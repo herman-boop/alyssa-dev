@@ -1048,6 +1048,7 @@ function LegsModal({ tripId, order, onClose, onSave, headers }) {
   const [saving, setSaving] = useState(false);
   const [copiedLeg, setCopiedLeg] = useState(null);
   const [multiUnitModal, setMultiUnitModal] = useState(null); // { leg, selectedOrders: [] }
+  const [multiUnitSearch, setMultiUnitSearch] = useState("");
   const [allOrders, setAllOrders] = useState([]);
 
   // Load semua orders untuk pilih multi-unit
@@ -1347,9 +1348,15 @@ function LegsModal({ tripId, order, onClose, onSave, headers }) {
             </div>
             <button onClick={() => setMultiUnitModal(null)} style={{ background: "none", border: "none", color: "#8b949e", cursor: "pointer", fontSize: 18 }}>✕</button>
           </div>
-          <div style={{ background: "#0d1117", borderRadius: 8, padding: "8px 12px", marginBottom: 12, fontSize: 11, color: "#60a5fa" }}>
+          <div style={{ background: "#0d1117", borderRadius: 8, padding: "8px 12px", marginBottom: 10, fontSize: 11, color: "#60a5fa" }}>
             ⚓ {multiUnitModal.leg.kapal || "—"} &nbsp;|&nbsp; {multiUnitModal.leg.asal} → {multiUnitModal.leg.tujuan} &nbsp;|&nbsp; Marking: <b>{multiUnitModal.leg.marking || "—"}</b>
           </div>
+          <input
+            value={multiUnitSearch}
+            onChange={e => setMultiUnitSearch(e.target.value)}
+            placeholder="Cari nopol (B 9564) atau 5 digit rangka (21258)..."
+            style={{ width: "100%", padding: "8px 10px", borderRadius: 7, border: "1px solid #30363d", background: "#0d1117", color: "#e6edf3", fontSize: 12, marginBottom: 10, boxSizing: "border-box" }}
+          />
           {/* Unit yang sedang dibuka — selalu masuk */}
           <div style={{ marginBottom: 10 }}>
             <div style={{ fontSize: 10, color: "#8b949e", marginBottom: 6, letterSpacing: 1 }}>UNIT AKTIF (otomatis masuk)</div>
@@ -1360,7 +1367,14 @@ function LegsModal({ tripId, order, onClose, onSave, headers }) {
           {/* Pilih unit lain */}
           <div style={{ fontSize: 10, color: "#8b949e", marginBottom: 6, letterSpacing: 1 }}>TAMBAH UNIT LAIN</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 14 }}>
-            {allOrders.filter(o => String(o._id) !== String(tripId) && String(o.trip_id) !== String(tripId) && o.nopol !== order?.nopol).map(o => {
+            {allOrders.filter(o => {
+              if (String(o._id) === String(tripId) || String(o.trip_id) === String(tripId) || o.nopol === order?.nopol) return false;
+              if (!multiUnitSearch.trim()) return true;
+              const q = multiUnitSearch.trim().toLowerCase().replace(/\s/g, "");
+              const nopol = (o.nopol || "").toLowerCase().replace(/\s/g, "");
+              const rangka = (o.no_rangka || "").toLowerCase();
+              return nopol.includes(q) || rangka.slice(-5).includes(q) || rangka.includes(q);
+            }).map(o => {
               const isSelected = multiUnitModal.selected.some(s => s._id === o._id);
               return (
                 <div key={o._id} onClick={() => {
