@@ -1047,6 +1047,70 @@ function LegsModal({ tripId, order, onClose, onSave, headers }) {
   });
   const [saving, setSaving] = useState(false);
   const [copiedLeg, setCopiedLeg] = useState(null);
+  const [multiUnitModal, setMultiUnitModal] = useState(null); // { leg, selectedOrders: [] }
+  const [allOrders, setAllOrders] = useState([]);
+
+  // Load semua orders untuk pilih multi-unit
+  const openMultiUnit = async (leg) => {
+    try {
+      const r = await axios.get(`${API}/admin/orders`, { headers });
+      setAllOrders(r.data?.items || r.data || []);
+    } catch {}
+    setMultiUnitModal({ leg, selected: [{ nopol: order?.nopol, vehicle_type: order?.vehicle_type, no_rangka: order?.no_rangka, warna: order?.warna }] });
+  };
+
+  const printKartuMuatMulti = (leg, units) => {
+    const tgl = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
+    const eta = leg.eta ? new Date(leg.eta).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" }) : "—";
+    const unitRows = units.map((u, idx) => `
+      <tr>
+        <td style="padding:8px 10px;font-weight:900;font-size:13px">${idx+1}</td>
+        <td style="padding:8px 10px;font-weight:800">${u.nopol || u.vehicle_type || "—"}</td>
+        <td style="padding:8px 10px">${u.vehicle_type || "—"}</td>
+        <td style="padding:8px 10px;font-size:11px;color:#555">${u.no_rangka || "—"}</td>
+        <td style="padding:8px 10px">${u.warna || "—"}</td>
+      </tr>`).join("");
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Kartu Muat</title>
+    <style>
+      body{font-family:Arial,sans-serif;margin:0;padding:12px;background:#fff;color:#1a1a1a}
+      .head{background:#1a1a2e;color:#fff;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;border-radius:8px 8px 0 0}
+      .head-title{color:#fff;font-size:14px;font-weight:800;letter-spacing:1px}
+      .head-sub{color:#fff8e1;font-size:10px;margin-top:2px}
+      .marking-box{background:#1a1a2e;padding:12px 16px;text-align:center;border-bottom:2px dashed #BA7517}
+      .marking-lbl{font-size:10px;color:#aaa;letter-spacing:2px;text-transform:uppercase}
+      .marking-val{font-size:32px;font-weight:900;color:#FFD060;letter-spacing:4px;font-family:monospace}
+      .kapal-val{font-size:14px;color:#e0e0e0;margin-top:4px;font-weight:700}
+      .route-box{background:#fffbe6;border:1px solid #ffe066;border-radius:6px;padding:8px 14px;margin:10px 14px;text-align:center}
+      .route-txt{font-size:14px;font-weight:900;color:#7a5700}
+      table{width:100%;border-collapse:collapse;margin:10px 0}
+      th{background:#f5f5f5;padding:8px 10px;text-align:left;font-size:11px;color:#555;border-bottom:2px solid #ddd}
+      tr:nth-child(even){background:#fafafa}
+      .foot{background:#f8f8f8;padding:8px 16px;font-size:10px;color:#888;text-align:center;border-top:1px solid #eee;margin-top:8px}
+      @media print{@page{margin:8mm;size:A5 landscape}body{padding:0}}
+    </style></head><body>
+    <div class="head">
+      <div><div class="head-title">PT ALYSSA AUTO LOGISTIK</div><div class="head-sub">KARTU MUAT KENDARAAN — ${units.length} UNIT</div></div>
+      <div style="color:#fff8e1;font-size:10px;text-align:right">${tgl}</div>
+    </div>
+    <div class="marking-box">
+      <div class="marking-lbl">MARKING / KODE EKSPEDISI</div>
+      <div class="marking-val">${leg.marking || "—"}</div>
+      <div class="kapal-val">⚓ ${leg.kapal || "Nama kapal belum diisi"}</div>
+    </div>
+    <div class="route-box">
+      <div class="route-txt">${leg.asal || "—"} &nbsp;→&nbsp; ${leg.tujuan || "—"}</div>
+      <div style="font-size:11px;color:#a07000;margin-top:2px">Estimasi Tiba: ${eta} &nbsp;·&nbsp; Total: ${units.length} unit</div>
+    </div>
+    <table>
+      <thead><tr><th>#</th><th>No. Polisi</th><th>Tipe Kendaraan</th><th>No. Rangka</th><th>Warna</th></tr></thead>
+      <tbody>${unitRows}</tbody>
+    </table>
+    <div class="foot">Pengirim: PT. ALYSSA AUTO LOGISTIK &nbsp;·&nbsp; Hub admin: 0818 631 135 &nbsp;·&nbsp; Siapkan area penerimaan sebelum kapal tiba</div>
+    <script>window.onload=()=>window.print()<\/script>
+    </body></html>`;
+    const w = window.open("", "_blank"); w.document.write(html); w.document.close();
+    setMultiUnitModal(null);
+  };
 
   const printKartuMuat = (leg, ord) => {
     const tgl = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
@@ -1205,12 +1269,16 @@ function LegsModal({ tripId, order, onClose, onSave, headers }) {
                       <input style={{ ...IL, marginTop: 2 }} value={leg.marking || ""} onChange={e => setLeg(i, { marking: e.target.value })} placeholder="AAL-001 / JKT-MKS" />
                     </label>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => printKartuMuat(leg, order)}
-                    style={{ width: "100%", padding: "7px", borderRadius: 6, border: "none", background: "#1f6feb", color: "#fff", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
-                    Cetak Kartu Muat — Share ke Perwakilan
-                  </button>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                    <button type="button" onClick={() => printKartuMuat(leg, order)}
+                      style={{ padding: "7px", borderRadius: 6, border: "none", background: "#1f6feb", color: "#fff", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
+                      🖨️ 1 Unit
+                    </button>
+                    <button type="button" onClick={() => openMultiUnit(leg)}
+                      style={{ padding: "7px", borderRadius: 6, border: "1px solid #1f6feb", background: "transparent", color: "#60a5fa", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
+                      📋 Multi Unit
+                    </button>
+                  </div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 8 }}>
                     <label style={{ fontSize: 10, color: "#8b949e" }}>Koordinator Kapal
                       <input style={{ ...IL, marginTop: 2 }} value={leg.kord_kapal || ""} onChange={e => setLeg(i, { kord_kapal: e.target.value })} placeholder="Nama koordinator kapal" />
@@ -1266,6 +1334,65 @@ function LegsModal({ tripId, order, onClose, onSave, headers }) {
         </div>
       </div>
     </div>
+
+    {/* Modal pilih multi-unit untuk Kartu Muat */}
+    {multiUnitModal && (
+      <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+        <div style={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 12, width: "100%", maxWidth: 520, maxHeight: "85vh", overflowY: "auto", padding: 20 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <div>
+              <div style={{ color: "#fff", fontWeight: 800, fontSize: 14 }}>📋 Kartu Muat Multi-Unit</div>
+              <div style={{ color: "#8b949e", fontSize: 11, marginTop: 2 }}>Pilih unit yang ikut di kapal yang sama</div>
+            </div>
+            <button onClick={() => setMultiUnitModal(null)} style={{ background: "none", border: "none", color: "#8b949e", cursor: "pointer", fontSize: 18 }}>✕</button>
+          </div>
+          <div style={{ background: "#0d1117", borderRadius: 8, padding: "8px 12px", marginBottom: 12, fontSize: 11, color: "#60a5fa" }}>
+            ⚓ {multiUnitModal.leg.kapal || "—"} &nbsp;|&nbsp; {multiUnitModal.leg.asal} → {multiUnitModal.leg.tujuan} &nbsp;|&nbsp; Marking: <b>{multiUnitModal.leg.marking || "—"}</b>
+          </div>
+          {/* Unit yang sedang dibuka — selalu masuk */}
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 10, color: "#8b949e", marginBottom: 6, letterSpacing: 1 }}>UNIT AKTIF (otomatis masuk)</div>
+            <div style={{ background: "#0d2a0d", border: "1px solid #238636", borderRadius: 7, padding: "8px 12px", fontSize: 12, color: "#3fb950" }}>
+              ✓ {order?.nopol || order?.vehicle_type} &nbsp;·&nbsp; {order?.vehicle_type} &nbsp;·&nbsp; Rangka: {order?.no_rangka || "—"}
+            </div>
+          </div>
+          {/* Pilih unit lain */}
+          <div style={{ fontSize: 10, color: "#8b949e", marginBottom: 6, letterSpacing: 1 }}>TAMBAH UNIT LAIN</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 14 }}>
+            {allOrders.filter(o => o._id !== order?._id && o._id !== tripId).map(o => {
+              const isSelected = multiUnitModal.selected.some(s => s._id === o._id);
+              return (
+                <div key={o._id} onClick={() => {
+                  setMultiUnitModal(m => ({
+                    ...m,
+                    selected: isSelected
+                      ? m.selected.filter(s => s._id !== o._id)
+                      : [...m.selected, { _id: o._id, nopol: o.nopol, vehicle_type: o.vehicle_type, no_rangka: o.no_rangka, warna: o.warna }]
+                  }));
+                }} style={{ cursor: "pointer", background: isSelected ? "#0d2a0d" : "#0d1117", border: `1px solid ${isSelected ? "#238636" : "#21262d"}`, borderRadius: 7, padding: "8px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <span style={{ color: isSelected ? "#3fb950" : "#e6edf3", fontWeight: 700, fontSize: 12 }}>{o.nopol || o.vehicle_type}</span>
+                    <span style={{ color: "#8b949e", fontSize: 11, marginLeft: 8 }}>{o.vehicle_type}</span>
+                    <div style={{ color: "#6e7681", fontSize: 10, marginTop: 2 }}>Rangka: {o.no_rangka || "—"} &nbsp;·&nbsp; {o.pelanggan || ""}</div>
+                  </div>
+                  <div style={{ fontSize: 16 }}>{isSelected ? "✓" : "+"}</div>
+                </div>
+              );
+            })}
+            {allOrders.filter(o => o._id !== order?._id && o._id !== tripId).length === 0 && (
+              <div style={{ color: "#6e7681", fontSize: 12, textAlign: "center", padding: 16 }}>Tidak ada order lain tersedia</div>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => setMultiUnitModal(null)} style={{ flex: 1, padding: "9px", borderRadius: 7, border: "1px solid #30363d", background: "none", color: "#8b949e", cursor: "pointer", fontSize: 12 }}>Batal</button>
+            <button onClick={() => printKartuMuatMulti(multiUnitModal.leg, multiUnitModal.selected)}
+              style={{ flex: 2, padding: "9px", borderRadius: 7, border: "none", background: "#1f6feb", color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>
+              🖨️ Cetak {multiUnitModal.selected.length} Unit
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
   );
 }
 
