@@ -1214,6 +1214,7 @@ function LegsModal({ tripId, order, onClose, onSave, headers }) {
   const TIPE_ICON = { "Self Drive": "🚗", "Kapal RoRo": "🚢", "Kapal Kontainer": "🚢", "Car Carrier": "🚛", "Towing": "🔗", "Self Loader": "🏗", "Lainnya": "📦" };
 
   return (
+    <>
     <div className="adm-modal-bg" onClick={onClose}>
       <div className="adm-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 620, maxHeight: "90vh", overflowY: "auto" }}>
         <div className="adm-modal-head">
@@ -1393,6 +1394,7 @@ function LegsModal({ tripId, order, onClose, onSave, headers }) {
         </div>
       </div>
     )}
+    </>
   );
 }
 
