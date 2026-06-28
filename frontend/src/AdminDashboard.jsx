@@ -507,6 +507,24 @@ function StatTile({ label, value, cls = "", onClick, active, testid }) {
    ORDER CARD
 ════════════════════════════════════════ */
 function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLegs, headers, kordList = [] }) {
+  const [uploadingKapal, setUploadingKapal] = useState(false);
+  const kapalFileRef = React.useRef();
+
+  const uploadFotoKapal = async (files) => {
+    if (!order.trip_id || !files?.length) return;
+    setUploadingKapal(true);
+    try {
+      for (const file of Array.from(files)) {
+        const fd = new FormData();
+        fd.append("file", file);
+        fd.append("stage", "kapal");
+        await axios.post(`${API}/trips/${order.trip_id}/album`, fd, { headers: { ...headers, "Content-Type": "multipart/form-data" } });
+      }
+      alert(`${files.length} foto berhasil diupload ke album Di Kapal`);
+    } catch { alert("Gagal upload foto"); }
+    setUploadingKapal(false);
+  };
+
   const [editDriver, setEditDriver] = useState(false);
   const [driverDraft, setDriverDraft] = useState(order.driver_id || "");
   const [editNama, setEditNama] = useState(false);
@@ -758,6 +776,15 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
         {linkDriver && <a className="adm-btn adm-btn-ghost adm-btn-sm" href={linkDriver} target="_blank" rel="noreferrer" data-testid={`adm-link-driver-${order.order_id}`}>Driver</a>}
         {linkTrack  && <a className="adm-btn adm-btn-ghost adm-btn-sm" href={linkTrack}  target="_blank" rel="noreferrer" data-testid={`adm-link-track-${order.order_id}`}>Track</a>}
         {linkBastk  && <a className="adm-btn adm-btn-ghost adm-btn-sm" href={linkBastk}  target="_blank" rel="noreferrer" data-testid={`adm-link-bastk-${order.order_id}`}>BASTK</a>}
+        {order.trip_id && Array.isArray(order.legs) && order.legs.some(l => l.tipe && l.tipe.startsWith("Kapal")) && (
+          <>
+            <input ref={kapalFileRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={e => uploadFotoKapal(e.target.files)} />
+            <button className="adm-btn adm-btn-sm" onClick={() => kapalFileRef.current?.click()} disabled={uploadingKapal}
+              style={{ background: "#1a3a5c", border: "1px solid #1f6feb", color: "#60a5fa" }}>
+              {uploadingKapal ? "Uploading..." : "⚓ Upload Di Kapal"}
+            </button>
+          </>
+        )}
         {order.trip_id && (
           <button className="adm-btn adm-btn-purple adm-btn-sm" onClick={() => onOdoo(order.order_id)} data-testid={`adm-odoo-${order.order_id}`}>
             <IcoOdoo /> Odoo
