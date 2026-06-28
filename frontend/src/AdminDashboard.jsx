@@ -1360,7 +1360,7 @@ function LegsModal({ tripId, order, onClose, onSave, headers }) {
           {/* Pilih unit lain */}
           <div style={{ fontSize: 10, color: "#8b949e", marginBottom: 6, letterSpacing: 1 }}>TAMBAH UNIT LAIN</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 14 }}>
-            {allOrders.filter(o => o._id !== order?._id && o._id !== tripId).map(o => {
+            {allOrders.filter(o => String(o._id) !== String(tripId) && String(o.trip_id) !== String(tripId) && o.nopol !== order?.nopol).map(o => {
               const isSelected = multiUnitModal.selected.some(s => s._id === o._id);
               return (
                 <div key={o._id} onClick={() => {
