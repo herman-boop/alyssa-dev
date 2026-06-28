@@ -1378,45 +1378,44 @@ function LegsModal({ tripId, order, onClose, onSave, headers }) {
           <div style={{ fontSize: 10, color: "#8b949e", marginBottom: 6, letterSpacing: 1 }}>TAMBAH UNIT LAIN</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 14 }}>
             {(() => {
-              const baseList = allOrders.filter(o => {
-                if (String(o._id) === String(tripId) || String(o.trip_id) === String(tripId) || o.nopol === order?.nopol) return false;
-                return true;
-              });
+              const selNopols = new Set(multiUnitModal.selected.map(s => s.nopol).filter(Boolean));
+              const baseList = allOrders.filter(o => o.nopol && o.nopol !== order?.nopol);
               const q = multiUnitSearch.trim().toLowerCase().replace(/\s/g, "");
-              const selected = baseList.filter(o => multiUnitModal.selected.some(s => s._id === o._id));
-              const unselected = baseList.filter(o => !multiUnitModal.selected.some(s => s._id === o._id) && (() => {
+              const matchQ = (o) => {
                 if (!q) return true;
                 const nopol = (o.nopol || "").toLowerCase().replace(/\s/g, "");
                 const rangka = (o.no_rangka || "").toLowerCase();
                 return nopol.includes(q) || rangka.slice(-5).includes(q) || rangka.includes(q);
-              })());
+              };
+              const selectedList = baseList.filter(o => selNopols.has(o.nopol));
+              const unselectedList = baseList.filter(o => !selNopols.has(o.nopol) && matchQ(o));
               const renderItem = (o) => {
-                const isSelected = multiUnitModal.selected.some(s => s._id === o._id);
+                const isSel = selNopols.has(o.nopol);
                 return (
-                  <div key={o._id} onClick={() => {
+                  <div key={o.nopol} onClick={() => {
                     setMultiUnitModal(m => ({
                       ...m,
-                      selected: isSelected
-                        ? m.selected.filter(s => s._id !== o._id)
-                        : [...m.selected, { _id: o._id, nopol: o.nopol, vehicle_type: o.vehicle_type, no_rangka: o.no_rangka, warna: o.warna }]
+                      selected: isSel
+                        ? m.selected.filter(s => s.nopol !== o.nopol)
+                        : [...m.selected, { nopol: o.nopol, vehicle_type: o.vehicle_type, no_rangka: o.no_rangka, warna: o.warna }]
                     }));
-                  }} style={{ cursor: "pointer", background: isSelected ? "#0d2a0d" : "#0d1117", border: `1px solid ${isSelected ? "#238636" : "#21262d"}`, borderRadius: 7, padding: "8px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  }} style={{ cursor: "pointer", background: isSel ? "#0d2a0d" : "#0d1117", border: `1px solid ${isSel ? "#238636" : "#21262d"}`, borderRadius: 7, padding: "8px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
                     <div>
-                      <span style={{ color: isSelected ? "#3fb950" : "#e6edf3", fontWeight: 700, fontSize: 12 }}>{o.nopol || o.vehicle_type}</span>
+                      <span style={{ color: isSel ? "#3fb950" : "#e6edf3", fontWeight: 700, fontSize: 12 }}>{o.nopol}</span>
                       <span style={{ color: "#8b949e", fontSize: 11, marginLeft: 8 }}>{o.vehicle_type}</span>
                       <div style={{ color: "#6e7681", fontSize: 10, marginTop: 2 }}>Rangka: {o.no_rangka || "—"} &nbsp;·&nbsp; {o.pelanggan || ""}</div>
                     </div>
-                    <div style={{ fontSize: 16, color: isSelected ? "#3fb950" : "#8b949e" }}>{isSelected ? "✓" : "+"}</div>
+                    <div style={{ fontSize: 16, color: isSel ? "#3fb950" : "#8b949e", fontWeight: 700 }}>{isSel ? "✓" : "+"}</div>
                   </div>
                 );
               };
               return (
                 <>
-                  {selected.length > 0 && <div style={{ fontSize: 10, color: "#3fb950", marginBottom: 4, letterSpacing: 1 }}>SUDAH DIPILIH</div>}
-                  {selected.map(renderItem)}
-                  {unselected.length > 0 && selected.length > 0 && <div style={{ fontSize: 10, color: "#8b949e", margin: "8px 0 4px", letterSpacing: 1 }}>HASIL PENCARIAN</div>}
-                  {unselected.map(renderItem)}
-                  {selected.length === 0 && unselected.length === 0 && <div style={{ color: "#6e7681", fontSize: 12, textAlign: "center", padding: 16 }}>Tidak ada order ditemukan</div>}
+                  {selectedList.length > 0 && <div style={{ fontSize: 10, color: "#3fb950", marginBottom: 4, letterSpacing: 1, fontWeight: 700 }}>✓ SUDAH DIPILIH</div>}
+                  {selectedList.map(renderItem)}
+                  {unselectedList.length > 0 && <div style={{ fontSize: 10, color: "#8b949e", margin: "8px 0 4px", letterSpacing: 1 }}>{q ? "HASIL PENCARIAN" : "SEMUA ORDER"}</div>}
+                  {unselectedList.map(renderItem)}
+                  {selectedList.length === 0 && unselectedList.length === 0 && <div style={{ color: "#6e7681", fontSize: 12, textAlign: "center", padding: 16 }}>Tidak ada order ditemukan</div>}
                 </>
               );
             })()}
