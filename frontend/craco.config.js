@@ -29,6 +29,7 @@ let webpackConfig = {
         "react-hooks/rules-of-hooks": "warn",
         "react-hooks/exhaustive-deps": "off",
         "no-unused-vars": "off",
+        "no-useless-escape": "off",
       },
     },
   },

@@ -4,6 +4,7 @@
     "react-hooks/exhaustive-deps": "off",
     "no-unused-vars": "off",
     "no-undef": "off",
-    "react-hooks/rules-of-hooks": "warn"
+    "react-hooks/rules-of-hooks": "warn",
+    "no-useless-escape": "off"
   }
 }
