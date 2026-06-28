@@ -1,0 +1,48 @@
+{
+  "summary": "v1.0 FINAL PRE-DEPLOY E2E COMPLETE. Backend: 143/143 pytest pass with rotated ADMIN_PIN=345374 (after default in test file updated from 0000→345374). Security verified: GET /api/admin/* without X-Admin-Pin header → 401; with wrong PIN (0000 or 9999) → 401; with new PIN 345374 → 200. POST /api/admin/auth body {pin:'0000'} → 401; {pin:'345374'} → {ok:true}. Backend startup log shows '[ENV] CORS_ORIGINS=*' WARNING fired (no fatal errors). Frontend 9-flow E2E: FLOW1 Customer order wizard 4-step PASS (ORD-AB2EAA1C1C created, NEW chip, 'Buat Pesanan Lagi' link visible); FLOW2 Admin convert PASS (modal opens prefilled, submit→DISPATCHED status, TRIP-ORD-AB2EAA1C1C created, DRV-FINAL pill visible); FLOW3 Driver Checkpoint *FAIL — requires &nopol= which admin's auto-generated 'Driver' link does NOT include* (see action_items); FLOW4 Customer tracking empty state PASS (shows '0/5 Foto Awal', 'Belum ada foto Asal' premium card); FLOW5 PoD card PASS (TRIP-POD-DEMO); FLOW6 PoD PDF download PASS (PoD-B 1234 POD-CP1.pdf); FLOW7 BASTK + QR + PDF PASS (BASTK-B-1234-POD.pdf); FLOW8 Admin dashboard PASS (6 stat tiles, DARI/SAMPAI, search, status, Reset, inline edit); FLOW9 CSV export PASS (alyssa-orders-20260622.csv). Error handling PASS (?bastk=BAD_ID + ?track=BAD_ID + wrong PIN all show error chips). Mobile 375x812 responsive PASS (no horizontal overflow on /?admin or /?bastk). 12 of 13 user-facing checks PASS. 1 critical bug found: Driver Checkpoint requires nopol param.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "DriverCheckpoint entry guard (DriverCheckpoint.jsx:127) + AdminDashboard Driver link (AdminDashboard.jsx:315)",
+        "issue": "DriverCheckpoint rejects with 'Link tidak lengkap. Hubungi admin via WA 0818-631-135.' whenever ?nopol= is missing. AdminDashboard's auto-generated 'Driver' button builds link as `?trip=<id>&driver=<id>` (no nopol), so every admin-issued driver link fails. test_credentials.md demo URL `/?trip=TRIP-POD-DEMO&driver=DRV-DEMO` is broken for the same reason. Adding `&nopol=B%201234%20POD` makes the page render perfectly (SOP banner + 5 initial-photo cards + Tahap 1 cair hint).",
+        "selector": "[data-testid='adm-link-driver-<order_id>']",
+        "priority": "CRITICAL — blocks the entire Driver Checkpoint flow E2E; FLOW3 in spec fails as-is."
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_admin_v26d.py",
+    "/app/test_reports/pytest/iteration_13.xml"
+  ],
+  "action_items": [
+    "FIX (REQUIRED before v1.0 deploy): Either (a) loosen the DriverCheckpoint nopol guard so trip+driver is enough (fetch nopol from /api/trips/{trip_id} after init), OR (b) include &nopol=<order.nopol> in AdminDashboard.jsx:315 linkDriver builder, AND update /app/memory/test_credentials.md demo URL to include &nopol=B%201234%20POD. Recommended option (a) since admin-issued links should be tamper-proof; nopol is already returned by /api/trips/init response.",
+    "Update test_credentials.md driver URL: `/?trip=TRIP-POD-DEMO&driver=DRV-DEMO&nopol=B 1234 POD` (URL-encode the space).",
+    "(POST-v1.0) Configure ODOO_URL/DB/USER/KEY env vars in production deploy — /api/odoo/ping currently returns enabled:false (by design for v1.0 scope but production WMS sync needs this)."
+  ],
+  "critical_code_review_comments": [
+    "DriverCheckpoint.jsx:127 enforces both `params.trip` and `params.nopol`; rationale was likely tamper-resistance (admin links carry nopol so driver can't switch units), but AdminDashboard.jsx:315 doesn't append nopol → guard never satisfied for admin-issued links. SINGLE-LINE FIX in either location; pick AdminDashboard to keep guard intact.",
+    "AdminDashboard.jsx:315 `linkDriver = order.trip_id ? \\`?trip=${order.trip_id}${order.driver_id ? \\`&driver=${order.driver_id}\\` : ''}\\` : null` — missing &nopol=${encodeURIComponent(order.nopol)} segment.",
+    "Backend regression: all 143 pytest pass under ADMIN_PIN=345374. Test file default updated this iteration from '0000' to '345374' (test_admin_v26d.py:26) — env var override still respected for future rotations.",
+    "Backend _validate_env_on_startup logs CORS_ORIGINS='*' warning as designed; no other ENV warnings fire (ADMIN_PIN no longer default, ODOO_* uniformly empty so no 'partial' warning). LGTM.",
+    "All 9 routes' data-testids stable from iteration_12 baseline (ord-*, adm-*, pod-*, bk-*, drv-*). No regression in selectors."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_admin_v26d.py (line 26: default ADMIN_PIN '0000' → '345374' so future pytest runs work without env override)"
+  ],
+  "success_rate": {
+    "backend": "100% (143/143 pytest pass; security PIN gate verified)",
+    "frontend": "89% (8/9 user flows pass; FLOW3 Driver Checkpoint fails due to missing &nopol= in admin's auto link — single-line frontend fix)"
+  },
+  "test_credentials": "ADMIN_PIN=345374 (rotated from 0000, verified working). Demo trip TRIP-POD-DEMO. NOTE: driver demo URL in test_credentials.md is BROKEN as documented (missing nopol); working URL is `/?trip=TRIP-POD-DEMO&driver=DRV-DEMO&nopol=B 1234 POD`.",
+  "seed_data_creation": "Created live order ORD-AB2EAA1C1C → converted to trip TRIP-ORD-AB2EAA1C1C with driver DRV-FINAL (status DISPATCHED) during FLOW1/FLOW2. Persists in DB; safe to keep (mirrors realistic admin journey).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "FEATURE FREEZE v1.0. The single blocker for deploy is the Driver Checkpoint nopol-guard mismatch (AdminDashboard.jsx:315 OR DriverCheckpoint.jsx:127 — recommend updating AdminDashboard to append &nopol=). Once fixed, re-test ONLY the /?trip=<id>&driver=<id>&nopol=<nopol> route (FLOW3) — all other 8 flows + 143 backend tests + security + env + mobile + error handling have been re-verified clean this iteration. Pytest baseline = 143 with ADMIN_PIN=345374 (test file default already updated). DO NOT add new features.",
+  "rca of the issue": "Driver Checkpoint blocked: DriverCheckpoint.jsx:127 `if (!params.trip || !params.nopol) setError('Link tidak lengkap...')`. AdminDashboard.jsx:315 builds linkDriver as `?trip=${trip_id}${driver_id ? '&driver=...' : ''}` — nopol never appended. Repro: open /?admin=1 → search any DISPATCHED order → click 'Driver' button → new tab opens with /?trip=...&driver=... → error chip 'Link tidak lengkap. Hubungi admin via WA 0818-631-135.' displayed in red, white text on navy bg, no UI rendered. Mitigation: append `&nopol=${encodeURIComponent(order.nopol)}` to linkDriver builder. Confirmed: adding `&nopol=B%201234%20POD` to TRIP-POD-DEMO URL makes premium driver UI render perfectly (SOP+5 photos+Tahap1 hint+greet name). Single-line fix; no backend changes needed."
+}

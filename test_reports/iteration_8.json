@@ -1,0 +1,44 @@
+{
+  "summary": "v2.6a BASTK (Berita Acara Serah Terima Kendaraan) end-to-end testing. Backend BASTK API: 14/14 pytest passed covering vehicle_type validation (400 invalid, all 20 valid), damage_marks code filter + x/y clamp, customer_data whitelist + truncate, signatures dataURL-only filter, catatan 500-char truncate, public endpoint exposure of BASTK fields, 404 unknown trip, and regression on init/get/public. Frontend /?bastk=TRIP-POD-DEMO: full premium A4 print-ready BASTK page loads with trip data (B 1234 POD, Jakarta-Bandung, Driver Demo PoD), 20-item vehicle dropdown, Truck Box SVG sketch renders, 6 damage code buttons selectable, click on sketch adds markers (verified RSK + B + others), customer fields/catatan fill OK, both signature canvases drawable, btn-save-bastk persists data (verified after reload — vehicleType, marks count=6, customer.nama, catatan, sig images all persisted), btn-download-bastk triggers PDF without console errors. Regression: /?track=TRIP-POD-DEMO still renders PoD card + album + download button; /?trip=TRIP-POD-DEMO still loads DriverCheckpoint (SOP visible). Zero pageerrors across all routes.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/trips/{trip_id}/bastk", "issue": "damage_marks invalid codes silently dropped without warning — admin won't see frontend mismatch in logs. Same pattern as upload_daily_photo silent status filter noted in iter-7. Non-blocking."},
+      {"endpoint": "GET /api/", "issue": "Pre-existing stale assertions in test_driver_checkpoint.py::test_01_root and test_iteration6_pod.py::test_v24_root_returns_2_4 still hardcode v='2.4' but backend now returns 'v: 2.6a' — these old tests should be updated (not BASTK regressions)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "BASTK print area", "issues": ["Navy + Gold theme A4 print area looks crisp and production-ready in screenshot — header logo, two-column data tables, sketch panel with damage codes legend, signature tri-grid, footer all aligned correctly."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_bastk_v26a.py",
+    "/app/test_reports/pytest/bastk_v26a.xml"
+  ],
+  "action_items": [
+    "(LOW) Update pre-existing tests test_driver_checkpoint.py::test_01_root and test_iteration6_pod.py::test_v24_root_returns_2_4 to expect v='2.6a' (or remove version pinning) so full regression suite is green.",
+    "(LOW carried over from iter-7) Reseed TRIP-POD-DEMO daily_checkpoints[0] with status='Checkpoint 2' + keterangan='Lewat Cikampek lancar' for v2.5 demo URL."
+  ],
+  "critical_code_review_comments": [
+    "BASTKBody backend validation is solid: vehicle_type rejected with 400 on invalid; damage_marks invalid codes silently filtered (consistent with existing pattern); x/y clamped to [0,100]; customer_data uses key whitelist with per-field char limits (nama:120, hp:30, alamat:300, pic:120, warna:40, tahun:6, km:12, kondisi:20); signatures only accept strings starting with 'data:image' and capped at 400KB; catatan truncated to 500 chars. ALL fields optional → backward compatible.",
+    "Public endpoint correctly exposes all 5 BASTK read-only fields (vehicle_type, damage_marks, customer_data, signatures, bastk_catatan) without breaking existing PoD/album/handover keys.",
+    "Frontend BASTKPage.jsx (452 lines, under 700-line limit): well-scoped — single component with embedded SignaturePad + CFld helpers. Uses axios + jsPDF + html2canvas. State synced with public endpoint on load. saveBASTK + downloadPDF both invoke partial-update endpoint correctly. Toast feedback present. data-testid coverage excellent (bk-root, bk-print, bk-sketch-area, bk-code-{RSK..L}, bk-mark-{id}, btn-save-bastk, btn-download-bastk, sig-canvas-{driver|customer}, sig-clear-*, cust-*, select-vehicle-type, bk-catatan, toast, bk-error).",
+    "Minor: damage_marks list has no max-length enforcement on the frontend (backend caps at 80 — fine), but accumulated marks across test runs caused overlapping marker buttons that intercept pointer events in playwright. UX-wise this is OK because the user-facing pattern is to clear & redraw, but consider showing 'Clear all marks' button for admin convenience.",
+    "Minor: jsPDF + html2canvas dependencies properly imported with no SSR concern; multi-page split logic in downloadPDF handles tall print area correctly.",
+    "Note: VEHICLE_SKETCH_MAP coverage verified — Truck Box SVG renders functional truck shape with wheels visible in screenshot. All 20 types selectable.",
+    "Note: signatures store base64 PNG (~14KB each from 400×140 canvas) — well within 400KB cap. dataURL persistence verified via reload showing <img alt='ttd driver'> + <img alt='ttd customer'> in print area."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_bastk_v26a.py (NEW — 14 tests for BASTK v2.6a)"
+  ],
+  "success_rate": {"backend": "100% on new BASTK suite (14/14); 71/74 across full backend suite (3 pre-existing failures unrelated to BASTK: 2 stale version assertions, 1 seed data gap from iter-7)", "frontend": "100% — all BASTK flows working: dropdown 20 options, sketch render, damage codes, marker add, customer/catatan fill, signature draw, save+reload persistence, PDF generation no error, regression on /?trip= and /?track= unbroken"},
+  "test_credentials": "N/A — no auth in this app. Demo trip: TRIP-POD-DEMO (nopol B 1234 POD, driver Driver Demo PoD, route Jakarta-Bandung).",
+  "seed_data_creation": "Used existing TRIP-POD-DEMO; BASTK testing wrote vehicle_type=Truck Box→Tronton (last test), damage_marks (6), customer_data (PT Customer Test), signatures (driver+customer dataURLs), bastk_catatan='Test catatan tambahan untuk BASTK' to TRIP-POD-DEMO.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "v2.6a = BASTK premium PDF generator (20 SVG sketches + 6 damage codes + dual signature pad + A4 print-ready PDF). Backend has 14 dedicated tests in test_bastk_v26a.py (all pass). Frontend BASTKPage covers full lifecycle: load → edit → save → reload (persistence) → PDF download. Marker remove-on-click works in code (verified via stopPropagation+removeMark) but is hard to test via playwright when many overlapping markers exist — clear DB marks or test on fresh trip if needed. TRIP-POD-DEMO has accumulated test data in BASTK fields, safe to overwrite. Three pre-existing test failures (stale 2.4 version assertions, iter-7 seed gap) are documented and out of BASTK scope.",
+  "rca of the issue": "No new bugs in v2.6a. Pre-existing minor: test_driver_checkpoint.py and test_iteration6_pod.py hardcode v='2.4' but server.py now returns v='2.6a' — assertions stale (not a bug, just test maintenance). Fix: update assertions to '2.6a' or remove version pinning. Carried-over: TRIP-POD-DEMO seed lacks v2.5 status/keterangan fields on daily checkpoint (RCA documented in iteration_7.json)."
+}

@@ -1,0 +1,48 @@
+{
+  "summary": "v2.6d Admin Mini-Dashboard — full backend + frontend testing PASSED. Backend: 24/24 new pytest in test_admin_v26d.py + full regression 130/130 (106 previous + 24 new). Frontend: PIN gate (wrong/correct/localStorage cache/logout), 6 stat tiles, search (case-insensitive, by name/nopol/order_id), status filter, full status workflow (NEW→DISPATCHED→ON_TRIP→DELIVERED), convert modal with prefilled defaults & toast 'Trip dibuat: TRIP-...', inline driver assign with mirror to linked trip, cancel button removed after delivery, mobile responsive (390px viewport 2-col stat grid). Navy+Gold theme clean, zero console errors.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/admin/orders?status=ZZZZ", "issue": "Invalid status value is silently ignored (no filter applied) rather than returning 400. Per spec, status enum validation is documented for PATCH only, so this is acceptable but worth documenting."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "POST /api/orders/{id}/convert with driver_id payload", "issue": "Convert writes driver_id to the new trip but NOT back to the order document. Result: after convert, order.driver_id stays null while trip.driver_id holds the value. Admin must then use inline edit (PATCH /admin/orders) to populate order.driver_id, which DOES mirror correctly to the trip. Minor data-consistency nit — UX still works because the Driver row reads from order.driver_id and shows 'belum di-assign' until admin clicks ✎.", "affected_selectors": ["[data-testid=adm-modal-driver]"]}
+    ],
+    "design_issues": [
+      {"screen": "/?admin=1 dashboard", "issues": ["Navy + Gold theme renders crisply on both desktop (1366px) and mobile (390px). Stat tiles wrap to 2-col on mobile as intended. Active stat tile highlight (Baru orange ring) clearly visible. Modal overlay + form inputs aligned. No contrast or alignment issues observed."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_admin_v26d.py",
+    "/app/test_reports/pytest/admin_v26d.xml",
+    "/app/test_reports/pytest/full_v26d.xml"
+  ],
+  "action_items": [
+    "(MINOR) Consider mirroring driver_id from convert payload to BOTH order and trip documents in POST /api/orders/{id}/convert (currently only writes to trip). Today admin must inline-edit driver after convert to populate order.driver_id. Non-blocking; PATCH flow already mirrors correctly.",
+    "(NIT) GET /api/admin/orders silently drops invalid status values — could return 400 for consistency with PATCH validation, but current behaviour is forgiving and probably preferable for URL fiddling."
+  ],
+  "critical_code_review_comments": [
+    "require_admin_pin (server.py:38-45) is clean: header-based, 503 when env unset, 401 on mismatch. Dependency injected via Depends() on all 3 admin endpoints — properly guarded.",
+    "/admin/auth (line 856-864) reuses the same env-lookup pattern instead of calling require_admin_pin (because PIN comes in body, not header). Acceptable duplication; logic is identical.",
+    "/admin/stats uses single Mongo aggregation pipeline + one count_documents — efficient. Returns all 5 status buckets even when zero count (good for UI rendering).",
+    "/admin/orders search uses re.escape(qs) on regex — SAFE against ReDoS / regex injection. Limit clamped 1..500. $or across 6 fields covers all reasonable search axes.",
+    "/admin/orders/{id} PATCH validates status against VALID_ORDER_STATUS enum, rejects empty body with 400, returns 404 for unknown order, mirrors driver_id to linked trip when present. All edge cases handled.",
+    "MongoDB _id properly stripped from all admin responses via .pop('_id', None).",
+    "Frontend AdminDashboard.jsx (440 lines) is large but single-responsibility (PinScreen, Dashboard, StatTile, OrderCard, ConvertModal). data-testid coverage is excellent — every interactive element has a stable selector.",
+    "PIN cache via localStorage with re-auth check on mount (line 33-42): on cached PIN, fetches /admin/auth to validate before showing dashboard. Clean — handles PIN revocation by admin.",
+    "Logout (line 55) properly clears localStorage + resets PIN state + reverts to PinScreen."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_admin_v26d.py (NEW — 24 pytest covering: auth 3, guard 4, stats 1, list/filter/search 8, patch 6, regression 2)"
+  ],
+  "success_rate": {"backend": "100% (130/130 full suite, 24/24 new v2.6d)", "frontend": "100% (PIN gate, status workflow, search/filter, convert modal, driver mirror, logout, mobile responsive — all PASS)"},
+  "test_credentials": "ADMIN_PIN=0000 (set in /app/backend/.env). PIN screen accepts '0000', rejects all other values with 401.",
+  "seed_data_creation": "Created and cleaned-up ~5 TEST_ prefixed orders (TEST_AdminBob/Cindy/David/Convert/E2E_AdminFlow). All set to CANCELLED at teardown to avoid polluting NEW count. Mongo cleanup query: db.orders.deleteMany({customer_nama: /^TEST_/}); db.trips.deleteMany({trip_id: /^TRIP-ORD-/, customer_data: {$exists: true}}).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "v2.6d is STABLE. Adds Admin Mini-Dashboard at /?admin=1, PIN-gated by ADMIN_PIN env (default '0000'). Backend endpoints: POST /api/admin/auth (body PIN), GET /api/admin/stats, GET /api/admin/orders?status=&q=&limit=, PATCH /api/admin/orders/{id}. All require X-Admin-Pin header except /admin/auth. Frontend caches PIN in localStorage key 'aal_admin_pin'. Status workflow: NEW→DISPATCHED (via /orders/{id}/convert)→ON_TRIP→DELIVERED, CANCELLED terminal. Convert modal writes driver_id to TRIP only — order.driver_id requires inline edit after convert (see action item). 130/130 backend tests pass. No regressions from v2.6c.",
+  "rca of the issue": "No critical issues. Single data-consistency nit: POST /api/orders/{id}/convert with driver_id in payload populates trip.driver_id but leaves order.driver_id null. Admin workaround = inline ✎ edit on the order card (PATCH /admin/orders/{id}) which correctly mirrors driver_id to BOTH order and trip. Either: (a) update convert endpoint to also write driver_id to order document, or (b) document that admin should always assign driver via inline edit (current UX path works fine since modal driver field is optional)."
+}

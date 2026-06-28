@@ -1,0 +1,42 @@
+{
+  "summary": "v2.6c QR Verifikasi BASTK + POST /api/orders/{id}/convert + _odoo_sync_order stub — Full end-to-end testing PASSED. Backend: 13/13 new pytest in test_orders_v26c_convert.py + full regression 106/106 across all backend tests (previous 93 + 13 new). Frontend: /?bastk=TRIP-POD-DEMO renders QR Verifikasi panel correctly — QR SVG with center logo (AAL flag, level=H error correction) encodes ${origin}/?track=TRIP-POD-DEMO, caption 'SCAN UNTUK LACAK' present, all 5 metadata rows populated (No. BASTK, Trip ID, No. Polisi, Tanggal Cetak, Verifikasi URL). BASTK header doc-no format matches /^BASTK\\/\\d{6}\\/[A-Z0-9]{6}$/ (actual: BASTK/202606/ODDEMO derived from 'TRIPPODDEMO'.slice(-6)). PDF download (btn-download-bastk) completes successfully with QR panel included, zero console errors. Odoo sync verified: backend log shows '[odoo:sync_order:skip] order_id=... (env not configured)' after each convert call, no exceptions raised. Version bumped: GET /api/ returns v='2.6c'.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/?bastk=TRIP-POD-DEMO QR panel", "issues": ["QR panel renders cleanly with Navy + Gold theme — QR SVG with AAL flag center logo, caption 'SCAN UNTUK LACAK' bold gold, 5 metadata rows aligned with monospace values, soft cream note below explaining digital verification. No contrast or alignment issues."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_orders_v26c_convert.py",
+    "/app/test_reports/pytest/orders_v26c.xml",
+    "/app/test_reports/pytest/full_v26c.xml"
+  ],
+  "action_items": [
+    "(NIT) Review-request spec says BASTK No tail is '6 hex' but actual code (BASTKPage.jsx:204) uses /[^A-Z0-9]/gi regex producing 6 alphanumeric (not strictly hex). Example output 'BASTK/202606/ODDEMO' contains non-hex letters (O, D). Either tighten regex to hex-only or update spec wording. Non-blocking — visually correct and consistent."
+  ],
+  "critical_code_review_comments": [
+    "OrderConvertBody model accepts all optional payload (trip_id, driver_id, uj, t1, t2, t3, bonus_daily, bonus_kerajinan) with sensible defaults. Idempotency via order.trip_id check at server.py:687-697 — clean.",
+    "Trip pre-fill from order: route='asal_kota - tujuan_kota', nopol fallback 'TBD-<last4>', customer_data prefers tujuan_alamat/delivery_pic. source_order_id backlink added. All schema-additive — no breaking changes to existing trips.",
+    "_odoo_sync_order is fire-and-forget via asyncio.create_task — won't block /convert response. Skips cleanly when OdooClient.enabled=False (env empty). Never raises (try/except wraps entire body). Verified in backend.err.log: '[odoo:sync_order:skip] order_id=... (env not configured)'.",
+    "409 collision check at server.py:702-704 prevents trip_id clobbering when admin passes a trip_id already used elsewhere.",
+    "QR generation uses qrcode.react@4.2.0 with level='H' (30% error correction) + 28x28 SVG logo embedded via excavate=true — keeps QR scannable even with logo overlay. Production-grade choice.",
+    "Frontend BASTK No derivation client-side from trip_id slice — deterministic + stable across reloads (no DB round-trip). Good for offline-friendly UX. However: tail uses alphanumeric not hex (minor spec mismatch noted in action_items).",
+    "Track URL uses window.location.origin so it auto-adapts to deployment domain. Clean.",
+    "MongoDB _id stripped from all responses via trip_doc_to_public(). No serialization leaks."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_orders_v26c_convert.py (NEW — 13 tests: convert happy path x5, errors x2, odoo sync stub x2, version, regression x3)"
+  ],
+  "success_rate": {"backend": "100% (106/106 full suite, 13/13 new v2.6c)", "frontend": "100% on QR Verifikasi panel + PDF download + zero console errors"},
+  "test_credentials": "N/A — no auth.",
+  "seed_data_creation": "Created ~10 TEST_-prefixed orders + TEST_TRIP_* + TEST_TRIP_COLLIDE_* + TRIP-ORD-* trips during convert/idempotent testing. Clean via: db.orders.deleteMany({customer_nama: /^TEST_/}); db.trips.deleteMany({trip_id: /^(TEST_|TRIP-ORD-)/}).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "v2.6c is STABLE. Adds: (1) QR Verifikasi panel inside BASTK print area (qrcode.react@4.2.0, level=H, center logo) encoding /?track=<trip_id>; (2) POST /api/orders/{id}/convert idempotent endpoint creating trip + setting order.status=DISPATCHED; (3) _odoo_sync_order best-effort XML-RPC sync after convert (env-gated, no-op when ODOO_URL empty). Backend version='2.6c'. BASTK No format: BASTK/YYYYMM/<6 alphanumeric uppercase derived from trip_id.replace(/[^A-Z0-9]/gi).slice(-6)> — note spec says 'hex' but actual is alphanumeric. /?bastk=TRIP-POD-DEMO is the demo route. 106/106 backend tests pass. No regressions from v2.6b.",
+  "rca of the issue": "No issues found in v2.6c. Single nit: spec wording 'BASTK/YYYYMM/<6 hex>' is slightly imprecise — actual implementation produces 6 alphanumeric uppercase (matches /^[A-Z0-9]{6}$/ not /^[A-F0-9]{6}$/). For demo trip 'TRIP-POD-DEMO' tail = 'ODDEMO'. Code at BASTKPage.jsx:204 is correct and deterministic; spec docs could be tightened."
+}

@@ -1,0 +1,47 @@
+{
+  "summary": "v2.6b Customer Order Form (4-step wizard) + POST/GET /api/orders + Odoo XML-RPC stub end-to-end testing. Backend: 19/19 new pytest in test_orders_v26b.py + full regression 93/93 across all backend tests (was 71/74 in iter-8 — the 3 stale 2.4 version assertions now resolved). Frontend: /?order=1 wizard works end-to-end. Stepper 4 steps render, dropdown has 21 options (placeholder + 20 vehicle types), Lanjut button disabled until required field filled, nopol auto-uppercased, stepper back-navigation works, summary panel shows all entered data, Submit POSTs to /api/orders successfully (ORD-785AB9B843 created), SuccessScreen renders with order_id/status chip NEW/route/customer/'Buat Pesanan Lagi' link. Regression: /?bastk=TRIP-POD-DEMO PASS (BASTK page renders), /?track=TRIP-POD-DEMO PASS (CustomerTracking renders). /?trip=TRIP-POD-DEMO shows expected 'Link tidak lengkap' gate (DriverCheckpoint requires both trip+driver params — pre-existing gate, not a v2.6b regression).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/orders", "issue": "vehicle_type invalid value gives generic 400 but the error detail field returns the full sorted VALID_VEHICLE_TYPES list (long string). Consider returning code + accepted list separately for cleaner client parsing. Non-blocking."},
+      {"endpoint": "GET /api/orders", "issue": "limit param accepts non-int strings causing FastAPI default 422 validation error rather than coercion fallback. Behavior is acceptable but inconsistent with `status` which is silently sliced. Non-blocking."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/?order=1 success screen", "issues": ["Premium Navy + Gold theme renders crisply: green success badge, gold heading 'Pesanan Terkirim!', summary card with ID/Status chip/Rute/Kontak rows aligned, 'Buat Pesanan Lagi' gold button, footer contact note. No contrast issues observed."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_orders_v26b.py",
+    "/app/test_reports/pytest/orders_v26b.xml",
+    "/app/test_reports/pytest/full_v26b.xml"
+  ],
+  "action_items": [
+    "(LOW) Optionally enrich POST /api/orders error response: return {code: 'INVALID_VEHICLE_TYPE', accepted: [...]} instead of dumping full list into detail string.",
+    "(INFO) /?trip=TRIP-POD-DEMO shows 'Link tidak lengkap' because DriverCheckpoint requires both trip + driver query params (security gate at DriverCheckpoint.jsx:128). Iter-8 incorrectly claimed it renders SOP page from this URL — actual flow needs full driver link. Not a v2.6b regression."
+  ],
+  "critical_code_review_comments": [
+    "OrderBody model design solid: 4 required fields (vehicle_type, asal_kota, tujuan_kota, customer_nama, customer_hp) but vehicle_type='' is allowed (only validated when non-empty against VALID_VEHICLE_TYPES). Truncation limits enforced server-side per spec (nama:120, hp:30, alamat:300, catatan:500, nopol:20, rangka:40, tahun:6, km:12).",
+    "order_id format ORD-{10 hex upper} verified — length 14 chars, uppercase, guaranteed unique via uuid4().hex slice.",
+    "status field hardcoded to 'NEW' on creation. created_at/updated_at both ISO UTC. Good.",
+    "GET /api/orders limit clamped 1..200 (max(1, min(200, limit))) — sound guardrail. Sort by created_at desc verified.",
+    "OdooClient correctly returns enabled:false + reason='missing ODOO_URL/DB/USER/KEY env vars' when env empty. ping() never raises. authenticate() returns None safely. call() is fire-and-forget no-op when not configured. XML-RPC stdlib — zero new deps. Excellent scaffold.",
+    "notify_odoo() webhook is fire-and-forget via asyncio.to_thread + 5s timeout — won't block order creation if webhook URL is unreachable.",
+    "CustomerOrderForm.jsx (~378 lines, well under 700-limit) is a clean single-file wizard. stepValid useMemo correctly gates Lanjut button per step. Stepper back-click only allowed for i<step (forward-click is no-op). All form fields have data-testid. axios POST uses REACT_APP_BACKEND_URL via env. Error state shown in .ord-error block on step 4. SuccessScreen separated. Nopol auto-uppercased; tahun stripped to digits + maxLength=4.",
+    "MongoDB _id excluded from all responses (doc.pop('_id', None)). No serialization issues.",
+    "Compatibility note in server.py:587 — order does NOT auto-create trip (admin still converts via PO). This is intentional and well-documented. trip_id field stored as None initially."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_orders_v26b.py (NEW — 19 tests covering POST/GET orders, odoo ping, regression)"
+  ],
+  "success_rate": {"backend": "100% (93/93 full suite, 19/19 new v2.6b orders+odoo tests)", "frontend": "100% on v2.6b order wizard; 2/3 regression routes verified visually (bastk + track), 1 route requires full driver link (pre-existing gate)"},
+  "test_credentials": "N/A — no auth in this app.",
+  "seed_data_creation": "Created multiple TEST_-prefixed orders via API during testing (truncation, validation, get-by-id) + one via frontend wizard (ORD-785AB9B843 for TEST_PT Logistik Jaya, Jakarta→Bandung, MPV B 1234 XYZ). Safe to leave or clean via db.orders.deleteMany({customer_nama: /^TEST_/}).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "v2.6b ADDS POST/GET /api/orders + OdooClient stub (XML-RPC, env-gated). Order model uses 4 required string fields (vehicle_type validated optional, asal_kota/tujuan_kota/customer_nama/customer_hp required non-empty). All text fields truncated server-side. order_id = ORD-{10 hex upper}. Frontend /?order=1 routes to CustomerOrderForm 4-step wizard (kendaraan→asal→tujuan→konfirmasi). 93/93 backend tests pass. Important nuance: /?trip=TRIP-POD-DEMO alone returns 'Link tidak lengkap' — DriverCheckpoint needs both trip+driver query params. Use BASTK/track for trip-side regression instead.",
+  "rca of the issue": "No new bugs in v2.6b. One historical claim corrected: /?trip=TRIP-POD-DEMO alone does NOT render SOP page — it triggers security gate at DriverCheckpoint.jsx:128 unless driver param also present. This was misreported in iter-8 but is pre-existing app behavior, not introduced by v2.6b."
+}

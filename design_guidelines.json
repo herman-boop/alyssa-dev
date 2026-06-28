@@ -1,0 +1,68 @@
+{
+  "theme": "light",
+  "archetype": "4 (Swiss & High-Contrast)",
+  "typography": {
+    "heading_font": "Cabinet Grotesk",
+    "body_font": "IBM Plex Sans",
+    "font_pairs_explanation": "Cabinet Grotesk provides authority and clarity for metrics/titles (tracking-tight). IBM Plex Sans gives a functional, technical, data-heavy feel perfect for tracking dashboards and tabular data."
+  },
+  "colors": {
+    "background": "#F4F4F5",
+    "surface": "#FFFFFF",
+    "surface_accent": "#09090B",
+    "primary": "#E11D48",
+    "primary_hover": "#BE123C",
+    "text_main": "#09090B",
+    "text_muted": "#71717A",
+    "border": "#E4E4E7",
+    "explanation": "Stark white and tint-less greys (zinc) form the base. The design relies heavily on structural grayscale for hierarchy. Signal Red (Rose-600) is used exclusively for the critical 'Tambah Checkpoint' action. Active state surfaces use sharp black (#09090B) with white text."
+  },
+  "layout": {
+    "strategy": "The Control Room Grid",
+    "description": "Strict grid hierarchy prioritizing data correlation and density. Mobile-first stacking, expanding to a 12-column bento-style grid on desktop.",
+    "spacing": "Tight gaps (gap-6) between cards. Generous internal padding (p-6 to p-8) inside cards with borders to prevent text collision. Use p-0 for map card to allow full bleed.",
+    "corners": "Subtle roundness, max 8px border-radius (rounded-lg) for outer containers, sharper inside.",
+    "desktop_grid": "12 columns. Map: col-span-12 lg:col-span-8, row-span-2. Sidebar (Manifest + Timeline): col-span-12 lg:col-span-4, stacked vertically."
+  },
+  "components": {
+    "header": {
+      "style": "Solid background (bg-white), hard bottom border (border-zinc-200). Contains Logo and Real-time Clock."
+    },
+    "map_container": {
+      "type": "Leaflet/OpenStreetMap",
+      "style": "Full bleed inside its container with a 1px border. h-[500px] or h-full to feel like a command center screen.",
+      "markers": "Use sharp, high-contrast markers. Ensure Leaflet z-index is managed correctly (z-10) to not overlap standard UI headers (z-50)."
+    },
+    "clock": {
+      "style": "Tabular numerals, large text (text-xl to text-2xl), high contrast. Displayed prominently in the header or top of the sidebar. Format: Jam:Menit:Detik | DD MMMM YYYY."
+    },
+    "manifest_card": {
+      "style": "Solid white background, 1px subtle border, no shadow. Active manifest summary can use inverted dark mode (bg-zinc-950 text-white) to stand out clearly from the form."
+    },
+    "checkpoint_button": {
+      "style": "Massive, high-contrast Signal Red CTA (bg-rose-600). Needs hover lift (-translate-y-1) and focus ring. Text must be bold and commanding."
+    },
+    "timeline": {
+      "style": "Left-bordered list (border-l-2 border-zinc-200) inside a scrollable container. Nodes placed on the line use stark black or red. Items display Timestamp (bold) and GPS Coordinates/Address (muted)."
+    }
+  },
+  "animations": {
+    "hover": "Slight lift (-translate-y-1) and subtle shadow for cards. Color darkening for buttons.",
+    "entrance": "Staggered fade-up for timeline items when a new checkpoint is added."
+  },
+  "accessibility": {
+    "contrast": "Ensure all text meets APCA standards. High contrast everywhere.",
+    "testing": "All interactive elements MUST include data-testid attributes (e.g., data-testid='input-nopol', data-testid='btn-checkpoint', data-testid='form-manifest')."
+  },
+  "image_urls": {},
+  "instructions_to_main_agent": [
+    "Install and setup Leaflet for React (react-leaflet, leaflet) or standard Leaflet JS for the map.",
+    "Use standard HTML/Tailwind for structural layouts to achieve the Control Room grid.",
+    "Use Shadcn UI for Form inputs (Input, Label, Form), Buttons, and Cards where applicable, but ensure border-radius is `rounded-lg` max.",
+    "Real-time clock must use a React useEffect interval to update every second without causing full page re-renders. Use Indonesian locale (id-ID) for date formatting.",
+    "Manifest form inputs must include: No Pol (Nomor Polisi), Nama Driver, Asal, Tujuan, Muatan.",
+    "Driver Checkpoint button must request `navigator.geolocation`, capture coordinates + timestamp, and prepend to the Timeline list state.",
+    "Make sure the UI text is in Indonesian as requested (e.g., 'Tambah Checkpoint', 'Manifes Perjalanan Aktif', 'Belum ada checkpoint').",
+    "Ensure all key elements have 'data-testid' for testing purposes."
+  ]
+}

@@ -1,0 +1,84 @@
+<svg viewBox="0 0 500 540" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="PT Alyssa Auto Logistik">
+  <defs>
+    <!-- Circle gradient: cyan top-center → deep navy edges/bottom -->
+    <radialGradient id="aal-cg" cx="40%" cy="22%" r="78%" gradientUnits="objectBoundingBox">
+      <stop offset="0%"   stop-color="#1EC8EE"/>
+      <stop offset="42%"  stop-color="#1880CC"/>
+      <stop offset="78%"  stop-color="#1040A8"/>
+      <stop offset="100%" stop-color="#0A1B6E"/>
+    </radialGradient>
+    <!-- Arrow fill -->
+    <linearGradient id="aal-ag" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%"   stop-color="#0A1B6E"/>
+      <stop offset="100%" stop-color="#112BB0"/>
+    </linearGradient>
+    <!-- Text arc path (bottom of circle) -->
+    <path id="aal-arc" d="M 70,410 A 186,186 0 0,0 430,410"/>
+    <!-- Clip to circle -->
+    <clipPath id="aal-clip">
+      <circle cx="250" cy="216" r="184"/>
+    </clipPath>
+  </defs>
+
+  <!-- ── Main circle ── -->
+  <circle cx="250" cy="216" r="184" fill="url(#aal-cg)"/>
+
+  <!-- ── Sailboat (clipped inside circle) ── -->
+  <g clip-path="url(#aal-clip)">
+
+    <!-- Wave / sea base platform -->
+    <path d="M 60,298 Q 150,278 250,282 Q 350,278 440,298 L 440,340 Q 350,320 250,324 Q 150,320 60,340 Z"
+          fill="#0A1B6E" opacity="0.85"/>
+
+    <!-- Deck line wave (lighter) -->
+    <path d="M 80,290 Q 165,275 250,278 Q 335,275 420,290"
+          stroke="white" stroke-width="2.5" fill="none" opacity="0.35"/>
+
+    <!-- Mast -->
+    <rect x="247.5" y="58" width="5" height="228" fill="white" rx="2"/>
+
+    <!-- Center sail — left blade (almond/leaf left half) -->
+    <path d="M 250,62 C 220,100 200,165 208,280 L 250,280 Z" fill="white"/>
+    <!-- Center sail — right blade -->
+    <path d="M 250,62 C 280,100 300,165 292,280 L 250,280 Z" fill="white"/>
+
+    <!-- Left wing sail -->
+    <path d="M 247,148 C 205,165 148,190 115,255 L 205,268 Z" fill="white" opacity="0.92"/>
+
+    <!-- Right wing sail (small) -->
+    <path d="M 253,148 C 295,160 328,178 344,220 L 292,258 Z" fill="white" opacity="0.88"/>
+
+    <!-- Boat hull / keel shape -->
+    <path d="M 175,282 Q 250,270 325,282 L 315,304 Q 250,294 185,304 Z"
+          fill="#08175A" opacity="0.9"/>
+
+    <!-- Inner circle accent line (top) -->
+    <circle cx="250" cy="216" r="184" fill="none" stroke="white" stroke-width="2" opacity="0.12"/>
+  </g>
+
+  <!-- ── Arrow swoosh (outside/overlapping circle bottom-right) ── -->
+  <!-- Main swoosh body -->
+  <path d="
+    M 112,365
+    Q 195,332 295,340
+    Q 360,344 412,368
+    L 420,354
+    Q 365,326 292,322
+    Q 185,314 98,352
+    Z"
+    fill="url(#aal-ag)"/>
+
+  <!-- Arrow head (right tip pointing right) -->
+  <path d="M 412,368 L 428,354 L 440,371 L 424,383 Z" fill="#0A1B6E"/>
+
+  <!-- ── Curved company name text ── -->
+  <text font-family="'Arial Black','Arial','Helvetica Neue',sans-serif"
+        font-weight="900"
+        font-size="28.5"
+        fill="#0A1B6E"
+        letter-spacing="1.8">
+    <textPath href="#aal-arc" startOffset="50%" text-anchor="middle">
+      PT. ALYSSA AUTO LOGISTIK
+    </textPath>
+  </text>
+</svg>

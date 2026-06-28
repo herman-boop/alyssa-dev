@@ -1,0 +1,232 @@
+/* =====================================================
+   PT Alyssa Auto Logistik — Design System v2
+   Font  : SF Pro (Apple) → Inter fallback
+   Light : Default white + blue gradient
+   Dark  : [data-theme="dark"] on <html>
+   ===================================================== */
+
+/* ── Font ── */
+:root {
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
+          "Inter", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "SF Mono", "SFMono-Regular", "JetBrains Mono", ui-monospace,
+               "Courier New", monospace;
+}
+
+/* ── Light (default) ── */
+:root {
+  color-scheme: light;
+
+  /* Surface */
+  --bg:        #FFFFFF;
+  --bg-2:      #F8FAFC;
+  --bg-3:      #F1F5F9;
+  --bg-accent: #EFF6FF;
+  --surface:   #FFFFFF;
+  --surface-2: #F1F5F9;
+
+  /* Border */
+  --border:       #E2E8F0;
+  --border-light: #F1F5F9;
+  --border-2:     #CBD5E1;
+
+  /* Text */
+  --text:      #0F172A;
+  --text-2:    #334155;
+  --text-mute: #64748B;
+  --text-dim:  #94A3B8;
+
+  /* Brand gold */
+  --gold:        #D4A847;
+  --gold-light:  #D4A847;
+  --gold-soft:   #E8B84B;
+  --gold-bg:     #FFFBEB;
+  --gold-border: #FDE68A;
+  --gold-dark:   #B8860B;
+
+  /* Primary / Blue */
+  --primary:    #2563EB;
+  --primary-h:  #1D4ED8;
+  --primary-bg: #EFF6FF;
+  --blue:       #2563EB;
+  --blue-dark:  #1D4ED8;
+  --blue-bg:    #EFF6FF;
+
+  /* Status */
+  --green:      #16A34A;
+  --green-dark: #15803D;
+  --green-bg:   #F0FDF4;
+  --red:        #DC2626;
+  --red-bg:     #FEF2F2;
+  --amber:      #D97706;
+  --amber-bg:   #FFFBEB;
+  --orange:     #D97706;
+  --orange-bg:  #FFFBEB;
+  --purple:     #7C3AED;
+  --purple-bg:  #F5F3FF;
+  --wa:         #25D366;
+
+  /* Shadow */
+  --shadow-xs: 0 1px 2px rgba(15,23,42,0.04);
+  --shadow-sm: 0 1px 3px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04);
+  --shadow:    0 4px 12px rgba(15,23,42,0.08), 0 2px 4px rgba(15,23,42,0.04);
+  --shadow-md: 0 8px 24px rgba(15,23,42,0.10), 0 4px 8px rgba(15,23,42,0.04);
+  --shadow-lg: 0 16px 48px rgba(15,23,42,0.12), 0 8px 16px rgba(15,23,42,0.06);
+  --shadow-xl: 0 30px 60px rgba(15,23,42,0.14);
+
+  /* Radius */
+  --r-xs: 4px;
+  --r-sm: 8px;
+  --r:    12px;
+  --r-lg: 16px;
+  --r-xl: 24px;
+
+  /* Transition */
+  --t:      0.15s ease;
+  --t-slow: 0.28s ease;
+}
+
+/* ── Dark ── */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg:        #0A1628;
+  --bg-2:      #0F1E35;
+  --bg-3:      #152238;
+  --bg-accent: #0F1E35;
+  --surface:   #0F1E35;
+  --surface-2: #1B2C46;
+
+  --border:       #1F2F4A;
+  --border-light: #2C4264;
+  --border-2:     #2C4264;
+
+  --text:      #E6EDF3;
+  --text-2:    #C4CFE0;
+  --text-mute: #94A3C4;
+  --text-dim:  #5F7494;
+
+  /* Gold stays same — it's brand */
+  --gold-bg:     #2B1D0E;
+  --gold-border: #5A3A05;
+
+  /* Primary / Blue goes lighter for dark bg */
+  --primary:    #60A5FA;
+  --primary-h:  #93C5FD;
+  --primary-bg: #0C2D52;
+  --blue:       #60A5FA;
+  --blue-dark:  #2563EB;
+  --blue-bg:    #0C2D52;
+
+  /* Status on dark bg */
+  --green:      #56d364;
+  --green-dark: #2ea043;
+  --green-bg:   #0F2A1C;
+  --red:        #f85149;
+  --red-bg:     #2D1515;
+  --amber:      #FBB847;
+  --amber-bg:   #2B1D0E;
+  --orange:     #FBB847;
+  --orange-bg:  #2B1D0E;
+  --purple-bg:  #1E1040;
+
+  --shadow-xs: 0 1px 2px rgba(0,0,0,0.4);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.5);
+  --shadow:    0 4px 12px rgba(0,0,0,0.55);
+  --shadow-md: 0 8px 24px rgba(0,0,0,0.6);
+  --shadow-lg: 0 16px 48px rgba(0,0,0,0.65);
+  --shadow-xl: 0 30px 60px rgba(0,0,0,0.70);
+}
+
+/* ── Global base ── */
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: 1.6;
+  transition: background var(--t-slow), color var(--t-slow);
+}
+
+/* ── Skeleton shimmer ── */
+.skeleton {
+  display: block;
+  background: linear-gradient(
+    90deg,
+    var(--bg-3) 25%,
+    var(--bg-2) 50%,
+    var(--bg-3) 75%
+  );
+  background-size: 200% 100%;
+  animation: ds-shimmer 1.4s infinite linear;
+  border-radius: var(--r-sm);
+  min-height: 14px;
+}
+
+@keyframes ds-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ── Spinner ── */
+.spinner {
+  width: 22px;
+  height: 22px;
+  border: 2.5px solid var(--border);
+  border-top-color: var(--gold-light);
+  border-radius: 50%;
+  animation: ds-spin 0.65s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes ds-spin { to { transform: rotate(360deg); } }
+
+/* ── Theme toggle button ── */
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-sm);
+  border: 1.5px solid var(--border);
+  background: var(--bg-2);
+  cursor: pointer;
+  color: var(--text-mute);
+  font-size: 16px;
+  transition: all var(--t);
+  flex-shrink: 0;
+  line-height: 1;
+}
+.theme-toggle:hover {
+  border-color: var(--gold-light);
+  color: var(--gold);
+  background: var(--gold-bg);
+}
+
+/* ── Chip / badge ── */
+.ds-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  font-family: var(--font);
+}
+.ds-chip-new    { background: var(--gold-bg);   color: var(--gold);   border: 1px solid var(--gold-border); }
+.ds-chip-done   { background: var(--green-bg);  color: var(--green);  border: 1px solid #BBF7D0; }
+.ds-chip-trip   { background: var(--purple-bg); color: var(--purple); border: 1px solid #DDD6FE; }
+.ds-chip-disp   { background: var(--blue-bg);   color: var(--blue);   border: 1px solid #BFDBFE; }
+.ds-chip-cancel { background: var(--red-bg);    color: var(--red);    border: 1px solid #FECACA; }

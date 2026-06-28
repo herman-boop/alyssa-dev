@@ -1,0 +1,373 @@
+/* ============================================================
+   OperationGuide — Tutorial Operasional v1.0
+   Theme: Navy + Gold (consistent with platform)
+   Onboarding-style single-card with progress + print A4 mode
+   ============================================================ */
+
+.gd-root {
+  min-height: 100vh;
+  background: var(--bg, #0A1628);
+  color: var(--text, #E6EDF3);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  padding: 0 0 110px;
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+/* ----- Header ----- */
+.gd-header {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 12px 16px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+}
+.gd-brand { display: flex; align-items: center; gap: 12px; }
+.gd-brand-logo {
+  width: 52px; height: 52px;
+  display: grid; place-items: center;
+  border-radius: 12px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 2px var(--gold-light, #D4A847);
+}
+.gd-brand-name {
+  font-weight: 900; font-size: 14px;
+  color: var(--text, #E6EDF3); letter-spacing: 0.4px;
+}
+.gd-brand-tag {
+  font-size: 10.5px; color: var(--gold-light, #D4A847);
+  margin-top: 2px; font-weight: 600;
+}
+
+/* ----- Tabs ----- */
+.gd-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  padding: 12px;
+}
+.gd-tab {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 4px;
+  padding: 12px 8px;
+  background: var(--surface, #152238);
+  border: 1.5px solid var(--border, #1F2F4A);
+  border-radius: 12px;
+  cursor: pointer; transition: all .15s ease;
+  font-family: inherit;
+  color: var(--text-mute, #94A3C4);
+}
+.gd-tab:hover { transform: translateY(-1px); border-color: var(--border-light, #2C4264); }
+.gd-tab.active {
+  background: linear-gradient(180deg, var(--surface, #152238) 0%, #0F1E35 100%);
+  border-color: var(--gold-light, #D4A847);
+  box-shadow: 0 6px 20px rgba(212,168,71,.18);
+  color: var(--gold-light, #D4A847);
+}
+.gd-tab-icon { font-size: 22px; }
+.gd-tab-label {
+  font-weight: 800; font-size: 12.5px;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.gd-tab-count {
+  font-size: 10.5px; font-weight: 700;
+  color: var(--text-dim, #5F7494);
+  background: var(--bg-2, #0F1E35);
+  border-radius: 999px; padding: 1px 8px;
+}
+.gd-tab.active .gd-tab-count {
+  background: var(--gold-bg, #2B1D0E);
+  color: var(--gold-light, #D4A847);
+}
+
+/* ----- Progress bar ----- */
+.gd-progress {
+  position: relative;
+  height: 6px;
+  margin: 8px 16px 0;
+  background: var(--bg-2, #0F1E35);
+  border-radius: 999px;
+  overflow: visible;
+}
+.gd-progress-bar {
+  position: absolute; inset: 0 auto 0 0;
+  background: linear-gradient(90deg, #D4A847 0%, #854F0B 100%);
+  border-radius: 999px;
+  transition: width .35s cubic-bezier(.4,0,.2,1);
+  box-shadow: 0 0 12px rgba(212,168,71,.4);
+}
+.gd-progress-text {
+  position: absolute; top: 10px; right: 0;
+  font-size: 10.5px; font-weight: 700;
+  color: var(--text-mute, #94A3C4); letter-spacing: 0.4px;
+}
+
+/* ----- Stage (single card) ----- */
+.gd-stage { padding: 24px 16px 16px; min-height: 50vh; }
+.gd-card {
+  background: var(--surface, #152238);
+  border: 1px solid var(--border, #1F2F4A);
+  border-radius: 18px;
+  padding: 28px 22px 24px;
+  position: relative;
+  box-shadow: 0 14px 40px rgba(0,0,0,.32);
+  animation: gd-slide-in .3s cubic-bezier(.4,0,.2,1);
+}
+@keyframes gd-slide-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.gd-card-num {
+  position: absolute; top: -22px; left: 22px;
+  font-family: "JetBrains Mono", monospace;
+  font-weight: 900; font-size: 56px;
+  background: linear-gradient(180deg, #D4A847 0%, #854F0B 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  line-height: 1;
+  letter-spacing: -2px;
+  text-shadow: 0 8px 24px rgba(212,168,71,.22);
+}
+
+.gd-card-icon {
+  font-size: 44px;
+  margin-bottom: 10px;
+  display: block;
+}
+
+.gd-card-title {
+  font-size: 22px; font-weight: 900;
+  color: var(--gold-light, #D4A847);
+  margin: 0 0 16px;
+  letter-spacing: 0.3px;
+  line-height: 1.25;
+}
+
+.gd-card-steps {
+  list-style: none; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.gd-card-steps li {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 10px 12px;
+  background: var(--bg-2, #0F1E35);
+  border: 1px solid var(--border, #1F2F4A);
+  border-radius: 10px;
+  line-height: 1.5;
+}
+.gd-step-bullet {
+  flex-shrink: 0;
+  width: 24px; height: 24px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #D4A847 0%, #854F0B 100%);
+  color: #0A1628;
+  font-weight: 900; font-size: 12.5px;
+  display: grid; place-items: center;
+  font-family: "JetBrains Mono", monospace;
+}
+.gd-step-text {
+  font-size: 14px; color: var(--text, #E6EDF3);
+  font-weight: 500;
+}
+
+.gd-card-tip {
+  margin-top: 16px;
+  padding: 12px 14px;
+  background: linear-gradient(90deg, rgba(212,168,71,.08) 0%, rgba(212,168,71,.02) 100%);
+  border-left: 3px solid var(--gold-light, #D4A847);
+  border-radius: 0 10px 10px 0;
+  display: flex; gap: 10px;
+}
+.gd-tip-icon { font-size: 18px; line-height: 1; }
+.gd-tip-text {
+  font-size: 13px; font-style: italic;
+  color: var(--text-mute, #94A3C4);
+  line-height: 1.5;
+}
+
+/* ----- Bottom nav + dots ----- */
+.gd-nav {
+  position: sticky; bottom: 0;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  background: linear-gradient(180deg, transparent 0%, var(--bg, #0A1628) 30%);
+  z-index: 10;
+}
+
+.gd-dots {
+  display: inline-flex; gap: 5px;
+  justify-content: center;
+}
+.gd-dot {
+  width: 8px; height: 8px;
+  border-radius: 999px;
+  background: var(--border-light, #2C4264);
+  cursor: pointer;
+  transition: all .2s ease;
+}
+.gd-dot:hover { transform: scale(1.2); }
+.gd-dot.done   { background: var(--gold, #BA7517); }
+.gd-dot.active {
+  background: var(--gold-light, #D4A847);
+  width: 22px;
+  box-shadow: 0 0 10px rgba(212,168,71,.5);
+}
+
+.gd-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  padding: 11px 16px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  font-weight: 800; font-size: 12.5px;
+  font-family: inherit;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform .08s, box-shadow .15s, opacity .15s;
+}
+.gd-btn:active:not(:disabled) { transform: translateY(1px); }
+.gd-btn:disabled { opacity: .4; cursor: not-allowed; }
+.gd-btn-sm { padding: 8px 12px; font-size: 11.5px; }
+.gd-btn-ghost {
+  background: transparent;
+  border-color: var(--border-light, #2C4264);
+  color: var(--text, #E6EDF3);
+}
+.gd-btn-ghost:hover:not(:disabled) { background: rgba(255,255,255,.04); }
+.gd-btn-gold {
+  background: linear-gradient(180deg, #D4A847 0%, #854F0B 100%);
+  color: #0A1628;
+  box-shadow: 0 5px 16px rgba(212,168,71,.3);
+}
+.gd-btn-gold:hover:not(:disabled) { box-shadow: 0 7px 22px rgba(212,168,71,.42); }
+
+/* ============================================================
+   PRINT MODE — full guide in white A4 layout
+   Triggered via .guide-print-mode class on #guide-print container
+   ============================================================ */
+.gd-print-container {
+  position: absolute;
+  left: -99999px;
+  top: 0;
+  width: 760px;
+  background: #fff;
+  color: #0A1628;
+  padding: 24px;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+}
+.gd-print-container.guide-print-mode,
+#guide-print {
+  /* When called by html2canvas we make it briefly visible by JS, but offscreen position is fine for capture */
+}
+.gd-print-header {
+  border-bottom: 3px double #854F0B;
+  padding-bottom: 12px;
+  margin-bottom: 18px;
+  text-align: center;
+}
+.gd-print-header h1 {
+  font-size: 22px; font-weight: 900;
+  color: #0A1628;
+  margin: 0 0 4px;
+  letter-spacing: 0.3px;
+}
+.gd-print-header p {
+  color: #854F0B;
+  font-size: 12px; font-weight: 700;
+  margin: 0;
+}
+
+.gd-print-section { margin-bottom: 22px; page-break-inside: avoid; }
+.gd-print-cat {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 16px; font-weight: 900;
+  background: linear-gradient(90deg, #0A1628 0%, #152238 100%);
+  color: #D4A847;
+  padding: 10px 14px;
+  border-radius: 10px;
+  margin: 0 0 12px;
+  letter-spacing: 1px;
+}
+.gd-print-cat span:first-child { font-size: 20px; }
+
+.gd-print-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.gd-print-card {
+  background: #fbfcfe;
+  border: 1px solid #d9dce3;
+  border-radius: 8px;
+  padding: 10px 12px;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+.gd-print-card-head {
+  display: flex; align-items: center; gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed #d9dce3;
+  margin-bottom: 8px;
+}
+.gd-print-num {
+  font-family: "JetBrains Mono", monospace;
+  background: linear-gradient(180deg, #D4A847 0%, #854F0B 100%);
+  color: #0A1628;
+  font-weight: 900; font-size: 13px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  letter-spacing: 0.4px;
+}
+.gd-print-icon { font-size: 16px; }
+.gd-print-title {
+  font-weight: 800; font-size: 13px;
+  color: #0A1628;
+}
+.gd-print-steps {
+  list-style: decimal; padding-left: 18px; margin: 0;
+  font-size: 11px; line-height: 1.5;
+  color: #0A1628;
+}
+.gd-print-steps li { margin-bottom: 2px; }
+.gd-print-tip {
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: #fdf6e6;
+  border-left: 3px solid #D4A847;
+  font-size: 10.5px;
+  font-style: italic;
+  color: #5F7494;
+  border-radius: 0 4px 4px 0;
+}
+.gd-print-footer {
+  margin-top: 20px;
+  padding-top: 10px;
+  border-top: 1px dashed #d9dce3;
+  text-align: center;
+  font-size: 10px;
+  color: #5F7494;
+}
+
+/* ----- Mobile tweaks ----- */
+@media (max-width: 540px) {
+  .gd-brand-name { font-size: 12.5px; }
+  .gd-brand-tag  { font-size: 9.5px; }
+  .gd-tabs { padding: 10px; gap: 4px; }
+  .gd-tab { padding: 10px 4px; }
+  .gd-tab-icon { font-size: 18px; }
+  .gd-tab-label { font-size: 11px; }
+  .gd-card { padding: 24px 16px 20px; }
+  .gd-card-num { font-size: 44px; top: -16px; left: 16px; }
+  .gd-card-icon { font-size: 36px; }
+  .gd-card-title { font-size: 18px; }
+  .gd-step-text { font-size: 13px; }
+  .gd-nav { padding: 12px; }
+  .gd-btn { padding: 10px 12px; font-size: 12px; }
+  .gd-print-cards { grid-template-columns: 1fr; }
+}
