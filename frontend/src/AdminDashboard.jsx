@@ -776,7 +776,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
         {linkDriver && <a className="adm-btn adm-btn-ghost adm-btn-sm" href={linkDriver} target="_blank" rel="noreferrer" data-testid={`adm-link-driver-${order.order_id}`}>Driver</a>}
         {linkTrack  && <a className="adm-btn adm-btn-ghost adm-btn-sm" href={linkTrack}  target="_blank" rel="noreferrer" data-testid={`adm-link-track-${order.order_id}`}>Track</a>}
         {linkBastk  && <a className="adm-btn adm-btn-ghost adm-btn-sm" href={linkBastk}  target="_blank" rel="noreferrer" data-testid={`adm-link-bastk-${order.order_id}`}>BASTK</a>}
-        {order.trip_id && Array.isArray(order.legs) && order.legs.some(l => l.tipe && l.tipe.startsWith("Kapal")) && (
+        {order.trip_id && (
           <>
             <input ref={kapalFileRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={e => uploadFotoKapal(e.target.files)} />
             <button className="adm-btn adm-btn-sm" onClick={() => kapalFileRef.current?.click()} disabled={uploadingKapal}
