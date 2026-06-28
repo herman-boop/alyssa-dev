@@ -1,5 +1,5 @@
 /* eslint-disable */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { VEHICLE_TYPE_LIST } from "@/VehicleSketches";
 import CostCalculator from "@/CostCalculator";
@@ -508,7 +508,7 @@ function StatTile({ label, value, cls = "", onClick, active, testid }) {
 ════════════════════════════════════════ */
 function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLegs, headers, kordList = [] }) {
   const [uploadingKapal, setUploadingKapal] = useState(false);
-  const kapalFileRef = React.useRef();
+  const kapalFileRef = useRef();
 
   const uploadFotoKapal = async (files) => {
     if (!order.trip_id || !files?.length) return;
