@@ -1357,6 +1357,16 @@ function LegsModal({ tripId, order, onClose, onSave, headers }) {
             placeholder="Cari nopol (B 9564) atau 5 digit rangka (21258)..."
             style={{ width: "100%", padding: "8px 10px", borderRadius: 7, border: "1px solid #30363d", background: "#0d1117", color: "#e6edf3", fontSize: 12, marginBottom: 10, boxSizing: "border-box" }}
           />
+          {/* Counter + reset */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <div style={{ fontSize: 11, color: "#8b949e" }}>Dipilih: <b style={{ color: "#3fb950" }}>{multiUnitModal.selected.length} unit</b></div>
+            {multiUnitModal.selected.length > 1 && (
+              <button onClick={() => setMultiUnitModal(m => ({ ...m, selected: [m.selected[0]] }))}
+                style={{ background: "none", border: "1px solid #f85149", borderRadius: 5, color: "#f85149", fontSize: 10, padding: "3px 8px", cursor: "pointer" }}>
+                Reset Pilihan
+              </button>
+            )}
+          </div>
           {/* Unit yang sedang dibuka — selalu masuk */}
           <div style={{ marginBottom: 10 }}>
             <div style={{ fontSize: 10, color: "#8b949e", marginBottom: 6, letterSpacing: 1 }}>UNIT AKTIF (otomatis masuk)</div>
