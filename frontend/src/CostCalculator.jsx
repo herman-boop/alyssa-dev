@@ -184,25 +184,32 @@ export default function CostCalculator() {
     setPtSaveMsg("");
   };
 
-  const doSimpanPenawaran = async (hargaDeal) => {
-    setSimpanModal(null);
-    if (!selectedPt || !hargaDeal) return;
+  const doSimpanPenawaran = async () => {
+    if (!selectedPt || !routeList.length) return;
     setPtSaving(true);
     try {
-      const res = await axios.post(
-        `${API}/api/admin/pelanggan/${selectedPt.id}/harga`,
-        {
-          rute: `${asal}→${tujuan}`,
-          hpp: calc.hppFinal,
-          harga_deal: hargaDeal,
-          tipe_kendaraan: tipe,
-          catatan: catatan.trim(),
-        },
-        { headers: { "x-admin-pin": adminPin } }
-      );
-      setSelectedPt(res.data);
-      setPtSaveMsg("✓ Tersimpan!");
-      setTimeout(() => setPtSaveMsg(""), 3000);
+      let lastRes = null;
+      for (const r of routeList) {
+        const res = await axios.post(
+          `${API}/api/admin/pelanggan/${selectedPt.id}/harga`,
+          {
+            rute: `${r.asal}→${r.tujuan}`,
+            asal: r.asal, tujuan: r.tujuan, tipe: r.tipe,
+            hpp: r.hpp, harga_deal: r.price_deal || r.corp || 0,
+            tipe_kendaraan: r.tipe, catatan: r.catatan || "",
+            price_lbl: r.price_lbl || "",
+            harga_eksp: r.eksp, harga_eksp2: r.eksp2,
+            harga_sales: r.sales, harga_sales2: r.sales2,
+            harga_corp: r.corp, harga_corp2: r.corp2,
+          },
+          { headers: { "x-admin-pin": adminPin } }
+        );
+        lastRes = res.data;
+      }
+      if (lastRes) setSelectedPt(lastRes);
+      setRouteList([]);
+      setPtSaveMsg(`✓ ${routeList.length} rute tersimpan ke ${selectedPt.nama_pt}!`);
+      setTimeout(() => setPtSaveMsg(""), 4000);
     } catch (e) {
       alert("Gagal simpan: " + (e.response?.data?.detail || e.message));
     } finally {
@@ -258,20 +265,58 @@ export default function CostCalculator() {
   const saveMargin = () => { try { localStorage.setItem("alyssa_margin", JSON.stringify(M)); } catch (e) {} setSavedMsg(true); setTimeout(() => setSavedMsg(false), 2000); };
   const saveList = () => { try { localStorage.setItem("alyssa_routelist", JSON.stringify(routeList)); } catch (e) {} setListSaved(true); setTimeout(() => setListSaved(false), 2000); };
 
+  const [addModal, setAddModal] = useState(null); // { hargaOptions, routeData }
+  const [addPilihan, setAddPilihan] = useState(null);
+
   const addToList = () => {
     if (!asal.trim() || !tujuan.trim()) { alert("Isi Asal dan Tujuan dulu!"); return; }
     if (!calc.hppFinal) { alert("Isi minimal 1 komponen biaya dulu!"); return; }
     const h = calc.h;
-    setRouteList((rl) => [...rl, {
-      asal: asal.trim(), tujuan: tujuan.trim(), tipe, top: isTempo ? "Tempo 30hr" : "Cash",
-      risiko: isRawan ? "Rawan" : "Normal", catatan: catatan.trim(), asuransi: calc.as, hpp: calc.hppFinal,
-      eksp: h.eksp, eksp2: h.eksp2, sales: h.sales, sales2: h.sales2, corp: h.corp, corp2: h.corp2,
-    }]);
+    setAddModal({
+      routeData: {
+        asal: asal.trim(), tujuan: tujuan.trim(), tipe, top: isTempo ? "Tempo 30hr" : "Cash",
+        risiko: isRawan ? "Rawan" : "Normal", catatan: catatan.trim(), hpp: calc.hppFinal,
+        eksp: h.eksp, eksp2: h.eksp2, sales: h.sales, sales2: h.sales2, corp: h.corp, corp2: h.corp2,
+      },
+      options: [
+        { lbl: "Eksp 1", val: h.eksp, color: "#56d364" },
+        { lbl: "Eksp 2", val: h.eksp2, color: "#34d399" },
+        { lbl: "Sales 1", val: h.sales, color: "#EF9F27" },
+        { lbl: "Sales 2", val: h.sales2, color: "#fbbf24" },
+        { lbl: "Corp 1", val: h.corp, color: "#58a6ff" },
+        { lbl: "Corp 2", val: h.corp2, color: "#a78bfa" },
+      ]
+    });
+    setAddPilihan(null);
+  };
+
+  const confirmAddToList = () => {
+    if (!addModal || !addPilihan) return;
+    setRouteList((rl) => [...rl, { ...addModal.routeData, price_deal: addPilihan.val, price_lbl: addPilihan.lbl }]);
+    setAddModal(null); setAddPilihan(null);
     setAsal(""); setTujuan(""); setCatatan(""); setTop("cash"); setRisiko("normal");
     setLegs((ls) => ls.map((l) => ({ ...l, cost: "" }))); setAdmin("0"); setAsuransi("0"); setLain("0");
   };
+
   const delRoute = (i) => setRouteList((rl) => rl.filter((_, idx) => idx !== i));
   const clearList = () => { if (window.confirm("Hapus semua rute?")) setRouteList([]); };
+
+  const deleteHargaPT = async (hargaId) => {
+    if (!selectedPt) return;
+    if (!window.confirm("Hapus data harga ini?")) return;
+    try {
+      const res = await axios.delete(`${API}/api/admin/pelanggan/${selectedPt.id}/harga/${hargaId}`, { headers: { "x-admin-pin": adminPin } });
+      setSelectedPt(res.data);
+      const fromHistory = (res.data.harga_history || []).map(h => ({
+        asal: h.asal || (h.rute||"").split("→")[0]||"", tujuan: h.tujuan || (h.rute||"").split("→")[1]||"",
+        tipe: h.tipe || "", top: h.top || "cash", risiko: h.risiko || "normal",
+        hpp: h.hpp || 0, eksp: h.harga_eksp||0, eksp2: h.harga_eksp2||0,
+        sales: h.harga_sales||0, sales2: h.harga_sales2||0, corp: h.harga_corp||0, corp2: h.harga_corp2||0,
+        catatan: h.catatan||"", price_deal: h.harga_deal||0, price_lbl: h.price_lbl||""
+      }));
+      setRouteList(fromHistory);
+    } catch { alert("Gagal hapus"); }
+  };
 
   const exportCSV = () => {
     if (!routeList.length) return;
@@ -377,27 +422,27 @@ export default function CostCalculator() {
   return (
     <div style={{ fontFamily: "-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif", background: "#0d1117", color: "#e6edf3", minHeight: "100vh", padding: 16 }}>
 
-      {/* Modal pilih harga deal */}
-      {simpanModal && (
+      {/* Modal pilih harga saat Tambah ke List */}
+      {addModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-          <div style={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 12, width: "100%", maxWidth: 400, padding: 20 }}>
-            <div style={{ fontWeight: 800, fontSize: 14, color: "#fff", marginBottom: 4 }}>💾 Pilih Harga Deal</div>
-            <div style={{ fontSize: 11, color: "#8b949e", marginBottom: 14 }}>Rute: {asal} → {tujuan} &nbsp;·&nbsp; HPP: {fRp(calc.hppFinal)}</div>
+          <div style={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 12, width: "100%", maxWidth: 420, padding: 20 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: "#fff", marginBottom: 4 }}>+ Tambah ke List — Pilih Harga</div>
+            <div style={{ fontSize: 11, color: "#8b949e", marginBottom: 14 }}>{addModal.routeData.asal} → {addModal.routeData.tujuan} &nbsp;·&nbsp; HPP: {fRp(addModal.routeData.hpp)}</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
-              {simpanModal.options.map(opt => (
-                <div key={opt.lbl} onClick={() => setSimpanPilihan(opt)}
-                  style={{ cursor: "pointer", padding: "12px 10px", borderRadius: 8, border: `2px solid ${simpanPilihan?.lbl === opt.lbl ? opt.color : "#30363d"}`, background: simpanPilihan?.lbl === opt.lbl ? "rgba(255,255,255,0.05)" : "#0d1117", textAlign: "center" }}>
+              {addModal.options.map(opt => (
+                <div key={opt.lbl} onClick={() => setAddPilihan(opt)}
+                  style={{ cursor: "pointer", padding: "12px 10px", borderRadius: 8, border: `2px solid ${addPilihan?.lbl === opt.lbl ? opt.color : "#30363d"}`, background: addPilihan?.lbl === opt.lbl ? "rgba(255,255,255,0.05)" : "#0d1117", textAlign: "center" }}>
                   <div style={{ fontSize: 10, color: "#8b949e", marginBottom: 4 }}>{opt.lbl}</div>
                   <div style={{ fontSize: 15, fontWeight: 800, color: opt.color }}>{fRp(opt.val)}</div>
-                  <div style={{ fontSize: 10, color: "#6e7681", marginTop: 2 }}>margin {fRp(opt.val - calc.hppFinal)}</div>
+                  <div style={{ fontSize: 10, color: "#6e7681", marginTop: 2 }}>margin {fRp(opt.val - addModal.routeData.hpp)}</div>
                 </div>
               ))}
             </div>
             <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={() => setSimpanModal(null)} style={{ flex: 1, padding: 9, borderRadius: 7, border: "1px solid #30363d", background: "none", color: "#8b949e", cursor: "pointer" }}>Batal</button>
-              <button onClick={() => simpanPilihan && doSimpanPenawaran(simpanPilihan.val)} disabled={!simpanPilihan}
-                style={{ flex: 2, padding: 9, borderRadius: 7, border: "none", background: simpanPilihan ? "#1f6feb" : "#21262d", color: simpanPilihan ? "#fff" : "#484f58", cursor: simpanPilihan ? "pointer" : "not-allowed", fontWeight: 700 }}>
-                {simpanPilihan ? `Simpan ${simpanPilihan.lbl} — ${fRp(simpanPilihan.val)}` : "Pilih harga dulu"}
+              <button onClick={() => setAddModal(null)} style={{ flex: 1, padding: 9, borderRadius: 7, border: "1px solid #30363d", background: "none", color: "#8b949e", cursor: "pointer" }}>Batal</button>
+              <button onClick={confirmAddToList} disabled={!addPilihan}
+                style={{ flex: 2, padding: 9, borderRadius: 7, border: "none", background: addPilihan ? "#2ea043" : "#21262d", color: addPilihan ? "#fff" : "#484f58", cursor: addPilihan ? "pointer" : "not-allowed", fontWeight: 700 }}>
+                {addPilihan ? `✓ Masukkan ${addPilihan.lbl} — ${fRp(addPilihan.val)}` : "Pilih harga dulu"}
               </button>
             </div>
           </div>
@@ -554,23 +599,52 @@ export default function CostCalculator() {
         </div>
       )}
 
-      {/* ── Simpan Penawaran & Salin Link (when PT selected) ── */}
-      {selectedPt && calc.hppFinal > 0 && (
-        <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
-          <button onClick={simpanPenawaran} disabled={ptSaving}
-            style={{ padding: "8px 16px", borderRadius: 7, cursor: "pointer", fontSize: 12, fontWeight: 700, border: "none", background: ptSaving ? "#21262d" : "#1f6feb", color: "#fff" }}>
-            {ptSaving ? "Menyimpan..." : `💾 Simpan Penawaran → ${selectedPt.nama_pt}`}
-          </button>
-          {ptSaveMsg && <span style={{ fontSize: 12, color: "#56d364", fontWeight: 700 }}>{ptSaveMsg}</span>}
-        </div>
-      )}
-
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
         <button onClick={addToList} style={{ padding: "8px 16px", borderRadius: 7, cursor: "pointer", fontSize: 12, fontWeight: 700, border: "none", background: "#2ea043", color: "#fff" }}>+ Tambah ke List</button>
         <button onClick={() => { setAsal(""); setTujuan(""); setCatatan(""); setTop("cash"); setRisiko("normal"); setAdmin("0"); setAsuransi("0"); setLain("0"); setLegs([{ id: nextId, type: "Self Drive", cost: "" }, { id: nextId + 1, type: "Kapal Laut", cost: "" }, { id: nextId + 2, type: "Self Drive", cost: "" }]); setNextId((n) => n + 3); }} style={{ padding: "8px 16px", borderRadius: 7, cursor: "pointer", fontSize: 12, fontWeight: 700, background: "none", border: "1px solid #30363d", color: "#8b949e" }}>Reset Form</button>
       </div>
 
+      {/* List rute yg belum disimpan ke DB */}
       {routeList.length > 0 && (
+        <div style={{ background: "#161b22", border: "1px solid #238636", borderRadius: 10, marginBottom: 12 }}>
+          <div style={{ padding: "10px 14px", borderBottom: "1px solid #21262d", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "#3fb950" }}>📋 List Rute ({routeList.length}) — Belum Disimpan</span>
+            <button onClick={clearList} style={{ padding: "4px 10px", fontSize: 11, borderRadius: 6, background: "none", border: "1px solid #30363d", color: "#8b949e", cursor: "pointer" }}>Clear</button>
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+              <thead><tr style={{ background: "#21262d" }}>
+                {["#","Asal","Tujuan","HPP","Harga Deal","Tipe Harga",""].map((th,i) => <th key={i} style={{ padding: "6px 8px", textAlign: "left", color: "#8b949e", fontWeight: 600 }}>{th}</th>)}
+              </tr></thead>
+              <tbody>
+                {routeList.map((r, i) => (
+                  <tr key={i} style={{ borderTop: "1px solid #21262d" }}>
+                    <td style={{ padding: "6px 8px", color: "#6e7681" }}>{i+1}</td>
+                    <td style={{ padding: "6px 8px", fontWeight: 700 }}>{r.asal}</td>
+                    <td style={{ padding: "6px 8px", fontWeight: 700 }}>{r.tujuan}</td>
+                    <td style={{ padding: "6px 8px", color: "#8b949e" }}>{fRp(r.hpp)}</td>
+                    <td style={{ padding: "6px 8px", color: "#3fb950", fontWeight: 700 }}>{fRp(r.price_deal)}</td>
+                    <td style={{ padding: "6px 8px", color: "#8b949e", fontSize: 10 }}>{r.price_lbl}</td>
+                    <td style={{ padding: "6px 8px" }}><button onClick={() => delRoute(i)} style={{ background: "none", border: "none", color: "#f85149", cursor: "pointer" }}>✕</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {selectedPt && (
+            <div style={{ padding: "10px 14px", borderTop: "1px solid #21262d", display: "flex", gap: 8, alignItems: "center" }}>
+              <button onClick={doSimpanPenawaran} disabled={ptSaving}
+                style={{ padding: "9px 18px", borderRadius: 7, cursor: "pointer", fontSize: 12, fontWeight: 700, border: "none", background: ptSaving ? "#21262d" : "#1f6feb", color: "#fff" }}>
+                {ptSaving ? "Menyimpan..." : `💾 Simpan ke Penawaran ${selectedPt.nama_pt} (${routeList.length} rute)`}
+              </button>
+              {ptSaveMsg && <span style={{ fontSize: 12, color: "#56d364", fontWeight: 700 }}>{ptSaveMsg}</span>}
+            </div>
+          )}
+          {!selectedPt && <div style={{ padding: "8px 14px", fontSize: 11, color: "#f85149" }}>⚠ Pilih PT dulu di atas untuk menyimpan penawaran</div>}
+        </div>
+      )}
+
+      {false && routeList.length > 0 && (
         <div style={{ background: "#161b22", border: "1px solid #21262d", borderRadius: 10, overflow: "hidden", marginBottom: 12 }}>
           <div style={{ padding: "10px 14px", borderBottom: "1px solid #21262d", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span style={{ fontSize: 12, fontWeight: 700 }}>List Rute</span>
@@ -621,14 +695,16 @@ export default function CostCalculator() {
         </div>
       )}
 
-      {/* ── Price History Sidebar ── */}
+      {/* ── Price History PT (dari DB) ── */}
       {selectedPt && ptHistory.length > 0 && (
         <div style={{ ...CARD, marginTop: 0 }}>
-          <div style={TITLE}>Histori Harga — {selectedPt.nama_pt}</div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <div style={TITLE}>📋 Daftar Harga — {selectedPt.nama_pt} ({ptHistory.length} rute)</div>
+          </div>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
               <thead><tr style={{ background: "#21262d" }}>
-                {["Tanggal", "Rute", "Tipe Kendaraan", "Harga Deal", "Margin %"].map((th) => (
+                {["#","Tanggal","Rute","Tipe Kendaraan","Harga Deal","Margin %",""].map((th) => (
                   <th key={th} style={{ padding: "6px 8px", textAlign: "left", color: "#8b949e", fontWeight: 600, border: "1px solid #30363d" }}>{th}</th>
                 ))}
               </tr></thead>
@@ -637,12 +713,14 @@ export default function CostCalculator() {
                   const mc = marginColor(entry.margin_aktual || 0);
                   const tgl = entry.tanggal ? new Date(entry.tanggal).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }) : "-";
                   return (
-                    <tr key={entry.id || i}>
+                    <tr key={entry.id || i} style={{ borderTop: "1px solid #21262d" }}>
+                      <td style={{ ...TD, color: "#6e7681" }}>{ptHistory.length - i}</td>
                       <td style={{ ...TD, fontSize: 10, color: "#8b949e" }}>{tgl}</td>
                       <td style={TD}>{entry.rute}</td>
                       <td style={{ ...TD, fontSize: 10, color: "#8b949e" }}>{entry.tipe_kendaraan}</td>
                       <td style={{ ...TD, textAlign: "right", color: "#e6edf3", fontWeight: 700 }}>{fRp(entry.harga_deal)}</td>
                       <td style={{ ...TD, textAlign: "center", color: mc, fontWeight: 700 }}>{entry.margin_aktual}%</td>
+                      <td style={TD}><button onClick={() => deleteHargaPT(entry.id)} style={{ background: "none", border: "none", color: "#f85149", cursor: "pointer", fontSize: 14 }}>🗑</button></td>
                     </tr>
                   );
                 })}

@@ -2075,6 +2075,18 @@ async def add_pelanggan_harga(pelanggan_id: str, body: PelangganHargaBody):
     updated["harga_history"] = (updated.get("harga_history") or [])[-20:]
     return updated
 
+@api_router.delete("/admin/pelanggan/{pelanggan_id}/harga/{harga_id}", dependencies=[Depends(require_admin_pin)])
+async def delete_pelanggan_harga(pelanggan_id: str, harga_id: str):
+    """Remove one price record from harga_history by its id."""
+    result = await db.pelanggan_profiles.update_one(
+        {"id": pelanggan_id},
+        {"$pull": {"harga_history": {"id": harga_id}}}
+    )
+    if result.modified_count == 0:
+        raise HTTPException(404, "Data harga tidak ditemukan")
+    updated = await db.pelanggan_profiles.find_one({"id": pelanggan_id}, {"_id": 0})
+    return updated
+
 @api_router.get("/pelanggan/{token}")
 async def public_pelanggan_harga(token: str):
     """Public endpoint — return PT name + last 10 price records (no HPP/margin)."""
