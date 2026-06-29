@@ -144,6 +144,18 @@ export default function CostCalculator() {
       if (full.margin_khusus && Object.keys(full.margin_khusus).length > 0) {
         setM((m) => ({ ...m, ...full.margin_khusus }));
       }
+      // Load harga_history ke routeList supaya bisa lanjut dari no terakhir
+      if (full.harga_history && full.harga_history.length > 0) {
+        const fromHistory = full.harga_history.map(h => ({
+          asal: h.asal || "", tujuan: h.tujuan || "", tipe: h.tipe || "",
+          top: h.top || "cash", risiko: h.risiko || "normal",
+          hpp: h.hpp || 0, eksp: h.harga_eksp || 0, eksp2: h.harga_eksp2 || 0,
+          sales: h.harga_sales || 0, sales2: h.harga_sales2 || 0,
+          corp: h.harga_corp || 0, corp2: h.harga_corp2 || 0,
+          catatan: h.catatan || ""
+        }));
+        setRouteList(fromHistory);
+      }
     } catch (e) {
       setSelectedPt(pt);
     }
