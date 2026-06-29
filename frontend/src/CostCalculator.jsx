@@ -416,6 +416,7 @@ export default function CostCalculator() {
               style={I}
               value={ptQuery}
               onChange={(e) => { setPtQuery(e.target.value); if (selectedPt) setSelectedPt(null); }}
+              onKeyDown={(e) => { if (e.key === "Enter" && ptDropdown.length > 0) selectPt(ptDropdown[0]); }}
               placeholder="Ketik nama PT untuk mencari atau membuat baru..."
             />
             {ptDropdown.length > 0 && (
