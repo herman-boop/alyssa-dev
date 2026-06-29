@@ -89,6 +89,8 @@ export default function CostCalculator() {
   const [M, setM] = useState(DEFAULT_MARGIN);
   const [savedMsg, setSavedMsg] = useState(false);
   const [listSaved, setListSaved] = useState(false);
+  const [simpanModal, setSimpanModal] = useState(null); // { hargaOptions }
+  const [simpanPilihan, setSimpanPilihan] = useState(null);
   const [routeList, setRouteList] = useState(() => {
     try { const raw = localStorage.getItem("alyssa_routelist"); return raw ? JSON.parse(raw) : []; } catch { return []; }
   });
@@ -182,16 +184,9 @@ export default function CostCalculator() {
     setPtSaveMsg("");
   };
 
-  const simpanPenawaran = async () => {
-    if (!selectedPt || !calc.hppFinal) return;
-    const h = calc.h;
-    const hargaDealStr = window.prompt(
-      `Masukkan Harga Deal untuk ${selectedPt.nama_pt}\nRute: ${asal}→${tujuan}\nHPP: ${fRp(calc.hppFinal)}\nCorp1: ${fRp(h.corp)}`,
-      String(h.corp)
-    );
-    if (!hargaDealStr) return;
-    const hargaDeal = pNum(hargaDealStr);
-    if (!hargaDeal) { alert("Harga deal tidak valid"); return; }
+  const doSimpanPenawaran = async (hargaDeal) => {
+    setSimpanModal(null);
+    if (!selectedPt || !hargaDeal) return;
     setPtSaving(true);
     try {
       const res = await axios.post(
@@ -213,6 +208,22 @@ export default function CostCalculator() {
     } finally {
       setPtSaving(false);
     }
+  };
+
+  const simpanPenawaran = () => {
+    if (!selectedPt || !calc.hppFinal) return;
+    const h = calc.h;
+    setSimpanModal({
+      options: [
+        { lbl: "Eksp 1", val: h.eksp, color: "#56d364" },
+        { lbl: "Eksp 2", val: h.eksp2, color: "#34d399" },
+        { lbl: "Sales 1", val: h.sales, color: "#EF9F27" },
+        { lbl: "Sales 2", val: h.sales2, color: "#fbbf24" },
+        { lbl: "Corp 1", val: h.corp, color: "#58a6ff" },
+        { lbl: "Corp 2", val: h.corp2, color: "#a78bfa" },
+      ]
+    });
+    setSimpanPilihan(null);
   };
 
   const salinLinkHarga = () => {
@@ -365,6 +376,34 @@ export default function CostCalculator() {
 
   return (
     <div style={{ fontFamily: "-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif", background: "#0d1117", color: "#e6edf3", minHeight: "100vh", padding: 16 }}>
+
+      {/* Modal pilih harga deal */}
+      {simpanModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 12, width: "100%", maxWidth: 400, padding: 20 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: "#fff", marginBottom: 4 }}>💾 Pilih Harga Deal</div>
+            <div style={{ fontSize: 11, color: "#8b949e", marginBottom: 14 }}>Rute: {asal} → {tujuan} &nbsp;·&nbsp; HPP: {fRp(calc.hppFinal)}</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
+              {simpanModal.options.map(opt => (
+                <div key={opt.lbl} onClick={() => setSimpanPilihan(opt)}
+                  style={{ cursor: "pointer", padding: "12px 10px", borderRadius: 8, border: `2px solid ${simpanPilihan?.lbl === opt.lbl ? opt.color : "#30363d"}`, background: simpanPilihan?.lbl === opt.lbl ? "rgba(255,255,255,0.05)" : "#0d1117", textAlign: "center" }}>
+                  <div style={{ fontSize: 10, color: "#8b949e", marginBottom: 4 }}>{opt.lbl}</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: opt.color }}>{fRp(opt.val)}</div>
+                  <div style={{ fontSize: 10, color: "#6e7681", marginTop: 2 }}>margin {fRp(opt.val - calc.hppFinal)}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setSimpanModal(null)} style={{ flex: 1, padding: 9, borderRadius: 7, border: "1px solid #30363d", background: "none", color: "#8b949e", cursor: "pointer" }}>Batal</button>
+              <button onClick={() => simpanPilihan && doSimpanPenawaran(simpanPilihan.val)} disabled={!simpanPilihan}
+                style={{ flex: 2, padding: 9, borderRadius: 7, border: "none", background: simpanPilihan ? "#1f6feb" : "#21262d", color: simpanPilihan ? "#fff" : "#484f58", cursor: simpanPilihan ? "pointer" : "not-allowed", fontWeight: 700 }}>
+                {simpanPilihan ? `Simpan ${simpanPilihan.lbl} — ${fRp(simpanPilihan.val)}` : "Pilih harga dulu"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <h1 style={{ fontSize: 17, fontWeight: 700, marginBottom: 3 }}>Cost <span style={{ color: "#BA7517" }}>Calculator</span></h1>
       <p style={{ fontSize: 12, color: "#8b949e", marginBottom: 16 }}>HPP + Margin + Proteksi Risiko + Bunga Dana Talang</p>
 
