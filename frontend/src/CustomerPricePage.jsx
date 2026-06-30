@@ -81,12 +81,21 @@ export default function CustomerPricePage() {
                   const tgl = entry.tanggal
                     ? new Date(entry.tanggal).toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" })
                     : "-";
+                  const sudahAsuransi = entry.asuransi && entry.asuransi > 0;
                   return (
                     <tr key={i} style={{ background: i % 2 === 1 ? "#0d1117" : "transparent" }}>
                       <td style={{ padding: "8px 10px", border: "1px solid #21262d", color: "#8b949e", fontSize: 11 }}>{tgl}</td>
-                      <td style={{ padding: "8px 10px", border: "1px solid #21262d", fontWeight: 600 }}>{entry.rute}</td>
+                      <td style={{ padding: "8px 10px", border: "1px solid #21262d", fontWeight: 600 }}>
+                        {entry.rute}
+                        {entry.catatan && <div style={{ fontSize: 10, color: "#8b949e", marginTop: 3, fontStyle: "italic" }}>{entry.catatan}</div>}
+                      </td>
                       <td style={{ padding: "8px 10px", border: "1px solid #21262d", color: "#8b949e", fontSize: 11 }}>{entry.tipe_kendaraan}</td>
-                      <td style={{ padding: "8px 10px", border: "1px solid #21262d", textAlign: "right", fontWeight: 800, color: "#EF9F27", fontSize: 13 }}>{fRp(entry.harga_deal)}</td>
+                      <td style={{ padding: "8px 10px", border: "1px solid #21262d", textAlign: "right" }}>
+                        <div style={{ fontWeight: 800, color: "#EF9F27", fontSize: 13 }}>{fRp(entry.harga_deal)}</div>
+                        <div style={{ fontSize: 10, marginTop: 3, color: sudahAsuransi ? "#3fb950" : "#f85149", fontWeight: 600 }}>
+                          {sudahAsuransi ? "✓ Sudah termasuk asuransi" : "⚠ Belum termasuk asuransi"}
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}

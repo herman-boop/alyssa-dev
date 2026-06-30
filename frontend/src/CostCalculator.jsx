@@ -198,6 +198,7 @@ export default function CostCalculator() {
             asal: r.asal, tujuan: r.tujuan, tipe: r.tipe,
             hpp: r.hpp, harga_deal: r.price_deal || r.corp || 0,
             tipe_kendaraan: r.tipe, catatan: r.catatan || "",
+            asuransi: r.asuransi || 0,
             price_lbl: r.price_lbl || "",
             harga_eksp: r.eksp, harga_eksp2: r.eksp2,
             harga_sales: r.sales, harga_sales2: r.sales2,
@@ -276,7 +277,7 @@ export default function CostCalculator() {
     setAddModal({
       routeData: {
         asal: asal.trim(), tujuan: tujuan.trim(), tipe, top: isTempo ? "Tempo 30hr" : "Cash",
-        risiko: isRawan ? "Rawan" : "Normal", catatan: catatan.trim(), hpp: calc.hppFinal,
+        risiko: isRawan ? "Rawan" : "Normal", catatan: catatan.trim(), hpp: calc.hppFinal, asuransi: calc.as || 0,
         eksp: h.eksp, eksp2: h.eksp2, sales: h.sales, sales2: h.sales2, corp: h.corp, corp2: h.corp2,
       },
       options: [
