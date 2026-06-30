@@ -171,7 +171,6 @@ export default function DriverData({ embedded = false }) {
     <h2>SURAT PENGANTAR DRIVER</h2>
     <div class="info-grid">
       <span class="k">Nama Driver</span><span class="v">: ${drv.nama}</span>
-      <span class="k">No. HP</span><span class="v">: ${drv.no_hp || "—"}</span>
       <div class="sep"></div>
       <span class="k">No. KTP</span><span class="v">: ${drv.no_ktp || "—"}</span>
       <span class="k">No. SIM</span><span class="v">: ${drv.no_sim || "—"} ${drv.tipe_sim ? `(SIM ${drv.tipe_sim})` : ""}</span>
