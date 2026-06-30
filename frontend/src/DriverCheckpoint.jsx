@@ -397,7 +397,9 @@ export default function DriverCheckpoint() {
   // Buka modal crop untuk gambar; PDF langsung lanjut tanpa crop
   const openCrop = (file, onDone) => {
     if (!file) return;
-    if (!file.type?.startsWith("image/")) { onDone(file); return; }
+    // PDF -> skip crop. Sisanya (termasuk foto kamera yg type-nya kosong) -> crop.
+    const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name || "");
+    if (isPdf) { onDone(file); return; }
     setCropData({ url: URL.createObjectURL(file), file, onDone });
   };
 
