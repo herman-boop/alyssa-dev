@@ -2087,6 +2087,18 @@ async def delete_pelanggan(pelanggan_id: str):
         raise HTTPException(404, "Pelanggan tidak ditemukan")
     return {"ok": True}
 
+@api_router.delete("/admin/pelanggan/{pelanggan_id}/harga", dependencies=[Depends(require_admin_pin)])
+async def clear_pelanggan_harga(pelanggan_id: str):
+    """Clear ALL price records for a pelanggan."""
+    result = await db.pelanggan_profiles.update_one(
+        {"id": pelanggan_id},
+        {"$set": {"harga_history": []}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(404, "Pelanggan tidak ditemukan")
+    updated = await db.pelanggan_profiles.find_one({"id": pelanggan_id}, {"_id": 0})
+    return updated
+
 @api_router.delete("/admin/pelanggan/{pelanggan_id}/harga/{harga_id}", dependencies=[Depends(require_admin_pin)])
 async def delete_pelanggan_harga(pelanggan_id: str, harga_id: str):
     """Remove one price record from harga_history by its id."""

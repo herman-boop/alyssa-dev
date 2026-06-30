@@ -331,6 +331,15 @@ export default function CostCalculator() {
     } catch { alert("Gagal hapus"); }
   };
 
+  const clearAllHarga = async () => {
+    if (!selectedPt) return;
+    if (!window.confirm(`Hapus SEMUA ${ptHistory.length} rute harga dari ${selectedPt.nama_pt}?\nTidak bisa dibatalkan!`)) return;
+    try {
+      const res = await axios.delete(`${API}/admin/pelanggan/${selectedPt.id}/harga`, { headers: { "x-admin-pin": adminPin } });
+      setSelectedPt(res.data);
+    } catch { alert("Gagal hapus semua"); }
+  };
+
   const deletePT = async () => {
     if (!selectedPt) return;
     if (!window.confirm(`Hapus PT "${selectedPt.nama_pt}" beserta semua data harga?\nTidak bisa dibatalkan!`)) return;
@@ -751,6 +760,7 @@ export default function CostCalculator() {
         <div style={{ ...CARD, marginTop: 0 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
             <div style={TITLE}>📋 Daftar Harga — {selectedPt.nama_pt} ({ptHistory.length} rute)</div>
+            <button onClick={clearAllHarga} style={{ padding: "5px 12px", borderRadius: 7, fontSize: 11, fontWeight: 700, cursor: "pointer", background: "none", border: "1px solid #f85149", color: "#f85149" }}>🗑 Hapus Semua Rute</button>
           </div>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
