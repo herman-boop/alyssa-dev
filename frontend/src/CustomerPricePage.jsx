@@ -15,7 +15,8 @@ export default function CustomerPricePage() {
 
   useEffect(() => {
     if (!token) { setError("Link tidak valid"); setLoading(false); return; }
-    axios.get(`/api/pelanggan/${token}`)
+    const BACKEND = process.env.REACT_APP_BACKEND_URL || "";
+    axios.get(`${BACKEND}/api/pelanggan/${token}`)
       .then((res) => { setData(res.data); setLoading(false); })
       .catch((e) => {
         setError(e.response?.data?.detail || "Link tidak valid atau sudah kadaluarsa");
