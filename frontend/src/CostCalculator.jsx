@@ -755,7 +755,7 @@ export default function CostCalculator() {
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
               <thead><tr style={{ background: "#21262d" }}>
-                {["#","Tanggal","Rute","Tipe Kendaraan","Harga Deal","Margin %",""].map((th) => (
+                {["#","Tanggal","Rute","Moda","Tipe Kendaraan","Harga","Margin %",""].map((th) => (
                   <th key={th} style={{ padding: "6px 8px", textAlign: "left", color: "#8b949e", fontWeight: 600, border: "1px solid #30363d" }}>{th}</th>
                 ))}
               </tr></thead>
@@ -763,13 +763,21 @@ export default function CostCalculator() {
                 {ptHistory.map((entry, i) => {
                   const mc = marginColor(entry.margin_aktual || 0);
                   const tgl = entry.tanggal ? new Date(entry.tanggal).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }) : "-";
+                  const sudahAsuransi = entry.asuransi && entry.asuransi > 0;
                   return (
                     <tr key={entry.id || i} style={{ borderTop: "1px solid #21262d" }}>
                       <td style={{ ...TD, color: "#6e7681" }}>{ptHistory.length - i}</td>
                       <td style={{ ...TD, fontSize: 10, color: "#8b949e" }}>{tgl}</td>
-                      <td style={TD}>{entry.rute}</td>
+                      <td style={TD}>
+                        <div style={{ fontWeight: 700 }}>{entry.rute}</div>
+                        {entry.catatan && <div style={{ fontSize: 10, color: "#8b949e", fontStyle: "italic", marginTop: 2 }}>{entry.catatan}</div>}
+                      </td>
+                      <td style={{ ...TD, fontSize: 10, color: "#58a6ff", fontWeight: 600 }}>{entry.moda || "—"}</td>
                       <td style={{ ...TD, fontSize: 10, color: "#8b949e" }}>{entry.tipe_kendaraan}</td>
-                      <td style={{ ...TD, textAlign: "right", color: "#e6edf3", fontWeight: 700 }}>{fRp(entry.harga_deal)}</td>
+                      <td style={{ ...TD, textAlign: "right" }}>
+                        <div style={{ color: "#EF9F27", fontWeight: 800 }}>{fRp(entry.harga_deal)}</div>
+                        <div style={{ fontSize: 9, marginTop: 2, color: sudahAsuransi ? "#3fb950" : "#f85149", fontWeight: 600 }}>{sudahAsuransi ? "✓ Termasuk asuransi" : "⚠ Belum termasuk asuransi"}</div>
+                      </td>
                       <td style={{ ...TD, textAlign: "center", color: mc, fontWeight: 700 }}>{entry.margin_aktual}%</td>
                       <td style={TD}><button onClick={() => deleteHargaPT(entry.id)} style={{ background: "none", border: "none", color: "#f85149", cursor: "pointer", fontSize: 14 }}>🗑</button></td>
                     </tr>
