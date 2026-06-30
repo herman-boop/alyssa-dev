@@ -1985,6 +1985,7 @@ class PelangganHargaBody(BaseModel):
     tipe_kendaraan: str
     catatan: str = ""
     asuransi: int = 0
+    moda: str = ""
 
 @api_router.post("/admin/pelanggan", dependencies=[Depends(require_admin_pin)])
 async def create_pelanggan(body: PelangganCreateBody):
@@ -2067,6 +2068,7 @@ async def add_pelanggan_harga(pelanggan_id: str, body: PelangganHargaBody):
         "tipe_kendaraan": body.tipe_kendaraan,
         "catatan": body.catatan.strip(),
         "asuransi": body.asuransi,
+        "moda": body.moda,
         "tanggal": datetime.utcnow().isoformat(),
     }
     await db.pelanggan_profiles.update_one(
@@ -2112,6 +2114,7 @@ async def public_pelanggan_harga(token: str):
             "tanggal": h.get("tanggal"),
             "asuransi": h.get("asuransi", 0),
             "catatan": h.get("catatan", ""),
+            "moda": h.get("moda", ""),
         }
         for h in history
     ]

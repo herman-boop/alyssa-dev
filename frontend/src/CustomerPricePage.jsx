@@ -71,7 +71,7 @@ export default function CustomerPricePage() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
                 <tr style={{ background: "#21262d" }}>
-                  {["Tanggal", "Rute", "Tipe Kendaraan", "Harga"].map((th) => (
+                  {["Tanggal", "Rute", "Moda", "Tipe Kendaraan", "Harga"].map((th) => (
                     <th key={th} style={{ padding: "8px 10px", textAlign: "left", color: "#8b949e", fontWeight: 600, border: "1px solid #30363d" }}>{th}</th>
                   ))}
                 </tr>
@@ -89,6 +89,7 @@ export default function CustomerPricePage() {
                         {entry.rute}
                         {entry.catatan && <div style={{ fontSize: 10, color: "#8b949e", marginTop: 3, fontStyle: "italic" }}>{entry.catatan}</div>}
                       </td>
+                      <td style={{ padding: "8px 10px", border: "1px solid #21262d", color: "#58a6ff", fontSize: 11, fontWeight: 600 }}>{entry.moda || "—"}</td>
                       <td style={{ padding: "8px 10px", border: "1px solid #21262d", color: "#8b949e", fontSize: 11 }}>{entry.tipe_kendaraan}</td>
                       <td style={{ padding: "8px 10px", border: "1px solid #21262d", textAlign: "right" }}>
                         <div style={{ fontWeight: 800, color: "#EF9F27", fontSize: 13 }}>{fRp(entry.harga_deal)}</div>

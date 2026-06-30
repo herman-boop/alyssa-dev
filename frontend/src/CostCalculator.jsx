@@ -198,7 +198,7 @@ export default function CostCalculator() {
             asal: r.asal, tujuan: r.tujuan, tipe: r.tipe,
             hpp: r.hpp, harga_deal: r.price_deal || r.corp || 0,
             tipe_kendaraan: r.tipe, catatan: r.catatan || "",
-            asuransi: r.asuransi || 0,
+            asuransi: r.asuransi || 0, moda: r.moda || "",
             price_lbl: r.price_lbl || "",
             harga_eksp: r.eksp, harga_eksp2: r.eksp2,
             harga_sales: r.sales, harga_sales2: r.sales2,
@@ -278,6 +278,7 @@ export default function CostCalculator() {
       routeData: {
         asal: asal.trim(), tujuan: tujuan.trim(), tipe, top: isTempo ? "Tempo 30hr" : "Cash",
         risiko: isRawan ? "Rawan" : "Normal", catatan: catatan.trim(), hpp: calc.hppFinal, asuransi: calc.as || 0,
+        moda: [...new Set(legs.filter(l => l.cost && parseFloat(l.cost) > 0).map(l => l.type))].join(" + ") || legs.map(l => l.type).filter((v,i,a)=>a.indexOf(v)===i).join(" + "),
         eksp: h.eksp, eksp2: h.eksp2, sales: h.sales, sales2: h.sales2, corp: h.corp, corp2: h.corp2,
       },
       options: [
@@ -633,7 +634,7 @@ export default function CostCalculator() {
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
               <thead><tr style={{ background: "#21262d" }}>
-                {["#","Asal","Tujuan","HPP","Harga Deal","Tipe Harga",""].map((th,i) => <th key={i} style={{ padding: "6px 8px", textAlign: "left", color: "#8b949e", fontWeight: 600 }}>{th}</th>)}
+                {["#","Asal","Tujuan","Moda","HPP","Harga Deal","Tipe Harga",""].map((th,i) => <th key={i} style={{ padding: "6px 8px", textAlign: "left", color: "#8b949e", fontWeight: 600 }}>{th}</th>)}
               </tr></thead>
               <tbody>
                 {routeList.map((r, i) => (
@@ -641,6 +642,7 @@ export default function CostCalculator() {
                     <td style={{ padding: "6px 8px", color: "#6e7681" }}>{i+1}</td>
                     <td style={{ padding: "6px 8px", fontWeight: 700 }}>{r.asal}</td>
                     <td style={{ padding: "6px 8px", fontWeight: 700 }}>{r.tujuan}</td>
+                    <td style={{ padding: "6px 8px", color: "#58a6ff", fontSize: 10 }}>{r.moda || "—"}</td>
                     <td style={{ padding: "6px 8px", color: "#8b949e" }}>{fRp(r.hpp)}</td>
                     <td style={{ padding: "6px 8px", color: "#3fb950", fontWeight: 700 }}>{fRp(r.price_deal)}</td>
                     <td style={{ padding: "6px 8px", color: "#8b949e", fontSize: 10 }}>{r.price_lbl}</td>
