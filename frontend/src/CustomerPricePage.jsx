@@ -45,6 +45,34 @@ export default function CustomerPricePage() {
 
   const history = data.harga_history || [];
 
+  const exportExcel = () => {
+    const tglExport = new Date().toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
+    const rows = [
+      [`Penawaran Harga — ${data.nama_pt}`],
+      [`PT ALYSSA AUTO LOGISTIK`, "", "", "", "", `Diterbitkan: ${tglExport}`],
+      [],
+      ["Tanggal", "Rute", "Moda Pengiriman", "Tipe Kendaraan", "Harga", "Asuransi", "Catatan"],
+      ...history.map(e => [
+        e.tanggal ? new Date(e.tanggal).toLocaleDateString("id-ID") : "-",
+        e.rute || "-",
+        e.moda || "-",
+        e.tipe_kendaraan || "-",
+        e.harga_deal || 0,
+        e.asuransi && e.asuransi > 0 ? "Sudah termasuk" : "Belum termasuk",
+        e.catatan || "",
+      ]),
+      [],
+      ["* Harga berlaku 7 hari sejak tanggal penawaran. Hubungi: 0818 631 135"],
+    ];
+    const csvContent = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n");
+    const BOM = "﻿";
+    const blob = new Blob([BOM + csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `Penawaran_${data.nama_pt.replace(/\s+/g,"_")}_${tglExport.replace(/\s/g,"")}.csv`;
+    a.click(); URL.revokeObjectURL(url);
+  };
+
   return (
     <div style={{ fontFamily: "-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif", background: bg, color: "#e6edf3", minHeight: "100vh", padding: 20 }}>
       {/* Header */}
@@ -53,9 +81,15 @@ export default function CustomerPricePage() {
           <div style={{ fontSize: 18, fontWeight: 800, color: "#EF9F27", letterSpacing: ".5px" }}>PT ALYSSA AUTO LOGISTIK</div>
           <div style={{ fontSize: 11, color: "#8b949e", marginTop: 2 }}>Solusi Transportasi &amp; Logistik Kendaraan</div>
         </div>
-        <div style={{ textAlign: "right" }}>
+        <div style={{ textAlign: "right", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: "#e6edf3" }}>Penawaran Harga</div>
-          <div style={{ fontSize: 12, color: "#EF9F27", fontWeight: 600, marginTop: 2 }}>{data.nama_pt}</div>
+          <div style={{ fontSize: 12, color: "#EF9F27", fontWeight: 600 }}>{data.nama_pt}</div>
+          {history.length > 0 && (
+            <button onClick={exportExcel}
+              style={{ padding: "6px 14px", borderRadius: 6, border: "1px solid #2ea043", background: "#0d2818", color: "#3fb950", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
+              📥 Download Excel
+            </button>
+          )}
         </div>
       </div>
 
