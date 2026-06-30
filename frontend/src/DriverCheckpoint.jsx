@@ -117,16 +117,23 @@ function CropModal({ url, file, onCancel, onConfirm }) {
 
   const move = (e) => {
     if (!drag.current || !imgRef.current) return;
+    if (e.cancelable) { try { e.preventDefault(); } catch {} }
     const r = imgRef.current.getBoundingClientRect();
-    const pt = e.touches ? e.touches[0] : e;
-    let fx = Math.min(1, Math.max(0, (pt.clientX - r.left) / r.width));
-    let fy = Math.min(1, Math.max(0, (pt.clientY - r.top) / r.height));
+    if (!r.width || !r.height) return;
+    const pt = (e.touches && e.touches[0]) ? e.touches[0] : e;
+    if (pt.clientX == null || pt.clientY == null) return;
+    let fx = (pt.clientX - r.left) / r.width;
+    let fy = (pt.clientY - r.top) / r.height;
+    if (!Number.isFinite(fx) || !Number.isFinite(fy)) return;
+    fx = Math.min(1, Math.max(0, fx));
+    fy = Math.min(1, Math.max(0, fy));
+    const corner = drag.current;
     setRect((rc) => {
       const n = { ...rc };
-      if (drag.current.includes("l")) n.x0 = Math.min(fx, rc.x1 - 0.08);
-      if (drag.current.includes("r")) n.x1 = Math.max(fx, rc.x0 + 0.08);
-      if (drag.current.includes("t")) n.y0 = Math.min(fy, rc.y1 - 0.08);
-      if (drag.current.includes("b")) n.y1 = Math.max(fy, rc.y0 + 0.08);
+      if (corner.includes("l")) n.x0 = Math.min(fx, rc.x1 - 0.08);
+      if (corner.includes("r")) n.x1 = Math.max(fx, rc.x0 + 0.08);
+      if (corner.includes("t")) n.y0 = Math.min(fy, rc.y1 - 0.08);
+      if (corner.includes("b")) n.y1 = Math.max(fy, rc.y0 + 0.08);
       return n;
     });
   };
@@ -158,8 +165,8 @@ function CropModal({ url, file, onCancel, onConfirm }) {
   const pct = (n) => `${n * 100}%`;
 
   return (
-    <div onMouseMove={move} onMouseUp={end} onTouchMove={move} onTouchEnd={end}
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.92)", zIndex: 9999, display: "flex", flexDirection: "column", padding: 12 }}>
+    <div onMouseMove={move} onMouseUp={end} onMouseLeave={end} onTouchMove={move} onTouchEnd={end} onTouchCancel={end}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.92)", zIndex: 9999, display: "flex", flexDirection: "column", padding: 12, touchAction: "none", overscrollBehavior: "contain", userSelect: "none" }}>
       <div style={{ color: "#fff", textAlign: "center", fontWeight: 800, fontSize: 14, padding: "6px 0 10px" }}>
         Geser garis potong, lalu Potong &amp; Lanjut
       </div>
