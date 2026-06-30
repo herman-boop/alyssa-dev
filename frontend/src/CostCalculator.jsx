@@ -159,12 +159,15 @@ export default function CostCalculator() {
       // Load harga_history ke routeList supaya bisa lanjut dari no terakhir
       if (full.harga_history && full.harga_history.length > 0) {
         const fromHistory = full.harga_history.map(h => ({
-          asal: h.asal || "", tujuan: h.tujuan || "", tipe: h.tipe || "",
+          asal: h.asal || (h.rute||"").split("→")[0] || "",
+          tujuan: h.tujuan || (h.rute||"").split("→")[1] || "",
+          tipe: h.tipe_kendaraan || h.tipe || "",
           top: h.top || "cash", risiko: h.risiko || "normal",
           hpp: h.hpp || 0, eksp: h.harga_eksp || 0, eksp2: h.harga_eksp2 || 0,
           sales: h.harga_sales || 0, sales2: h.harga_sales2 || 0,
           corp: h.harga_corp || 0, corp2: h.harga_corp2 || 0,
-          catatan: h.catatan || ""
+          catatan: h.catatan || "", moda: h.moda || "", asuransi: h.asuransi || 0,
+          price_deal: h.harga_deal || 0, price_lbl: h.price_lbl || ""
         }));
         setRouteList(fromHistory);
       }
@@ -321,7 +324,8 @@ export default function CostCalculator() {
       setSelectedPt(res.data);
       const fromHistory = (res.data.harga_history || []).map(h => ({
         asal: h.asal || (h.rute||"").split("→")[0]||"", tujuan: h.tujuan || (h.rute||"").split("→")[1]||"",
-        tipe: h.tipe || "", top: h.top || "cash", risiko: h.risiko || "normal",
+        tipe: h.tipe_kendaraan || h.tipe || "", top: h.top || "cash", risiko: h.risiko || "normal",
+        moda: h.moda || "", asuransi: h.asuransi || 0,
         hpp: h.hpp || 0, eksp: h.harga_eksp||0, eksp2: h.harga_eksp2||0,
         sales: h.harga_sales||0, sales2: h.harga_sales2||0, corp: h.harga_corp||0, corp2: h.harga_corp2||0,
         catatan: h.catatan||"", price_deal: h.harga_deal||0, price_lbl: h.price_lbl||""
