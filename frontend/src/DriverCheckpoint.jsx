@@ -142,14 +142,23 @@ function CropModal({ url, file, onCancel, onConfirm }) {
   const doCrop = async () => {
     setBusy(true);
     try {
-      const img = new Image();
-      img.src = url;
-      await new Promise((r) => { img.onload = r; img.onerror = r; });
-      const sx = rect.x0 * img.naturalWidth, sy = rect.y0 * img.naturalHeight;
-      const sw = (rect.x1 - rect.x0) * img.naturalWidth, sh = (rect.y1 - rect.y0) * img.naturalHeight;
+      // Pakai createImageBitmap dgn imageOrientation 'from-image' supaya hasil crop
+      // ikut orientasi EXIF (sama dgn yg tampil), tidak kebalik. Fallback ke <img>.
+      let src = null, srcW = 0, srcH = 0;
+      try {
+        src = await createImageBitmap(file, { imageOrientation: "from-image" });
+        srcW = src.width; srcH = src.height;
+      } catch {
+        const img = new Image();
+        img.src = url;
+        await new Promise((r) => { img.onload = r; img.onerror = r; });
+        src = img; srcW = img.naturalWidth; srcH = img.naturalHeight;
+      }
+      const sx = rect.x0 * srcW, sy = rect.y0 * srcH;
+      const sw = (rect.x1 - rect.x0) * srcW, sh = (rect.y1 - rect.y0) * srcH;
       const canvas = document.createElement("canvas");
       canvas.width = Math.max(1, Math.round(sw)); canvas.height = Math.max(1, Math.round(sh));
-      canvas.getContext("2d").drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+      canvas.getContext("2d").drawImage(src, sx, sy, sw, sh, 0, 0, sw, sh);
       canvas.toBlob((blob) => {
         const out = blob ? new File([blob], (file.name || "resi").replace(/\.\w+$/, "") + "_crop.jpg", { type: "image/jpeg" }) : file;
         onConfirm(out);
