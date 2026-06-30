@@ -590,7 +590,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
         </div>
         <div class="info-cell" style="flex:2">
           <div class="lbl">Kepada / Consignee</div>
-          <div class="val">${order.pelanggan || "&nbsp;"}</div>
+          <div class="val">${order.customer_nama || "&nbsp;"}</div>
         </div>
         <div class="info-cell" style="flex:1">
           <div class="lbl">Ref. PO / SL No.</div>
@@ -666,7 +666,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
         <div class="sign-cell">
           <div class="sign-lbl">Penerima / Received</div>
           <div class="sign-space"></div>
-          <div class="sign-name">${order.pelanggan || "_____________"}</div>
+          <div class="sign-name">${order.customer_nama || "_____________"}</div>
         </div>
         <div class="sign-cell">
           <div class="sign-lbl">Tgl Terima / Date Received</div>
