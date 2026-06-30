@@ -525,6 +525,168 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
     setUploadingKapal(false);
   };
 
+  const printSuratJalan = () => {
+    const tgl = new Date().toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
+    const noSurat = `AAL-${order.order_id?.slice(-6) || "000000"}`;
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Surat Jalan ${noSurat}</title>
+    <style>
+      * { margin:0; padding:0; box-sizing:border-box; }
+      body { font-family: Arial, sans-serif; font-size: 11px; color: #000; background: #fff; padding: 8mm; }
+      .outer { border: 2px solid #000; width: 100%; }
+      .header { display: flex; border-bottom: 2px solid #000; }
+      .logo-box { width: 200px; border-right: 2px solid #000; padding: 8px 10px; display: flex; flex-direction: column; justify-content: center; }
+      .logo-name { font-size: 14px; font-weight: 900; color: #000; letter-spacing: 1px; line-height: 1.2; }
+      .logo-tagline { font-size: 8px; color: #333; margin-top: 3px; font-style: italic; }
+      .logo-addr { font-size: 8px; color: #333; margin-top: 4px; line-height: 1.4; }
+      .title-box { flex: 1; padding: 8px 12px; }
+      .title-main { font-size: 13px; font-weight: 900; text-align: center; letter-spacing: 1px; }
+      .title-sub { font-size: 10px; text-align: center; color: #333; margin-top: 2px; font-style: italic; }
+      .no-box { border: 1px solid #000; display: inline-block; padding: 2px 10px; margin-top: 6px; font-size: 14px; font-weight: 900; letter-spacing: 2px; }
+      .info-row { display: flex; border-bottom: 1px solid #000; }
+      .info-cell { flex: 1; border-right: 1px solid #000; padding: 5px 8px; }
+      .info-cell:last-child { border-right: none; }
+      .lbl { font-size: 8px; font-weight: 700; text-transform: uppercase; color: #555; letter-spacing: .5px; }
+      .val { font-size: 11px; font-weight: 600; margin-top: 2px; min-height: 18px; }
+      table { width: 100%; border-collapse: collapse; }
+      th { background: #e8e8e8; border: 1px solid #000; padding: 5px 6px; font-size: 9px; text-align: center; font-weight: 700; text-transform: uppercase; }
+      td { border: 1px solid #000; padding: 5px 6px; font-size: 11px; min-height: 36px; vertical-align: top; }
+      .td-no { text-align: center; width: 30px; }
+      .td-isi { width: 40%; }
+      .service-box { border-bottom: 1px solid #000; padding: 6px 8px; display: flex; gap: 20px; align-items: center; }
+      .svc-lbl { font-size: 9px; font-weight: 700; text-transform: uppercase; margin-right: 8px; }
+      .svc-opt { display: flex; align-items: center; gap: 4px; font-size: 10px; }
+      .chk { width: 12px; height: 12px; border: 1px solid #000; display: inline-block; }
+      .chk.checked { background: #000; }
+      .sign-row { display: flex; border-top: 1px solid #000; }
+      .sign-cell { flex: 1; border-right: 1px solid #000; padding: 6px 8px; }
+      .sign-cell:last-child { border-right: none; }
+      .sign-lbl { font-size: 8px; font-weight: 700; text-transform: uppercase; color: #555; }
+      .sign-space { height: 40px; }
+      .sign-name { font-size: 9px; border-top: 1px solid #555; margin-top: 4px; padding-top: 2px; color: #333; }
+      .catatan { padding: 6px 8px; border-top: 1px solid #000; font-size: 9px; color: #333; line-height: 1.5; }
+      @media print { @page { margin: 5mm; size: A5 landscape; } body { padding: 0; } }
+    </style></head><body>
+    <div class="outer">
+      <!-- HEADER -->
+      <div class="header">
+        <div class="logo-box">
+          <div class="logo-name">PT. ALYSSA<br>AUTO LOGISTIK</div>
+          <div class="logo-tagline">Logistic on going</div>
+          <div class="logo-addr">Jl Enim Raya 2 No 86<br>Jakarta Utara, DKI Jakarta 14330<br>Telp: 0818 631 135</div>
+        </div>
+        <div class="title-box">
+          <div class="title-main">SURAT TANDA TERIMA KIRIMAN BARANG</div>
+          <div class="title-sub">CONSIGNMENT NOTE</div>
+          <div style="text-align:center;margin-top:6px"><div class="no-box">${noSurat}</div></div>
+          <div style="text-align:right;font-size:9px;margin-top:4px;color:#555">Tanggal: ${tgl}</div>
+        </div>
+      </div>
+
+      <!-- INFO BARIS 1 -->
+      <div class="info-row">
+        <div class="info-cell" style="flex:2">
+          <div class="lbl">Dari / Shipper</div>
+          <div class="val">PT. ALYSSA AUTO LOGISTIK</div>
+        </div>
+        <div class="info-cell" style="flex:2">
+          <div class="lbl">Kepada / Consignee</div>
+          <div class="val">${order.pelanggan || "&nbsp;"}</div>
+        </div>
+        <div class="info-cell" style="flex:1">
+          <div class="lbl">Ref. PO / SL No.</div>
+          <div class="val">${order.order_id || "&nbsp;"}</div>
+        </div>
+      </div>
+
+      <!-- INFO BARIS 2 -->
+      <div class="info-row">
+        <div class="info-cell">
+          <div class="lbl">Rute / Route</div>
+          <div class="val">${order.asal_kota || "—"} → ${order.tujuan_kota || "—"}</div>
+        </div>
+        <div class="info-cell">
+          <div class="lbl">No. Polisi / Plate No.</div>
+          <div class="val">${order.nopol || "&nbsp;"}</div>
+        </div>
+        <div class="info-cell">
+          <div class="lbl">Tipe Kendaraan</div>
+          <div class="val">${order.vehicle_type || "&nbsp;"}</div>
+        </div>
+        <div class="info-cell">
+          <div class="lbl">No. Rangka / Chassis</div>
+          <div class="val">${order.no_rangka || "&nbsp;"}</div>
+        </div>
+      </div>
+
+      <!-- TABEL ISI -->
+      <table>
+        <thead><tr>
+          <th class="td-no">#</th>
+          <th>Jml Jns Colly / No. of Pieces</th>
+          <th>Tipe / Pak</th>
+          <th>Berat / Weight (kg)</th>
+          <th class="td-isi">Isi Menurut Pengirim / Contents</th>
+          <th>Warna / Color</th>
+        </tr></thead>
+        <tbody>
+          <tr>
+            <td class="td-no">1</td>
+            <td style="text-align:center">1</td>
+            <td>Unit</td>
+            <td></td>
+            <td class="td-isi">${order.vehicle_type || ""} ${order.nopol ? "· " + order.nopol : ""}</td>
+            <td>${order.warna || ""}</td>
+          </tr>
+          <tr><td class="td-no">2</td><td></td><td></td><td></td><td></td><td></td></tr>
+          <tr><td class="td-no">3</td><td></td><td></td><td></td><td></td><td></td></tr>
+        </tbody>
+      </table>
+
+      <!-- SERVICE -->
+      <div class="service-box">
+        <span class="svc-lbl">Services:</span>
+        <div class="svc-opt"><div class="chk"></div> Vessel</div>
+        <div class="svc-opt"><div class="chk"></div> Flight</div>
+        <div class="svc-opt"><div class="chk checked"></div> Truck / Self Drive</div>
+        <div class="svc-opt"><div class="chk"></div> Kapal RoRo</div>
+      </div>
+
+      <!-- TANDA TANGAN -->
+      <div class="sign-row">
+        <div class="sign-cell">
+          <div class="sign-lbl">Pengirim / Shipper</div>
+          <div class="sign-space"></div>
+          <div class="sign-name">PT. Alyssa Auto Logistik</div>
+        </div>
+        <div class="sign-cell">
+          <div class="sign-lbl">Driver / Supir</div>
+          <div class="sign-space"></div>
+          <div class="sign-name">${order.nama_driver || order.driver_id || "_____________"}</div>
+        </div>
+        <div class="sign-cell">
+          <div class="sign-lbl">Penerima / Received</div>
+          <div class="sign-space"></div>
+          <div class="sign-name">${order.pelanggan || "_____________"}</div>
+        </div>
+        <div class="sign-cell">
+          <div class="sign-lbl">Tgl Terima / Date Received</div>
+          <div class="sign-space"></div>
+          <div class="sign-name">_____________</div>
+        </div>
+      </div>
+
+      <!-- CATATAN -->
+      <div class="catatan">
+        <b>CATATAN / NOTES:</b> Barang yang dikirim sudah diperiksa dan sesuai dengan keterangan di atas.
+        Kerusakan/kehilangan yang disebabkan bukan karena kelalaian PT. Alyssa Auto Logistik tidak menjadi tanggung jawab perusahaan.
+        &nbsp;|&nbsp; <i>Goods have been inspected and match the description above.</i>
+      </div>
+    </div>
+    <script>window.onload=()=>window.print()<\/script>
+    </body></html>`;
+    const w = window.open("", "_blank"); w.document.write(html); w.document.close();
+  };
+
   const [editDriver, setEditDriver] = useState(false);
   const [driverDraft, setDriverDraft] = useState(order.driver_id || "");
   const [editNama, setEditNama] = useState(false);
@@ -785,6 +947,10 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
             </button>
           </>
         )}
+        <button className="adm-btn adm-btn-sm" onClick={() => printSuratJalan()}
+          style={{ background: "#1a2e1a", border: "1px solid #3fb950", color: "#3fb950" }}>
+          📄 Surat Jalan
+        </button>
         {order.trip_id && (
           <button className="adm-btn adm-btn-purple adm-btn-sm" onClick={() => onOdoo(order.order_id)} data-testid={`adm-odoo-${order.order_id}`}>
             <IcoOdoo /> Odoo
