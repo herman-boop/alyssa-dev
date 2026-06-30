@@ -27,14 +27,14 @@ const DEFAULT_MARGIN = {
 // Preset 25 rute lama (dari daftar harga kemarin). Semua Tipe Kecil Biasa, Cash, belum termasuk asuransi.
 const PRESET_RUTE_LAMA = [
   ["Tangsel","Aceh",5233000],["Tangsel","Binjai",4083000],["Tangsel","Medan",4083000],
-  ["Tangsel","P Sidempuan",3968000],["Tangsel","Siantar",4083000],["Tangsel","Rantau Prapat",4083000],
-  ["Tangsel","Bukit Tinggi",3363000],["Tangsel","Dumai",3508000],["Tangsel","Pekanbaru",3245000],
-  ["Tangsel","Bengkulu",3245000],["Tangsel","Jambi",2419000],["Tangsel","Pangkal Pinang",4543000],
+  ["Tangsel","P Sidempuan",3968000],["Tangsel","Siantar",4083000],["Tangsel","Rantau prapat",4083000],
+  ["Tangsel","Bukit tinggi",3363000],["Tangsel","Dumai",3508000],["Tangsel","Pekanbaru",3245000],
+  ["Tangsel","Bengkulu",3245000],["Tangsel","Jambi",2419000],["Tangsel","Pangkal pinang",4543000],
   ["Tangsel","Palembang",1711000],["Tangsel","Lampung",1239000],["Tangsel","Denpasar",3127000],
   ["Tangsel","Kupang",9845000],["Setu","Tenggilis, Surabaya",1593000],["Setu","Bawono, Surabaya",1593000],
-  ["Setu","Tegal",975000],["Jakarta","Pekalongan",1235000],["Setu","Toroh Grobogan",1235000],
+  ["Setu","Tegal",975000],["Jakarta","Pekalongan",1235000],["Setu","Toroh Grobokan",1235000],
   ["Setu","Cirebon",910000],["Jakarta","Bandung",715000],["Tangsel","Batam",7590000],
-  ["Tangsel","Flores, NTT",7280000],
+  ["Tangsel","Flores, Ntt",7280000],
 ].map(([asal,tujuan,harga]) => ({
   asal, tujuan, tipe: "Kendaraan Kecil Biasa", top: "cash", risiko: "normal",
   hpp: 0, price_deal: harga, price_lbl: "", moda: "", asuransi: 0,
