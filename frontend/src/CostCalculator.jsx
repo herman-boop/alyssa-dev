@@ -24,6 +24,24 @@ const DEFAULT_MARGIN = {
   c21: "45", c22: "35", c23: "28", c24: "22", c25: "15", c26: "10",
 };
 
+// Preset 25 rute lama (dari daftar harga kemarin). Semua Tipe Kecil Biasa, Cash, belum termasuk asuransi.
+const PRESET_RUTE_LAMA = [
+  ["Tangsel","Aceh",5233000],["Tangsel","Binjai",4083000],["Tangsel","Medan",4083000],
+  ["Tangsel","P Sidempuan",3968000],["Tangsel","Siantar",4083000],["Tangsel","Rantau Prapat",4083000],
+  ["Tangsel","Bukit Tinggi",3363000],["Tangsel","Dumai",3508000],["Tangsel","Pekanbaru",3245000],
+  ["Tangsel","Bengkulu",3245000],["Tangsel","Jambi",2419000],["Tangsel","Pangkal Pinang",4543000],
+  ["Tangsel","Palembang",1711000],["Tangsel","Lampung",1239000],["Tangsel","Denpasar",3127000],
+  ["Tangsel","Kupang",9845000],["Setu","Tenggilis, Surabaya",1593000],["Setu","Bawono, Surabaya",1593000],
+  ["Setu","Tegal",975000],["Jakarta","Pekalongan",1235000],["Setu","Toroh Grobogan",1235000],
+  ["Setu","Cirebon",910000],["Jakarta","Bandung",715000],["Tangsel","Batam",7590000],
+  ["Tangsel","Flores, NTT",7280000],
+].map(([asal,tujuan,harga]) => ({
+  asal, tujuan, tipe: "Kendaraan Kecil Biasa", top: "cash", risiko: "normal",
+  hpp: 0, price_deal: harga, price_lbl: "", moda: "", asuransi: 0,
+  catatan: "Harga belum termasuk asuransi",
+  eksp: harga, eksp2: harga, sales: harga, sales2: harga, corp: harga, corp2: harga,
+}));
+
 function pNum(s) {
   if (!s) return 0;
   s = String(s).trim().replace(/[Rp ]/g, "");
@@ -633,6 +651,7 @@ export default function CostCalculator() {
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
         <button onClick={addToList} style={{ padding: "8px 16px", borderRadius: 7, cursor: "pointer", fontSize: 12, fontWeight: 700, border: "none", background: "#2ea043", color: "#fff" }}>+ Tambah ke List</button>
         <button onClick={() => { setAsal(""); setTujuan(""); setCatatan(""); setTop("cash"); setRisiko("normal"); setAdmin("0"); setAsuransi("0"); setLain("0"); setLegs([{ id: nextId, type: "Self Drive", cost: "" }, { id: nextId + 1, type: "Kapal Laut", cost: "" }, { id: nextId + 2, type: "Self Drive", cost: "" }]); setNextId((n) => n + 3); }} style={{ padding: "8px 16px", borderRadius: 7, cursor: "pointer", fontSize: 12, fontWeight: 700, background: "none", border: "1px solid #30363d", color: "#8b949e" }}>Reset Form</button>
+        <button onClick={() => { if (window.confirm("Muat 25 rute lama ke List?")) setRouteList((rl) => [...rl, ...PRESET_RUTE_LAMA]); }} style={{ padding: "8px 16px", borderRadius: 7, cursor: "pointer", fontSize: 12, fontWeight: 700, background: "none", border: "1px solid #58a6ff", color: "#58a6ff" }}>📥 Muat 25 Rute Lama</button>
       </div>
 
       {/* List rute yg belum disimpan ke DB */}
