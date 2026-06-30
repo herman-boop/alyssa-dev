@@ -116,6 +116,14 @@ export default function CostCalculator() {
     try { localStorage.setItem("alyssa_routelist", JSON.stringify(routeList)); } catch (e) {}
   }, [routeList]);
 
+  // Auto-isi Moda dari komponen biaya yg diisi (kalau user belum edit manual)
+  const [modaManual, setModaManual] = useState(false);
+  useEffect(() => {
+    if (modaManual) return;
+    const auto = [...new Set(legs.filter(l => parseFloat(l.cost) > 0).map(l => l.type))].join(" + ");
+    setModa(auto);
+  }, [legs, modaManual]);
+
   // Debounced PT search
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -298,7 +306,7 @@ export default function CostCalculator() {
     if (!addModal || !addPilihan) return;
     setRouteList((rl) => [...rl, { ...addModal.routeData, price_deal: addPilihan.val, price_lbl: addPilihan.lbl }]);
     setAddModal(null); setAddPilihan(null);
-    setAsal(""); setTujuan(""); setCatatan(""); setTop("cash"); setRisiko("normal"); setModa("");
+    setAsal(""); setTujuan(""); setCatatan(""); setTop("cash"); setRisiko("normal"); setModa(""); setModaManual(false);
     setLegs((ls) => ls.map((l) => ({ ...l, cost: "" }))); setAdmin("0"); setAsuransi("0"); setLain("0");
   };
 
@@ -539,10 +547,10 @@ export default function CostCalculator() {
           <label style={LBL}>Moda Pengiriman <span style={{ color: "#6e7681", fontWeight: 400 }}>(otomatis dari komponen biaya, bisa diedit)</span></label>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {["Self Drive","Kapal Laut","Car Carrier","Towing","Self Loader","Low Bed"].map(m => (
-              <button key={m} type="button" onClick={() => setModa(prev => {
+              <button key={m} type="button" onClick={() => { setModaManual(true); setModa(prev => {
                 const parts = prev ? prev.split(" + ").map(s=>s.trim()).filter(Boolean) : [];
                 return parts.includes(m) ? parts.filter(p=>p!==m).join(" + ") : [...parts, m].join(" + ");
-              })}
+              }); }}
                 style={{ padding: "4px 10px", borderRadius: 5, fontSize: 11, cursor: "pointer", fontWeight: 600,
                   background: moda.includes(m) ? "#1f3a5f" : "none",
                   border: moda.includes(m) ? "1px solid #58a6ff" : "1px solid #30363d",
@@ -550,7 +558,7 @@ export default function CostCalculator() {
                 {m}
               </button>
             ))}
-            {moda && <button type="button" onClick={() => setModa("")} style={{ padding: "4px 8px", borderRadius: 5, fontSize: 10, cursor: "pointer", background: "none", border: "1px solid #f85149", color: "#f85149" }}>✕ Reset</button>}
+            {moda && <button type="button" onClick={() => { setModaManual(false); }} style={{ padding: "4px 8px", borderRadius: 5, fontSize: 10, cursor: "pointer", background: "none", border: "1px solid #f85149", color: "#f85149" }}>↻ Auto</button>}
           </div>
           {moda && <div style={{ marginTop: 4, fontSize: 11, color: "#58a6ff" }}>→ {moda}</div>}
         </div>
