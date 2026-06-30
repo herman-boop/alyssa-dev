@@ -108,6 +108,81 @@ function scanEnhance(file) {
   });
 }
 
+/* Modal crop: kasih garis potong (4 sudut bisa digeser) sebelum upload. */
+function CropModal({ url, file, onCancel, onConfirm }) {
+  const imgRef = useRef(null);
+  const [rect, setRect] = useState({ x0: 0.05, y0: 0.05, x1: 0.95, y1: 0.95 });
+  const [busy, setBusy] = useState(false);
+  const drag = useRef(null);
+
+  const move = (e) => {
+    if (!drag.current || !imgRef.current) return;
+    const r = imgRef.current.getBoundingClientRect();
+    const pt = e.touches ? e.touches[0] : e;
+    let fx = Math.min(1, Math.max(0, (pt.clientX - r.left) / r.width));
+    let fy = Math.min(1, Math.max(0, (pt.clientY - r.top) / r.height));
+    setRect((rc) => {
+      const n = { ...rc };
+      if (drag.current.includes("l")) n.x0 = Math.min(fx, rc.x1 - 0.08);
+      if (drag.current.includes("r")) n.x1 = Math.max(fx, rc.x0 + 0.08);
+      if (drag.current.includes("t")) n.y0 = Math.min(fy, rc.y1 - 0.08);
+      if (drag.current.includes("b")) n.y1 = Math.max(fy, rc.y0 + 0.08);
+      return n;
+    });
+  };
+  const end = () => { drag.current = null; };
+
+  const doCrop = async () => {
+    setBusy(true);
+    try {
+      const img = new Image();
+      img.src = url;
+      await new Promise((r) => { img.onload = r; img.onerror = r; });
+      const sx = rect.x0 * img.naturalWidth, sy = rect.y0 * img.naturalHeight;
+      const sw = (rect.x1 - rect.x0) * img.naturalWidth, sh = (rect.y1 - rect.y0) * img.naturalHeight;
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(sw)); canvas.height = Math.max(1, Math.round(sh));
+      canvas.getContext("2d").drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+      canvas.toBlob((blob) => {
+        const out = blob ? new File([blob], (file.name || "resi").replace(/\.\w+$/, "") + "_crop.jpg", { type: "image/jpeg" }) : file;
+        onConfirm(out);
+      }, "image/jpeg", 0.95);
+    } catch { onConfirm(file); }
+  };
+
+  const H = (corner, style) => (
+    <div onMouseDown={(e) => { e.preventDefault(); drag.current = corner; }}
+      onTouchStart={(e) => { drag.current = corner; }}
+      style={{ position: "absolute", width: 28, height: 28, marginLeft: -14, marginTop: -14, borderRadius: "50%", background: "#EF9F27", border: "3px solid #fff", boxShadow: "0 0 6px rgba(0,0,0,.6)", touchAction: "none", cursor: "grab", ...style }} />
+  );
+  const pct = (n) => `${n * 100}%`;
+
+  return (
+    <div onMouseMove={move} onMouseUp={end} onTouchMove={move} onTouchEnd={end}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.92)", zIndex: 9999, display: "flex", flexDirection: "column", padding: 12 }}>
+      <div style={{ color: "#fff", textAlign: "center", fontWeight: 800, fontSize: 14, padding: "6px 0 10px" }}>
+        Geser garis potong, lalu Potong &amp; Lanjut
+      </div>
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+        <div style={{ position: "relative", maxWidth: "100%", maxHeight: "100%", lineHeight: 0 }}>
+          <img ref={imgRef} src={url} alt="crop" style={{ maxWidth: "100%", maxHeight: "70vh", display: "block", userSelect: "none", pointerEvents: "none" }} />
+          {/* kotak crop */}
+          <div style={{ position: "absolute", border: "2px dashed #EF9F27", left: pct(rect.x0), top: pct(rect.y0), width: pct(rect.x1 - rect.x0), height: pct(rect.y1 - rect.y0), boxShadow: "0 0 0 9999px rgba(0,0,0,.45)", touchAction: "none" }} />
+          {H("tl", { left: pct(rect.x0), top: pct(rect.y0) })}
+          {H("tr", { left: pct(rect.x1), top: pct(rect.y0) })}
+          {H("bl", { left: pct(rect.x0), top: pct(rect.y1) })}
+          {H("br", { left: pct(rect.x1), top: pct(rect.y1) })}
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 8, padding: "10px 0 4px" }}>
+        <button onClick={onCancel} disabled={busy} style={{ flex: 1, padding: "12px", borderRadius: 10, border: "1px solid #555", background: "none", color: "#ccc", fontWeight: 700, fontSize: 13 }}>Batal</button>
+        <button onClick={() => onConfirm(file)} disabled={busy} style={{ flex: 1, padding: "12px", borderRadius: 10, border: "1px solid #888", background: "none", color: "#fff", fontWeight: 700, fontSize: 13 }}>Pakai Full</button>
+        <button onClick={doCrop} disabled={busy} style={{ flex: 1.4, padding: "12px", borderRadius: 10, border: "none", background: "#EF9F27", color: "#1a1208", fontWeight: 900, fontSize: 13 }}>{busy ? "..." : "✂ Potong & Lanjut"}</button>
+      </div>
+    </div>
+  );
+}
+
 /* "Cap" foto: bakar lokasi + waktu ke dalam gambar (mirip GPS Map Camera).
    `lines` ditulis di bar bawah. Gagal apa pun → kembalikan file asli. */
 function stampPhoto(file, lines) {
@@ -315,8 +390,16 @@ export default function DriverCheckpoint() {
   const [uploadingBastk, setUploadingBastk] = useState(false);
   const [uploadingResi, setUploadingResi] = useState(false);
   const [cairingTahap, setCairingTahap] = useState(0);
+  const [cropData, setCropData] = useState(null); // { url, file, onDone }
 
   const fileRefs = useRef({});
+
+  // Buka modal crop untuk gambar; PDF langsung lanjut tanpa crop
+  const openCrop = (file, onDone) => {
+    if (!file) return;
+    if (!file.type?.startsWith("image/")) { onDone(file); return; }
+    setCropData({ url: URL.createObjectURL(file), file, onDone });
+  };
 
   // Real-time clock
   useEffect(() => {
@@ -1399,7 +1482,7 @@ export default function DriverCheckpoint() {
                 type="file"
                 accept="image/*,application/pdf"
                 capture="environment"
-                onChange={(e) => uploadResi(e.target.files?.[0])}
+                onChange={(e) => openCrop(e.target.files?.[0], uploadResi)}
                 style={{ display: "none" }}
               />
               {resi ? (
@@ -1502,6 +1585,14 @@ export default function DriverCheckpoint() {
         <div className={`drv-toast ${toast.type === "err" ? "drv-toast-err" : "drv-toast-ok"}`} data-testid="toast">
           {toast.msg}
         </div>
+      )}
+      {cropData && (
+        <CropModal
+          url={cropData.url}
+          file={cropData.file}
+          onCancel={() => { URL.revokeObjectURL(cropData.url); setCropData(null); }}
+          onConfirm={(out) => { URL.revokeObjectURL(cropData.url); const done = cropData.onDone; setCropData(null); done(out); }}
+        />
       )}
     </div>
   );
