@@ -156,9 +156,9 @@ export default function CostCalculator() {
       if (full.margin_khusus && Object.keys(full.margin_khusus).length > 0) {
         setM((m) => ({ ...m, ...full.margin_khusus }));
       }
-      // Jangan load history ke routeList (sudah tampil di tabel Daftar Harga).
-      // routeList hanya untuk rute BARU agar tidak dobel saat simpan.
-      setRouteList([]);
+      // Jangan load history ke routeList (sudah tampil di tabel Daftar Harga)
+      // dan jangan hapus routeList yg sedang dibuat user — biar rute yg sudah
+      // diketik bisa di-assign ke PT ini. Cegah dobel: history tidak di-load.
     } catch (e) {
       setSelectedPt(pt);
     }
