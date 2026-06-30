@@ -320,6 +320,15 @@ export default function CostCalculator() {
     } catch { alert("Gagal hapus"); }
   };
 
+  const deletePT = async () => {
+    if (!selectedPt) return;
+    if (!window.confirm(`Hapus PT "${selectedPt.nama_pt}" beserta semua data harga?\nTidak bisa dibatalkan!`)) return;
+    try {
+      await axios.delete(`${API}/admin/pelanggan/${selectedPt.id}`, { headers: { "x-admin-pin": adminPin } });
+      setSelectedPt(null); setPtQuery(""); setRouteList([]);
+    } catch (e) { alert("Gagal hapus PT: " + (e.response?.data?.detail || e.message)); }
+  };
+
   const exportCSV = () => {
     if (!routeList.length) return;
     const rows = routeList.map((r) => [r.asal, r.tujuan, r.tipe, r.top, r.risiko, r.hpp, r.eksp, r.eksp2, r.sales, r.sales2, r.corp, r.corp2, '"' + (r.catatan || "") + '"'].join(",")).join("\n");
@@ -508,6 +517,10 @@ export default function CostCalculator() {
             <button onClick={salinLinkHarga}
               style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid #30363d", background: "none", color: ptLinkCopied ? "#56d364" : "#8b949e", fontSize: 11, cursor: "pointer" }}>
               {ptLinkCopied ? "✓ Link Tersalin!" : "🔗 Salin Link Harga"}
+            </button>
+            <button onClick={deletePT}
+              style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid #f85149", background: "none", color: "#f85149", fontSize: 11, cursor: "pointer" }}>
+              🗑 Hapus PT
             </button>
           </div>
         )}

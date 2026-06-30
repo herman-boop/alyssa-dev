@@ -2077,6 +2077,14 @@ async def add_pelanggan_harga(pelanggan_id: str, body: PelangganHargaBody):
     updated["harga_history"] = (updated.get("harga_history") or [])[-20:]
     return updated
 
+@api_router.delete("/admin/pelanggan/{pelanggan_id}", dependencies=[Depends(require_admin_pin)])
+async def delete_pelanggan(pelanggan_id: str):
+    """Delete a pelanggan profile entirely."""
+    result = await db.pelanggan_profiles.delete_one({"id": pelanggan_id})
+    if result.deleted_count == 0:
+        raise HTTPException(404, "Pelanggan tidak ditemukan")
+    return {"ok": True}
+
 @api_router.delete("/admin/pelanggan/{pelanggan_id}/harga/{harga_id}", dependencies=[Depends(require_admin_pin)])
 async def delete_pelanggan_harga(pelanggan_id: str, harga_id: str):
     """Remove one price record from harga_history by its id."""
