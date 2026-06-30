@@ -85,6 +85,7 @@ export default function CostCalculator() {
   const [asuransi, setAsuransi] = useState("0");
   const [lain, setLain] = useState("0");
   const [catatan, setCatatan] = useState("");
+  const [moda, setModa] = useState("");
   const [legs, setLegs] = useState([{ id: 1, type: "Self Drive", cost: "" }, { id: 2, type: "Kapal Laut", cost: "" }, { id: 3, type: "Self Drive", cost: "" }]);
   const [nextId, setNextId] = useState(4);
   const [M, setM] = useState(DEFAULT_MARGIN);
@@ -278,7 +279,7 @@ export default function CostCalculator() {
       routeData: {
         asal: asal.trim(), tujuan: tujuan.trim(), tipe, top: isTempo ? "Tempo 30hr" : "Cash",
         risiko: isRawan ? "Rawan" : "Normal", catatan: catatan.trim(), hpp: calc.hppFinal, asuransi: calc.as || 0,
-        moda: [...new Set(legs.filter(l => l.cost && parseFloat(l.cost) > 0).map(l => l.type))].join(" + ") || legs.map(l => l.type).filter((v,i,a)=>a.indexOf(v)===i).join(" + "),
+        moda: moda.trim(),
         eksp: h.eksp, eksp2: h.eksp2, sales: h.sales, sales2: h.sales2, corp: h.corp, corp2: h.corp2,
       },
       options: [
@@ -297,7 +298,7 @@ export default function CostCalculator() {
     if (!addModal || !addPilihan) return;
     setRouteList((rl) => [...rl, { ...addModal.routeData, price_deal: addPilihan.val, price_lbl: addPilihan.lbl }]);
     setAddModal(null); setAddPilihan(null);
-    setAsal(""); setTujuan(""); setCatatan(""); setTop("cash"); setRisiko("normal");
+    setAsal(""); setTujuan(""); setCatatan(""); setTop("cash"); setRisiko("normal"); setModa("");
     setLegs((ls) => ls.map((l) => ({ ...l, cost: "" }))); setAdmin("0"); setAsuransi("0"); setLain("0");
   };
 
@@ -533,6 +534,25 @@ export default function CostCalculator() {
           <div><label style={LBL}>Kota Asal</label><input style={I} value={asal} onChange={(e) => setAsal(e.target.value)} placeholder="Jakarta" /></div>
           <div><label style={LBL}>Kota Tujuan</label><input style={I} value={tujuan} onChange={(e) => setTujuan(e.target.value)} placeholder="Banjarmasin" /></div>
           <div><label style={LBL}>Tipe Kendaraan</label><select style={I} value={tipe} onChange={(e) => setTipe(e.target.value)}>{TIPE_OPTS.map((t) => <option key={t}>{t}</option>)}</select></div>
+        </div>
+        <div style={{ marginBottom: 8 }}>
+          <label style={LBL}>Moda Pengiriman <span style={{ color: "#6e7681", fontWeight: 400 }}>(otomatis dari komponen biaya, bisa diedit)</span></label>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {["Self Drive","Kapal Laut","Car Carrier","Towing","Self Loader","Low Bed"].map(m => (
+              <button key={m} type="button" onClick={() => setModa(prev => {
+                const parts = prev ? prev.split(" + ").map(s=>s.trim()).filter(Boolean) : [];
+                return parts.includes(m) ? parts.filter(p=>p!==m).join(" + ") : [...parts, m].join(" + ");
+              })}
+                style={{ padding: "4px 10px", borderRadius: 5, fontSize: 11, cursor: "pointer", fontWeight: 600,
+                  background: moda.includes(m) ? "#1f3a5f" : "none",
+                  border: moda.includes(m) ? "1px solid #58a6ff" : "1px solid #30363d",
+                  color: moda.includes(m) ? "#58a6ff" : "#6e7681" }}>
+                {m}
+              </button>
+            ))}
+            {moda && <button type="button" onClick={() => setModa("")} style={{ padding: "4px 8px", borderRadius: 5, fontSize: 10, cursor: "pointer", background: "none", border: "1px solid #f85149", color: "#f85149" }}>✕ Reset</button>}
+          </div>
+          {moda && <div style={{ marginTop: 4, fontSize: 11, color: "#58a6ff" }}>→ {moda}</div>}
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
           <div><label style={LBL}>Term of Payment</label>
