@@ -5,7 +5,8 @@ import axios from "axios";
 /* Port dari cost-calculator.html (app lama). Logika hitung 1:1:
    HPP + Margin bertingkat + Proteksi Risiko + Bunga Dana Talang. */
 
-const API = "";
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "";
+const API = `${BACKEND_URL}/api`;
 const LEG_TYPES = ["Self Drive", "Kapal Laut", "Car Carrier", "Towing", "Self Loader", "Low Bed", "Bongkar/Muat", "Trucking", "Lainnya"];
 const TIPE_OPTS = [
   "Kendaraan Kecil Biasa", "Kendaraan Kecil Medium", "Truck Ringan D4 Std", "Truck Ringan D4 Long",
@@ -120,7 +121,7 @@ export default function CostCalculator() {
     if (ptQuery.length < 2) { setPtDropdown([]); return; }
     debounceRef.current = setTimeout(async () => {
       try {
-        const res = await axios.get(`${API}/api/admin/pelanggan`, {
+        const res = await axios.get(`${API}/admin/pelanggan`, {
           params: { q: ptQuery },
           headers: { "x-admin-pin": adminPin },
         });
@@ -137,7 +138,7 @@ export default function CostCalculator() {
     setPtQuery(pt.nama_pt);
     // Load full doc with history
     try {
-      const res = await axios.get(`${API}/api/admin/pelanggan/${pt.id}`, {
+      const res = await axios.get(`${API}/admin/pelanggan/${pt.id}`, {
         headers: { "x-admin-pin": adminPin },
       });
       const full = res.data;
@@ -166,7 +167,7 @@ export default function CostCalculator() {
   const createNewPt = async () => {
     if (!ptQuery.trim()) { alert("Masukkan nama PT terlebih dahulu"); return; }
     try {
-      const res = await axios.post(`${API}/api/admin/pelanggan`,
+      const res = await axios.post(`${API}/admin/pelanggan`,
         { nama_pt: ptQuery.trim() },
         { headers: { "x-admin-pin": adminPin } }
       );
@@ -191,7 +192,7 @@ export default function CostCalculator() {
       let lastRes = null;
       for (const r of routeList) {
         const res = await axios.post(
-          `${API}/api/admin/pelanggan/${selectedPt.id}/harga`,
+          `${API}/admin/pelanggan/${selectedPt.id}/harga`,
           {
             rute: `${r.asal}→${r.tujuan}`,
             asal: r.asal, tujuan: r.tujuan, tipe: r.tipe,
@@ -305,7 +306,7 @@ export default function CostCalculator() {
     if (!selectedPt) return;
     if (!window.confirm("Hapus data harga ini?")) return;
     try {
-      const res = await axios.delete(`${API}/api/admin/pelanggan/${selectedPt.id}/harga/${hargaId}`, { headers: { "x-admin-pin": adminPin } });
+      const res = await axios.delete(`${API}/admin/pelanggan/${selectedPt.id}/harga/${hargaId}`, { headers: { "x-admin-pin": adminPin } });
       setSelectedPt(res.data);
       const fromHistory = (res.data.harga_history || []).map(h => ({
         asal: h.asal || (h.rute||"").split("→")[0]||"", tujuan: h.tujuan || (h.rute||"").split("→")[1]||"",
