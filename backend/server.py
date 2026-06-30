@@ -2034,7 +2034,7 @@ async def get_pelanggan(pelanggan_id: str):
     doc = await db.pelanggan_profiles.find_one({"id": pelanggan_id}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Pelanggan tidak ditemukan")
-    doc["harga_history"] = (doc.get("harga_history") or [])[-20:]
+    doc["harga_history"] = (doc.get("harga_history") or [])[-200:]
     return doc
 
 @api_router.patch("/admin/pelanggan/{pelanggan_id}", dependencies=[Depends(require_admin_pin)])
@@ -2076,7 +2076,7 @@ async def add_pelanggan_harga(pelanggan_id: str, body: PelangganHargaBody):
         {"$push": {"harga_history": {"$each": [entry], "$slice": -100}}}
     )
     updated = await db.pelanggan_profiles.find_one({"id": pelanggan_id}, {"_id": 0})
-    updated["harga_history"] = (updated.get("harga_history") or [])[-20:]
+    updated["harga_history"] = (updated.get("harga_history") or [])[-200:]
     return updated
 
 @api_router.delete("/admin/pelanggan/{pelanggan_id}", dependencies=[Depends(require_admin_pin)])
@@ -2105,7 +2105,7 @@ async def public_pelanggan_harga(token: str):
     doc = await db.pelanggan_profiles.find_one({"token": token}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Link tidak valid")
-    history = (doc.get("harga_history") or [])[-10:]
+    history = (doc.get("harga_history") or [])[-200:]
     safe_history = [
         {
             "rute": h.get("rute"),

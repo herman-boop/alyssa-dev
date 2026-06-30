@@ -439,7 +439,7 @@ export default function CostCalculator() {
     { lbl: "Corp 1", val: h.corp, m: h.cp, c: "#58a6ff" }, { lbl: "Corp 2", val: h.corp2, m: h.cp2, c: "#a78bfa" },
   ] : [];
 
-  const ptHistory = selectedPt ? [...(selectedPt.harga_history || [])].reverse().slice(0, 10) : [];
+  const ptHistory = selectedPt ? [...(selectedPt.harga_history || [])].reverse() : [];
 
   return (
     <div style={{ fontFamily: "-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif", background: "#0d1117", color: "#e6edf3", minHeight: "100vh", padding: 16 }}>
