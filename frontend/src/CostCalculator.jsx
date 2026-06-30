@@ -458,13 +458,23 @@ export default function CostCalculator() {
         <div style={TITLE}>Nama PT / Pelanggan Korporat</div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", position: "relative" }}>
           <div style={{ flex: 1, position: "relative" }}>
-            <input
-              style={I}
-              value={ptQuery}
-              onChange={(e) => { setPtQuery(e.target.value); if (selectedPt) setSelectedPt(null); }}
-              onKeyDown={(e) => { if (e.key === "Enter" && ptDropdown.length > 0) selectPt(ptDropdown[0]); }}
-              placeholder="Ketik nama PT untuk mencari atau membuat baru..."
-            />
+            {selectedPt ? (
+              <div style={{ ...I, display: "flex", alignItems: "center", gap: 8, background: "#0d2818", border: "1px solid #2ea043", cursor: "default" }}>
+                <span style={{ color: "#3fb950", fontWeight: 700, fontSize: 13 }}>✓</span>
+                <span style={{ fontWeight: 700, color: "#e6edf3", fontSize: 13 }}>{selectedPt.nama_pt}</span>
+                <button onClick={() => { setSelectedPt(null); setPtQuery(""); }}
+                  style={{ marginLeft: "auto", background: "none", border: "none", color: "#8b949e", cursor: "pointer", fontSize: 11, padding: "0 4px" }}>Ganti PT</button>
+              </div>
+            ) : (
+              <input
+                style={I}
+                value={ptQuery}
+                onChange={(e) => setPtQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && ptDropdown.length > 0) selectPt(ptDropdown[0]); }}
+                placeholder="Ketik nama PT untuk mencari atau membuat baru..."
+                autoFocus
+              />
+            )}
             {ptDropdown.length > 0 && (
               <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#161b22", border: "1px solid #30363d", borderRadius: 6, zIndex: 100, maxHeight: 200, overflowY: "auto" }}>
                 {ptDropdown.map((pt) => (
@@ -484,12 +494,6 @@ export default function CostCalculator() {
             <button onClick={createNewPt}
               style={{ padding: "7px 14px", borderRadius: 6, border: "1px dashed #EF9F27", background: "none", color: "#EF9F27", fontSize: 11, cursor: "pointer", fontWeight: 700, whiteSpace: "nowrap" }}>
               + PT Baru
-            </button>
-          )}
-          {selectedPt && (
-            <button onClick={clearPt}
-              style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #30363d", background: "none", color: "#8b949e", fontSize: 11, cursor: "pointer" }}>
-              ✕
             </button>
           )}
         </div>
