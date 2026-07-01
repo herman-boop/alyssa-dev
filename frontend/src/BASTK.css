@@ -658,3 +658,52 @@
   /* Jangan pecah blok ke halaman berikutnya */
   .bk-panel, .bk-grid-2, .bk-qr-panel, .bk-sig-grid, .bk-sketch-area { break-inside: avoid; }
 }
+
+/* ============================================================
+   SCAN-HARDENING — aktif hanya saat generate PDF (class .bk-scan
+   ditambah sementara oleh downloadPDF). Tidak mengubah tampilan layar.
+   Tujuan: teks & tabel tetap tajam walau dicetak lalu discan ulang.
+   ============================================================ */
+.bk-scan, .bk-scan * {
+  font-family: "Inter", "Roboto", "Helvetica Neue", Arial, sans-serif !important;
+  letter-spacing: 0.5px !important;
+  color: #000 !important;               /* teks hitam pekat = paling tajam saat discan */
+  -webkit-font-smoothing: antialiased;
+}
+/* Font minimal 11.5px untuk semua teks kecil (angka urut, nama komponen, dll) */
+.bk-scan, .bk-scan td, .bk-scan th, .bk-scan span, .bk-scan div,
+.bk-scan label, .bk-scan p, .bk-scan li,
+.bk-scan .bk-kv, .bk-scan .bk-kv .k, .bk-scan .bk-kv .v,
+.bk-scan .bk-qr-row, .bk-scan .bk-qr-k, .bk-scan .bk-qr-v,
+.bk-scan .bk-sketch-meta, .bk-scan .bk-sketch-meta-item,
+.bk-scan .bk-doc-no, .bk-scan .bk-table th, .bk-scan .bk-table td {
+  font-size: 11.5px !important;
+  font-weight: 600 !important;
+  line-height: 1.35 !important;
+}
+/* Judul/heading tetap besar & sangat tebal */
+.bk-scan .bk-doc-title { font-size: 16px !important; font-weight: 900 !important; letter-spacing: 0.8px !important; }
+.bk-scan .bk-doc-sub, .bk-scan .bk-brand-name { font-weight: 800 !important; font-size: 13px !important; }
+.bk-scan .bk-panel-title, .bk-scan .bk-section-title { font-weight: 800 !important; font-size: 12.5px !important; }
+/* Nilai isian (nama, nopol, dll) lebih tebal biar menonjol */
+.bk-scan .bk-table td, .bk-scan .bk-kv .v, .bk-scan .bk-doc-num { font-weight: 700 !important; }
+
+/* Garis tabel & panel jadi solid hitam 1.5px (garis tipis suka putus saat discan) */
+.bk-scan .bk-table, .bk-scan .bk-panel, .bk-scan table {
+  border-color: #000 !important;
+}
+.bk-scan .bk-table th, .bk-scan .bk-table td,
+.bk-scan table th, .bk-scan table td {
+  border: 1.5px solid #000 !important;
+}
+.bk-scan .bk-panel { border: 1.5px solid #000 !important; }
+.bk-scan .bk-table th { background: #eaeaea !important; }
+
+/* Kotak checklist (kalau ada) minimal 15x15 dengan tepi hitam tebal */
+.bk-scan input[type="checkbox"], .bk-scan .bk-check, .bk-scan .bk-box, .bk-scan .bk-checkbox {
+  width: 15px !important; height: 15px !important;
+  min-width: 15px !important; min-height: 15px !important;
+  border: 2px solid #000 !important;
+  border-radius: 2px !important;
+  box-sizing: border-box !important;
+}

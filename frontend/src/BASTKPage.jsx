@@ -169,16 +169,17 @@ export default function BASTKPage() {
       el.style.width = A4_W + "px";
       el.style.maxWidth = A4_W + "px";
       el.style.margin = "0";
+      el.classList.add("bk-scan"); // font tebal + border tegas biar tajam saat discan ulang
       el.getBoundingClientRect(); // paksa reflow
       const canvas = await html2canvas(el, {
         backgroundColor: "#FFFFFF",
-        scale: 2.5, useCORS: true, logging: false,
+        scale: 3, useCORS: true, logging: false,
         width: A4_W, windowWidth: A4_W,
       });
       const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4", compress: true });
       const pw = pdf.internal.pageSize.getWidth();
       const ph = pdf.internal.pageSize.getHeight();
-      const imgData = canvas.toDataURL("image/jpeg", 0.95);
+      const imgData = canvas.toDataURL("image/jpeg", 0.98);
       // Paksa muat 1 halaman A4: scale konten agar lebar & tinggi pas dalam margin.
       const maxW = pw - 12;  // margin 6mm kiri-kanan
       const maxH = ph - 12;  // margin 6mm atas-bawah
@@ -197,6 +198,7 @@ export default function BASTKPage() {
       showToast("Gagal generate PDF: " + e.message, "err");
     } finally {
       // Kembalikan style asli biar tampilan layar nggak ikut berubah
+      el.classList.remove("bk-scan");
       el.style.width = prev.width;
       el.style.maxWidth = prev.maxWidth;
       el.style.margin = prev.margin;
