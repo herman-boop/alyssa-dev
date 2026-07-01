@@ -108,12 +108,110 @@ function scanEnhance(file) {
   });
 }
 
-/* Modal crop: kasih garis potong (4 sudut bisa digeser) sebelum upload. */
+/* ── OpenCV.js lazy-loader (sekali, cached oleh browser) ── */
+let _cvPromise = null;
+function loadOpenCV() {
+  if (window.cv && window.cv.Mat) return Promise.resolve(window.cv);
+  if (_cvPromise) return _cvPromise;
+  _cvPromise = new Promise((resolve, reject) => {
+    const done = () => {
+      if (window.cv && window.cv.Mat) return resolve(window.cv);
+      // cv ada tapi runtime belum init
+      if (window.cv) window.cv["onRuntimeInitialized"] = () => resolve(window.cv);
+      else reject(new Error("cv missing"));
+    };
+    let s = document.getElementById("opencv-js");
+    if (s) { s.addEventListener("load", done); if (window.cv) done(); return; }
+    s = document.createElement("script");
+    s.id = "opencv-js";
+    s.async = true;
+    s.src = "https://docs.opencv.org/4.10.0/opencv.js";
+    s.onload = done;
+    s.onerror = () => reject(new Error("gagal load opencv"));
+    document.body.appendChild(s);
+    // safety timeout 20s
+    setTimeout(() => { if (!(window.cv && window.cv.Mat)) reject(new Error("timeout opencv")); }, 20000);
+  });
+  return _cvPromise;
+}
+
+function loadImg(src) {
+  return new Promise((res, rej) => {
+    const im = new Image();
+    im.onload = () => res(im);
+    im.onerror = rej;
+    im.src = src;
+  });
+}
+
+/* Modal scanner: auto-deteksi 4 sudut (OpenCV) + geser manual + perspective transform + filter. */
 function CropModal({ url, file, onCancel, onConfirm }) {
   const imgRef = useRef(null);
-  const [rect, setRect] = useState({ x0: 0.05, y0: 0.05, x1: 0.95, y1: 0.95 });
+  // 4 sudut bebas (quad) dlm fraksi 0..1
+  const [corners, setCorners] = useState({ tl: { x: 0.06, y: 0.06 }, tr: { x: 0.94, y: 0.06 }, br: { x: 0.94, y: 0.94 }, bl: { x: 0.06, y: 0.94 } });
   const [busy, setBusy] = useState(false);
+  const [cvState, setCvState] = useState("loading"); // loading | ready | manual
+  const [mode, setMode] = useState("magic"); // color | bw | magic
+  const [work, setWork] = useState({ url, file }); // gambar kerja (bisa dirotate)
   const drag = useRef(null);
+  const workRef = useRef(work);
+  workRef.current = work;
+
+  // Bersihkan objectURL hasil rotasi saat modal ditutup
+  useEffect(() => () => { if (workRef.current.url !== url) { try { URL.revokeObjectURL(workRef.current.url); } catch {} } }, [url]);
+
+  // Load OpenCV + auto-deteksi tepi
+  useEffect(() => {
+    let alive = true;
+    loadOpenCV()
+      .then((cv) => { if (!alive) return; setCvState("ready"); autoDetect(cv); })
+      .catch(() => { if (alive) setCvState("manual"); });
+    return () => { alive = false; };
+    // eslint-disable-next-line
+  }, [work.url]);
+
+  const autoDetect = async (cv) => {
+    try {
+      const img = await loadImg(work.url);
+      const MAXW = 900;
+      const sc = img.naturalWidth > MAXW ? MAXW / img.naturalWidth : 1;
+      const w = Math.round(img.naturalWidth * sc), h = Math.round(img.naturalHeight * sc);
+      const cnv = document.createElement("canvas"); cnv.width = w; cnv.height = h;
+      cnv.getContext("2d").drawImage(img, 0, 0, w, h);
+      const src = cv.imread(cnv);
+      const gray = new cv.Mat(); cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+      cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0);
+      const edges = new cv.Mat(); cv.Canny(gray, edges, 60, 180);
+      const k = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(5, 5));
+      cv.dilate(edges, edges, k);
+      const contours = new cv.MatVector(); const hier = new cv.Mat();
+      cv.findContours(edges, contours, hier, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+      let best = null, bestArea = w * h * 0.15; // minimal 15% area
+      for (let i = 0; i < contours.size(); i++) {
+        const c = contours.get(i);
+        const peri = cv.arcLength(c, true);
+        const approx = new cv.Mat();
+        cv.approxPolyDP(c, approx, 0.02 * peri, true);
+        if (approx.rows === 4) {
+          const area = Math.abs(cv.contourArea(approx));
+          if (area > bestArea) { bestArea = area; if (best) best.delete(); best = approx; }
+          else approx.delete();
+        } else approx.delete();
+        c.delete();
+      }
+      if (best) {
+        const pts = [];
+        for (let i = 0; i < 4; i++) pts.push({ x: best.data32S[i * 2] / w, y: best.data32S[i * 2 + 1] / h });
+        // urutkan: tl,tr,br,bl
+        pts.sort((a, b) => a.y - b.y);
+        const top = pts.slice(0, 2).sort((a, b) => a.x - b.x);
+        const bot = pts.slice(2, 4).sort((a, b) => a.x - b.x);
+        setCorners({ tl: top[0], tr: top[1], br: bot[1], bl: bot[0] });
+        best.delete();
+      }
+      src.delete(); gray.delete(); edges.delete(); k.delete(); contours.delete(); hier.delete();
+    } catch { /* biarkan default kotak */ }
+  };
 
   const move = (e) => {
     if (!drag.current || !imgRef.current) return;
@@ -122,78 +220,139 @@ function CropModal({ url, file, onCancel, onConfirm }) {
     if (!r.width || !r.height) return;
     const pt = (e.touches && e.touches[0]) ? e.touches[0] : e;
     if (pt.clientX == null || pt.clientY == null) return;
-    let fx = (pt.clientX - r.left) / r.width;
-    let fy = (pt.clientY - r.top) / r.height;
+    let fx = (pt.clientX - r.left) / r.width, fy = (pt.clientY - r.top) / r.height;
     if (!Number.isFinite(fx) || !Number.isFinite(fy)) return;
-    fx = Math.min(1, Math.max(0, fx));
-    fy = Math.min(1, Math.max(0, fy));
-    const corner = drag.current;
-    setRect((rc) => {
-      const n = { ...rc };
-      if (corner.includes("l")) n.x0 = Math.min(fx, rc.x1 - 0.08);
-      if (corner.includes("r")) n.x1 = Math.max(fx, rc.x0 + 0.08);
-      if (corner.includes("t")) n.y0 = Math.min(fy, rc.y1 - 0.08);
-      if (corner.includes("b")) n.y1 = Math.max(fy, rc.y0 + 0.08);
-      return n;
-    });
+    fx = Math.min(1, Math.max(0, fx)); fy = Math.min(1, Math.max(0, fy));
+    const key = drag.current;
+    setCorners((c) => ({ ...c, [key]: { x: fx, y: fy } }));
   };
   const end = () => { drag.current = null; };
 
-  const doCrop = async () => {
+  const rotate90 = async () => {
     setBusy(true);
     try {
-      // Pakai createImageBitmap dgn imageOrientation 'from-image' supaya hasil crop
-      // ikut orientasi EXIF (sama dgn yg tampil), tidak kebalik. Fallback ke <img>.
-      let src = null, srcW = 0, srcH = 0;
-      try {
-        src = await createImageBitmap(file, { imageOrientation: "from-image" });
-        srcW = src.width; srcH = src.height;
-      } catch {
-        const img = new Image();
-        img.src = url;
-        await new Promise((r) => { img.onload = r; img.onerror = r; });
-        src = img; srcW = img.naturalWidth; srcH = img.naturalHeight;
+      const img = await loadImg(work.url);
+      const w = img.naturalWidth, h = img.naturalHeight;
+      const cnv = document.createElement("canvas"); cnv.width = h; cnv.height = w;
+      const ctx = cnv.getContext("2d");
+      ctx.translate(h, 0); ctx.rotate(Math.PI / 2); ctx.drawImage(img, 0, 0);
+      const blob = await new Promise((r) => cnv.toBlob(r, "image/jpeg", 0.95));
+      const nf = blob ? new File([blob], "rot.jpg", { type: "image/jpeg" }) : work.file;
+      const nurl = URL.createObjectURL(nf);
+      if (work.url !== url) URL.revokeObjectURL(work.url);
+      setCorners({ tl: { x: 0.06, y: 0.06 }, tr: { x: 0.94, y: 0.06 }, br: { x: 0.94, y: 0.94 }, bl: { x: 0.06, y: 0.94 } });
+      setWork({ url: nurl, file: nf });
+    } catch {}
+    setBusy(false);
+  };
+
+  // filter enhancement pada canvas (dipakai utk mode manual & sbagai finishing)
+  const enhance = (ctx, w, h) => {
+    if (mode === "color") return;
+    const id = ctx.getImageData(0, 0, w, h), d = id.data;
+    if (mode === "bw") {
+      // grayscale + threshold adaptif sederhana (rata2 global)
+      let sum = 0;
+      for (let i = 0; i < d.length; i += 4) sum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      const thr = (sum / (d.length / 4)) * 0.92;
+      for (let i = 0; i < d.length; i += 4) {
+        const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+        const v = g < thr ? 0 : 255;
+        d[i] = d[i + 1] = d[i + 2] = v;
       }
-      const sx = rect.x0 * srcW, sy = rect.y0 * srcH;
-      const sw = (rect.x1 - rect.x0) * srcW, sh = (rect.y1 - rect.y0) * srcH;
+    } else { // magic: normalize kontras + sedikit boost
+      let mn = 255, mx = 0;
+      for (let i = 0; i < d.length; i += 4) { const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]; if (g < mn) mn = g; if (g > mx) mx = g; }
+      const rng = mx - mn || 1;
+      for (let i = 0; i < d.length; i += 4) for (let c = 0; c < 3; c++) {
+        let v = ((d[i + c] - mn) / rng) * 255;
+        v = Math.pow(Math.min(1, Math.max(0, v / 255)), 0.8) * 255;
+        d[i + c] = Math.min(255, Math.max(0, v));
+      }
+    }
+    ctx.putImageData(id, 0, 0);
+  };
+
+  const doScan = async () => {
+    setBusy(true);
+    try {
+      const img = await loadImg(work.url);
+      const W = img.naturalWidth, H = img.naturalHeight;
+      const p = {
+        tl: [corners.tl.x * W, corners.tl.y * H], tr: [corners.tr.x * W, corners.tr.y * H],
+        br: [corners.br.x * W, corners.br.y * H], bl: [corners.bl.x * W, corners.bl.y * H],
+      };
+      const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+      const outW = Math.round(Math.max(dist(p.tl, p.tr), dist(p.bl, p.br)));
+      const outH = Math.round(Math.max(dist(p.tl, p.bl), dist(p.tr, p.br)));
       const canvas = document.createElement("canvas");
-      canvas.width = Math.max(1, Math.round(sw)); canvas.height = Math.max(1, Math.round(sh));
-      canvas.getContext("2d").drawImage(src, sx, sy, sw, sh, 0, 0, sw, sh);
-      canvas.toBlob((blob) => {
-        const out = blob ? new File([blob], (file.name || "resi").replace(/\.\w+$/, "") + "_crop.jpg", { type: "image/jpeg" }) : file;
-        onConfirm(out);
-      }, "image/jpeg", 0.95);
+      canvas.width = Math.max(1, outW); canvas.height = Math.max(1, outH);
+      const ctx = canvas.getContext("2d");
+
+      if (cvState === "ready" && window.cv && window.cv.Mat) {
+        // Perspective transform via OpenCV
+        const cv = window.cv;
+        const cnv0 = document.createElement("canvas"); cnv0.width = W; cnv0.height = H;
+        cnv0.getContext("2d").drawImage(img, 0, 0);
+        const src = cv.imread(cnv0);
+        const srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [p.tl[0], p.tl[1], p.tr[0], p.tr[1], p.br[0], p.br[1], p.bl[0], p.bl[1]]);
+        const dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, outW, 0, outW, outH, 0, outH]);
+        const M = cv.getPerspectiveTransform(srcTri, dstTri);
+        const dst = new cv.Mat();
+        cv.warpPerspective(src, dst, M, new cv.Size(outW, outH), cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar());
+        cv.imshow(canvas, dst);
+        src.delete(); dst.delete(); M.delete(); srcTri.delete(); dstTri.delete();
+        enhance(ctx, outW, outH);
+      } else {
+        // Fallback manual: crop bounding-box dari 4 sudut
+        const xs = [p.tl[0], p.tr[0], p.br[0], p.bl[0]], ys = [p.tl[1], p.tr[1], p.br[1], p.bl[1]];
+        const x0 = Math.min(...xs), y0 = Math.min(...ys), x1 = Math.max(...xs), y1 = Math.max(...ys);
+        const cw = Math.max(1, Math.round(x1 - x0)), ch = Math.max(1, Math.round(y1 - y0));
+        canvas.width = cw; canvas.height = ch;
+        ctx.drawImage(img, x0, y0, cw, ch, 0, 0, cw, ch);
+        enhance(ctx, cw, ch);
+      }
+      const blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", 0.95));
+      const out = blob ? new File([blob], (file.name || "resi").replace(/\.\w+$/, "") + "_scan.jpg", { type: "image/jpeg" }) : file;
+      onConfirm(out);
     } catch { onConfirm(file); }
   };
 
-  const H = (corner, style) => (
-    <div onMouseDown={(e) => { e.preventDefault(); drag.current = corner; }}
-      onTouchStart={(e) => { drag.current = corner; }}
-      style={{ position: "absolute", width: 28, height: 28, marginLeft: -14, marginTop: -14, borderRadius: "50%", background: "#EF9F27", border: "3px solid #fff", boxShadow: "0 0 6px rgba(0,0,0,.6)", touchAction: "none", cursor: "grab", ...style }} />
+  const H = (key) => (
+    <div onMouseDown={(e) => { e.preventDefault(); drag.current = key; }}
+      onTouchStart={() => { drag.current = key; }}
+      style={{ position: "absolute", width: 30, height: 30, marginLeft: -15, marginTop: -15, borderRadius: "50%", background: "#EF9F27", border: "3px solid #fff", boxShadow: "0 0 6px rgba(0,0,0,.7)", touchAction: "none", cursor: "grab", left: `${corners[key].x * 100}%`, top: `${corners[key].y * 100}%` }} />
   );
-  const pct = (n) => `${n * 100}%`;
+  const poly = `${corners.tl.x * 100},${corners.tl.y * 100} ${corners.tr.x * 100},${corners.tr.y * 100} ${corners.br.x * 100},${corners.br.y * 100} ${corners.bl.x * 100},${corners.bl.y * 100}`;
+  const modeBtn = (m, lbl) => (
+    <button onClick={() => setMode(m)} disabled={busy}
+      style={{ flex: 1, padding: "7px", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer",
+        border: mode === m ? "2px solid #EF9F27" : "1px solid #555", background: mode === m ? "#3a2c10" : "none", color: mode === m ? "#EF9F27" : "#bbb" }}>{lbl}</button>
+  );
 
   return (
     <div onMouseMove={move} onMouseUp={end} onMouseLeave={end} onTouchMove={move} onTouchEnd={end} onTouchCancel={end}
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.92)", zIndex: 9999, display: "flex", flexDirection: "column", padding: 12, touchAction: "none", overscrollBehavior: "contain", userSelect: "none" }}>
-      <div style={{ color: "#fff", textAlign: "center", fontWeight: 800, fontSize: 14, padding: "6px 0 10px" }}>
-        Geser garis potong, lalu Potong &amp; Lanjut
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.94)", zIndex: 9999, display: "flex", flexDirection: "column", padding: 12, touchAction: "none", overscrollBehavior: "contain", userSelect: "none" }}>
+      <div style={{ color: "#fff", textAlign: "center", fontWeight: 800, fontSize: 13, padding: "4px 0 8px" }}>
+        {cvState === "loading" ? "⏳ Menyiapkan auto-scan..." : cvState === "ready" ? "Sudut terdeteksi otomatis — geser untuk pas" : "Geser 4 sudut ke tepi dokumen"}
       </div>
       <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
         <div style={{ position: "relative", maxWidth: "100%", maxHeight: "100%", lineHeight: 0 }}>
-          <img ref={imgRef} src={url} alt="crop" style={{ maxWidth: "100%", maxHeight: "70vh", display: "block", userSelect: "none", pointerEvents: "none" }} />
-          {/* kotak crop */}
-          <div style={{ position: "absolute", border: "2px dashed #EF9F27", left: pct(rect.x0), top: pct(rect.y0), width: pct(rect.x1 - rect.x0), height: pct(rect.y1 - rect.y0), boxShadow: "0 0 0 9999px rgba(0,0,0,.45)", touchAction: "none" }} />
-          {H("tl", { left: pct(rect.x0), top: pct(rect.y0) })}
-          {H("tr", { left: pct(rect.x1), top: pct(rect.y0) })}
-          {H("bl", { left: pct(rect.x0), top: pct(rect.y1) })}
-          {H("br", { left: pct(rect.x1), top: pct(rect.y1) })}
+          <img ref={imgRef} src={work.url} alt="scan" style={{ maxWidth: "100%", maxHeight: "64vh", display: "block", pointerEvents: "none" }} />
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}>
+            <polygon points={poly} fill="rgba(239,159,39,0.12)" stroke="#EF9F27" strokeWidth="0.6" strokeDasharray="2 1.5" vectorEffect="non-scaling-stroke" />
+          </svg>
+          {H("tl")}{H("tr")}{H("br")}{H("bl")}
         </div>
       </div>
-      <div style={{ display: "flex", gap: 8, padding: "10px 0 4px" }}>
+      <div style={{ display: "flex", gap: 6, padding: "8px 0 6px" }}>
+        {modeBtn("color", "🌈 Warna")}{modeBtn("magic", "✨ Magic")}{modeBtn("bw", "📄 B&W")}
+        <button onClick={rotate90} disabled={busy} style={{ flex: 1, padding: "7px", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer", border: "1px solid #555", background: "none", color: "#bbb" }}>🔄 Putar</button>
+      </div>
+      <div style={{ display: "flex", gap: 8, padding: "2px 0 4px" }}>
         <button onClick={onCancel} disabled={busy} style={{ flex: 1, padding: "12px", borderRadius: 10, border: "1px solid #555", background: "none", color: "#ccc", fontWeight: 700, fontSize: 13 }}>Batal</button>
         <button onClick={() => onConfirm(file)} disabled={busy} style={{ flex: 1, padding: "12px", borderRadius: 10, border: "1px solid #888", background: "none", color: "#fff", fontWeight: 700, fontSize: 13 }}>Pakai Full</button>
-        <button onClick={doCrop} disabled={busy} style={{ flex: 1.4, padding: "12px", borderRadius: 10, border: "none", background: "#EF9F27", color: "#1a1208", fontWeight: 900, fontSize: 13 }}>{busy ? "..." : "✂ Potong & Lanjut"}</button>
+        <button onClick={doScan} disabled={busy} style={{ flex: 1.5, padding: "12px", borderRadius: 10, border: "none", background: "#EF9F27", color: "#1a1208", fontWeight: 900, fontSize: 13 }}>{busy ? "..." : "✂ Scan & Lanjut"}</button>
       </div>
     </div>
   );
