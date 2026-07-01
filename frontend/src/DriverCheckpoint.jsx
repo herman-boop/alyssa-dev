@@ -135,13 +135,60 @@ function loadOpenCV() {
   return _cvPromise;
 }
 
-function loadImg(src) {
+function loadImg(src, cors) {
   return new Promise((res, rej) => {
     const im = new Image();
+    if (cors) im.crossOrigin = "anonymous";
     im.onload = () => res(im);
     im.onerror = rej;
     im.src = src;
   });
+}
+
+/* jsPDF lazy-loader (UMD dari CDN, cached browser) */
+let _pdfPromise = null;
+function loadJsPDF() {
+  if (window.jspdf && window.jspdf.jsPDF) return Promise.resolve(window.jspdf.jsPDF);
+  if (_pdfPromise) return _pdfPromise;
+  _pdfPromise = new Promise((res, rej) => {
+    const done = () => { (window.jspdf && window.jspdf.jsPDF) ? res(window.jspdf.jsPDF) : rej(new Error("jspdf missing")); };
+    let s = document.getElementById("jspdf-js");
+    if (s) { s.addEventListener("load", done); if (window.jspdf) done(); return; }
+    s = document.createElement("script");
+    s.id = "jspdf-js"; s.async = true;
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+    s.onload = done;
+    s.onerror = () => rej(new Error("gagal load jspdf"));
+    document.body.appendChild(s);
+    setTimeout(() => { if (!(window.jspdf && window.jspdf.jsPDF)) rej(new Error("timeout jspdf")); }, 15000);
+  });
+  return _pdfPromise;
+}
+
+/* Render gambar ke canvas A4 potrait 300DPI (2480x3508), bg putih + pertegas kontras.
+   Return dataURL JPEG kualitas tinggi. Gambar harus CORS-enabled. */
+async function imageToA4DataUrl(imgUrl) {
+  const img = await loadImg(imgUrl, true);
+  const AW = 2480, AH = 3508, m = 70;
+  const cnv = document.createElement("canvas");
+  cnv.width = AW; cnv.height = AH;
+  const ctx = cnv.getContext("2d");
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, AW, AH);
+  const sc = Math.min((AW - m * 2) / img.naturalWidth, (AH - m * 2) / img.naturalHeight);
+  const dw = img.naturalWidth * sc, dh = img.naturalHeight * sc;
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, (AW - dw) / 2, (AH - dh) / 2, dw, dh);
+  // Pertegas: cerahkan background putih, gelapkan teks (levels ringan)
+  try {
+    const id = ctx.getImageData(0, 0, AW, AH), d = id.data;
+    for (let i = 0; i < d.length; i += 4) for (let c = 0; c < 3; c++) {
+      let v = (d[i + c] - 12) * 1.18 + 12;
+      if (v > 236) v = 255;
+      d[i + c] = Math.min(255, Math.max(0, v));
+    }
+    ctx.putImageData(id, 0, 0);
+  } catch { /* canvas tainted -> lewati enhancement */ }
+  return cnv.toDataURL("image/jpeg", 0.95);
 }
 
 /* Modal scanner: auto-deteksi 4 sudut (OpenCV) + geser manual + perspective transform + filter. */
@@ -589,6 +636,24 @@ export default function DriverCheckpoint() {
     if (isPdf) { onDone(file); return; }
     const norm = await normalizeImage(file);
     setCropData({ url: URL.createObjectURL(norm), file: norm, onDone });
+  };
+
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const downloadPDF = async (imgUrl, name) => {
+    if (!imgUrl) return;
+    if (/\.pdf$/i.test(imgUrl)) { window.open(resolveUrl(imgUrl), "_blank"); return; }
+    setPdfBusy(true);
+    showToast("Membuat PDF A4...");
+    try {
+      const jsPDF = await loadJsPDF();
+      const dataUrl = await imageToA4DataUrl(resolveUrl(imgUrl));
+      const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      doc.addImage(dataUrl, "JPEG", 0, 0, 210, 297, undefined, "FAST");
+      doc.save(name || "dokumen-a4.pdf");
+      showToast("PDF tersimpan");
+    } catch (e) {
+      showToast("Gagal buat PDF", "err");
+    } finally { setPdfBusy(false); }
   };
 
   // Real-time clock
@@ -1682,6 +1747,10 @@ export default function DriverCheckpoint() {
                   </a>
                   <button className="drv-btn drv-btn-ghost" onClick={() => triggerFile("resi")} disabled={uploadingResi} data-testid="btn-replace-resi">
                     {uploadingResi ? "Upload..." : "Ganti Foto"}
+                  </button>
+                  <button className="drv-btn" onClick={() => downloadPDF(resi.url, "resi-a4.pdf")} disabled={pdfBusy}
+                    style={{ background: "#EF9F27", color: "#1a1208", fontWeight: 800, border: "none" }} data-testid="btn-pdf-resi">
+                    {pdfBusy ? "Membuat..." : "📄 Download PDF"}
                   </button>
                 </div>
               ) : (
