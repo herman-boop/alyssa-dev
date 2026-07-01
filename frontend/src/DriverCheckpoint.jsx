@@ -411,12 +411,25 @@ export default function DriverCheckpoint() {
   const fileRefs = useRef({});
 
   // Buka modal crop untuk gambar; PDF langsung lanjut tanpa crop
-  const openCrop = (file, onDone) => {
+  // Luruskan orientasi EXIF -> JPEG upright, supaya preview & crop tidak kebalik.
+  const normalizeImage = async (file) => {
+    try {
+      const bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
+      const c = document.createElement("canvas");
+      c.width = bmp.width; c.height = bmp.height;
+      c.getContext("2d").drawImage(bmp, 0, 0);
+      const blob = await new Promise((res) => c.toBlob(res, "image/jpeg", 0.95));
+      return blob ? new File([blob], (file.name || "img").replace(/\.\w+$/, "") + ".jpg", { type: "image/jpeg" }) : file;
+    } catch { return file; }
+  };
+
+  const openCrop = async (file, onDone) => {
     if (!file) return;
     // PDF -> skip crop. Sisanya (termasuk foto kamera yg type-nya kosong) -> crop.
     const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name || "");
     if (isPdf) { onDone(file); return; }
-    setCropData({ url: URL.createObjectURL(file), file, onDone });
+    const norm = await normalizeImage(file);
+    setCropData({ url: URL.createObjectURL(norm), file: norm, onDone });
   };
 
   // Real-time clock
