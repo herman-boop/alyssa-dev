@@ -16,6 +16,116 @@ function resolveUrl(url) {
 }
 const ALBUM_STAGES = ["asal", "kapal", "tujuan", "dokumen"];
 
+/* ── Opener global modal preview (dipakai PhotoCard & thumbnail checkpoint) ── */
+let _openDoc = null;
+function openDocPreview(url, label, isPdf) { if (_openDoc) _openDoc({ url, label, isPdf }); }
+
+/* jsPDF lazy-loader (CDN, cached) */
+let _pdfPromise = null;
+function loadJsPDF() {
+  if (window.jspdf && window.jspdf.jsPDF) return Promise.resolve(window.jspdf.jsPDF);
+  if (_pdfPromise) return _pdfPromise;
+  _pdfPromise = new Promise((res, rej) => {
+    const done = () => { (window.jspdf && window.jspdf.jsPDF) ? res(window.jspdf.jsPDF) : rej(new Error("jspdf missing")); };
+    let s = document.getElementById("jspdf-js");
+    if (s) { s.addEventListener("load", done); if (window.jspdf) done(); return; }
+    s = document.createElement("script"); s.id = "jspdf-js"; s.async = true;
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+    s.onload = done; s.onerror = () => rej(new Error("gagal load jspdf"));
+    document.body.appendChild(s);
+    setTimeout(() => { if (!(window.jspdf && window.jspdf.jsPDF)) rej(new Error("timeout jspdf")); }, 15000);
+  });
+  return _pdfPromise;
+}
+
+function loadImgCORS(src) {
+  return new Promise((res, rej) => { const im = new Image(); im.crossOrigin = "anonymous"; im.onload = () => res(im); im.onerror = rej; im.src = src; });
+}
+
+/* Gambar -> dataURL canvas A4 potrait 300DPI (2480x3508), bg putih + kontras ringan */
+async function imgToA4DataUrl(imgUrl) {
+  const img = await loadImgCORS(imgUrl);
+  const AW = 2480, AH = 3508, m = 70;
+  const cnv = document.createElement("canvas"); cnv.width = AW; cnv.height = AH;
+  const ctx = cnv.getContext("2d");
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, AW, AH);
+  const sc = Math.min((AW - m * 2) / img.naturalWidth, (AH - m * 2) / img.naturalHeight);
+  const dw = img.naturalWidth * sc, dh = img.naturalHeight * sc;
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, (AW - dw) / 2, (AH - dh) / 2, dw, dh);
+  try {
+    const id = ctx.getImageData(0, 0, AW, AH), d = id.data;
+    for (let i = 0; i < d.length; i += 4) for (let c = 0; c < 3; c++) { let v = (d[i + c] - 128) * 1.08 + 128; d[i + c] = v < 0 ? 0 : v > 255 ? 255 : v; }
+    ctx.putImageData(id, 0, 0);
+  } catch {}
+  return cnv.toDataURL("image/jpeg", 0.95);
+}
+
+/* ── Modal Preview Dokumen: zoom, Download PDF (A4), Cetak ── */
+function DocPreviewModal({ item, onClose }) {
+  const [zoom, setZoom] = useState(1);
+  const [busy, setBusy] = useState(false);
+  const src = resolveUrl(item.url);
+  const isPdf = item.isPdf || /\.pdf$/i.test(src);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const downloadPDF = async () => {
+    if (isPdf) { window.open(src, "_blank"); return; }
+    setBusy(true);
+    try {
+      const jsPDF = await loadJsPDF();
+      const dataUrl = await imgToA4DataUrl(src);
+      const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      doc.addImage(dataUrl, "JPEG", 0, 0, 210, 297, undefined, "FAST");
+      doc.save((item.label || "dokumen").replace(/[^\w]+/g, "_") + "-a4.pdf");
+    } catch { window.open(src, "_blank"); }
+    finally { setBusy(false); }
+  };
+
+  const printDoc = () => {
+    const w = window.open("", "_blank");
+    if (!w) return;
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${item.label || "Dokumen"}</title>
+      <style>@page{size:A4 portrait;margin:10mm} html,body{margin:0;padding:0} img{display:block;width:100%;height:auto;max-height:277mm;object-fit:contain}</style></head>
+      <body><img src="${src}" onload="setTimeout(function(){window.print()},250)"/></body></html>`);
+    w.document.close();
+  };
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.9)", zIndex: 10000, display: "flex", flexDirection: "column" }}>
+      {/* Top bar */}
+      <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", background: "rgba(0,0,0,.4)" }}>
+        <button onClick={onClose} style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid #666", background: "none", color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>← Kembali</button>
+        <div style={{ color: "#fff", fontWeight: 700, fontSize: 13, flex: 1, textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.label || "Dokumen"}</div>
+        <button onClick={onClose} style={{ width: 36, height: 36, borderRadius: "50%", border: "1px solid #666", background: "none", color: "#fff", fontSize: 18, cursor: "pointer" }}>✕</button>
+      </div>
+      {/* Gambar */}
+      <div onClick={(e) => e.stopPropagation()} style={{ flex: 1, overflow: "auto", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 10 }}>
+        {isPdf
+          ? <iframe title="pdf" src={src} style={{ width: "100%", height: "80vh", border: "none", background: "#fff", borderRadius: 6 }} />
+          : <img src={src} alt={item.label || ""} style={{ width: `${zoom * 100}%`, maxWidth: zoom === 1 ? "100%" : "none", height: "auto", objectFit: "contain", background: "#fff", borderRadius: 6, transition: "width .15s" }} />}
+      </div>
+      {/* Panel aksi */}
+      <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", gap: 8, padding: "10px 12px", background: "rgba(0,0,0,.5)", flexWrap: "wrap", justifyContent: "center" }}>
+        {!isPdf && (
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <button onClick={() => setZoom((z) => Math.max(1, +(z - 0.5).toFixed(1)))} style={{ width: 40, height: 40, borderRadius: 8, border: "1px solid #666", background: "none", color: "#fff", fontSize: 20, cursor: "pointer" }}>−</button>
+            <span style={{ color: "#ccc", fontSize: 12, minWidth: 42, textAlign: "center" }}>{Math.round(zoom * 100)}%</span>
+            <button onClick={() => setZoom((z) => Math.min(4, +(z + 0.5).toFixed(1)))} style={{ width: 40, height: 40, borderRadius: 8, border: "1px solid #666", background: "none", color: "#fff", fontSize: 20, cursor: "pointer" }}>+</button>
+          </div>
+        )}
+        <button onClick={downloadPDF} disabled={busy} style={{ padding: "10px 16px", borderRadius: 8, border: "none", background: "#EF9F27", color: "#1a1208", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>{busy ? "Membuat..." : "📄 Unduh PDF"}</button>
+        <button onClick={printDoc} style={{ padding: "10px 16px", borderRadius: 8, border: "1px solid #888", background: "none", color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>🖨 Cetak</button>
+      </div>
+    </div>
+  );
+}
+
 const SLOT_LABELS = {
   depan: "Tampak Depan", belakang: "Tampak Belakang",
   kiri: "Sisi Kiri", kanan: "Sisi Kanan", spidometer: "Dashboard",
@@ -78,10 +188,10 @@ function PhotoCard({ url, label, caption, isPdf }) {
   const src = resolveUrl(url);
   return (
     <div className="trk-album-item" style={{ position: "relative" }}>
-      <a href={src} target="_blank" rel="noreferrer" style={{ display: "block", width: "100%", height: "100%" }}>
+      <div onClick={() => openDocPreview(url, label, isPdf)} style={{ display: "block", width: "100%", height: "100%", cursor: "pointer" }}>
         {isPdf ? <div className="trk-pdf-thumb">PDF</div> : <img src={src} alt={label || ""} loading="lazy" />}
         {caption && <div className="trk-album-caption">{caption}</div>}
-      </a>
+      </div>
       <WaShareBtn url={src} label={label} />
     </div>
   );
@@ -298,7 +408,11 @@ export default function CustomerTracking() {
   const [lastUpdate, setLastUpdate] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedCp, setSelectedCp] = useState(null);
+  const [docPreview, setDocPreview] = useState(null);
   const panelRef = useRef(null);
+
+  // Daftarkan opener global supaya PhotoCard & thumbnail bisa buka modal
+  useEffect(() => { _openDoc = (item) => setDocPreview(item); return () => { _openDoc = null; }; }, []);
 
   const fetchData = useCallback(async (showSpinner = false) => {
     if (!tripId) { setError("not_found"); setLoading(false); return; }
@@ -499,9 +613,9 @@ export default function CustomerTracking() {
                           {isLatest && <span className="trk-popup-latest">Terakhir</span>}
                         </div>
                         {cp.url && (
-                          <a href={resolveUrl(cp.url)} target="_blank" rel="noreferrer" className="trk-popup-photo-wrap">
+                          <div onClick={() => openDocPreview(cp.url, `Checkpoint ${i + 1}`)} className="trk-popup-photo-wrap" style={{ cursor: "pointer" }}>
                             <img src={resolveUrl(cp.url)} alt={`CP-${i + 1}`} className="trk-popup-photo" />
-                          </a>
+                          </div>
                         )}
                         <div className="trk-popup-meta">
                           <div className="trk-popup-time">{fmtTs(cp.ts || cp.timestamp || cp.created_at)}</div>
@@ -643,9 +757,9 @@ export default function CustomerTracking() {
                         {/* Thumbnail */}
                         {selectedCp?.id === cp.id && cp.url && (
                           <div className="trk-cp-thumb-wrap" style={{ position: "relative" }}>
-                            <a href={resolveUrl(cp.url)} target="_blank" rel="noreferrer">
+                            <div onClick={() => openDocPreview(cp.url, `Checkpoint ${cpNum}`)} style={{ cursor: "pointer" }}>
                               <img src={resolveUrl(cp.url)} alt={`CP-${cpNum}`} className="trk-cp-thumb" />
-                            </a>
+                            </div>
                             <WaShareBtn url={resolveUrl(cp.url)} label={`Checkpoint ${cpNum}`} />
                           </div>
                         )}
@@ -807,6 +921,7 @@ export default function CustomerTracking() {
           </div>
         </div>
       </div>
+      {docPreview && <DocPreviewModal item={docPreview} onClose={() => setDocPreview(null)} />}
     </div>
   );
 }
