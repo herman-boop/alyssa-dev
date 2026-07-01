@@ -180,11 +180,11 @@ async function imageToA4DataUrl(imgUrl) {
   ctx.drawImage(img, (AW - dw) / 2, (AH - dh) / 2, dw, dh);
   // Pertegas: cerahkan background putih, gelapkan teks (levels ringan)
   try {
+    // kontras linear ringan saja (gambar sudah di-enhance saat scan) — jangan paksa putih
     const id = ctx.getImageData(0, 0, AW, AH), d = id.data;
     for (let i = 0; i < d.length; i += 4) for (let c = 0; c < 3; c++) {
-      let v = (d[i + c] - 12) * 1.18 + 12;
-      if (v > 236) v = 255;
-      d[i + c] = Math.min(255, Math.max(0, v));
+      let v = (d[i + c] - 128) * 1.08 + 128;
+      d[i + c] = v < 0 ? 0 : v > 255 ? 255 : v;
     }
     ctx.putImageData(id, 0, 0);
   } catch { /* canvas tainted -> lewati enhancement */ }
@@ -296,55 +296,37 @@ function CropModal({ url, file, onCancel, onConfirm }) {
   };
 
   // filter enhancement pada canvas (dipakai utk mode manual & sbagai finishing)
-  // param dari slider: bright 0..100 (default 55), sharp 0..100 (default 50)
-  const bAdd = (bright - 50) * 1.2;                 // -60..+60 offset kecerahan
-  const cf = 1 + (sharp / 100) * 1.4;               // 1.0..2.4 kontras/ketajaman
-  const bwC = 6 + (sharp / 100) * 26;               // 6..32 offset adaptive threshold
+  // ── Filter LINEAR (tanpa threshold) — pertahankan warna, teks tipis aman ──
+  // slider: bright 0..100 (default 55), sharp 0..100 (default 50)
+  // contrast 1.0..2.0, brightness 1.0..1.35, saturate per-mode
+  const cCon = (1.15 + (sharp / 100) * 0.85).toFixed(3);   // 1.15..2.0
+  const cBri = (0.85 + (bright / 100) * 0.5).toFixed(3);   // 0.85..1.35
+  const cSat = mode === "bw" ? 0 : (mode === "magic" ? 1.15 : 1.05);
+  const filterStr = `contrast(${cCon}) brightness(${cBri}) saturate(${cSat})`;
 
-  const enhance = (ctx, w, h) => {
-    const id = ctx.getImageData(0, 0, w, h), d = id.data;
-    if (mode === "color") {
-      // hanya brightness + contrast ringan, warna asli dipertahankan
-      for (let i = 0; i < d.length; i += 4) for (let c = 0; c < 3; c++) {
-        let v = (d[i + c] - 128) * (1 + (cf - 1) * 0.5) + 128 + bAdd;
-        d[i + c] = v < 0 ? 0 : v > 255 ? 255 : v;
-      }
-    } else if (mode === "bw") {
-      // ADAPTIVE THRESHOLD (mean lokal via integral image) — teks tipis aman
-      const gray = new Float32Array(w * h);
-      for (let i = 0, p = 0; i < d.length; i += 4, p++) gray[p] = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-      const IW = w + 1;
-      const integ = new Float64Array(IW * (h + 1));
-      for (let y = 0; y < h; y++) { let rs = 0; for (let x = 0; x < w; x++) { rs += gray[y * w + x]; integ[(y + 1) * IW + (x + 1)] = integ[y * IW + (x + 1)] + rs; } }
-      const win = Math.max(15, Math.round(w / 28)); const r = win >> 1;
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-        const x0 = x - r < 0 ? 0 : x - r, y0 = y - r < 0 ? 0 : y - r;
-        const x1 = x + r >= w ? w - 1 : x + r, y1 = y + r >= h ? h - 1 : y + r;
-        const cnt = (x1 - x0 + 1) * (y1 - y0 + 1);
-        const sum = integ[(y1 + 1) * IW + (x1 + 1)] - integ[y0 * IW + (x1 + 1)] - integ[(y1 + 1) * IW + x0] + integ[y0 * IW + x0];
-        const mean = sum / cnt;
-        const idx = (y * w + x) * 4;
-        const v = gray[y * w + x] < (mean - bwC + (bAdd * 0.15)) ? 0 : 255;
-        d[idx] = d[idx + 1] = d[idx + 2] = v;
-      }
-    } else {
-      // MAGIC COLOR: putihkan kertas abu2/bayangan, pertahankan warna (biru pulpen/logo)
-      const g = 1.15; // gamma bersihin bayangan tipis
-      for (let i = 0; i < d.length; i += 4) {
-        const R = d[i], G = d[i + 1], B = d[i + 2];
-        const lum = 0.299 * R + 0.587 * G + 0.114 * B;
-        const mx = Math.max(R, G, B), mn = Math.min(R, G, B);
-        const sat = mx <= 0 ? 0 : (mx - mn) / mx;
-        // area terang & tidak berwarna (kertas/bayangan) -> putihkan
-        if (lum > 175 && sat < 0.18) { d[i] = d[i + 1] = d[i + 2] = 255; continue; }
-        for (let c = 0; c < 3; c++) {
-          let v = (d[i + c] - 128) * cf + 128 + bAdd;   // contrast + brightness
-          v = 255 * Math.pow(Math.min(1, Math.max(0, v / 255)), 1 / g); // gamma
-          d[i + c] = v < 0 ? 0 : v > 255 ? 255 : v;
-        }
-      }
+  // Terapkan filter ke canvas -> canvas baru (pakai ctx.filter, sama persis dgn preview).
+  // Fallback per-pixel linear kalau ctx.filter tidak didukung.
+  const applyFilter = (srcCanvas) => {
+    const w = srcCanvas.width, h = srcCanvas.height;
+    const out = document.createElement("canvas");
+    out.width = w; out.height = h;
+    const octx = out.getContext("2d");
+    if (typeof octx.filter !== "undefined") {
+      octx.filter = filterStr;
+      octx.drawImage(srcCanvas, 0, 0);
+      return out;
     }
-    ctx.putImageData(id, 0, 0);
+    // fallback: rumus linear New = (Old-128)*Con + 128 + Bri_offset, clamp 0..255
+    octx.drawImage(srcCanvas, 0, 0);
+    const con = parseFloat(cCon), briOff = (parseFloat(cBri) - 1) * 255 * 0.5;
+    const id = octx.getImageData(0, 0, w, h), d = id.data;
+    for (let i = 0; i < d.length; i += 4) for (let c = 0; c < 3; c++) {
+      let v = (d[i + c] - 128) * con + 128 + briOff;
+      d[i + c] = v < 0 ? 0 : v > 255 ? 255 : v;
+    }
+    if (cSat === 0) for (let i = 0; i < d.length; i += 4) { const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]; d[i] = d[i + 1] = d[i + 2] = g; }
+    octx.putImageData(id, 0, 0);
+    return out;
   };
 
   const doScan = async () => {
@@ -376,7 +358,6 @@ function CropModal({ url, file, onCancel, onConfirm }) {
         cv.warpPerspective(src, dst, M, new cv.Size(outW, outH), cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar());
         cv.imshow(canvas, dst);
         src.delete(); dst.delete(); M.delete(); srcTri.delete(); dstTri.delete();
-        enhance(ctx, outW, outH);
       } else {
         // Fallback manual: crop bounding-box dari 4 sudut
         const xs = [p.tl[0], p.tr[0], p.br[0], p.bl[0]], ys = [p.tl[1], p.tr[1], p.br[1], p.bl[1]];
@@ -384,9 +365,9 @@ function CropModal({ url, file, onCancel, onConfirm }) {
         const cw = Math.max(1, Math.round(x1 - x0)), ch = Math.max(1, Math.round(y1 - y0));
         canvas.width = cw; canvas.height = ch;
         ctx.drawImage(img, x0, y0, cw, ch, 0, 0, cw, ch);
-        enhance(ctx, cw, ch);
       }
-      const blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", 0.95));
+      const finalCanvas = applyFilter(canvas);
+      const blob = await new Promise((r) => finalCanvas.toBlob(r, "image/jpeg", 0.95));
       const out = blob ? new File([blob], (file.name || "resi").replace(/\.\w+$/, "") + "_scan.jpg", { type: "image/jpeg" }) : file;
       onConfirm(out);
     } catch { onConfirm(file); }
@@ -413,8 +394,7 @@ function CropModal({ url, file, onCancel, onConfirm }) {
       <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
         <div style={{ position: "relative", maxWidth: "100%", maxHeight: "100%", lineHeight: 0 }}>
           <img ref={imgRef} src={work.url} alt="scan"
-            style={{ maxWidth: "100%", maxHeight: "58vh", display: "block", pointerEvents: "none",
-              filter: `brightness(${(0.7 + bright / 100 * 0.6).toFixed(2)}) contrast(${(1 + sharp / 100 * 1.0).toFixed(2)})${mode === "bw" ? " grayscale(1)" : ""}` }} />
+            style={{ maxWidth: "100%", maxHeight: "58vh", display: "block", pointerEvents: "none", filter: filterStr }} />
           <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}>
             <polygon points={poly} fill="rgba(239,159,39,0.12)" stroke="#EF9F27" strokeWidth="0.6" strokeDasharray="2 1.5" vectorEffect="non-scaling-stroke" />
           </svg>
