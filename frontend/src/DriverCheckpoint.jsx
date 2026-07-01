@@ -201,6 +201,7 @@ function CropModal({ url, file, onCancel, onConfirm }) {
   const [mode, setMode] = useState("magic"); // color | bw | magic
   const [bright, setBright] = useState(55); // 0..100
   const [sharp, setSharp] = useState(50);   // 0..100
+  const [hint, setHint] = useState("");
   const [work, setWork] = useState({ url, file }); // gambar kerja (bisa dirotate)
   const drag = useRef(null);
   const workRef = useRef(work);
@@ -213,13 +214,17 @@ function CropModal({ url, file, onCancel, onConfirm }) {
   useEffect(() => {
     let alive = true;
     loadOpenCV()
-      .then((cv) => { if (!alive) return; setCvState("ready"); autoDetect(cv); })
-      .catch(() => { if (alive) setCvState("manual"); });
+      .then(async (cv) => { if (!alive) return; setCvState("ready"); const ok = await autoDetect(cv); if (alive) setHint(ok ? "✓ Tepi dokumen terdeteksi otomatis" : "Geser 4 sudut ke tepi, atau tap Otomatis"); })
+      .catch(() => { if (alive) { setCvState("manual"); setHint("Mode manual — geser 4 sudut ke tepi dokumen"); } });
     return () => { alive = false; };
     // eslint-disable-next-line
   }, [work.url]);
 
+  const DEFAULT_CORNERS = { tl: { x: 0.06, y: 0.06 }, tr: { x: 0.94, y: 0.06 }, br: { x: 0.94, y: 0.94 }, bl: { x: 0.06, y: 0.94 } };
+
+  // return true kalau 4 sudut dokumen ketemu, false kalau gagal
   const autoDetect = async (cv) => {
+    let src, gray, edges, k, contours, hier, best = null, found = false;
     try {
       const img = await loadImg(work.url);
       const MAXW = 900;
@@ -227,21 +232,21 @@ function CropModal({ url, file, onCancel, onConfirm }) {
       const w = Math.round(img.naturalWidth * sc), h = Math.round(img.naturalHeight * sc);
       const cnv = document.createElement("canvas"); cnv.width = w; cnv.height = h;
       cnv.getContext("2d").drawImage(img, 0, 0, w, h);
-      const src = cv.imread(cnv);
-      const gray = new cv.Mat(); cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+      src = cv.imread(cnv);
+      gray = new cv.Mat(); cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
       cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0);
-      const edges = new cv.Mat(); cv.Canny(gray, edges, 60, 180);
-      const k = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(5, 5));
+      edges = new cv.Mat(); cv.Canny(gray, edges, 60, 180);
+      k = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(5, 5));
       cv.dilate(edges, edges, k);
-      const contours = new cv.MatVector(); const hier = new cv.Mat();
+      contours = new cv.MatVector(); hier = new cv.Mat();
       cv.findContours(edges, contours, hier, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
-      let best = null, bestArea = w * h * 0.15; // minimal 15% area
+      let bestArea = w * h * 0.15; // minimal 15% area layar
       for (let i = 0; i < contours.size(); i++) {
         const c = contours.get(i);
         const peri = cv.arcLength(c, true);
         const approx = new cv.Mat();
         cv.approxPolyDP(c, approx, 0.02 * peri, true);
-        if (approx.rows === 4) {
+        if (approx.rows === 4 && cv.isContourConvex(approx)) {
           const area = Math.abs(cv.contourArea(approx));
           if (area > bestArea) { bestArea = area; if (best) best.delete(); best = approx; }
           else approx.delete();
@@ -251,15 +256,25 @@ function CropModal({ url, file, onCancel, onConfirm }) {
       if (best) {
         const pts = [];
         for (let i = 0; i < 4; i++) pts.push({ x: best.data32S[i * 2] / w, y: best.data32S[i * 2 + 1] / h });
-        // urutkan: tl,tr,br,bl
         pts.sort((a, b) => a.y - b.y);
         const top = pts.slice(0, 2).sort((a, b) => a.x - b.x);
         const bot = pts.slice(2, 4).sort((a, b) => a.x - b.x);
         setCorners({ tl: top[0], tr: top[1], br: bot[1], bl: bot[0] });
-        best.delete();
+        found = true;
       }
-      src.delete(); gray.delete(); edges.delete(); k.delete(); contours.delete(); hier.delete();
-    } catch { /* biarkan default kotak */ }
+    } catch { found = false; }
+    try { best && best.delete(); src && src.delete(); gray && gray.delete(); edges && edges.delete(); k && k.delete(); contours && contours.delete(); hier && hier.delete(); } catch {}
+    return found;
+  };
+
+  // Tombol "Otomatis": jalankan deteksi instan, fallback ke kotak default kalau gagal
+  const runAutoDetect = async () => {
+    if (!(window.cv && window.cv.Mat)) { setHint("Auto-scan belum siap, geser manual dulu"); return; }
+    setBusy(true); setHint("🔍 Mendeteksi tepi dokumen...");
+    const ok = await autoDetect(window.cv);
+    if (!ok) { setCorners(DEFAULT_CORNERS); setHint("⚠ Tepi tidak jelas — geser 4 sudut manual"); }
+    else setHint("✓ Tepi dokumen terdeteksi");
+    setBusy(false);
   };
 
   const move = (e) => {
@@ -389,7 +404,7 @@ function CropModal({ url, file, onCancel, onConfirm }) {
     <div onMouseMove={move} onMouseUp={end} onMouseLeave={end} onTouchMove={move} onTouchEnd={end} onTouchCancel={end}
       style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.94)", zIndex: 9999, display: "flex", flexDirection: "column", padding: 12, touchAction: "none", overscrollBehavior: "contain", userSelect: "none" }}>
       <div style={{ color: "#fff", textAlign: "center", fontWeight: 800, fontSize: 13, padding: "4px 0 8px" }}>
-        {cvState === "loading" ? "⏳ Menyiapkan auto-scan..." : cvState === "ready" ? "Sudut terdeteksi otomatis — geser untuk pas" : "Geser 4 sudut ke tepi dokumen"}
+        {cvState === "loading" ? "⏳ Menyiapkan auto-scan..." : (hint || "Geser 4 sudut ke tepi dokumen")}
       </div>
       <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
         <div style={{ position: "relative", maxWidth: "100%", maxHeight: "100%", lineHeight: 0 }}>
@@ -402,8 +417,12 @@ function CropModal({ url, file, onCancel, onConfirm }) {
         </div>
       </div>
       <div style={{ display: "flex", gap: 6, padding: "8px 0 6px" }}>
-        {modeBtn("color", "🌈 Warna")}{modeBtn("magic", "✨ Magic")}{modeBtn("bw", "📄 B&W")}
+        <button onClick={runAutoDetect} disabled={busy || cvState === "loading"} style={{ flex: 1.3, padding: "7px", borderRadius: 8, fontSize: 11, fontWeight: 800, cursor: "pointer", border: "2px solid #2ea043", background: "#0d2818", color: "#3fb950" }}>🎯 Otomatis</button>
+        <button onClick={() => setCorners(DEFAULT_CORNERS)} disabled={busy} style={{ flex: 1, padding: "7px", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer", border: "1px solid #555", background: "none", color: "#bbb" }}>⬜ Reset</button>
         <button onClick={rotate90} disabled={busy} style={{ flex: 1, padding: "7px", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer", border: "1px solid #555", background: "none", color: "#bbb" }}>🔄 Putar</button>
+      </div>
+      <div style={{ display: "flex", gap: 6, padding: "0 0 6px" }}>
+        {modeBtn("color", "🌈 Warna")}{modeBtn("magic", "✨ Magic")}{modeBtn("bw", "📄 B&W")}
       </div>
       <div style={{ padding: "0 2px 6px", display: "flex", flexDirection: "column", gap: 6 }}>
         <label style={{ display: "flex", alignItems: "center", gap: 8, color: "#ccc", fontSize: 11, fontWeight: 600 }}>
