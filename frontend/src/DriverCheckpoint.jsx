@@ -199,6 +199,8 @@ function CropModal({ url, file, onCancel, onConfirm }) {
   const [busy, setBusy] = useState(false);
   const [cvState, setCvState] = useState("loading"); // loading | ready | manual
   const [mode, setMode] = useState("magic"); // color | bw | magic
+  const [bright, setBright] = useState(55); // 0..100
+  const [sharp, setSharp] = useState(50);   // 0..100
   const [work, setWork] = useState({ url, file }); // gambar kerja (bisa dirotate)
   const drag = useRef(null);
   const workRef = useRef(work);
@@ -294,27 +296,52 @@ function CropModal({ url, file, onCancel, onConfirm }) {
   };
 
   // filter enhancement pada canvas (dipakai utk mode manual & sbagai finishing)
+  // param dari slider: bright 0..100 (default 55), sharp 0..100 (default 50)
+  const bAdd = (bright - 50) * 1.2;                 // -60..+60 offset kecerahan
+  const cf = 1 + (sharp / 100) * 1.4;               // 1.0..2.4 kontras/ketajaman
+  const bwC = 6 + (sharp / 100) * 26;               // 6..32 offset adaptive threshold
+
   const enhance = (ctx, w, h) => {
-    if (mode === "color") return;
     const id = ctx.getImageData(0, 0, w, h), d = id.data;
-    if (mode === "bw") {
-      // grayscale + threshold adaptif sederhana (rata2 global)
-      let sum = 0;
-      for (let i = 0; i < d.length; i += 4) sum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-      const thr = (sum / (d.length / 4)) * 0.92;
-      for (let i = 0; i < d.length; i += 4) {
-        const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-        const v = g < thr ? 0 : 255;
-        d[i] = d[i + 1] = d[i + 2] = v;
-      }
-    } else { // magic: normalize kontras + sedikit boost
-      let mn = 255, mx = 0;
-      for (let i = 0; i < d.length; i += 4) { const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]; if (g < mn) mn = g; if (g > mx) mx = g; }
-      const rng = mx - mn || 1;
+    if (mode === "color") {
+      // hanya brightness + contrast ringan, warna asli dipertahankan
       for (let i = 0; i < d.length; i += 4) for (let c = 0; c < 3; c++) {
-        let v = ((d[i + c] - mn) / rng) * 255;
-        v = Math.pow(Math.min(1, Math.max(0, v / 255)), 0.8) * 255;
-        d[i + c] = Math.min(255, Math.max(0, v));
+        let v = (d[i + c] - 128) * (1 + (cf - 1) * 0.5) + 128 + bAdd;
+        d[i + c] = v < 0 ? 0 : v > 255 ? 255 : v;
+      }
+    } else if (mode === "bw") {
+      // ADAPTIVE THRESHOLD (mean lokal via integral image) — teks tipis aman
+      const gray = new Float32Array(w * h);
+      for (let i = 0, p = 0; i < d.length; i += 4, p++) gray[p] = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      const IW = w + 1;
+      const integ = new Float64Array(IW * (h + 1));
+      for (let y = 0; y < h; y++) { let rs = 0; for (let x = 0; x < w; x++) { rs += gray[y * w + x]; integ[(y + 1) * IW + (x + 1)] = integ[y * IW + (x + 1)] + rs; } }
+      const win = Math.max(15, Math.round(w / 28)); const r = win >> 1;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const x0 = x - r < 0 ? 0 : x - r, y0 = y - r < 0 ? 0 : y - r;
+        const x1 = x + r >= w ? w - 1 : x + r, y1 = y + r >= h ? h - 1 : y + r;
+        const cnt = (x1 - x0 + 1) * (y1 - y0 + 1);
+        const sum = integ[(y1 + 1) * IW + (x1 + 1)] - integ[y0 * IW + (x1 + 1)] - integ[(y1 + 1) * IW + x0] + integ[y0 * IW + x0];
+        const mean = sum / cnt;
+        const idx = (y * w + x) * 4;
+        const v = gray[y * w + x] < (mean - bwC + (bAdd * 0.15)) ? 0 : 255;
+        d[idx] = d[idx + 1] = d[idx + 2] = v;
+      }
+    } else {
+      // MAGIC COLOR: putihkan kertas abu2/bayangan, pertahankan warna (biru pulpen/logo)
+      const g = 1.15; // gamma bersihin bayangan tipis
+      for (let i = 0; i < d.length; i += 4) {
+        const R = d[i], G = d[i + 1], B = d[i + 2];
+        const lum = 0.299 * R + 0.587 * G + 0.114 * B;
+        const mx = Math.max(R, G, B), mn = Math.min(R, G, B);
+        const sat = mx <= 0 ? 0 : (mx - mn) / mx;
+        // area terang & tidak berwarna (kertas/bayangan) -> putihkan
+        if (lum > 175 && sat < 0.18) { d[i] = d[i + 1] = d[i + 2] = 255; continue; }
+        for (let c = 0; c < 3; c++) {
+          let v = (d[i + c] - 128) * cf + 128 + bAdd;   // contrast + brightness
+          v = 255 * Math.pow(Math.min(1, Math.max(0, v / 255)), 1 / g); // gamma
+          d[i + c] = v < 0 ? 0 : v > 255 ? 255 : v;
+        }
       }
     }
     ctx.putImageData(id, 0, 0);
@@ -385,7 +412,9 @@ function CropModal({ url, file, onCancel, onConfirm }) {
       </div>
       <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
         <div style={{ position: "relative", maxWidth: "100%", maxHeight: "100%", lineHeight: 0 }}>
-          <img ref={imgRef} src={work.url} alt="scan" style={{ maxWidth: "100%", maxHeight: "64vh", display: "block", pointerEvents: "none" }} />
+          <img ref={imgRef} src={work.url} alt="scan"
+            style={{ maxWidth: "100%", maxHeight: "58vh", display: "block", pointerEvents: "none",
+              filter: `brightness(${(0.7 + bright / 100 * 0.6).toFixed(2)}) contrast(${(1 + sharp / 100 * 1.0).toFixed(2)})${mode === "bw" ? " grayscale(1)" : ""}` }} />
           <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}>
             <polygon points={poly} fill="rgba(239,159,39,0.12)" stroke="#EF9F27" strokeWidth="0.6" strokeDasharray="2 1.5" vectorEffect="non-scaling-stroke" />
           </svg>
@@ -395,6 +424,16 @@ function CropModal({ url, file, onCancel, onConfirm }) {
       <div style={{ display: "flex", gap: 6, padding: "8px 0 6px" }}>
         {modeBtn("color", "🌈 Warna")}{modeBtn("magic", "✨ Magic")}{modeBtn("bw", "📄 B&W")}
         <button onClick={rotate90} disabled={busy} style={{ flex: 1, padding: "7px", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer", border: "1px solid #555", background: "none", color: "#bbb" }}>🔄 Putar</button>
+      </div>
+      <div style={{ padding: "0 2px 6px", display: "flex", flexDirection: "column", gap: 6 }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, color: "#ccc", fontSize: 11, fontWeight: 600 }}>
+          <span style={{ minWidth: 78 }}>☀ Kecerahan</span>
+          <input type="range" min="0" max="100" value={bright} onChange={(e) => setBright(+e.target.value)} style={{ flex: 1, accentColor: "#EF9F27" }} />
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, color: "#ccc", fontSize: 11, fontWeight: 600 }}>
+          <span style={{ minWidth: 78 }}>🔤 Ketajaman</span>
+          <input type="range" min="0" max="100" value={sharp} onChange={(e) => setSharp(+e.target.value)} style={{ flex: 1, accentColor: "#EF9F27" }} />
+        </label>
       </div>
       <div style={{ display: "flex", gap: 8, padding: "2px 0 4px" }}>
         <button onClick={onCancel} disabled={busy} style={{ flex: 1, padding: "12px", borderRadius: 10, border: "1px solid #555", background: "none", color: "#ccc", fontWeight: 700, fontSize: 13 }}>Batal</button>
