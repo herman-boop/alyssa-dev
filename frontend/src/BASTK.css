@@ -664,8 +664,11 @@
    ditambah sementara oleh downloadPDF). Tidak mengubah tampilan layar.
    Tujuan: teks & tabel tetap tajam walau dicetak lalu discan ulang.
    ============================================================ */
+/* "Inter" adalah variable font (opsz/wght axis) — html2canvas tidak mendukung
+   variable font dengan benar dan merender huruf jadi bergelombang/mleyot.
+   Saat capture PDF, paksa font statis (bukan variable) biar hasil scan tajam. */
 .bk-scan, .bk-scan * {
-  font-family: "Inter", "Roboto", "Helvetica Neue", Arial, sans-serif !important;
+  font-family: Arial, "Helvetica Neue", Helvetica, sans-serif !important;
   letter-spacing: 0.5px !important;
   color: #000 !important;               /* teks hitam pekat = paling tajam saat discan */
   -webkit-font-smoothing: antialiased;
