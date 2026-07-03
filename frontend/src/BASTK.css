@@ -665,69 +665,17 @@
 
 /* ============================================================
    SCAN-HARDENING — aktif hanya saat generate PDF (class .bk-scan
-   ditambah sementara oleh downloadPDF). Tidak mengubah tampilan layar.
-   Tujuan: teks & tabel tetap tajam walau dicetak lalu discan ulang.
+   ditambah sementara oleh downloadPDF). TIDAK mengubah warna, latar,
+   border, spacing, atau hierarki tipografi — desain premium navy+gold
+   harus tetap identik dengan tampilan layar. Ini murni rendering hints
+   (tidak mempengaruhi layout/paint), sisanya ketajaman dikerjakan di
+   pipeline capture (html2canvas scale + PNG lossless) di BASTKPage.jsx.
    ============================================================ */
 .bk-scan, .bk-scan * {
-  font-family: "Inter", "Roboto", "Helvetica Neue", Arial, sans-serif !important;
-  letter-spacing: 0.5px !important;
-  color: #000 !important;               /* teks hitam pekat = paling tajam saat discan */
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
-/* Font minimal 11.5px untuk semua teks kecil (angka urut, nama komponen, dll) */
-.bk-scan, .bk-scan td, .bk-scan th, .bk-scan span, .bk-scan div,
-.bk-scan label, .bk-scan p, .bk-scan li,
-.bk-scan .bk-kv, .bk-scan .bk-kv .k, .bk-scan .bk-kv .v,
-.bk-scan .bk-qr-row, .bk-scan .bk-qr-k, .bk-scan .bk-qr-v,
-.bk-scan .bk-sketch-meta, .bk-scan .bk-sketch-meta-item,
-.bk-scan .bk-doc-no, .bk-scan .bk-table th, .bk-scan .bk-table td {
-  font-size: 11.5px !important;
-  font-weight: 600 !important;
-  line-height: 1.35 !important;
-}
-/* Judul/heading tetap besar & sangat tebal */
-.bk-scan .bk-doc-title { font-size: 16px !important; font-weight: 900 !important; letter-spacing: 0.8px !important; }
-.bk-scan .bk-doc-sub, .bk-scan .bk-brand-name { font-weight: 800 !important; font-size: 13px !important; }
-.bk-scan .bk-panel-title, .bk-scan .bk-section-title { font-weight: 800 !important; font-size: 12.5px !important; }
-/* Nilai isian (nama, nopol, dll) lebih tebal biar menonjol */
-.bk-scan .bk-table td, .bk-scan .bk-kv .v, .bk-scan .bk-doc-num { font-weight: 700 !important; }
-
-/* Garis tabel & panel jadi solid abu-abu tegas 1px (tipis tapi jelas, tidak nge-blok) */
-.bk-scan .bk-table, .bk-scan .bk-panel, .bk-scan table {
-  border-color: #333333 !important;
-}
-.bk-scan .bk-table th, .bk-scan .bk-table td,
-.bk-scan table th, .bk-scan table td {
-  border: 1px solid #333333 !important;
-}
-.bk-scan .bk-panel { border: 1px solid #333333 !important; }
-
-/* FIX: latar belakang gelap (navy/gradient) pada header panel & logo box tenggelamkan
-   teks yang dipaksa hitam di atas -> paksa semua latar jadi putih bersih saat generate PDF,
-   supaya teks hitam kontras penuh dan tidak ada lagi blok warna gelap. */
-.bk-scan, .bk-scan .bk-root, .bk-scan.bk-print, .bk-scan .bk-print,
-.bk-scan .bk-panel, .bk-scan .bk-panel-head, .bk-scan .bk-logo-box,
-.bk-scan .bk-table, .bk-scan .bk-table th, .bk-scan .bk-table td, .bk-scan table,
-.bk-scan .bk-sketch-meta, .bk-scan .bk-sketch-meta-item, .bk-scan .bk-marks-summary,
-.bk-scan .bk-qr-box, .bk-scan .bk-qr-svg, .bk-scan .bk-sig-box, .bk-scan .bk-sig-empty,
-.bk-scan .bk-sig-img, .bk-scan .bk-qr-note {
-  background: #ffffff !important;
-  background-color: #ffffff !important;
-  background-image: none !important;
-  box-shadow: none !important;
-  -webkit-print-color-adjust: exact !important;
-  print-color-adjust: exact !important;
-}
-.bk-scan .bk-panel-head { border-bottom: 1px solid #333333 !important; }
-.bk-scan .bk-logo-box { border: 1px solid #333333 !important; }
-.bk-scan .bk-qr-box::before, .bk-scan .bk-qr-box::after { border-color: #333333 !important; }
-
-/* Kotak checklist (kalau ada) minimal 15x15 dengan tepi hitam tegas */
+/* Kotak checklist tetap sesuai ukuran desain asli — tidak diperbesar/diberi warna baru */
 .bk-scan input[type="checkbox"], .bk-scan .bk-check, .bk-scan .bk-box, .bk-scan .bk-checkbox {
-  width: 15px !important; height: 15px !important;
-  min-width: 15px !important; min-height: 15px !important;
-  border: 2px solid #000 !important;
-  border-radius: 2px !important;
   box-sizing: border-box !important;
-  background: #ffffff !important;
 }

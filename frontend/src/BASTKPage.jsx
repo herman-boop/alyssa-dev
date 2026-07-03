@@ -162,24 +162,48 @@ export default function BASTKPage() {
     // Force A4 portrait width (210mm ≈ 794px @96dpi) saat capture, biar hasil PDF
     // selalu proporsi A4 walau driver buka di HP (layar sempit).
     const A4_W = 794;
+    // Scale capture jauh di atas 1x agar tahan siklus print->scan (target ~380 DPI
+    // efektif: 794px / 8.27in * 4 ≈ 384 DPI, di rentang 300-600 DPI yang diminta).
+    // scale eksplisit dipakai (bukan window.devicePixelRatio) supaya hasil konsisten
+    // di semua device driver, bukan tergantung DPR HP masing-masing.
+    const CAPTURE_SCALE = 4;
     const prev = { width: el.style.width, maxWidth: el.style.maxWidth, margin: el.style.margin };
     try {
       // Simpan dulu sebelum print
       await saveBASTK();
+      // Pastikan web font (Inter/JetBrains Mono) sudah fully loaded sebelum capture —
+      // kalau belum, html2canvas bisa menggambar pakai fallback font system dengan
+      // metrik berbeda (FOUT), hasilnya terlihat blur/tidak presisi saat di-scale up.
+      if (document.fonts && document.fonts.ready) {
+        await document.fonts.ready;
+      }
       el.style.width = A4_W + "px";
       el.style.maxWidth = A4_W + "px";
       el.style.margin = "0";
-      el.classList.add("bk-scan"); // font tebal + border tegas biar tajam saat discan ulang
+      el.classList.add("bk-scan"); // hint rendering saja (antialiasing), desain premium tetap identik
       el.getBoundingClientRect(); // paksa reflow
       const canvas = await html2canvas(el, {
         backgroundColor: "#FFFFFF",
-        scale: 3, useCORS: true, logging: false,
-        width: A4_W, windowWidth: A4_W,
+        scale: CAPTURE_SCALE,
+        useCORS: true,
+        logging: false,
+        width: A4_W,
+        windowWidth: A4_W,
+        imageTimeout: 0,
+        // false (default) = teks digambar via canvas fillText per-glyph, bukan
+        // didelegasikan ke <foreignObject> SVG bawaan browser. Hasilnya konsisten
+        // lintas browser/device dan lebih presisi untuk dicetak, dibanding
+        // foreignObjectRendering:true yang bergantung ke rendering native browser.
+        foreignObjectRendering: false,
       });
       const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4", compress: true });
       const pw = pdf.internal.pageSize.getWidth();
       const ph = pdf.internal.pageSize.getHeight();
-      const imgData = canvas.toDataURL("image/jpeg", 0.98);
+      // PNG (lossless) — bukan JPEG. JPEG memakai DCT + chroma subsampling yang
+      // menimbulkan ringing/blur di tepi teks kontras tinggi (persis efek yang
+      // dikeluhkan setelah print->scan). PNG mempertahankan tiap piksel persis
+      // hasil capture, jadi teks tetap tajam sampai ke kertas.
+      const imgData = canvas.toDataURL("image/png");
       // Paksa muat 1 halaman A4: scale konten agar lebar & tinggi pas dalam margin.
       const maxW = pw - 12;  // margin 6mm kiri-kanan
       const maxH = ph - 12;  // margin 6mm atas-bawah
@@ -190,7 +214,7 @@ export default function BASTKPage() {
         w = (canvas.width / canvas.height) * h;
       }
       const x = (pw - w) / 2;   // center horizontal
-      pdf.addImage(imgData, "JPEG", x, 6, w, h);
+      pdf.addImage(imgData, "PNG", x, 6, w, h, undefined, "NONE");
       const nopol = (data?.nopol || "AAL").replace(/\s+/g, "-");
       pdf.save(`BASTK-${nopol}.pdf`);
       showToast("PDF tersimpan");
