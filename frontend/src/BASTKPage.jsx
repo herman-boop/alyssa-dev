@@ -1,7 +1,5 @@
 import { useEffect, useState, useMemo, useRef } from "react";
 import axios from "axios";
-import jsPDF from "jspdf";
-import html2canvas from "html2canvas";
 import { QRCodeSVG } from "qrcode.react";
 import "@/App.css";
 import "@/Driver.css";
@@ -97,7 +95,6 @@ export default function BASTKPage() {
   const [gen, setGen] = useState(false);
   const [toast, setToast] = useState(null);
   const sketchAreaRef = useRef(null);
-  const printAreaRef = useRef(null);
 
   const showToast = (msg, type = "ok") => { setToast({ msg, type }); setTimeout(() => setToast(null), 2400); };
 
@@ -155,120 +152,26 @@ export default function BASTKPage() {
     } finally { setSaving(false); }
   };
 
-  const downloadPDF = async () => {
-    if (!printAreaRef.current) return;
+  // Cetak lewat dialog print bawaan browser (window.print), BUKAN html2canvas+jsPDF.
+  // html2canvas merender jadi satu gambar raster (PNG/JPEG) yang resolusinya mentok
+  // di scale capture-nya — begitu di-print fisik lalu discan HP, teks kecil pecah/blur
+  // karena sudah 2x proses rasterisasi (capture -> scan). window.print() memakai CSS
+  // @media print di bawah dan menghasilkan PDF dengan TEKS VEKTOR asli (selectable,
+  // tajam di DPI berapa pun printer-nya) kalau driver pilih "Simpan sebagai PDF" di
+  // dialog print, atau langsung tajam kalau dicetak ke printer fisik.
+  const printBASTK = async () => {
     setGen(true);
-    const el = printAreaRef.current;
-    // Force A4 portrait width (210mm ≈ 794px @96dpi) saat capture, biar hasil PDF
-    // selalu proporsi A4 walau driver buka di HP (layar sempit).
-    const A4_W = 794;
-    // Scale capture jauh di atas 1x agar tahan siklus print->scan (target ~380 DPI
-    // efektif: 794px / 8.27in * 4 ≈ 384 DPI, di rentang 300-600 DPI yang diminta).
-    // scale eksplisit dipakai (bukan window.devicePixelRatio) supaya hasil konsisten
-    // di semua device driver, bukan tergantung DPR HP masing-masing.
-    const CAPTURE_SCALE = 4;
-    const prev = { width: el.style.width, maxWidth: el.style.maxWidth, margin: el.style.margin };
     try {
-      // Simpan dulu sebelum print
       await saveBASTK();
-      // Pastikan web font (Inter/JetBrains Mono) sudah fully loaded sebelum capture —
-      // kalau belum, html2canvas bisa menggambar pakai fallback font system dengan
-      // metrik berbeda (FOUT), hasilnya terlihat blur/tidak presisi saat di-scale up.
+      // Tunggu font Inter/JetBrains Mono fully loaded biar layout print stabil
+      // (menghindari reflow/wrap berubah gara-gara FOUT saat dialog print dibuka).
       if (document.fonts && document.fonts.ready) {
         await document.fonts.ready;
       }
-      el.style.width = A4_W + "px";
-      el.style.maxWidth = A4_W + "px";
-      el.style.margin = "0";
-      el.classList.add("bk-scan"); // hint rendering saja (antialiasing), desain premium tetap identik
-      el.getBoundingClientRect(); // paksa reflow
-
-      // Ukur batas tiap section utama (anak langsung .bk-print) SEBELUM capture,
-      // supaya kalau kontennya lebih tinggi dari 1 halaman A4, pemotongan ke
-      // halaman berikutnya jatuh di celah antar-section — bukan memotong di
-      // tengah tabel/panel/tanda tangan.
-      const sectionBoundsCssPx = Array.from(el.children).map((c) => ({
-        top: c.offsetTop,
-        bottom: c.offsetTop + c.offsetHeight,
-      }));
-
-      const canvas = await html2canvas(el, {
-        backgroundColor: "#FFFFFF",
-        scale: CAPTURE_SCALE,
-        useCORS: true,
-        logging: false,
-        width: A4_W,
-        windowWidth: A4_W,
-        imageTimeout: 0,
-        // false (default) = teks digambar via canvas fillText per-glyph, bukan
-        // didelegasikan ke <foreignObject> SVG bawaan browser. Hasilnya konsisten
-        // lintas browser/device dan lebih presisi untuk dicetak, dibanding
-        // foreignObjectRendering:true yang bergantung ke rendering native browser.
-        foreignObjectRendering: false,
-      });
-      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4", compress: true });
-      const pageWmm = pdf.internal.pageSize.getWidth();
-      const pageHmm = pdf.internal.pageSize.getHeight();
-      const marginMm = 6;
-      const usableWmm = pageWmm - marginMm * 2;
-      const usableHmm = pageHmm - marginMm * 2;
-
-      // Skala px->mm SELALU dihitung dari lebar penuh halaman (fit-to-width),
-      // TIDAK ikut diperkecil lagi kalau kontennya panjang — itu yang dulu
-      // bikin font kelihatan kecil demi muat 1 halaman. Sekarang kalau lebih
-      // tinggi dari 1 halaman, dipecah ke halaman ke-2/ke-3 dst dengan ukuran
-      // font di kertas yang tetap sama (bukan ukuran layar diperkecil).
-      const pxPerMm = canvas.width / usableWmm;
-      const pageBudgetPx = usableHmm * pxPerMm;
-      const cssPxToCanvasPx = canvas.width / A4_W; // == CAPTURE_SCALE
-
-      const cuts = [0];
-      let pageStart = 0;
-      for (const b of sectionBoundsCssPx) {
-        const topPx = b.top * cssPxToCanvasPx;
-        const bottomPx = b.bottom * cssPxToCanvasPx;
-        if (bottomPx - pageStart > pageBudgetPx) {
-          // Section ini tidak muat sisa halaman sekarang.
-          pageStart = topPx > pageStart ? topPx : pageStart + pageBudgetPx;
-          cuts.push(pageStart);
-        }
-      }
-      cuts.push(canvas.height);
-
-      // PNG (lossless) — bukan JPEG. JPEG memakai DCT + chroma subsampling yang
-      // menimbulkan ringing/blur di tepi teks kontras tinggi (persis efek yang
-      // dikeluhkan setelah print->scan). PNG mempertahankan tiap piksel persis
-      // hasil capture, jadi teks tetap tajam sampai ke kertas.
-      for (let i = 0; i < cuts.length - 1; i++) {
-        const startPx = cuts[i];
-        const endPx = Math.min(cuts[i + 1], canvas.height);
-        const sliceHeightPx = Math.round(endPx - startPx);
-        if (sliceHeightPx <= 0) continue;
-
-        const sliceCanvas = document.createElement("canvas");
-        sliceCanvas.width = canvas.width;
-        sliceCanvas.height = sliceHeightPx;
-        sliceCanvas.getContext("2d").drawImage(
-          canvas, 0, startPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx
-        );
-        const imgData = sliceCanvas.toDataURL("image/png");
-        const sliceHeightMm = sliceHeightPx / pxPerMm;
-
-        if (i > 0) pdf.addPage();
-        pdf.addImage(imgData, "PNG", marginMm, marginMm, usableWmm, sliceHeightMm, undefined, "NONE");
-      }
-
-      const nopol = (data?.nopol || "AAL").replace(/\s+/g, "-");
-      pdf.save(`BASTK-${nopol}.pdf`);
-      showToast(cuts.length > 2 ? `PDF tersimpan (${cuts.length - 1} halaman)` : "PDF tersimpan");
+      window.print();
     } catch (e) {
-      showToast("Gagal generate PDF: " + e.message, "err");
+      showToast("Gagal menyiapkan cetak: " + e.message, "err");
     } finally {
-      // Kembalikan style asli biar tampilan layar nggak ikut berubah
-      el.classList.remove("bk-scan");
-      el.style.width = prev.width;
-      el.style.maxWidth = prev.maxWidth;
-      el.style.margin = prev.margin;
       setGen(false);
     }
   };
@@ -299,14 +202,14 @@ export default function BASTKPage() {
           <button className="bk-btn bk-btn-ghost" onClick={saveBASTK} disabled={saving} data-testid="btn-save-bastk">
             {saving ? "Simpan..." : "Simpan"}
           </button>
-          <button className="bk-btn bk-btn-gold" onClick={downloadPDF} disabled={gen} data-testid="btn-download-bastk">
-            {gen ? "Membuat PDF..." : "Download PDF A4"}
+          <button className="bk-btn bk-btn-gold" onClick={printBASTK} disabled={gen} data-testid="btn-download-bastk">
+            {gen ? "Menyiapkan..." : "Cetak / Simpan PDF"}
           </button>
         </div>
       </div>
 
-      {/* PRINT AREA — yang masuk ke PDF */}
-      <div className="bk-print" ref={printAreaRef} data-testid="bk-print">
+      {/* PRINT AREA — yang tampil saat Cetak/Simpan PDF (window.print) */}
+      <div className="bk-print" data-testid="bk-print">
         {/* HEADER */}
         <div className="bk-header">
           <div className="bk-header-left">
@@ -341,16 +244,6 @@ export default function BASTKPage() {
               <div className="bk-kv"><span className="k">Kondisi</span><span className="v">{customer.kondisi || "—"}</span></div>
               <div className="bk-kv"><span className="k">PIC</span><span className="v">{customer.pic || "—"}</span></div>
               <div className="bk-kv bk-kv-full"><span className="k">Rute</span><span className="v">{data.route || "—"}</span></div>
-            </div>
-            <div className="bk-sketch-meta">
-              <div className="bk-sketch-meta-item"><b>Kode Kerusakan:</b></div>
-              <div className="bk-codes-row">
-                {DAMAGE_CODES.map((c) => (
-                  <span key={c.code} className="bk-code-pill" style={{ background: c.bg, color: c.color, borderColor: c.color }}>
-                    <b>{c.code}</b> = {c.label}
-                  </span>
-                ))}
-              </div>
             </div>
           </section>
           <div className="bk-party-col">
@@ -426,6 +319,16 @@ export default function BASTKPage() {
               })}
             </div>
           )}
+          <div className="bk-sketch-meta">
+            <div className="bk-sketch-meta-item"><b>Kode Kerusakan:</b></div>
+            <div className="bk-codes-row">
+              {DAMAGE_CODES.map((c) => (
+                <span key={c.code} className="bk-code-pill" style={{ background: c.bg, color: c.color, borderColor: c.color }}>
+                  <b>{c.code}</b> = {c.label}
+                </span>
+              ))}
+            </div>
+          </div>
         </section>
 
         {/* CATATAN */}
