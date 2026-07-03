@@ -669,7 +669,11 @@
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
-  .bk-toolbar, .bk-editor { display: none !important; }
+  /* .drv-toast (notifikasi "BASTK tersimpan" dll) posisinya fixed di layar —
+     kalau tidak disembunyikan saat print, ikut ke-render di atas konten
+     halaman karena window.print() bisa terpanggil selagi toast masih tampil
+     (durasinya ~2.4 detik, belum sempat hilang). */
+  .bk-toolbar, .bk-editor, .drv-toast { display: none !important; }
   .bk-root { background: #fff; padding: 0; margin: 0; max-width: none; min-height: 0; }
   .bk-print {
     margin: 0;
