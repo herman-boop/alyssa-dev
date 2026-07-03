@@ -182,6 +182,16 @@ export default function BASTKPage() {
       el.style.margin = "0";
       el.classList.add("bk-scan"); // hint rendering saja (antialiasing), desain premium tetap identik
       el.getBoundingClientRect(); // paksa reflow
+
+      // Ukur batas tiap section utama (anak langsung .bk-print) SEBELUM capture,
+      // supaya kalau kontennya lebih tinggi dari 1 halaman A4, pemotongan ke
+      // halaman berikutnya jatuh di celah antar-section — bukan memotong di
+      // tengah tabel/panel/tanda tangan.
+      const sectionBoundsCssPx = Array.from(el.children).map((c) => ({
+        top: c.offsetTop,
+        bottom: c.offsetTop + c.offsetHeight,
+      }));
+
       const canvas = await html2canvas(el, {
         backgroundColor: "#FFFFFF",
         scale: CAPTURE_SCALE,
@@ -197,27 +207,60 @@ export default function BASTKPage() {
         foreignObjectRendering: false,
       });
       const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4", compress: true });
-      const pw = pdf.internal.pageSize.getWidth();
-      const ph = pdf.internal.pageSize.getHeight();
+      const pageWmm = pdf.internal.pageSize.getWidth();
+      const pageHmm = pdf.internal.pageSize.getHeight();
+      const marginMm = 6;
+      const usableWmm = pageWmm - marginMm * 2;
+      const usableHmm = pageHmm - marginMm * 2;
+
+      // Skala px->mm SELALU dihitung dari lebar penuh halaman (fit-to-width),
+      // TIDAK ikut diperkecil lagi kalau kontennya panjang — itu yang dulu
+      // bikin font kelihatan kecil demi muat 1 halaman. Sekarang kalau lebih
+      // tinggi dari 1 halaman, dipecah ke halaman ke-2/ke-3 dst dengan ukuran
+      // font di kertas yang tetap sama (bukan ukuran layar diperkecil).
+      const pxPerMm = canvas.width / usableWmm;
+      const pageBudgetPx = usableHmm * pxPerMm;
+      const cssPxToCanvasPx = canvas.width / A4_W; // == CAPTURE_SCALE
+
+      const cuts = [0];
+      let pageStart = 0;
+      for (const b of sectionBoundsCssPx) {
+        const topPx = b.top * cssPxToCanvasPx;
+        const bottomPx = b.bottom * cssPxToCanvasPx;
+        if (bottomPx - pageStart > pageBudgetPx) {
+          // Section ini tidak muat sisa halaman sekarang.
+          pageStart = topPx > pageStart ? topPx : pageStart + pageBudgetPx;
+          cuts.push(pageStart);
+        }
+      }
+      cuts.push(canvas.height);
+
       // PNG (lossless) — bukan JPEG. JPEG memakai DCT + chroma subsampling yang
       // menimbulkan ringing/blur di tepi teks kontras tinggi (persis efek yang
       // dikeluhkan setelah print->scan). PNG mempertahankan tiap piksel persis
       // hasil capture, jadi teks tetap tajam sampai ke kertas.
-      const imgData = canvas.toDataURL("image/png");
-      // Paksa muat 1 halaman A4: scale konten agar lebar & tinggi pas dalam margin.
-      const maxW = pw - 12;  // margin 6mm kiri-kanan
-      const maxH = ph - 12;  // margin 6mm atas-bawah
-      let w = maxW;
-      let h = (canvas.height / canvas.width) * w;
-      if (h > maxH) {           // kalau kepanjangan, kecilkan ikut tinggi
-        h = maxH;
-        w = (canvas.width / canvas.height) * h;
+      for (let i = 0; i < cuts.length - 1; i++) {
+        const startPx = cuts[i];
+        const endPx = Math.min(cuts[i + 1], canvas.height);
+        const sliceHeightPx = Math.round(endPx - startPx);
+        if (sliceHeightPx <= 0) continue;
+
+        const sliceCanvas = document.createElement("canvas");
+        sliceCanvas.width = canvas.width;
+        sliceCanvas.height = sliceHeightPx;
+        sliceCanvas.getContext("2d").drawImage(
+          canvas, 0, startPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx
+        );
+        const imgData = sliceCanvas.toDataURL("image/png");
+        const sliceHeightMm = sliceHeightPx / pxPerMm;
+
+        if (i > 0) pdf.addPage();
+        pdf.addImage(imgData, "PNG", marginMm, marginMm, usableWmm, sliceHeightMm, undefined, "NONE");
       }
-      const x = (pw - w) / 2;   // center horizontal
-      pdf.addImage(imgData, "PNG", x, 6, w, h, undefined, "NONE");
+
       const nopol = (data?.nopol || "AAL").replace(/\s+/g, "-");
       pdf.save(`BASTK-${nopol}.pdf`);
-      showToast("PDF tersimpan");
+      showToast(cuts.length > 2 ? `PDF tersimpan (${cuts.length - 1} halaman)` : "PDF tersimpan");
     } catch (e) {
       showToast("Gagal generate PDF: " + e.message, "err");
     } finally {
@@ -299,6 +342,16 @@ export default function BASTKPage() {
               <div className="bk-kv"><span className="k">PIC</span><span className="v">{customer.pic || "—"}</span></div>
               <div className="bk-kv bk-kv-full"><span className="k">Rute</span><span className="v">{data.route || "—"}</span></div>
             </div>
+            <div className="bk-sketch-meta">
+              <div className="bk-sketch-meta-item"><b>Kode Kerusakan:</b></div>
+              <div className="bk-codes-row">
+                {DAMAGE_CODES.map((c) => (
+                  <span key={c.code} className="bk-code-pill" style={{ background: c.bg, color: c.color, borderColor: c.color }}>
+                    <b>{c.code}</b> = {c.label}
+                  </span>
+                ))}
+              </div>
+            </div>
           </section>
           <div className="bk-party-col">
             <section className="bk-panel">
@@ -330,13 +383,6 @@ export default function BASTKPage() {
           <div className="bk-sketch-meta">
             <div className="bk-sketch-meta-item"><b>Tipe:</b> {vehicleType || "—"}</div>
             <div className="bk-sketch-meta-item"><b>Total tanda:</b> {marks.length}</div>
-            <div className="bk-codes-row">
-              {DAMAGE_CODES.map((c) => (
-                <span key={c.code} className="bk-code-pill" style={{ background: c.bg, color: c.color, borderColor: c.color }}>
-                  <b>{c.code}</b> = {c.label}
-                </span>
-              ))}
-            </div>
           </div>
           <div
             ref={sketchAreaRef}
@@ -407,7 +453,7 @@ export default function BASTKPage() {
               <div className="bk-qr-svg">
                 <QRCodeSVG
                   value={trackUrl}
-                  size={132}
+                  size={168}
                   level="H"
                   includeMargin={false}
                   bgColor="#FFFFFF"
@@ -423,8 +469,8 @@ export default function BASTKPage() {
                         '<path d="M41,26 L60,32 L41,40 Z" fill="#D4A847"/>' +
                         '</svg>'
                       ),
-                    height: 28,
-                    width: 28,
+                    height: 34,
+                    width: 34,
                     excavate: true,
                   }}
                 />
