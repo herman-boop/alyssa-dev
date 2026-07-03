@@ -95,6 +95,7 @@ export default function BASTKPage() {
   const [gen, setGen] = useState(false);
   const [toast, setToast] = useState(null);
   const sketchAreaRef = useRef(null);
+  const printElRef = useRef(null);
 
   const showToast = (msg, type = "ok") => { setToast({ msg, type }); setTimeout(() => setToast(null), 2400); };
 
@@ -161,6 +162,7 @@ export default function BASTKPage() {
   // dialog print, atau langsung tajam kalau dicetak ke printer fisik.
   const printBASTK = async () => {
     setGen(true);
+    const el = printElRef.current;
     try {
       await saveBASTK();
       // Tunggu font Inter/JetBrains Mono fully loaded biar layout print stabil
@@ -168,6 +170,31 @@ export default function BASTKPage() {
       if (document.fonts && document.fonts.ready) {
         await document.fonts.ready;
       }
+
+      // Data trip beda-beda panjangnya (nama/alamat/catatan panjang, jenis
+      // kendaraan dengan sketsa lebih detail, banyak tanda kerusakan, dst).
+      // Supaya TETAP 1 halaman A4 untuk data apa pun -- bukan cuma yang
+      // kebetulan muat -- ukur dulu tinggi konten meniru lebar & font cetak
+      // asli SEBELUM window.print(). Kalau lebih tinggi dari 1 halaman,
+      // aktifkan .bk-compact: HANYA memangkas padding/line-height/gap,
+      // BUKAN mengecilkan font data utama, BUKAN scale seluruh halaman.
+      if (el) {
+        const PRINT_W = 756;   // px @96dpi, lebar cetak asli (210mm - 2x5mm margin @page)
+        const BUDGET_H = 1060; // px @96dpi, sedikit di bawah tinggi cetak asli (287mm) sebagai buffer aman
+        const prev = { width: el.style.width, maxWidth: el.style.maxWidth };
+        el.classList.remove("bk-compact");
+        el.classList.add("bk-measure-mode"); // samakan font ke Arial (sama seperti saat cetak asli)
+        el.style.width = PRINT_W + "px";
+        el.style.maxWidth = PRINT_W + "px";
+        el.getBoundingClientRect(); // paksa reflow
+        if (el.offsetHeight > BUDGET_H) {
+          el.classList.add("bk-compact");
+        }
+        el.classList.remove("bk-measure-mode");
+        el.style.width = prev.width;
+        el.style.maxWidth = prev.maxWidth;
+      }
+
       window.print();
     } catch (e) {
       showToast("Gagal menyiapkan cetak: " + e.message, "err");
@@ -209,7 +236,7 @@ export default function BASTKPage() {
       </div>
 
       {/* PRINT AREA — yang tampil saat Cetak/Simpan PDF (window.print) */}
-      <div className="bk-print" data-testid="bk-print">
+      <div className="bk-print" ref={printElRef} data-testid="bk-print">
         {/* HEADER */}
         <div className="bk-header">
           <div className="bk-header-left">
