@@ -397,7 +397,11 @@
 .bk-sketch-area {
   position: relative;
   width: 100%;
-  aspect-ratio: 16 / 3.7;
+  /* Sedikit lebih tinggi dari sebelumnya (16/3.7) — memanfaatkan ruang yang
+     terselamatkan dari pemindahan legend kode kerusakan, biar sketsa & tanda
+     kerusakan lebih jelas dibaca setelah print/scan. Tetap net lebih pendek
+     dari total tinggi dokumen sebelumnya. */
+  aspect-ratio: 16 / 4.2;
   background: #f8f9fb;
   cursor: crosshair;
   overflow: hidden;

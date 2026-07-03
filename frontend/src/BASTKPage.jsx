@@ -342,6 +342,16 @@ export default function BASTKPage() {
               <div className="bk-kv"><span className="k">PIC</span><span className="v">{customer.pic || "—"}</span></div>
               <div className="bk-kv bk-kv-full"><span className="k">Rute</span><span className="v">{data.route || "—"}</span></div>
             </div>
+            <div className="bk-sketch-meta">
+              <div className="bk-sketch-meta-item"><b>Kode Kerusakan:</b></div>
+              <div className="bk-codes-row">
+                {DAMAGE_CODES.map((c) => (
+                  <span key={c.code} className="bk-code-pill" style={{ background: c.bg, color: c.color, borderColor: c.color }}>
+                    <b>{c.code}</b> = {c.label}
+                  </span>
+                ))}
+              </div>
+            </div>
           </section>
           <div className="bk-party-col">
             <section className="bk-panel">
@@ -373,13 +383,6 @@ export default function BASTKPage() {
           <div className="bk-sketch-meta">
             <div className="bk-sketch-meta-item"><b>Tipe:</b> {vehicleType || "—"}</div>
             <div className="bk-sketch-meta-item"><b>Total tanda:</b> {marks.length}</div>
-            <div className="bk-codes-row">
-              {DAMAGE_CODES.map((c) => (
-                <span key={c.code} className="bk-code-pill" style={{ background: c.bg, color: c.color, borderColor: c.color }}>
-                  <b>{c.code}</b> = {c.label}
-                </span>
-              ))}
-            </div>
           </div>
           <div
             ref={sketchAreaRef}
