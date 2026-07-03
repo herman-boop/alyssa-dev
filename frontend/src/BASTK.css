@@ -88,12 +88,12 @@
   background: #ffffff;
   color: #0A1628;
   margin: 10px;
-  padding: 16px 20px;
+  padding: 10px 16px;
   border-radius: 14px;
   border: 1px solid #d9dce3;
   box-shadow: 0 10px 30px rgba(0,0,0,.35);
   font-size: 13px;
-  line-height: 1.45;
+  line-height: 1.32;
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
 }
@@ -104,9 +104,9 @@
   grid-template-columns: 1fr auto;
   gap: 16px;
   align-items: center;
-  padding-bottom: 10px;
+  padding-bottom: 4px;
   border-bottom: 3px double #854F0B;
-  margin-bottom: 10px;
+  margin-bottom: 4px;
 }
 .bk-header-left {
   display: flex;
@@ -172,8 +172,8 @@
 .bk-qr-body {
   display: grid;
   grid-template-columns: 150px 1fr;
-  gap: 12px;
-  padding: 6px 8px;
+  gap: 10px;
+  padding: 4px 8px;
   align-items: center;
 }
 @media (max-width: 540px) {
@@ -184,8 +184,8 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 8px;
+  gap: 3px;
+  padding: 5px;
   background: #fbfcfe;
   border: 1.5px solid #D4A847;
   border-radius: 12px;
@@ -202,7 +202,7 @@
 .bk-qr-box::after  { bottom: -3px; right: -3px; border-left: 0; border-top: 0; }
 .bk-qr-svg {
   background: #fff;
-  padding: 6px;
+  padding: 4px;
   border-radius: 6px;
   display: flex;
   align-items: center;
@@ -214,9 +214,9 @@
   height: 112px;
 }
 .bk-qr-cap {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 800;
-  letter-spacing: 1.5px;
+  letter-spacing: 1.2px;
   color: #854F0B;
   text-transform: uppercase;
 }
@@ -224,14 +224,14 @@
   display: flex;
   flex-direction: column;
   gap: 0;
-  padding: 2px;
+  padding: 1px;
 }
 .bk-qr-row {
   display: grid;
   grid-template-columns: 120px 1fr;
   gap: 8px;
   font-size: 13px;
-  padding: 3px 0;
+  padding: 2px 0;
   border-bottom: 1.5px solid #c7ccd6;
 }
 .bk-qr-row:last-of-type { border-bottom: 0; }
@@ -252,13 +252,13 @@
   color: #000000;
 }
 .bk-qr-note {
-  margin-top: 4px;
-  padding: 5px 8px;
+  margin-top: 3px;
+  padding: 4px 8px;
   background: #fdf6e6;
   border-left: 3px solid #D4A847;
   font-size: 10.5px;
   color: #000000;
-  line-height: 1.4;
+  line-height: 1.3;
   border-radius: 0 6px 6px 0;
   font-style: italic;
 }
@@ -266,16 +266,16 @@
 /* ----- Grid 2 kolom ----- */
 .bk-grid-2 {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 0.94fr 1.06fr;
   gap: 8px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 @media (max-width: 720px) {
   .bk-grid-2 { grid-template-columns: 1fr; }
 }
 
 /* Kolom kanan: 2 kotak penyerah + penerima */
-.bk-party-col { display: flex; flex-direction: column; gap: 8px; }
+.bk-party-col { display: flex; flex-direction: column; gap: 6px; }
 .bk-party-col .bk-panel { margin-bottom: 0; }
 
 /* Data kendaraan 2 kolom (label:value) */
@@ -286,27 +286,27 @@
 }
 .bk-kv {
   display: flex;
-  gap: 6px;
-  padding: 6px 10px;
+  gap: 4px;
+  padding: 4px 10px;
   border-bottom: 1.5px solid #c7ccd6;
   font-size: 14px;
-  line-height: 1.4;
+  line-height: 1.28;
   align-items: baseline;
 }
-.bk-kv .k { color: #333333; font-weight: 700; min-width: 72px; }
+.bk-kv .k { color: #333333; font-weight: 700; min-width: 52px; }
 .bk-kv .v { color: #000000; font-weight: 800; }
 .bk-kv-full { grid-column: 1 / -1; }
 
 /* Syarat & Ketentuan — 1 kolom biar font besar tetap nyaman dibaca */
 .bk-terms {
   margin: 0;
-  padding: 6px 14px 6px 26px;
+  padding: 3px 14px 3px 22px;
   font-size: 11px;
-  line-height: 1.55;
+  line-height: 1.38;
   color: #000000;
   columns: 1;
 }
-.bk-terms li { margin-bottom: 4px; break-inside: avoid; }
+.bk-terms li { margin-bottom: 1px; break-inside: avoid; }
 .bk-terms b { color: #854F0B; }
 
 /* ----- Panel (block dengan head) ----- */
@@ -315,7 +315,7 @@
   border-radius: 10px;
   overflow: hidden;
   background: #fff;
-  margin-bottom: 6px;
+  margin-bottom: 3px;
 }
 .bk-panel-head {
   background: #0A1628;
@@ -324,9 +324,9 @@
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
   font-size: 12px;
-  line-height: 1.6;
+  line-height: 1.3;
   letter-spacing: .8px;
-  padding: 6px 10px;
+  padding: 3px 10px;
   text-transform: uppercase;
 }
 
@@ -337,14 +337,14 @@
   font-size: 14px;
 }
 .bk-table th, .bk-table td {
-  padding: 6px 10px;
+  padding: 4px 10px;
   text-align: left;
   vertical-align: top;
   border-bottom: 1.5px solid #c7ccd6;
-  line-height: 1.4;
+  line-height: 1.26;
 }
 .bk-table th {
-  width: 38%;
+  width: 30%;
   color: #333333;
   font-weight: 700;
   background: #f8f9fb;
@@ -355,7 +355,7 @@
 
 /* ----- Sketsa area + damage marks ----- */
 .bk-sketch-meta {
-  padding: 6px 10px;
+  padding: 2px 10px;
   background: #f8f9fb;
   border-bottom: 1.5px solid #c7ccd6;
   font-size: 13px;
@@ -363,13 +363,13 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 5px;
 }
 .bk-sketch-meta-item {
   background: #fff;
   border: 1px solid #d9dce3;
   border-radius: 6px;
-  padding: 4px 10px;
+  padding: 2px 9px;
   font-weight: 700;
 }
 .bk-codes-row {
@@ -386,9 +386,9 @@
   gap: 3px;
   border: 1px solid #d9dce3;
   border-radius: 999px;
-  padding: 3px 9px;
+  padding: 2px 8px;
   font-size: 10.5px;
-  line-height: 1.5;
+  line-height: 1.4;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -401,7 +401,7 @@
      terselamatkan dari pemindahan legend kode kerusakan, biar sketsa & tanda
      kerusakan lebih jelas dibaca setelah print/scan. Tetap net lebih pendek
      dari total tinggi dokumen sebelumnya. */
-  aspect-ratio: 16 / 4.2;
+  aspect-ratio: 16 / 3.85;
   background: #f8f9fb;
   cursor: crosshair;
   overflow: hidden;
@@ -448,19 +448,19 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  padding: 5px 12px;
+  padding: 4px 12px;
   background: #f8f9fb;
   font-size: 12.5px;
 }
 
 /* ----- Catatan box ----- */
 .bk-catatan-display {
-  padding: 6px 12px;
-  min-height: 16px;
+  padding: 4px 12px;
+  min-height: 12px;
   font-size: 13.5px;
   color: #000000;
   white-space: pre-line;
-  line-height: 1.5;
+  line-height: 1.35;
 }
 
 /* ----- Tanda tangan grid ----- */
@@ -468,7 +468,7 @@
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
-  padding: 6px;
+  padding: 3px;
 }
 @media (max-width: 720px) {
   .bk-sig-grid { grid-template-columns: 1fr; }
@@ -476,7 +476,7 @@
 .bk-sig-box {
   border: 1px solid #d9dce3;
   border-radius: 8px;
-  padding: 5px 8px;
+  padding: 4px 8px;
   background: #fbfcfe;
   text-align: center;
 }
@@ -490,13 +490,13 @@
 }
 .bk-sig-img {
   width: 100%;
-  max-height: 34px;
+  max-height: 30px;
   object-fit: contain;
   background: #fff;
   border-radius: 4px;
 }
 .bk-sig-empty {
-  height: 28px;
+  height: 24px;
   display: grid;
   place-items: center;
   color: #5F7494;
@@ -511,14 +511,14 @@
   font-size: 13px;
   font-weight: 800;
   color: #000000;
-  padding-top: 5px;
-  margin-top: 5px;
+  padding-top: 3px;
+  margin-top: 3px;
 }
 
 /* ----- Footer ----- */
 .bk-footer {
-  margin-top: 10px;
-  padding-top: 7px;
+  margin-top: 4px;
+  padding-top: 4px;
   border-top: 1.5px solid #c7ccd6;
   font-size: 12px;
   color: #333333;
