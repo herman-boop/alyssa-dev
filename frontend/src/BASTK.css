@@ -107,7 +107,7 @@
   width: 58px;
   height: 58px;
   border-radius: 12px;
-  background: linear-gradient(180deg, #0A1628 0%, #152238 100%);
+  background: #0A1628;
   display: grid;
   place-items: center;
   box-shadow: inset 0 0 0 2px #D4A847;
@@ -244,7 +244,7 @@
 .bk-qr-note {
   margin-top: 2px;
   padding: 3px 7px;
-  background: linear-gradient(90deg, #fdf6e6 0%, #fbfcfe 100%);
+  background: #fdf6e6;
   border-left: 3px solid #D4A847;
   font-size: 8.5px;
   color: #0A1628;
@@ -308,9 +308,11 @@
   margin-bottom: 4px;
 }
 .bk-panel-head {
-  background: linear-gradient(90deg, #0A1628 0%, #152238 100%);
+  background: #0A1628;
   color: #D4A847;
   font-weight: 800;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
   font-size: 10px;
   line-height: 1.5;
   letter-spacing: .8px;
@@ -385,8 +387,7 @@
   position: relative;
   width: 100%;
   aspect-ratio: 16 / 3.7;
-  background:
-    linear-gradient(to bottom, #fbfcfe 0%, #f4f6fa 100%);
+  background: #f8f9fb;
   cursor: crosshair;
   overflow: hidden;
   border-bottom: 1px solid #e4e7ee;
@@ -644,6 +645,11 @@
    ============================================================ */
 @media print {
   @page { size: A4 portrait; margin: 5mm; }
+  /* Paksa browser/WPS mempertahankan warna, jangan strip/blok jadi hitam */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
   .bk-toolbar, .bk-editor { display: none !important; }
   .bk-root { background: #fff; padding: 0; margin: 0; max-width: none; }
   .bk-print {
@@ -651,14 +657,33 @@
     box-shadow: none;
     border: 0;
     border-radius: 0;
-    /* Samakan lebar dgn lebar capture (794px) supaya tinggi konten pasti
-       (~1137px terukur), lalu skala turun agar muat 1 halaman A4.
-       zoom mempengaruhi layout di Chrome/Edge -> paginasi ikut mengecil. */
     width: 794px;
     zoom: 0.86;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
+  /* ===== VERSI CETAK BERSIH: latar putih, teks hitam, border tipis abu ===== */
+  .bk-print, .bk-print * {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+  .bk-panel { border: 1px solid #333333 !important; }
+  .bk-panel-head {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    font-weight: 800 !important;
+    border-bottom: 1px solid #333333 !important;
+  }
+  .bk-table th, .bk-table td,
+  .bk-kv, .bk-qr-row, .bk-sig-box {
+    border-color: #333333 !important;
+  }
+  .bk-table th { background-color: #ffffff !important; }
+  .bk-sig-line { border-bottom: 1px solid #000000 !important; }
+  /* QR tetap tampil (SVG pakai fill sendiri) */
+  .bk-qr-box, .bk-qr-svg { background-color: #ffffff !important; }
   /* Jangan pecah blok ke halaman berikutnya */
   .bk-panel, .bk-grid-2, .bk-qr-panel, .bk-sig-grid, .bk-sketch-area { break-inside: avoid; }
 }
@@ -671,10 +696,18 @@
    (tidak mempengaruhi layout/paint), sisanya ketajaman dikerjakan di
    pipeline capture (html2canvas scale + PNG lossless) di BASTKPage.jsx.
    ============================================================ */
+/* "Inter" adalah variable font (opsz/wght axis) — html2canvas tidak mendukung
+   variable font dengan benar dan merender huruf jadi bergelombang/mleyot.
+   Saat capture PDF, paksa font statis (bukan variable) biar hasil scan tajam. */
 .bk-scan, .bk-scan * {
+  font-family: Arial, "Helvetica Neue", Helvetica, sans-serif !important;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
+/* NB: sengaja TIDAK memaksa color:#000 di sini (beda dari versi lama PR sebelumnya).
+   Itu yang bikin teks emas .bk-panel-head di atas latar navy jadi tak kelihatan
+   (bug "blok hitam pekat" yang sudah diperbaiki). Kontras diambil dari warna asli
+   tiap elemen di desain, bukan dipaksa hitam semua. */
 /* Kotak checklist tetap sesuai ukuran desain asli — tidak diperbesar/diberi warna baru */
 .bk-scan input[type="checkbox"], .bk-scan .bk-check, .bk-scan .bk-box, .bk-scan .bk-checkbox {
   box-sizing: border-box !important;
