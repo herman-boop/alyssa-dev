@@ -119,6 +119,7 @@ export default function CustomerOrderForm() {
   const [step, setStep] = useState(0);
   const [data, setData] = useState({
     vehicle_type: "", nopol: "", warna: "", tahun: "", km: "", kondisi: "Bekas", no_rangka: "",
+    panjang: "", lebar: "", tinggi: "",
     asal_kota: "", asal_alamat: "", pickup_date: "", pickup_time: "", pickup_pic: "", pickup_hp: "",
     tujuan_kota: "", tujuan_alamat: "", delivery_pic: "", delivery_hp: "",
     customer_nama: "", customer_hp: "", customer_email: "", catatan: "",
@@ -164,7 +165,7 @@ export default function CustomerOrderForm() {
 
   const addAnother = () => {
     // Reset hanya data kendaraan, sisanya (asal/tujuan/customer) tetap
-    setData(d => ({ ...d, vehicle_type: "", nopol: "", warna: "", tahun: "", km: "", kondisi: "Bekas", no_rangka: "" }));
+    setData(d => ({ ...d, vehicle_type: "", nopol: "", warna: "", tahun: "", km: "", kondisi: "Bekas", no_rangka: "", panjang: "", lebar: "", tinggi: "" }));
     setFiles([]);
     setResult(null);
     setStep(0);
@@ -273,6 +274,21 @@ export default function CustomerOrderForm() {
                   <input type="text" className="of-inp" value={data.km}
                     onChange={(e) => set("km", e.target.value)}
                     placeholder="15000" data-testid="ord-km" />
+                </Field>
+                <Field label="Panjang (cm)">
+                  <input type="text" inputMode="decimal" className="of-inp" value={data.panjang}
+                    onChange={(e) => set("panjang", e.target.value.replace(/[^0-9.]/g, ""))}
+                    placeholder="480" data-testid="ord-panjang" />
+                </Field>
+                <Field label="Lebar (cm)">
+                  <input type="text" inputMode="decimal" className="of-inp" value={data.lebar}
+                    onChange={(e) => set("lebar", e.target.value.replace(/[^0-9.]/g, ""))}
+                    placeholder="190" data-testid="ord-lebar" />
+                </Field>
+                <Field label="Tinggi (cm)">
+                  <input type="text" inputMode="decimal" className="of-inp" value={data.tinggi}
+                    onChange={(e) => set("tinggi", e.target.value.replace(/[^0-9.]/g, ""))}
+                    placeholder="300" data-testid="ord-tinggi" />
                 </Field>
                 <Field label="Kondisi">
                   <select className="of-inp" value={data.kondisi}
@@ -423,6 +439,9 @@ export default function CustomerOrderForm() {
                   <SRow k="Pemesan"      v={`${data.customer_nama || "—"} ${data.customer_hp ? `· ${data.customer_hp}` : ""}`.trim()} />
                   <SRow k="Kendaraan"    v={`${data.vehicle_type || "—"} ${data.nopol ? `· ${data.nopol}` : ""}`} />
                   <SRow k="Warna / Tahun" v={`${data.warna || "—"} / ${data.tahun || "—"}`} />
+                  {(data.panjang || data.lebar || data.tinggi) && (
+                    <SRow k="Dimensi (P×L×T cm)" v={`${data.panjang || "—"} × ${data.lebar || "—"} × ${data.tinggi || "—"}`} />
+                  )}
                   <SRow k="Asal"         v={`${data.asal_kota}${data.asal_alamat ? ` — ${data.asal_alamat}` : ""}`} />
                   <SRow k="Jadwal"       v={`${data.pickup_date || "—"} ${data.pickup_time || ""}`.trim()} />
                   <SRow k="Tujuan"       v={`${data.tujuan_kota}${data.tujuan_alamat ? ` — ${data.tujuan_alamat}` : ""}`} />

@@ -549,6 +549,9 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
   const printSuratJalan = () => {
     const tgl = new Date().toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
     const noSurat = `AAL-${order.order_id?.slice(-6) || "000000"}`;
+    // M3 = P x L x T (cm) / 1.000.000 — dihitung otomatis dari dimensi yang diisi di form pesanan.
+    const p = parseFloat(order.panjang), l = parseFloat(order.lebar), t = parseFloat(order.tinggi);
+    const m3 = (p > 0 && l > 0 && t > 0) ? ((p * l * t) / 1_000_000).toFixed(3) : "";
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Surat Jalan ${noSurat}</title>
     <style>
       * { margin:0; padding:0; box-sizing:border-box; }
@@ -648,6 +651,10 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
           <th>Berat / Weight (kg)</th>
           <th class="td-isi">Isi Menurut Pengirim / Contents</th>
           <th>Warna / Color</th>
+          <th>P (cm)</th>
+          <th>L (cm)</th>
+          <th>T (cm)</th>
+          <th>M3</th>
         </tr></thead>
         <tbody>
           <tr>
@@ -657,9 +664,13 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
             <td></td>
             <td class="td-isi">${order.vehicle_type || ""} ${order.nopol ? "· " + order.nopol : ""}</td>
             <td>${order.warna || ""}</td>
+            <td style="text-align:center">${order.panjang || ""}</td>
+            <td style="text-align:center">${order.lebar || ""}</td>
+            <td style="text-align:center">${order.tinggi || ""}</td>
+            <td style="text-align:center;font-weight:700">${m3}</td>
           </tr>
-          <tr><td class="td-no">2</td><td></td><td></td><td></td><td></td><td></td></tr>
-          <tr><td class="td-no">3</td><td></td><td></td><td></td><td></td><td></td></tr>
+          <tr><td class="td-no">2</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+          <tr><td class="td-no">3</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
         </tbody>
       </table>
 

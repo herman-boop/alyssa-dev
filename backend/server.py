@@ -841,6 +841,10 @@ class OrderBody(BaseModel):
     tahun: str = ""
     km: str = ""
     kondisi: str = "Bekas"
+    # Dimensi kargo (cm) — dipakai buat hitung M3 otomatis di Surat Jalan
+    panjang: str = ""
+    lebar: str = ""
+    tinggi: str = ""
     # Asal
     asal_kota: str
     asal_alamat: str = ""
@@ -889,6 +893,9 @@ async def create_order(payload: OrderBody):
         "tahun": (payload.tahun or "").strip()[:6],
         "km": (payload.km or "").strip()[:12],
         "kondisi": (payload.kondisi or "Bekas").strip()[:20],
+        "panjang": (payload.panjang or "").strip()[:12],
+        "lebar": (payload.lebar or "").strip()[:12],
+        "tinggi": (payload.tinggi or "").strip()[:12],
         "asal_kota": payload.asal_kota.strip()[:80],
         "asal_alamat": (payload.asal_alamat or "").strip()[:300],
         "pickup_date": (payload.pickup_date or "").strip()[:10],
