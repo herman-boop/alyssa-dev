@@ -531,8 +531,10 @@ const FILENAME_TO_RATIO = {
 };
 /* Batas aman tertinggi (rasio terkecil / box tertinggi) yang masih genuinely
    1 halaman A4 — diverifikasi lewat generate PDF sungguhan (page.pdf() +
-   pdfjs-dist), bukan pengukuran DOM, di margin cetak 0.2in-1.0in. */
-const MAX_SKETCH_HEIGHT_RATIO = 4.0;
+   pdfjs-dist), bukan pengukuran DOM, di margin cetak 0.2in-1.0in. Titik pecah
+   nyata ada di ~3.65-3.7 (beda tipis antar skenario data); 3.8 dipakai supaya
+   masih ada buffer aman di atas titik itu. */
+const MAX_SKETCH_HEIGHT_RATIO = 3.8;
 
 export function getVehicleSketchRatio(type) {
   const filename = TYPE_TO_FILENAME[type];
