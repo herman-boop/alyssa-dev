@@ -845,6 +845,9 @@ class OrderBody(BaseModel):
     panjang: str = ""
     lebar: str = ""
     tinggi: str = ""
+    # Deskripsi barang — dipakai di Surat Jalan (kolom "Isi Menurut Pengirim")
+    # buat kiriman cargo/barang umum (bukan kendaraan/alat berat).
+    isi_kiriman: str = ""
     # Asal
     asal_kota: str
     asal_alamat: str = ""
@@ -896,6 +899,7 @@ async def create_order(payload: OrderBody):
         "panjang": (payload.panjang or "").strip()[:12],
         "lebar": (payload.lebar or "").strip()[:12],
         "tinggi": (payload.tinggi or "").strip()[:12],
+        "isi_kiriman": (payload.isi_kiriman or "").strip()[:200],
         "asal_kota": payload.asal_kota.strip()[:80],
         "asal_alamat": (payload.asal_alamat or "").strip()[:300],
         "pickup_date": (payload.pickup_date or "").strip()[:10],
