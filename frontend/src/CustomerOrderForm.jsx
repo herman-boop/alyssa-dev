@@ -119,7 +119,7 @@ export default function CustomerOrderForm() {
   const [step, setStep] = useState(0);
   const [data, setData] = useState({
     vehicle_type: "", nopol: "", warna: "", tahun: "", km: "", kondisi: "Bekas", no_rangka: "",
-    panjang: "", lebar: "", tinggi: "",
+    panjang: "", lebar: "", tinggi: "", isi_kiriman: "",
     asal_kota: "", asal_alamat: "", pickup_date: "", pickup_time: "", pickup_pic: "", pickup_hp: "",
     tujuan_kota: "", tujuan_alamat: "", delivery_pic: "", delivery_hp: "",
     customer_nama: "", customer_hp: "", customer_email: "", catatan: "",
@@ -165,7 +165,7 @@ export default function CustomerOrderForm() {
 
   const addAnother = () => {
     // Reset hanya data kendaraan, sisanya (asal/tujuan/customer) tetap
-    setData(d => ({ ...d, vehicle_type: "", nopol: "", warna: "", tahun: "", km: "", kondisi: "Bekas", no_rangka: "", panjang: "", lebar: "", tinggi: "" }));
+    setData(d => ({ ...d, vehicle_type: "", nopol: "", warna: "", tahun: "", km: "", kondisi: "Bekas", no_rangka: "", panjang: "", lebar: "", tinggi: "", isi_kiriman: "" }));
     setFiles([]);
     setResult(null);
     setStep(0);
@@ -289,6 +289,11 @@ export default function CustomerOrderForm() {
                   <input type="text" inputMode="decimal" className="of-inp" value={data.tinggi}
                     onChange={(e) => set("tinggi", e.target.value.replace(/[^0-9.]/g, ""))}
                     placeholder="300" data-testid="ord-tinggi" />
+                </Field>
+                <Field label="Deskripsi Barang / Isi Kiriman" full hint="Opsional — muncul di kolom Isi Menurut Pengirim di Surat Jalan. Isi ini kalau kirimannya bukan cuma kendaraan (mis. barang/cargo tambahan).">
+                  <input type="text" className="of-inp" value={data.isi_kiriman}
+                    onChange={(e) => set("isi_kiriman", e.target.value)}
+                    placeholder="Cth: 5 dus mesin cuci" maxLength={200} data-testid="ord-isi-kiriman" />
                 </Field>
                 <Field label="Kondisi">
                   <select className="of-inp" value={data.kondisi}

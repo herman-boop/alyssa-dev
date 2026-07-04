@@ -552,6 +552,9 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
     // M3 = P x L x T (cm) / 1.000.000 — dihitung otomatis dari dimensi yang diisi di form pesanan.
     const p = parseFloat(order.panjang), l = parseFloat(order.lebar), t = parseFloat(order.tinggi);
     const m3 = (p > 0 && l > 0 && t > 0) ? ((p * l * t) / 1_000_000).toFixed(3) : "";
+    // Kiriman cargo/barang umum pakai isi_kiriman; kiriman kendaraan pakai vehicle_type+nopol.
+    const isiContents = (order.isi_kiriman || "").trim()
+      || `${order.vehicle_type || ""} ${order.nopol ? "· " + order.nopol : ""}`.trim();
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Surat Jalan ${noSurat}</title>
     <style>
       * { margin:0; padding:0; box-sizing:border-box; }
@@ -662,7 +665,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
             <td style="text-align:center">1</td>
             <td>Unit</td>
             <td></td>
-            <td class="td-isi">${order.vehicle_type || ""} ${order.nopol ? "· " + order.nopol : ""}</td>
+            <td class="td-isi">${isiContents}</td>
             <td>${order.warna || ""}</td>
             <td style="text-align:center">${order.panjang || ""}</td>
             <td style="text-align:center">${order.lebar || ""}</td>
