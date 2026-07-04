@@ -409,7 +409,7 @@
      getVehicleSketchRatio di VehicleSketches.jsx) supaya gambar 5-sudut-
      pandang mengisi penuh lebar box tanpa letterboxing. Nilai di sini cuma
      fallback sebelum tipe dipilih / kalau JS gagal load. */
-  aspect-ratio: 8.5;
+  aspect-ratio: 4.0;
   background: #f8f9fb;
   cursor: crosshair;
   overflow: hidden;
