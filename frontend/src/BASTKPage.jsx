@@ -95,7 +95,6 @@ export default function BASTKPage() {
   const [gen, setGen] = useState(false);
   const [toast, setToast] = useState(null);
   const sketchAreaRef = useRef(null);
-  const printElRef = useRef(null);
 
   const showToast = (msg, type = "ok") => { setToast({ msg, type }); setTimeout(() => setToast(null), 2400); };
 
@@ -162,7 +161,6 @@ export default function BASTKPage() {
   // dialog print, atau langsung tajam kalau dicetak ke printer fisik.
   const printBASTK = async () => {
     setGen(true);
-    const el = printElRef.current;
     try {
       await saveBASTK();
       // Tunggu font Inter/JetBrains Mono fully loaded biar layout print stabil
@@ -170,40 +168,6 @@ export default function BASTKPage() {
       if (document.fonts && document.fonts.ready) {
         await document.fonts.ready;
       }
-
-      // Data trip beda-beda panjangnya (nama/alamat/catatan panjang, jenis
-      // kendaraan dengan sketsa lebih detail, banyak tanda kerusakan, dst).
-      // Supaya TETAP 1 halaman A4 untuk data apa pun -- bukan cuma yang
-      // kebetulan muat -- ukur dulu tinggi konten meniru lebar & font cetak
-      // asli SEBELUM window.print(). Kalau lebih tinggi dari 1 halaman,
-      // aktifkan .bk-compact: HANYA memangkas padding/line-height/gap,
-      // BUKAN mengecilkan font data utama, BUKAN scale seluruh halaman.
-      if (el) {
-        // CATATAN PENTING: awalnya angka ini dihitung dari @page{margin:5mm}
-        // yang kita set sendiri di CSS. Ternyata di HP Android (dites di
-        // Samsung Fold4 lewat "Simpan sebagai PDF"), margin cetak SUNGGUHAN
-        // tidak mengikuti @page sama sekali -- OS/print service pakai margin
-        // bawaannya sendiri yang jauh lebih besar (>=~0.4in, terbukti dari
-        // pengetesan lepas terhadap beberapa asumsi margin). Makanya angka di
-        // bawah ini SENGAJA dihitung dari margin ~0.75in (bukan 5mm) supaya
-        // tetap aman di printer/driver PDF manapun, bukan cuma yang menghormati
-        // CSS @page.
-        const PRINT_W = 650;  // px @96dpi, lebar cetak (210mm - 2x0.75in margin OS)
-        const BUDGET_H = 920; // px @96dpi, di bawah tinggi cetak (297mm - 2x0.75in) sebagai buffer aman
-        const prev = { width: el.style.width, maxWidth: el.style.maxWidth };
-        el.classList.remove("bk-compact");
-        el.classList.add("bk-measure-mode"); // samakan font ke Arial (sama seperti saat cetak asli)
-        el.style.width = PRINT_W + "px";
-        el.style.maxWidth = PRINT_W + "px";
-        el.getBoundingClientRect(); // paksa reflow
-        if (el.offsetHeight > BUDGET_H) {
-          el.classList.add("bk-compact");
-        }
-        el.classList.remove("bk-measure-mode");
-        el.style.width = prev.width;
-        el.style.maxWidth = prev.maxWidth;
-      }
-
       window.print();
     } catch (e) {
       showToast("Gagal menyiapkan cetak: " + e.message, "err");
@@ -245,7 +209,7 @@ export default function BASTKPage() {
       </div>
 
       {/* PRINT AREA — yang tampil saat Cetak/Simpan PDF (window.print) */}
-      <div className="bk-print" ref={printElRef} data-testid="bk-print">
+      <div className="bk-print" data-testid="bk-print">
         {/* HEADER */}
         <div className="bk-header">
           <div className="bk-header-left">

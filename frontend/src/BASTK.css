@@ -88,12 +88,12 @@
   background: #ffffff;
   color: #0A1628;
   margin: 10px;
-  padding: 8px 14px;
+  padding: 6px 12px;
   border-radius: 14px;
   border: 1px solid #d9dce3;
   box-shadow: 0 10px 30px rgba(0,0,0,.35);
   font-size: 13px;
-  line-height: 1.28;
+  line-height: 1.22;
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
 }
@@ -104,9 +104,9 @@
   grid-template-columns: 1fr auto;
   gap: 16px;
   align-items: center;
-  padding-bottom: 3px;
+  padding-bottom: 2px;
   border-bottom: 3px double #854F0B;
-  margin-bottom: 3px;
+  margin-bottom: 2px;
 }
 .bk-header-left {
   display: flex;
@@ -268,14 +268,14 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
-  margin-bottom: 6px;
+  margin-bottom: 2px;
 }
 @media (max-width: 720px) {
   .bk-grid-2 { grid-template-columns: 1fr; }
 }
 
 /* Kolom kanan: 2 kotak penyerah + penerima */
-.bk-party-col { display: flex; flex-direction: column; gap: 6px; }
+.bk-party-col { display: flex; flex-direction: column; gap: 2px; }
 .bk-party-col .bk-panel { margin-bottom: 0; }
 
 /* Data kendaraan 2 kolom (label:value) */
@@ -287,10 +287,10 @@
 .bk-kv {
   display: flex;
   gap: 4px;
-  padding: 3px 10px;
+  padding: 2px 10px;
   border-bottom: 1.5px solid #c7ccd6;
   font-size: 14px;
-  line-height: 1.24;
+  line-height: 1.18;
   align-items: baseline;
 }
 .bk-kv .k { color: #333333; font-weight: 700; min-width: 52px; }
@@ -300,9 +300,9 @@
 /* Syarat & Ketentuan — 1 kolom biar font besar tetap nyaman dibaca */
 .bk-terms {
   margin: 0;
-  padding: 2px 14px 2px 22px;
+  padding: 1px 12px 1px 20px;
   font-size: 11px;
-  line-height: 1.32;
+  line-height: 1.24;
   color: #000000;
   columns: 1;
 }
@@ -315,7 +315,7 @@
   border-radius: 10px;
   overflow: hidden;
   background: #fff;
-  margin-bottom: 2px;
+  margin-bottom: 1px;
 }
 .bk-panel-head {
   background: #0A1628;
@@ -324,9 +324,9 @@
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
   font-size: 12px;
-  line-height: 1.25;
+  line-height: 1.15;
   letter-spacing: .8px;
-  padding: 2px 10px;
+  padding: 1px 10px;
   text-transform: uppercase;
 }
 
@@ -337,11 +337,11 @@
   font-size: 14px;
 }
 .bk-table th, .bk-table td {
-  padding: 3px 10px;
+  padding: 2px 10px;
   text-align: left;
   vertical-align: top;
   border-bottom: 1.5px solid #c7ccd6;
-  line-height: 1.22;
+  line-height: 1.16;
 }
 .bk-table th {
   width: 30%;
@@ -355,7 +355,7 @@
 
 /* ----- Sketsa area + damage marks ----- */
 .bk-sketch-meta {
-  padding: 2px 10px;
+  padding: 1px 10px;
   background: #f8f9fb;
   border-bottom: 1.5px solid #c7ccd6;
   font-size: 12.5px;
@@ -455,20 +455,20 @@
 
 /* ----- Catatan box ----- */
 .bk-catatan-display {
-  padding: 3px 12px;
-  min-height: 10px;
+  padding: 2px 12px;
+  min-height: 8px;
   font-size: 13.5px;
   color: #000000;
   white-space: pre-line;
-  line-height: 1.3;
+  line-height: 1.22;
 }
 
 /* ----- Tanda tangan grid ----- */
 .bk-sig-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  padding: 3px;
+  gap: 6px;
+  padding: 2px;
 }
 @media (max-width: 720px) {
   .bk-sig-grid { grid-template-columns: 1fr; }
@@ -476,7 +476,7 @@
 .bk-sig-box {
   border: 1px solid #d9dce3;
   border-radius: 8px;
-  padding: 3px 8px;
+  padding: 2px 8px;
   background: #fbfcfe;
   text-align: center;
 }
@@ -486,7 +486,7 @@
   color: #333333;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  margin-bottom: 3px;
+  margin-bottom: 1px;
 }
 .bk-sig-img {
   width: 100%;
@@ -496,7 +496,7 @@
   border-radius: 4px;
 }
 .bk-sig-empty {
-  height: 24px;
+  height: 18px;
   display: grid;
   place-items: center;
   color: #5F7494;
@@ -505,20 +505,20 @@
 }
 .bk-sig-line {
   border-bottom: 1.5px solid #000000;
-  margin: 5px 8px 0;
+  margin: 2px 8px 0;
 }
 .bk-sig-name {
   font-size: 13px;
   font-weight: 800;
   color: #000000;
-  padding-top: 3px;
-  margin-top: 3px;
+  padding-top: 1px;
+  margin-top: 1px;
 }
 
 /* ----- Footer ----- */
 .bk-footer {
-  margin-top: 2px;
-  padding-top: 2px;
+  margin-top: 1px;
+  padding-top: 1px;
   border-top: 1.5px solid #c7ccd6;
   font-size: 11px;
   color: #333333;
@@ -694,45 +694,4 @@
   .bk-print, .bk-print * {
     font-family: Arial, "Helvetica Neue", Helvetica, sans-serif !important;
   }
-
-  /* ---- MODE PADAT (.bk-compact) ----
-     Data tiap trip beda panjang: nama/alamat/catatan panjang, jenis kendaraan
-     dengan sketsa lebih detail, banyak tanda kerusakan, dll — semua bikin
-     tinggi konten berbeda-beda. printBASTK() di BASTKPage.jsx mengukur tinggi
-     konten SEBELUM window.print() dan menambahkan class ini HANYA kalau
-     kontennya lebih tinggi dari 1 halaman A4. Yang dipangkas cuma padding/
-     line-height/gap/margin — font data utama & desain premium TIDAK berubah,
-     dan ini BUKAN scale/zoom seluruh halaman. */
-  .bk-print.bk-compact { padding: 3px 8px; line-height: 1.05; }
-  .bk-print.bk-compact .bk-header { padding-bottom: 1px; margin-bottom: 1px; }
-  .bk-print.bk-compact .bk-panel { margin-bottom: 0; }
-  .bk-print.bk-compact .bk-panel-head { padding: 0px 8px; line-height: 1.05; }
-  .bk-print.bk-compact .bk-grid-2 { margin-bottom: 0; gap: 4px; }
-  .bk-print.bk-compact .bk-party-col { gap: 0; }
-  .bk-print.bk-compact .bk-kv { padding: 0px 8px; line-height: 1; gap: 3px; }
-  .bk-print.bk-compact .bk-table th,
-  .bk-print.bk-compact .bk-table td { padding: 0px 8px; line-height: 1; }
-  .bk-print.bk-compact .bk-sketch-meta { padding: 0px 8px; gap: 3px; }
-  .bk-print.bk-compact .bk-sketch-area { aspect-ratio: 16 / 2.6; }
-  .bk-print.bk-compact .bk-marks-summary { padding: 0px 8px; }
-  .bk-print.bk-compact .bk-catatan-display { padding: 0px 8px; line-height: 1.05; min-height: 0; }
-  .bk-print.bk-compact .bk-terms { padding: 0px 8px 0px 16px; line-height: 1.05; }
-  .bk-print.bk-compact .bk-terms li { margin-bottom: 0; }
-  .bk-print.bk-compact .bk-qr-body { padding: 0px 4px; gap: 6px; }
-  .bk-print.bk-compact .bk-qr-row { padding: 0 0; }
-  .bk-print.bk-compact .bk-qr-note { padding: 0px 4px; margin-top: 1px; line-height: 1.05; }
-  .bk-print.bk-compact .bk-sig-grid { padding: 0px; gap: 4px; }
-  .bk-print.bk-compact .bk-sig-box { padding: 0px 6px; }
-  .bk-print.bk-compact .bk-sig-img { max-height: 26px; }
-  .bk-print.bk-compact .bk-sig-empty { height: 20px; }
-  .bk-print.bk-compact .bk-sig-name { padding-top: 0px; margin-top: 0px; }
-  .bk-print.bk-compact .bk-footer { margin-top: 0px; padding-top: 0px; }
-}
-
-/* Dipakai sesaat oleh printBASTK() (BASTKPage.jsx) untuk mengukur tinggi
-   konten SEBELUM window.print(), menyamakan font ke Arial (font yang sama
-   dipakai saat cetak asli) supaya hasil ukur akurat — bukan bagian dari
-   desain, dilepas lagi setelah pengukuran selesai. */
-.bk-measure-mode, .bk-measure-mode * {
-  font-family: Arial, "Helvetica Neue", Helvetica, sans-serif !important;
 }
