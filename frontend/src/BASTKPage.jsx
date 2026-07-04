@@ -4,7 +4,7 @@ import { QRCodeSVG } from "qrcode.react";
 import "@/App.css";
 import "@/Driver.css";
 import "@/BASTK.css";
-import { VEHICLE_TYPE_LIST, VehicleSketch, DAMAGE_CODES } from "@/VehicleSketches";
+import { VEHICLE_TYPE_LIST, VehicleSketch, DAMAGE_CODES, getVehicleSketchRatio } from "@/VehicleSketches";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -95,7 +95,6 @@ export default function BASTKPage() {
   const [gen, setGen] = useState(false);
   const [toast, setToast] = useState(null);
   const sketchAreaRef = useRef(null);
-  const printElRef = useRef(null);
 
   const showToast = (msg, type = "ok") => { setToast({ msg, type }); setTimeout(() => setToast(null), 2400); };
 
@@ -162,7 +161,6 @@ export default function BASTKPage() {
   // dialog print, atau langsung tajam kalau dicetak ke printer fisik.
   const printBASTK = async () => {
     setGen(true);
-    const el = printElRef.current;
     try {
       await saveBASTK();
       // Tunggu font Inter/JetBrains Mono fully loaded biar layout print stabil
@@ -170,40 +168,6 @@ export default function BASTKPage() {
       if (document.fonts && document.fonts.ready) {
         await document.fonts.ready;
       }
-
-      // Data trip beda-beda panjangnya (nama/alamat/catatan panjang, jenis
-      // kendaraan dengan sketsa lebih detail, banyak tanda kerusakan, dst).
-      // Supaya TETAP 1 halaman A4 untuk data apa pun -- bukan cuma yang
-      // kebetulan muat -- ukur dulu tinggi konten meniru lebar & font cetak
-      // asli SEBELUM window.print(). Kalau lebih tinggi dari 1 halaman,
-      // aktifkan .bk-compact: HANYA memangkas padding/line-height/gap,
-      // BUKAN mengecilkan font data utama, BUKAN scale seluruh halaman.
-      if (el) {
-        // CATATAN PENTING: awalnya angka ini dihitung dari @page{margin:5mm}
-        // yang kita set sendiri di CSS. Ternyata di HP Android (dites di
-        // Samsung Fold4 lewat "Simpan sebagai PDF"), margin cetak SUNGGUHAN
-        // tidak mengikuti @page sama sekali -- OS/print service pakai margin
-        // bawaannya sendiri yang jauh lebih besar (>=~0.4in, terbukti dari
-        // pengetesan lepas terhadap beberapa asumsi margin). Makanya angka di
-        // bawah ini SENGAJA dihitung dari margin ~0.75in (bukan 5mm) supaya
-        // tetap aman di printer/driver PDF manapun, bukan cuma yang menghormati
-        // CSS @page.
-        const PRINT_W = 650;  // px @96dpi, lebar cetak (210mm - 2x0.75in margin OS)
-        const BUDGET_H = 920; // px @96dpi, di bawah tinggi cetak (297mm - 2x0.75in) sebagai buffer aman
-        const prev = { width: el.style.width, maxWidth: el.style.maxWidth };
-        el.classList.remove("bk-compact");
-        el.classList.add("bk-measure-mode"); // samakan font ke Arial (sama seperti saat cetak asli)
-        el.style.width = PRINT_W + "px";
-        el.style.maxWidth = PRINT_W + "px";
-        el.getBoundingClientRect(); // paksa reflow
-        if (el.offsetHeight > BUDGET_H) {
-          el.classList.add("bk-compact");
-        }
-        el.classList.remove("bk-measure-mode");
-        el.style.width = prev.width;
-        el.style.maxWidth = prev.maxWidth;
-      }
-
       window.print();
     } catch (e) {
       showToast("Gagal menyiapkan cetak: " + e.message, "err");
@@ -245,7 +209,7 @@ export default function BASTKPage() {
       </div>
 
       {/* PRINT AREA — yang tampil saat Cetak/Simpan PDF (window.print) */}
-      <div className="bk-print" ref={printElRef} data-testid="bk-print">
+      <div className="bk-print" data-testid="bk-print">
         {/* HEADER */}
         <div className="bk-header">
           <div className="bk-header-left">
@@ -266,45 +230,40 @@ export default function BASTKPage() {
           </div>
         </div>
 
-        {/* DATA KENDARAAN + PELANGGAN */}
-        <div className="bk-grid-2">
-          <section className="bk-panel">
-            <div className="bk-panel-head">DATA KENDARAAN</div>
-            <div className="bk-kv-grid">
-              <div className="bk-kv"><span className="k">No. Polisi</span><span className="v bk-mono">{data.nopol || "—"}</span></div>
-              <div className="bk-kv"><span className="k">Tipe</span><span className="v">{vehicleType || data.tipe_kendaraan || "—"}</span></div>
-              <div className="bk-kv"><span className="k">No. Rangka</span><span className="v bk-mono">{data.no_rangka || "—"}</span></div>
-              <div className="bk-kv"><span className="k">Warna</span><span className="v">{customer.warna || "—"}</span></div>
-              <div className="bk-kv"><span className="k">Tahun</span><span className="v">{customer.tahun || "—"}</span></div>
-              <div className="bk-kv"><span className="k">Kilometer</span><span className="v">{customer.km || "—"}</span></div>
-              <div className="bk-kv"><span className="k">Kondisi</span><span className="v">{customer.kondisi || "—"}</span></div>
-              <div className="bk-kv"><span className="k">PIC</span><span className="v">{customer.pic || "—"}</span></div>
-              <div className="bk-kv bk-kv-full"><span className="k">Rute</span><span className="v">{data.route || "—"}</span></div>
-            </div>
-          </section>
-          <div className="bk-party-col">
-            <section className="bk-panel">
-              <div className="bk-panel-head">PELANGGAN YANG MENYERAHKAN</div>
-              <table className="bk-table">
-                <tbody>
-                  <tr><th>Nama</th><td>{customer.penyerah_nama || "—"}</td></tr>
-                  <tr><th>No. HP</th><td>{customer.penyerah_hp || "—"}</td></tr>
-                  <tr><th>Alamat</th><td className="bk-wrap">{customer.penyerah_alamat || "—"}</td></tr>
-                </tbody>
-              </table>
-            </section>
-            <section className="bk-panel">
-              <div className="bk-panel-head">PELANGGAN YANG MENERIMA</div>
-              <table className="bk-table">
-                <tbody>
-                  <tr><th>Nama</th><td>{customer.penerima_nama || "—"}</td></tr>
-                  <tr><th>No. HP</th><td>{customer.penerima_hp || "—"}</td></tr>
-                  <tr><th>Alamat</th><td className="bk-wrap">{customer.penerima_alamat || "—"}</td></tr>
-                </tbody>
-              </table>
-            </section>
+        {/* DATA KENDARAAN — full width, 4 kolom biar hemat tinggi */}
+        <section className="bk-panel">
+          <div className="bk-panel-head">DATA KENDARAAN</div>
+          <div className="bk-kv-grid">
+            <div className="bk-kv"><span className="k">No. Polisi</span><span className="v bk-mono">{data.nopol || "—"}</span></div>
+            <div className="bk-kv"><span className="k">Tipe</span><span className="v">{vehicleType || data.tipe_kendaraan || "—"}</span></div>
+            <div className="bk-kv"><span className="k">No. Rangka</span><span className="v bk-mono">{data.no_rangka || "—"}</span></div>
+            <div className="bk-kv"><span className="k">Warna</span><span className="v">{customer.warna || "—"}</span></div>
+            <div className="bk-kv"><span className="k">Tahun</span><span className="v">{customer.tahun || "—"}</span></div>
+            <div className="bk-kv"><span className="k">Kilometer</span><span className="v">{customer.km || "—"}</span></div>
+            <div className="bk-kv"><span className="k">Kondisi</span><span className="v">{customer.kondisi || "—"}</span></div>
+            <div className="bk-kv"><span className="k">PIC</span><span className="v">{customer.pic || "—"}</span></div>
+            <div className="bk-kv bk-kv-full"><span className="k">Rute</span><span className="v">{data.route || "—"}</span></div>
           </div>
-        </div>
+        </section>
+
+        {/* PELANGGAN — satu tabel gabungan (Menyerahkan + Menerima berdampingan) */}
+        <section className="bk-panel">
+          <div className="bk-panel-head">SERAH TERIMA PELANGGAN</div>
+          <table className="bk-table bk-table-split">
+            <thead>
+              <tr>
+                <th></th>
+                <th>Menyerahkan</th>
+                <th>Menerima</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><th>Nama</th><td>{customer.penyerah_nama || "—"}</td><td>{customer.penerima_nama || "—"}</td></tr>
+              <tr><th>No. HP</th><td>{customer.penyerah_hp || "—"}</td><td>{customer.penerima_hp || "—"}</td></tr>
+              <tr><th>Alamat</th><td className="bk-wrap">{customer.penyerah_alamat || "—"}</td><td className="bk-wrap">{customer.penerima_alamat || "—"}</td></tr>
+            </tbody>
+          </table>
+        </section>
 
         {/* SKETSA + DAMAGE CHECKLIST */}
         <section className="bk-panel">
@@ -312,10 +271,18 @@ export default function BASTKPage() {
           <div className="bk-sketch-meta">
             <div className="bk-sketch-meta-item"><b>Tipe:</b> {vehicleType || "—"}</div>
             <div className="bk-sketch-meta-item"><b>Total tanda:</b> {marks.length}</div>
+            <div className="bk-codes-row">
+              {DAMAGE_CODES.map((c) => (
+                <span key={c.code} className="bk-code-pill" style={{ background: c.bg, color: c.color, borderColor: c.color }}>
+                  <b>{c.code}</b> = {c.label}
+                </span>
+              ))}
+            </div>
           </div>
           <div
             ref={sketchAreaRef}
             className="bk-sketch-area"
+            style={{ aspectRatio: getVehicleSketchRatio(vehicleType) }}
             onClick={addMark}
             role="application"
             data-testid="bk-sketch-area"
@@ -355,16 +322,6 @@ export default function BASTKPage() {
               })}
             </div>
           )}
-          <div className="bk-sketch-meta">
-            <div className="bk-sketch-meta-item"><b>Kode Kerusakan:</b></div>
-            <div className="bk-codes-row">
-              {DAMAGE_CODES.map((c) => (
-                <span key={c.code} className="bk-code-pill" style={{ background: c.bg, color: c.color, borderColor: c.color }}>
-                  <b>{c.code}</b> = {c.label}
-                </span>
-              ))}
-            </div>
-          </div>
         </section>
 
         {/* CATATAN */}
@@ -450,19 +407,19 @@ export default function BASTKPage() {
           <div className="bk-sig-grid">
             <div className="bk-sig-box">
               <div className="bk-sig-box-label">Menyerahkan / Customer</div>
-              {sigPenyerah ? <img src={sigPenyerah} alt="ttd penyerah" className="bk-sig-img" /> : <div className="bk-sig-empty">(belum tanda tangan)</div>}
+              {sigPenyerah && <img src={sigPenyerah} alt="ttd penyerah" className="bk-sig-img" />}
               <div className="bk-sig-line" />
               <div className="bk-sig-name">{customer.penyerah_nama || "—"}</div>
             </div>
             <div className="bk-sig-box">
               <div className="bk-sig-box-label">Driver / Ekspedisi</div>
-              {sigDriver ? <img src={sigDriver} alt="ttd driver" className="bk-sig-img" /> : <div className="bk-sig-empty">(belum tanda tangan)</div>}
+              {sigDriver && <img src={sigDriver} alt="ttd driver" className="bk-sig-img" />}
               <div className="bk-sig-line" />
               <div className="bk-sig-name">{data.nama_driver || "—"}</div>
             </div>
             <div className="bk-sig-box">
               <div className="bk-sig-box-label">Menerima / Customer</div>
-              {sigCustomer ? <img src={sigCustomer} alt="ttd customer" className="bk-sig-img" /> : <div className="bk-sig-empty">(belum tanda tangan)</div>}
+              {sigCustomer && <img src={sigCustomer} alt="ttd customer" className="bk-sig-img" />}
               <div className="bk-sig-line" />
               <div className="bk-sig-name">{customer.penerima_nama || customer.nama || "—"}</div>
             </div>

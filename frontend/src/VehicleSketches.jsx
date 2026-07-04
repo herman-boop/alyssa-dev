@@ -506,6 +506,42 @@ const TYPE_TO_FILENAME = {
   "Dump Crawler":           "dump-crawler",
 };
 
+/* Rasio lebar:tinggi asli tiap file /vehicles/*.jpg — 5 sudut pandang disusun
+   2 baris (baris 1 lebih sedikit, baris 2 lebih banyak, dipilih otomatis
+   supaya rasio gabungan sedekat mungkin ke 4.0 tanpa melebihi) supaya box
+   sketsa bisa setinggi mungkin (aspect-ratio 4.0 adalah tinggi maksimal yang
+   masih aman muat 1 halaman A4) dengan letterbox seminimal mungkin. */
+const FILENAME_TO_RATIO = {
+  "sedan": 3.829,
+  "mpv-suv": 3.294,
+  "pickup": 3.443,
+  "truck-box": 3.005,
+  "truck-bak": 3.268,
+  "dump-truck": 3.526,
+  "tangki": 3.849,
+  "concrete-pump": 3.7,
+  "fire-truck": 3.489,
+  "motor": 3.778,
+  "excavator": 3.492,
+  "grader": 3.855,
+  "dozer": 3.804,
+  "vibro": 3.603,
+  "forklift": 3.675,
+  "dump-crawler": 3.6,
+};
+/* Batas aman tertinggi (rasio terkecil / box tertinggi) yang masih genuinely
+   1 halaman A4 — diverifikasi lewat generate PDF sungguhan (page.pdf() +
+   pdfjs-dist), bukan pengukuran DOM, di margin cetak 0.2in-1.0in. Titik pecah
+   nyata ada di ~3.65-3.7 (beda tipis antar skenario data); 3.8 dipakai supaya
+   masih ada buffer aman di atas titik itu. */
+const MAX_SKETCH_HEIGHT_RATIO = 3.8;
+
+export function getVehicleSketchRatio(type) {
+  const filename = TYPE_TO_FILENAME[type];
+  const native = filename && FILENAME_TO_RATIO[filename];
+  return Math.max(native || MAX_SKETCH_HEIGHT_RATIO, MAX_SKETCH_HEIGHT_RATIO);
+}
+
 export function VehicleSketch({ type, className, style, color = "#D4A847", strokeWidth = 2 }) {
   const [imgOk, setImgOk] = React.useState(true);
   const filename = TYPE_TO_FILENAME[type];
