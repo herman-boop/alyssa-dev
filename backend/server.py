@@ -1605,6 +1605,36 @@ async def admin_patch_trip_koordinator(trip_id: str, body: KoordinatorBody):
     return {"ok": True, "trip_id": trip_id}
 
 
+class BonusBody(BaseModel):
+    bonus_daily: Optional[int] = None
+    bonus_kerajinan: Optional[int] = None
+
+@api_router.patch("/admin/trips/{trip_id}/bonus", dependencies=[Depends(require_admin_pin)])
+async def admin_patch_trip_bonus(trip_id: str, body: BonusBody):
+    """Update bonus_daily / bonus_kerajinan pada trip yang SUDAH jalan.
+    Sebelumnya nilai ini cuma bisa diisi sekali waktu convert order -> trip
+    (form Convert cuma tampil selagi order.status == NEW) — jadi kalau mau
+    di-nol-in / diubah setelah trip aktif, nggak ada endpoint yang nyimpen
+    perubahannya. Endpoint ini nutup celah itu."""
+    trip = await db.trips.find_one({"trip_id": trip_id})
+    if not trip:
+        raise HTTPException(404, "Trip not found")
+    upd: dict = {"updated_at": datetime.now(timezone.utc).isoformat()}
+    if body.bonus_daily is not None:
+        if body.bonus_daily < 0:
+            raise HTTPException(400, "bonus_daily tidak boleh negatif")
+        upd["bonus_daily"] = body.bonus_daily
+    if body.bonus_kerajinan is not None:
+        if body.bonus_kerajinan < 0:
+            raise HTTPException(400, "bonus_kerajinan tidak boleh negatif")
+        upd["bonus_kerajinan"] = body.bonus_kerajinan
+    if len(upd) == 1:
+        raise HTTPException(400, "No fields to update")
+    await db.trips.update_one({"trip_id": trip_id}, {"$set": upd})
+    doc = await db.trips.find_one({"trip_id": trip_id})
+    return trip_doc_to_public(doc)
+
+
 # ══════════════════════════════════════════════════════
 # KOORDINATOR ACCOUNT SYSTEM
 # ══════════════════════════════════════════════════════
