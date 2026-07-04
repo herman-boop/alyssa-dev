@@ -117,6 +117,7 @@ function Field({ label, children, required, hint, full }) {
 export default function CustomerOrderForm() {
   const [dark, toggleDark] = useDarkMode();
   const [step, setStep] = useState(0);
+  const [shipmentType, setShipmentType] = useState("kendaraan"); // "kendaraan" | "cargo"
   const [data, setData] = useState({
     vehicle_type: "", nopol: "", warna: "", tahun: "", km: "", kondisi: "Bekas", no_rangka: "",
     panjang: "", lebar: "", tinggi: "", isi_kiriman: "",
@@ -132,12 +133,14 @@ export default function CustomerOrderForm() {
   const set = (k, v) => setData((d) => ({ ...d, [k]: v }));
 
   const stepValid = useMemo(() => {
-    if (step === 0) return !!data.vehicle_type;
+    if (step === 0) {
+      return shipmentType === "kendaraan" ? !!data.vehicle_type : !!data.isi_kiriman.trim();
+    }
     if (step === 1) return !!data.asal_kota.trim();
     if (step === 2) return !!data.tujuan_kota.trim();
     if (step === 3) return !!data.customer_nama.trim() && !!data.customer_hp.trim();
     return true;
-  }, [step, data]);
+  }, [step, data, shipmentType]);
 
   const goNext = () => { if (stepValid && step < STEPS.length - 1) setStep(step + 1); };
   const goPrev = () => { if (step > 0) setStep(step - 1); };
@@ -166,6 +169,7 @@ export default function CustomerOrderForm() {
   const addAnother = () => {
     // Reset hanya data kendaraan, sisanya (asal/tujuan/customer) tetap
     setData(d => ({ ...d, vehicle_type: "", nopol: "", warna: "", tahun: "", km: "", kondisi: "Bekas", no_rangka: "", panjang: "", lebar: "", tinggi: "", isi_kiriman: "" }));
+    setShipmentType("kendaraan");
     setFiles([]);
     setResult(null);
     setStep(0);
@@ -223,86 +227,121 @@ export default function CustomerOrderForm() {
               <div className="of-card-hd">
                 <span className="of-card-ico"><IcoTruck /></span>
                 <div>
-                  <div className="of-card-title">Data Kendaraan</div>
-                  <div className="of-card-sub">Lengkapi informasi kendaraan yang akan dikirim</div>
+                  <div className="of-card-title">Data Kiriman</div>
+                  <div className="of-card-sub">Kendaraan/alat berat, atau barang/cargo biasa?</div>
                 </div>
               </div>
-              <div className="of-grid">
-                <Field label="Tipe Kendaraan" required full>
-                  <select className="of-inp" value={data.vehicle_type}
-                    onChange={(e) => set("vehicle_type", e.target.value)}
-                    data-testid="ord-vehicle-type">
-                    <option value="">— Pilih tipe kendaraan —</option>
-                    {VEHICLE_TYPE_LIST.map((v) => <option key={v} value={v}>{v}</option>)}
-                  </select>
-                </Field>
-                {data.vehicle_type && (
-                  <div className="of-field--full" style={{ marginTop: 4 }}>
-                    <div style={{
-                      border: "1px solid var(--of-border, #e5e7eb)", borderRadius: 12,
-                      background: "#fff", padding: 12, display: "flex", flexDirection: "column",
-                      alignItems: "center", gap: 6,
-                    }}>
-                      <VehicleSketch type={data.vehicle_type} style={{ width: "100%", height: 200 }} />
-                      <div style={{ fontSize: 12, color: "#6b7280", fontWeight: 600 }}>
-                        Sketsa referensi — {data.vehicle_type}
+
+              <div className="of-shiptype-toggle" style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+                <button type="button"
+                  className={`of-shiptype-btn${shipmentType === "kendaraan" ? " of-shiptype-btn--active" : ""}`}
+                  onClick={() => setShipmentType("kendaraan")}
+                  data-testid="ord-shiptype-kendaraan"
+                  style={{
+                    flex: 1, padding: "12px 10px", borderRadius: 12, cursor: "pointer",
+                    border: shipmentType === "kendaraan" ? "2px solid #D4A847" : "1px solid var(--of-border, #e5e7eb)",
+                    background: shipmentType === "kendaraan" ? "#FDF6E6" : "#fff",
+                    fontWeight: 700, fontSize: 14,
+                  }}>
+                  🚗 Kendaraan / Alat Berat
+                </button>
+                <button type="button"
+                  className={`of-shiptype-btn${shipmentType === "cargo" ? " of-shiptype-btn--active" : ""}`}
+                  onClick={() => setShipmentType("cargo")}
+                  data-testid="ord-shiptype-cargo"
+                  style={{
+                    flex: 1, padding: "12px 10px", borderRadius: 12, cursor: "pointer",
+                    border: shipmentType === "cargo" ? "2px solid #D4A847" : "1px solid var(--of-border, #e5e7eb)",
+                    background: shipmentType === "cargo" ? "#FDF6E6" : "#fff",
+                    fontWeight: 700, fontSize: 14,
+                  }}>
+                  📦 Cargo / Barang
+                </button>
+              </div>
+
+              {shipmentType === "kendaraan" && (
+                <div className="of-grid">
+                  <Field label="Tipe Kendaraan" required full>
+                    <select className="of-inp" value={data.vehicle_type}
+                      onChange={(e) => set("vehicle_type", e.target.value)}
+                      data-testid="ord-vehicle-type">
+                      <option value="">— Pilih tipe kendaraan —</option>
+                      {VEHICLE_TYPE_LIST.map((v) => <option key={v} value={v}>{v}</option>)}
+                    </select>
+                  </Field>
+                  {data.vehicle_type && (
+                    <div className="of-field--full" style={{ marginTop: 4 }}>
+                      <div style={{
+                        border: "1px solid var(--of-border, #e5e7eb)", borderRadius: 12,
+                        background: "#fff", padding: 12, display: "flex", flexDirection: "column",
+                        alignItems: "center", gap: 6,
+                      }}>
+                        <VehicleSketch type={data.vehicle_type} style={{ width: "100%", height: 200 }} />
+                        <div style={{ fontSize: 12, color: "#6b7280", fontWeight: 600 }}>
+                          Sketsa referensi — {data.vehicle_type}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                )}
-                <Field label="No. Polisi">
-                  <input type="text" className="of-inp" value={data.nopol}
-                    onChange={(e) => set("nopol", e.target.value.toUpperCase())}
-                    placeholder="B 1234 ABC" data-testid="ord-nopol" />
-                </Field>
-                <Field label="No. Rangka">
-                  <input type="text" className="of-inp" value={data.no_rangka}
-                    onChange={(e) => set("no_rangka", e.target.value)}
-                    placeholder="MHFE1CD1XXXXX" data-testid="ord-rangka" />
-                </Field>
-                <Field label="Warna">
-                  <input type="text" className="of-inp" value={data.warna}
-                    onChange={(e) => set("warna", e.target.value)}
-                    placeholder="Hitam" data-testid="ord-warna" />
-                </Field>
-                <Field label="Tahun">
-                  <input type="text" className="of-inp" value={data.tahun} maxLength={4}
-                    onChange={(e) => set("tahun", e.target.value.replace(/\D/g, ""))}
-                    placeholder="2024" data-testid="ord-tahun" />
-                </Field>
-                <Field label="Kilometer">
-                  <input type="text" className="of-inp" value={data.km}
-                    onChange={(e) => set("km", e.target.value)}
-                    placeholder="15000" data-testid="ord-km" />
-                </Field>
-                <Field label="Panjang (cm)">
-                  <input type="text" inputMode="decimal" className="of-inp" value={data.panjang}
-                    onChange={(e) => set("panjang", e.target.value.replace(/[^0-9.]/g, ""))}
-                    placeholder="480" data-testid="ord-panjang" />
-                </Field>
-                <Field label="Lebar (cm)">
-                  <input type="text" inputMode="decimal" className="of-inp" value={data.lebar}
-                    onChange={(e) => set("lebar", e.target.value.replace(/[^0-9.]/g, ""))}
-                    placeholder="190" data-testid="ord-lebar" />
-                </Field>
-                <Field label="Tinggi (cm)">
-                  <input type="text" inputMode="decimal" className="of-inp" value={data.tinggi}
-                    onChange={(e) => set("tinggi", e.target.value.replace(/[^0-9.]/g, ""))}
-                    placeholder="300" data-testid="ord-tinggi" />
-                </Field>
-                <Field label="Deskripsi Barang / Isi Kiriman" full hint="Opsional — muncul di kolom Isi Menurut Pengirim di Surat Jalan. Isi ini kalau kirimannya bukan cuma kendaraan (mis. barang/cargo tambahan).">
-                  <input type="text" className="of-inp" value={data.isi_kiriman}
-                    onChange={(e) => set("isi_kiriman", e.target.value)}
-                    placeholder="Cth: 5 dus mesin cuci" maxLength={200} data-testid="ord-isi-kiriman" />
-                </Field>
-                <Field label="Kondisi">
-                  <select className="of-inp" value={data.kondisi}
-                    onChange={(e) => set("kondisi", e.target.value)}
-                    data-testid="ord-kondisi">
-                    {KONDISI_OPTIONS.map((o) => <option key={o}>{o}</option>)}
-                  </select>
-                </Field>
-              </div>
+                  )}
+                  <Field label="No. Polisi">
+                    <input type="text" className="of-inp" value={data.nopol}
+                      onChange={(e) => set("nopol", e.target.value.toUpperCase())}
+                      placeholder="B 1234 ABC" data-testid="ord-nopol" />
+                  </Field>
+                  <Field label="No. Rangka">
+                    <input type="text" className="of-inp" value={data.no_rangka}
+                      onChange={(e) => set("no_rangka", e.target.value)}
+                      placeholder="MHFE1CD1XXXXX" data-testid="ord-rangka" />
+                  </Field>
+                  <Field label="Warna">
+                    <input type="text" className="of-inp" value={data.warna}
+                      onChange={(e) => set("warna", e.target.value)}
+                      placeholder="Hitam" data-testid="ord-warna" />
+                  </Field>
+                  <Field label="Tahun">
+                    <input type="text" className="of-inp" value={data.tahun} maxLength={4}
+                      onChange={(e) => set("tahun", e.target.value.replace(/\D/g, ""))}
+                      placeholder="2024" data-testid="ord-tahun" />
+                  </Field>
+                  <Field label="Kilometer">
+                    <input type="text" className="of-inp" value={data.km}
+                      onChange={(e) => set("km", e.target.value)}
+                      placeholder="15000" data-testid="ord-km" />
+                  </Field>
+                  <Field label="Kondisi">
+                    <select className="of-inp" value={data.kondisi}
+                      onChange={(e) => set("kondisi", e.target.value)}
+                      data-testid="ord-kondisi">
+                      {KONDISI_OPTIONS.map((o) => <option key={o}>{o}</option>)}
+                    </select>
+                  </Field>
+                </div>
+              )}
+
+              {shipmentType === "cargo" && (
+                <div className="of-grid">
+                  <Field label="Deskripsi Barang / Isi Kiriman" required full hint="Muncul di kolom Isi Menurut Pengirim di Surat Jalan.">
+                    <input type="text" className="of-inp" value={data.isi_kiriman}
+                      onChange={(e) => set("isi_kiriman", e.target.value)}
+                      placeholder="Cth: 5 dus mesin cuci" maxLength={200} data-testid="ord-isi-kiriman" />
+                  </Field>
+                  <Field label="Panjang (cm)">
+                    <input type="text" inputMode="decimal" className="of-inp" value={data.panjang}
+                      onChange={(e) => set("panjang", e.target.value.replace(/[^0-9.]/g, ""))}
+                      placeholder="120" data-testid="ord-panjang" />
+                  </Field>
+                  <Field label="Lebar (cm)">
+                    <input type="text" inputMode="decimal" className="of-inp" value={data.lebar}
+                      onChange={(e) => set("lebar", e.target.value.replace(/[^0-9.]/g, ""))}
+                      placeholder="80" data-testid="ord-lebar" />
+                  </Field>
+                  <Field label="Tinggi (cm)">
+                    <input type="text" inputMode="decimal" className="of-inp" value={data.tinggi}
+                      onChange={(e) => set("tinggi", e.target.value.replace(/[^0-9.]/g, ""))}
+                      placeholder="100" data-testid="ord-tinggi" />
+                  </Field>
+                </div>
+              )}
             </div>
           )}
 
@@ -442,8 +481,14 @@ export default function CustomerOrderForm() {
                 <div className="of-summary-hd">Ringkasan Pesanan</div>
                 <div className="of-summary-body">
                   <SRow k="Pemesan"      v={`${data.customer_nama || "—"} ${data.customer_hp ? `· ${data.customer_hp}` : ""}`.trim()} />
-                  <SRow k="Kendaraan"    v={`${data.vehicle_type || "—"} ${data.nopol ? `· ${data.nopol}` : ""}`} />
-                  <SRow k="Warna / Tahun" v={`${data.warna || "—"} / ${data.tahun || "—"}`} />
+                  {shipmentType === "kendaraan" ? (
+                    <>
+                      <SRow k="Kendaraan"    v={`${data.vehicle_type || "—"} ${data.nopol ? `· ${data.nopol}` : ""}`} />
+                      <SRow k="Warna / Tahun" v={`${data.warna || "—"} / ${data.tahun || "—"}`} />
+                    </>
+                  ) : (
+                    <SRow k="Barang / Cargo" v={data.isi_kiriman || "—"} />
+                  )}
                   {(data.panjang || data.lebar || data.tinggi) && (
                     <SRow k="Dimensi (P×L×T cm)" v={`${data.panjang || "—"} × ${data.lebar || "—"} × ${data.tinggi || "—"}`} />
                   )}
