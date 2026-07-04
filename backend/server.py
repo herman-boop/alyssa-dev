@@ -40,7 +40,23 @@ CRON_SECRET      = os.environ.get("CRON_SECRET", "").strip()
 # real frontend page (same JSX/CSS as on-screen), then page.pdf() produces a
 # genuine vector PDF. Jauh lebih konsisten daripada window.print() + dialog
 # print bawaan Android, yang perilakunya beda-beda tergantung device/driver.
+#
+# Railway otomatis nyuntik RAILWAY_ENVIRONMENT_NAME ke tiap service yang
+# di-deploy di sana — dipakai sebagai sinyal "ini jalan di Railway" supaya
+# fallback localhost:3000 di bawah CUMA aktif pas dev lokal, TIDAK PERNAH di
+# production (kalau di production FRONTEND_URL kosong, biarkan kosong &
+# biar endpoint balas 503 dengan pesan jelas, daripada diam-diam nyasar ke
+# localhost yang jelas salah di server).
+#
+# FRONTEND_URL sendiri harus diisi di Railway dashboard (backend service ->
+# Variables) supaya otomatis ngikutin domain frontend produksi tanpa
+# hardcode — pakai Reference Variable Railway:
+#   FRONTEND_URL = https://${{<nama-service-frontend>.RAILWAY_PUBLIC_DOMAIN}}
+# Railway resolve ini sendiri & auto-update kalau domain frontend berubah.
+_ON_RAILWAY = bool(os.environ.get("RAILWAY_ENVIRONMENT_NAME") or os.environ.get("RAILWAY_ENVIRONMENT"))
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "").strip().rstrip("/")
+if not FRONTEND_URL and not _ON_RAILWAY:
+    FRONTEND_URL = "http://localhost:3000"
 # Override opsional untuk path executable Chromium (dev/sandbox saja — di
 # production biarkan kosong, biar Playwright pakai browser hasil
 # `playwright install chromium` saat build).
@@ -76,8 +92,12 @@ def _validate_env_on_startup() -> None:
     if odoo_keys and len(odoo_keys) < 4:
         warnings.append(f"[ENV] Partial Odoo config ({odoo_keys}) — all 4 required to enable XML-RPC sync.")
 
-    if not (os.environ.get("FRONTEND_URL") or "").strip():
-        warnings.append("[ENV] FRONTEND_URL not set — GET /api/trips/{id}/bastk/pdf will return 503.")
+    if not FRONTEND_URL:
+        warnings.append(
+            "[ENV] FRONTEND_URL not set — GET /api/trips/{id}/bastk/pdf will return 503. "
+            "Set it in Railway dashboard (backend service -> Variables) as a Reference "
+            "Variable: FRONTEND_URL=https://${{<frontend-service-name>.RAILWAY_PUBLIC_DOMAIN}}"
+        )
 
     for w in warnings:
         logging.warning(w)
@@ -98,7 +118,11 @@ async def _launch_pdf_browser():
     startup jauh lebih cepat daripada launch Chromium per-request."""
     global _pw, _browser
     if not FRONTEND_URL:
-        logger.warning("[pdf] FRONTEND_URL kosong — endpoint /bastk/pdf akan mengembalikan 503.")
+        logger.warning(
+            "[pdf] FRONTEND_URL kosong — endpoint /bastk/pdf akan mengembalikan 503. "
+            "Set di Railway dashboard (backend service -> Variables) sebagai Reference "
+            "Variable: FRONTEND_URL=https://${{<nama-service-frontend>.RAILWAY_PUBLIC_DOMAIN}}"
+        )
         return
     try:
         _pw = await async_playwright().start()
@@ -765,7 +789,12 @@ async def bastk_pdf(trip_id: str):
     if not doc:
         raise HTTPException(404, "Trip not found")
     if not FRONTEND_URL:
-        raise HTTPException(503, "FRONTEND_URL belum diset di backend.")
+        raise HTTPException(
+            503,
+            "FRONTEND_URL belum diset di backend. Set di Railway dashboard (backend "
+            "service -> Variables) sebagai Reference Variable: "
+            "FRONTEND_URL=https://${{<nama-service-frontend>.RAILWAY_PUBLIC_DOMAIN}}",
+        )
     if _browser is None:
         raise HTTPException(503, "PDF generator belum siap (Chromium gagal start saat startup).")
 
