@@ -88,7 +88,7 @@
   background: #ffffff;
   color: #0A1628;
   margin: 10px;
-  padding: 6px 12px;
+  padding: 4px 12px;
   border-radius: 14px;
   border: 1px solid #d9dce3;
   box-shadow: 0 10px 30px rgba(0,0,0,.35);
@@ -114,9 +114,9 @@
   gap: 14px;
 }
 .bk-logo-box {
-  width: 58px;
-  height: 58px;
-  border-radius: 12px;
+  width: 46px;
+  height: 46px;
+  border-radius: 10px;
   background: #0A1628;
   display: grid;
   place-items: center;
@@ -173,7 +173,7 @@
   display: grid;
   grid-template-columns: 150px 1fr;
   gap: 10px;
-  padding: 4px 8px;
+  padding: 2px 8px;
   align-items: center;
 }
 @media (max-width: 540px) {
@@ -252,8 +252,8 @@
   color: #000000;
 }
 .bk-qr-note {
-  margin-top: 3px;
-  padding: 4px 8px;
+  margin-top: 2px;
+  padding: 3px 8px;
   background: #fdf6e6;
   border-left: 3px solid #D4A847;
   font-size: 10.5px;
@@ -263,48 +263,56 @@
   font-style: italic;
 }
 
-/* ----- Grid 2 kolom ----- */
-.bk-grid-2 {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin-bottom: 2px;
-}
-@media (max-width: 720px) {
-  .bk-grid-2 { grid-template-columns: 1fr; }
-}
-
-/* Kolom kanan: 2 kotak penyerah + penerima */
-.bk-party-col { display: flex; flex-direction: column; gap: 2px; }
-.bk-party-col .bk-panel { margin-bottom: 0; }
-
-/* Data kendaraan 2 kolom (label:value) */
+/* Data kendaraan — 4 kolom (dipakai full-width sekarang, bukan setengah
+   halaman lagi), 8 field pendek muat 2 baris + 1 baris penuh utk Rute,
+   bukan 4 baris seperti versi 2-kolom lama -- hemat ~2 baris tinggi. */
 .bk-kv-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(4, 1fr);
   gap: 0;
+}
+@media (max-width: 720px) {
+  .bk-kv-grid { grid-template-columns: repeat(2, 1fr); }
 }
 .bk-kv {
   display: flex;
-  gap: 4px;
-  padding: 2px 10px;
-  border-bottom: 1.5px solid #c7ccd6;
-  font-size: 14px;
-  line-height: 1.18;
+  flex-direction: row;
   align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 8px;
+  border-bottom: 1.5px solid #c7ccd6;
+  line-height: 1.2;
 }
-.bk-kv .k { color: #333333; font-weight: 700; min-width: 52px; }
-.bk-kv .v { color: #000000; font-weight: 800; }
+.bk-kv .k { color: #333333; font-weight: 700; font-size: 9.5px; text-transform: uppercase; letter-spacing: .3px; white-space: nowrap; }
+.bk-kv .v { color: #000000; font-weight: 800; font-size: 14px; }
 .bk-kv-full { grid-column: 1 / -1; }
 
-/* Syarat & Ketentuan — 1 kolom biar font besar tetap nyaman dibaca */
+/* Tabel gabungan Menyerahkan+Menerima berdampingan (bk-table-split) —
+   ganti 2 panel terpisah jadi 1 tabel 3 kolom: label | Menyerahkan | Menerima */
+.bk-table-split th, .bk-table-split td { width: auto; }
+.bk-table-split th:first-child { width: 18%; }
+.bk-table-split thead th {
+  background: #f8f9fb;
+  color: #854F0B;
+  font-weight: 800;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  text-align: center;
+}
+.bk-table-split thead th:first-child { background: #fff; }
+.bk-table-split tbody th { text-align: left; }
+
+/* Syarat & Ketentuan — 2 kolom padat, font tetap sama */
 .bk-terms {
   margin: 0;
   padding: 1px 12px 1px 20px;
   font-size: 11px;
   line-height: 1.24;
   color: #000000;
-  columns: 1;
+  columns: 2;
+  column-gap: 14px;
 }
 .bk-terms li { margin-bottom: 0px; break-inside: avoid; }
 .bk-terms b { color: #854F0B; }
@@ -337,7 +345,7 @@
   font-size: 14px;
 }
 .bk-table th, .bk-table td {
-  padding: 2px 10px;
+  padding: 1px 10px;
   text-align: left;
   vertical-align: top;
   border-bottom: 1.5px solid #c7ccd6;
@@ -455,8 +463,8 @@
 
 /* ----- Catatan box ----- */
 .bk-catatan-display {
-  padding: 2px 12px;
-  min-height: 8px;
+  padding: 1px 12px;
+  min-height: 4px;
   font-size: 13.5px;
   color: #000000;
   white-space: pre-line;
@@ -476,7 +484,7 @@
 .bk-sig-box {
   border: 1px solid #d9dce3;
   border-radius: 8px;
-  padding: 2px 8px;
+  padding: 1px 8px;
   background: #fbfcfe;
   text-align: center;
 }
@@ -486,7 +494,7 @@
   color: #333333;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  margin-bottom: 1px;
+  margin-bottom: 0;
 }
 .bk-sig-img {
   width: 100%;
@@ -495,24 +503,16 @@
   background: #fff;
   border-radius: 4px;
 }
-.bk-sig-empty {
-  height: 18px;
-  display: grid;
-  place-items: center;
-  color: #5F7494;
-  font-size: 10px;
-  font-style: italic;
-}
 .bk-sig-line {
   border-bottom: 1.5px solid #000000;
-  margin: 2px 8px 0;
+  margin: 1px 8px 0;
 }
 .bk-sig-name {
   font-size: 13px;
   font-weight: 800;
   color: #000000;
-  padding-top: 1px;
-  margin-top: 1px;
+  padding-top: 0;
+  margin-top: 0;
 }
 
 /* ----- Footer ----- */
@@ -687,7 +687,7 @@
     max-width: 100% !important;
   }
   /* Jangan pecah blok ke halaman berikutnya */
-  .bk-panel, .bk-grid-2, .bk-qr-panel, .bk-sig-grid, .bk-sketch-area { break-inside: avoid; }
+  .bk-panel, .bk-qr-panel, .bk-sig-grid, .bk-sketch-area { break-inside: avoid; }
   /* Font statis (bukan variable-font Inter) — sebagian printer/print-to-PDF
      driver merender axis variable-font kurang presisi; Arial/Helvetica
      sebagai fallback cetak menjaga bentuk huruf tetap solid & vektor bersih. */

@@ -230,45 +230,40 @@ export default function BASTKPage() {
           </div>
         </div>
 
-        {/* DATA KENDARAAN + PELANGGAN */}
-        <div className="bk-grid-2">
-          <section className="bk-panel">
-            <div className="bk-panel-head">DATA KENDARAAN</div>
-            <div className="bk-kv-grid">
-              <div className="bk-kv"><span className="k">No. Polisi</span><span className="v bk-mono">{data.nopol || "—"}</span></div>
-              <div className="bk-kv"><span className="k">Tipe</span><span className="v">{vehicleType || data.tipe_kendaraan || "—"}</span></div>
-              <div className="bk-kv"><span className="k">No. Rangka</span><span className="v bk-mono">{data.no_rangka || "—"}</span></div>
-              <div className="bk-kv"><span className="k">Warna</span><span className="v">{customer.warna || "—"}</span></div>
-              <div className="bk-kv"><span className="k">Tahun</span><span className="v">{customer.tahun || "—"}</span></div>
-              <div className="bk-kv"><span className="k">Kilometer</span><span className="v">{customer.km || "—"}</span></div>
-              <div className="bk-kv"><span className="k">Kondisi</span><span className="v">{customer.kondisi || "—"}</span></div>
-              <div className="bk-kv"><span className="k">PIC</span><span className="v">{customer.pic || "—"}</span></div>
-              <div className="bk-kv bk-kv-full"><span className="k">Rute</span><span className="v">{data.route || "—"}</span></div>
-            </div>
-          </section>
-          <div className="bk-party-col">
-            <section className="bk-panel">
-              <div className="bk-panel-head">PELANGGAN YANG MENYERAHKAN</div>
-              <table className="bk-table">
-                <tbody>
-                  <tr><th>Nama</th><td>{customer.penyerah_nama || "—"}</td></tr>
-                  <tr><th>No. HP</th><td>{customer.penyerah_hp || "—"}</td></tr>
-                  <tr><th>Alamat</th><td className="bk-wrap">{customer.penyerah_alamat || "—"}</td></tr>
-                </tbody>
-              </table>
-            </section>
-            <section className="bk-panel">
-              <div className="bk-panel-head">PELANGGAN YANG MENERIMA</div>
-              <table className="bk-table">
-                <tbody>
-                  <tr><th>Nama</th><td>{customer.penerima_nama || "—"}</td></tr>
-                  <tr><th>No. HP</th><td>{customer.penerima_hp || "—"}</td></tr>
-                  <tr><th>Alamat</th><td className="bk-wrap">{customer.penerima_alamat || "—"}</td></tr>
-                </tbody>
-              </table>
-            </section>
+        {/* DATA KENDARAAN — full width, 4 kolom biar hemat tinggi */}
+        <section className="bk-panel">
+          <div className="bk-panel-head">DATA KENDARAAN</div>
+          <div className="bk-kv-grid">
+            <div className="bk-kv"><span className="k">No. Polisi</span><span className="v bk-mono">{data.nopol || "—"}</span></div>
+            <div className="bk-kv"><span className="k">Tipe</span><span className="v">{vehicleType || data.tipe_kendaraan || "—"}</span></div>
+            <div className="bk-kv"><span className="k">No. Rangka</span><span className="v bk-mono">{data.no_rangka || "—"}</span></div>
+            <div className="bk-kv"><span className="k">Warna</span><span className="v">{customer.warna || "—"}</span></div>
+            <div className="bk-kv"><span className="k">Tahun</span><span className="v">{customer.tahun || "—"}</span></div>
+            <div className="bk-kv"><span className="k">Kilometer</span><span className="v">{customer.km || "—"}</span></div>
+            <div className="bk-kv"><span className="k">Kondisi</span><span className="v">{customer.kondisi || "—"}</span></div>
+            <div className="bk-kv"><span className="k">PIC</span><span className="v">{customer.pic || "—"}</span></div>
+            <div className="bk-kv bk-kv-full"><span className="k">Rute</span><span className="v">{data.route || "—"}</span></div>
           </div>
-        </div>
+        </section>
+
+        {/* PELANGGAN — satu tabel gabungan (Menyerahkan + Menerima berdampingan) */}
+        <section className="bk-panel">
+          <div className="bk-panel-head">SERAH TERIMA PELANGGAN</div>
+          <table className="bk-table bk-table-split">
+            <thead>
+              <tr>
+                <th></th>
+                <th>Menyerahkan</th>
+                <th>Menerima</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><th>Nama</th><td>{customer.penyerah_nama || "—"}</td><td>{customer.penerima_nama || "—"}</td></tr>
+              <tr><th>No. HP</th><td>{customer.penyerah_hp || "—"}</td><td>{customer.penerima_hp || "—"}</td></tr>
+              <tr><th>Alamat</th><td className="bk-wrap">{customer.penyerah_alamat || "—"}</td><td className="bk-wrap">{customer.penerima_alamat || "—"}</td></tr>
+            </tbody>
+          </table>
+        </section>
 
         {/* SKETSA + DAMAGE CHECKLIST */}
         <section className="bk-panel">
@@ -276,6 +271,13 @@ export default function BASTKPage() {
           <div className="bk-sketch-meta">
             <div className="bk-sketch-meta-item"><b>Tipe:</b> {vehicleType || "—"}</div>
             <div className="bk-sketch-meta-item"><b>Total tanda:</b> {marks.length}</div>
+            <div className="bk-codes-row">
+              {DAMAGE_CODES.map((c) => (
+                <span key={c.code} className="bk-code-pill" style={{ background: c.bg, color: c.color, borderColor: c.color }}>
+                  <b>{c.code}</b> = {c.label}
+                </span>
+              ))}
+            </div>
           </div>
           <div
             ref={sketchAreaRef}
@@ -319,16 +321,6 @@ export default function BASTKPage() {
               })}
             </div>
           )}
-          <div className="bk-sketch-meta">
-            <div className="bk-sketch-meta-item"><b>Kode Kerusakan:</b></div>
-            <div className="bk-codes-row">
-              {DAMAGE_CODES.map((c) => (
-                <span key={c.code} className="bk-code-pill" style={{ background: c.bg, color: c.color, borderColor: c.color }}>
-                  <b>{c.code}</b> = {c.label}
-                </span>
-              ))}
-            </div>
-          </div>
         </section>
 
         {/* CATATAN */}
@@ -414,19 +406,19 @@ export default function BASTKPage() {
           <div className="bk-sig-grid">
             <div className="bk-sig-box">
               <div className="bk-sig-box-label">Menyerahkan / Customer</div>
-              {sigPenyerah ? <img src={sigPenyerah} alt="ttd penyerah" className="bk-sig-img" /> : <div className="bk-sig-empty">(belum tanda tangan)</div>}
+              {sigPenyerah && <img src={sigPenyerah} alt="ttd penyerah" className="bk-sig-img" />}
               <div className="bk-sig-line" />
               <div className="bk-sig-name">{customer.penyerah_nama || "—"}</div>
             </div>
             <div className="bk-sig-box">
               <div className="bk-sig-box-label">Driver / Ekspedisi</div>
-              {sigDriver ? <img src={sigDriver} alt="ttd driver" className="bk-sig-img" /> : <div className="bk-sig-empty">(belum tanda tangan)</div>}
+              {sigDriver && <img src={sigDriver} alt="ttd driver" className="bk-sig-img" />}
               <div className="bk-sig-line" />
               <div className="bk-sig-name">{data.nama_driver || "—"}</div>
             </div>
             <div className="bk-sig-box">
               <div className="bk-sig-box-label">Menerima / Customer</div>
-              {sigCustomer ? <img src={sigCustomer} alt="ttd customer" className="bk-sig-img" /> : <div className="bk-sig-empty">(belum tanda tangan)</div>}
+              {sigCustomer && <img src={sigCustomer} alt="ttd customer" className="bk-sig-img" />}
               <div className="bk-sig-line" />
               <div className="bk-sig-name">{customer.penerima_nama || customer.nama || "—"}</div>
             </div>
