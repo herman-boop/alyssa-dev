@@ -4,7 +4,7 @@ import { QRCodeSVG } from "qrcode.react";
 import "@/App.css";
 import "@/Driver.css";
 import "@/BASTK.css";
-import { VEHICLE_TYPE_LIST, VehicleSketch, DAMAGE_CODES } from "@/VehicleSketches";
+import { VEHICLE_TYPE_LIST, VehicleSketch, DAMAGE_CODES, getVehicleSketchRatio } from "@/VehicleSketches";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -282,6 +282,7 @@ export default function BASTKPage() {
           <div
             ref={sketchAreaRef}
             className="bk-sketch-area"
+            style={{ aspectRatio: getVehicleSketchRatio(vehicleType) }}
             onClick={addMark}
             role="application"
             data-testid="bk-sketch-area"

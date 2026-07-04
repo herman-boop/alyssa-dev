@@ -506,6 +506,35 @@ const TYPE_TO_FILENAME = {
   "Dump Crawler":           "dump-crawler",
 };
 
+/* Rasio lebar:tinggi asli tiap file /vehicles/*.jpg (5 sudut pandang
+   berjajar 1 baris) — dipakai untuk set aspect-ratio box sketsa secara
+   dinamis per tipe kendaraan supaya gambar mengisi penuh lebar box tanpa
+   letterboxing, hasil sketsa jadi sebesar mungkin. */
+const FILENAME_TO_RATIO = {
+  "sedan": 7.04,
+  "mpv-suv": 7.04,
+  "pickup": 7.25,
+  "truck-box": 6.34,
+  "truck-bak": 6.91,
+  "dump-truck": 9.47,
+  "tangki": 8.45,
+  "concrete-pump": 9.88,
+  "fire-truck": 8.79,
+  "motor": 10.19,
+  "excavator": 8.51,
+  "grader": 10.54,
+  "dozer": 8.41,
+  "vibro": 7.84,
+  "forklift": 7.88,
+  "dump-crawler": 7.91,
+};
+const DEFAULT_SKETCH_RATIO = 8.5;
+
+export function getVehicleSketchRatio(type) {
+  const filename = TYPE_TO_FILENAME[type];
+  return (filename && FILENAME_TO_RATIO[filename]) || DEFAULT_SKETCH_RATIO;
+}
+
 export function VehicleSketch({ type, className, style, color = "#D4A847", strokeWidth = 2 }) {
   const [imgOk, setImgOk] = React.useState(true);
   const filename = TYPE_TO_FILENAME[type];

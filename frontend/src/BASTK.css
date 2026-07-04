@@ -405,11 +405,11 @@
 .bk-sketch-area {
   position: relative;
   width: 100%;
-  /* Sedikit lebih tinggi dari sebelumnya (16/3.7) — memanfaatkan ruang yang
-     terselamatkan dari pemindahan legend kode kerusakan, biar sketsa & tanda
-     kerusakan lebih jelas dibaca setelah print/scan. Tetap net lebih pendek
-     dari total tinggi dokumen sebelumnya. */
-  aspect-ratio: 16 / 3.72;
+  /* aspect-ratio di-override inline per tipe kendaraan (lihat
+     getVehicleSketchRatio di VehicleSketches.jsx) supaya gambar 5-sudut-
+     pandang mengisi penuh lebar box tanpa letterboxing. Nilai di sini cuma
+     fallback sebelum tipe dipilih / kalau JS gagal load. */
+  aspect-ratio: 8.5;
   background: #f8f9fb;
   cursor: crosshair;
   overflow: hidden;
