@@ -506,28 +506,30 @@ const TYPE_TO_FILENAME = {
   "Dump Crawler":           "dump-crawler",
 };
 
-/* Rasio lebar:tinggi asli tiap file /vehicles/*.jpg — 5 sudut pandang disusun
-   2 baris (baris 1 lebih sedikit, baris 2 lebih banyak, dipilih otomatis
-   supaya rasio gabungan sedekat mungkin ke 4.0 tanpa melebihi) supaya box
-   sketsa bisa setinggi mungkin (aspect-ratio 4.0 adalah tinggi maksimal yang
-   masih aman muat 1 halaman A4) dengan letterbox seminimal mungkin. */
+/* Rasio lebar:tinggi asli tiap file /vehicles/*.jpg — hanya 4 sudut pandang
+   (depan, belakang, atas, 1 samping — duplikat sudut samping kedua dihapus).
+   Layout (1 baris atau 2 baris) dipilih otomatis per kendaraan: dihitung mana
+   yang menghasilkan tinggi render per-baris LEBIH BESAR pada rasio aman
+   (lihat MAX_SKETCH_HEIGHT_RATIO) — kadang 1 baris tanpa letterbox lebih besar
+   (rasio native sudah > batas aman), kadang 2 baris justru lebih besar
+   (rasio native < batas aman, jadi di-clamp & pakai tinggi maksimal). */
 const FILENAME_TO_RATIO = {
-  "sedan": 3.829,
-  "mpv-suv": 3.294,
-  "pickup": 3.443,
-  "truck-box": 3.005,
-  "truck-bak": 3.268,
-  "dump-truck": 3.526,
-  "tangki": 3.849,
-  "concrete-pump": 3.7,
-  "fire-truck": 3.489,
-  "motor": 3.778,
-  "excavator": 3.492,
-  "grader": 3.855,
-  "dozer": 3.804,
-  "vibro": 3.603,
-  "forklift": 3.675,
-  "dump-crawler": 3.6,
+  "sedan": 3.467,
+  "mpv-suv": 4.906,
+  "pickup": 5.068,
+  "truck-box": 4.311,
+  "truck-bak": 4.716,
+  "dump-truck": 7.014,
+  "tangki": 6.235,
+  "concrete-pump": 7.195,
+  "fire-truck": 6.657,
+  "motor": 3.365,
+  "excavator": 6.575,
+  "grader": 3.437,
+  "dozer": 6.374,
+  "vibro": 5.958,
+  "forklift": 6.183,
+  "dump-crawler": 6.072,
 };
 /* Batas aman tertinggi (rasio terkecil / box tertinggi) yang masih genuinely
    1 halaman A4 — diverifikasi lewat generate PDF sungguhan (page.pdf() +
