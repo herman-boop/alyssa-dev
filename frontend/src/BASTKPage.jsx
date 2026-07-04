@@ -179,8 +179,17 @@ export default function BASTKPage() {
       // aktifkan .bk-compact: HANYA memangkas padding/line-height/gap,
       // BUKAN mengecilkan font data utama, BUKAN scale seluruh halaman.
       if (el) {
-        const PRINT_W = 756;   // px @96dpi, lebar cetak asli (210mm - 2x5mm margin @page)
-        const BUDGET_H = 1060; // px @96dpi, sedikit di bawah tinggi cetak asli (287mm) sebagai buffer aman
+        // CATATAN PENTING: awalnya angka ini dihitung dari @page{margin:5mm}
+        // yang kita set sendiri di CSS. Ternyata di HP Android (dites di
+        // Samsung Fold4 lewat "Simpan sebagai PDF"), margin cetak SUNGGUHAN
+        // tidak mengikuti @page sama sekali -- OS/print service pakai margin
+        // bawaannya sendiri yang jauh lebih besar (>=~0.4in, terbukti dari
+        // pengetesan lepas terhadap beberapa asumsi margin). Makanya angka di
+        // bawah ini SENGAJA dihitung dari margin ~0.75in (bukan 5mm) supaya
+        // tetap aman di printer/driver PDF manapun, bukan cuma yang menghormati
+        // CSS @page.
+        const PRINT_W = 650;  // px @96dpi, lebar cetak (210mm - 2x0.75in margin OS)
+        const BUDGET_H = 920; // px @96dpi, di bawah tinggi cetak (297mm - 2x0.75in) sebagai buffer aman
         const prev = { width: el.style.width, maxWidth: el.style.maxWidth };
         el.classList.remove("bk-compact");
         el.classList.add("bk-measure-mode"); // samakan font ke Arial (sama seperti saat cetak asli)

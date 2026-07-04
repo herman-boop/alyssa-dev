@@ -703,28 +703,30 @@
      kontennya lebih tinggi dari 1 halaman A4. Yang dipangkas cuma padding/
      line-height/gap/margin — font data utama & desain premium TIDAK berubah,
      dan ini BUKAN scale/zoom seluruh halaman. */
-  .bk-print.bk-compact { padding: 6px 12px; line-height: 1.15; }
-  .bk-print.bk-compact .bk-header { padding-bottom: 2px; margin-bottom: 2px; }
-  .bk-print.bk-compact .bk-panel { margin-bottom: 1px; }
-  .bk-print.bk-compact .bk-panel-head { padding: 1px 10px; line-height: 1.15; }
-  .bk-print.bk-compact .bk-grid-2 { margin-bottom: 2px; }
-  .bk-print.bk-compact .bk-party-col { gap: 2px; }
-  .bk-print.bk-compact .bk-kv { padding: 1px 10px; line-height: 1.05; }
+  .bk-print.bk-compact { padding: 3px 8px; line-height: 1.05; }
+  .bk-print.bk-compact .bk-header { padding-bottom: 1px; margin-bottom: 1px; }
+  .bk-print.bk-compact .bk-panel { margin-bottom: 0; }
+  .bk-print.bk-compact .bk-panel-head { padding: 0px 8px; line-height: 1.05; }
+  .bk-print.bk-compact .bk-grid-2 { margin-bottom: 0; gap: 4px; }
+  .bk-print.bk-compact .bk-party-col { gap: 0; }
+  .bk-print.bk-compact .bk-kv { padding: 0px 8px; line-height: 1; gap: 3px; }
   .bk-print.bk-compact .bk-table th,
-  .bk-print.bk-compact .bk-table td { padding: 2px 10px; line-height: 1.05; }
-  .bk-print.bk-compact .bk-sketch-meta { padding: 1px 10px; gap: 3px; }
-  .bk-print.bk-compact .bk-sketch-area { aspect-ratio: 16 / 3.35; }
-  .bk-print.bk-compact .bk-marks-summary { padding: 2px 12px; }
-  .bk-print.bk-compact .bk-catatan-display { padding: 2px 12px; line-height: 1.15; min-height: 0; }
-  .bk-print.bk-compact .bk-terms { padding: 1px 12px 1px 20px; line-height: 1.18; }
+  .bk-print.bk-compact .bk-table td { padding: 0px 8px; line-height: 1; }
+  .bk-print.bk-compact .bk-sketch-meta { padding: 0px 8px; gap: 3px; }
+  .bk-print.bk-compact .bk-sketch-area { aspect-ratio: 16 / 2.6; }
+  .bk-print.bk-compact .bk-marks-summary { padding: 0px 8px; }
+  .bk-print.bk-compact .bk-catatan-display { padding: 0px 8px; line-height: 1.05; min-height: 0; }
+  .bk-print.bk-compact .bk-terms { padding: 0px 8px 0px 16px; line-height: 1.05; }
   .bk-print.bk-compact .bk-terms li { margin-bottom: 0; }
-  .bk-print.bk-compact .bk-qr-body { padding: 2px 6px; gap: 8px; }
+  .bk-print.bk-compact .bk-qr-body { padding: 0px 4px; gap: 6px; }
   .bk-print.bk-compact .bk-qr-row { padding: 0 0; }
-  .bk-print.bk-compact .bk-qr-note { padding: 2px 6px; margin-top: 2px; line-height: 1.15; }
-  .bk-print.bk-compact .bk-sig-grid { padding: 2px; gap: 6px; }
-  .bk-print.bk-compact .bk-sig-box { padding: 2px 6px; }
-  .bk-print.bk-compact .bk-sig-name { padding-top: 1px; margin-top: 1px; }
-  .bk-print.bk-compact .bk-footer { margin-top: 1px; padding-top: 1px; }
+  .bk-print.bk-compact .bk-qr-note { padding: 0px 4px; margin-top: 1px; line-height: 1.05; }
+  .bk-print.bk-compact .bk-sig-grid { padding: 0px; gap: 4px; }
+  .bk-print.bk-compact .bk-sig-box { padding: 0px 6px; }
+  .bk-print.bk-compact .bk-sig-img { max-height: 26px; }
+  .bk-print.bk-compact .bk-sig-empty { height: 20px; }
+  .bk-print.bk-compact .bk-sig-name { padding-top: 0px; margin-top: 0px; }
+  .bk-print.bk-compact .bk-footer { margin-top: 0px; padding-top: 0px; }
 }
 
 /* Dipakai sesaat oleh printBASTK() (BASTKPage.jsx) untuk mengukur tinggi
