@@ -58,6 +58,7 @@ const IcoMoon     = () => <svg width="15" height="15" viewBox="0 0 24 24" fill="
 const IcoOdoo     = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><circle cx="8" cy="10" r="2"/><circle cx="16" cy="10" r="2"/><path d="M10 10h4"/></svg>;
 const IcoCalc     = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="10" y2="10"/><line x1="14" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="10" y2="14"/><line x1="14" y1="14" x2="16" y2="14"/><line x1="8" y1="18" x2="10" y2="18"/><line x1="14" y1="18" x2="16" y2="18"/></svg>;
 const IcoRoute    = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M6 17V9a6 6 0 0 1 6-6h1"/><path d="M18 7v8a6 6 0 0 1-6 6h-1"/></svg>;
+const IcoGift     = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="8" width="18" height="4"/><rect x="5" y="12" width="14" height="9"/><line x1="12" y1="8" x2="12" y2="21"/><path d="M12 8c-1.5-3-5-4-5 0"/><path d="M12 8c1.5-3 5-4 5 0"/></svg>;
 const IcoList     = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>;
 
 /* ════════════════════════════════════════
@@ -157,6 +158,7 @@ function Dashboard({ pin, onLogout }) {
   const [convertModal, setConvertModal] = useState(null);
   const [odooModal, setOdooModal] = useState(null);
   const [legsModal, setLegsModal] = useState(null);
+  const [bonusModal, setBonusModal] = useState(null);
   const [toast, setToast] = useState("");
   const [kordList, setKordList] = useState([]);
 
@@ -215,6 +217,15 @@ function Dashboard({ pin, onLogout }) {
       await axios.patch(`${API}/admin/trips/${tripId}/legs`, { legs }, { headers });
       flash("Rute leg tersimpan");
       setLegsModal(null);
+      await loadAll();
+    } catch (e) { flash("Gagal: " + (e?.response?.data?.detail || "error")); }
+  };
+
+  const saveBonus = async (tripId, body) => {
+    try {
+      await axios.patch(`${API}/admin/trips/${tripId}/bonus`, body, { headers });
+      flash("Bonus tersimpan");
+      setBonusModal(null);
       await loadAll();
     } catch (e) { flash("Gagal: " + (e?.response?.data?.detail || "error")); }
   };
@@ -448,6 +459,7 @@ function Dashboard({ pin, onLogout }) {
             onOdoo={doOdoo}
             onDelete={() => deleteOrder(o.order_id)}
             onOpenLegs={() => setLegsModal({ tripId: o.trip_id, order: o })}
+            onOpenBonus={() => setBonusModal({ tripId: o.trip_id, order: o })}
             headers={headers}
             kordList={kordList}
           />
@@ -455,6 +467,15 @@ function Dashboard({ pin, onLogout }) {
       </section>
 
       {toast && <div className="adm-toast" data-testid="adm-toast">{toast}</div>}
+      {bonusModal && (
+        <BonusModal
+          tripId={bonusModal.tripId}
+          order={bonusModal.order}
+          headers={headers}
+          onClose={() => setBonusModal(null)}
+          onSave={(body) => saveBonus(bonusModal.tripId, body)}
+        />
+      )}
       {convertModal && (
         <ConvertModal
           order={convertModal}
@@ -506,7 +527,7 @@ function StatTile({ label, value, cls = "", onClick, active, testid }) {
 /* ════════════════════════════════════════
    ORDER CARD
 ════════════════════════════════════════ */
-function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLegs, headers, kordList = [] }) {
+function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLegs, onOpenBonus, headers, kordList = [] }) {
   const [uploadingKapal, setUploadingKapal] = useState(false);
   const kapalFileRef = useRef();
 
@@ -935,6 +956,11 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
             <IcoRoute /> Rute Leg
           </button>
         )}
+        {order.trip_id && (
+          <button className="adm-btn adm-btn-ghost adm-btn-sm" onClick={onOpenBonus} data-testid={`adm-bonus-${order.order_id}`}>
+            <IcoGift /> Bonus
+          </button>
+        )}
         {linkDriver && <a className="adm-btn adm-btn-ghost adm-btn-sm" href={linkDriver} target="_blank" rel="noreferrer" data-testid={`adm-link-driver-${order.order_id}`}>Driver</a>}
         {linkTrack  && <a className="adm-btn adm-btn-ghost adm-btn-sm" href={linkTrack}  target="_blank" rel="noreferrer" data-testid={`adm-link-track-${order.order_id}`}>Track</a>}
         {linkBastk  && <a className="adm-btn adm-btn-ghost adm-btn-sm" href={linkBastk}  target="_blank" rel="noreferrer" data-testid={`adm-link-bastk-${order.order_id}`}>BASTK</a>}
@@ -1041,6 +1067,71 @@ function ConvertModal({ order, onClose, onSubmit }) {
           <button className="adm-btn adm-btn-ghost" onClick={onClose} disabled={submitting}>Batal</button>
           <button className="adm-btn adm-btn-gold" onClick={submit} disabled={submitting} data-testid="adm-modal-submit">
             {submitting ? "Memproses..." : "Konversi Sekarang"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════
+   BONUS MODAL — edit bonus_daily/bonus_kerajinan untuk trip yang
+   sudah jalan. Nilai ini awalnya cuma bisa diisi sekali waktu convert
+   (form Convert cuma tampil selagi order.status == NEW), jadi kalau mau
+   di-nol-in / diubah setelah trip aktif dulu nggak ada tempatnya.
+════════════════════════════════════════ */
+function BonusModal({ tripId, order, headers, onClose, onSave }) {
+  const [loading, setLoading] = useState(true);
+  const [bd, setBd] = useState("0");
+  const [bk, setBk] = useState("0");
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    axios.get(`${API}/trips/${tripId}`)
+      .then((r) => {
+        if (!alive) return;
+        setBd(String(r.data?.bonus_daily ?? 0));
+        setBk(String(r.data?.bonus_kerajinan ?? 0));
+      })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [tripId]);
+
+  const submit = async () => {
+    setSubmitting(true);
+    await onSave({ bonus_daily: parseInt(bd || "0", 10), bonus_kerajinan: parseInt(bk || "0", 10) });
+    setSubmitting(false);
+  };
+
+  return (
+    <div className="adm-modal-bg" onClick={onClose} data-testid="adm-bonus-modal">
+      <div className="adm-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="adm-modal-head">
+          <div>
+            <div className="adm-modal-title"><IcoGift /> Atur Bonus Driver</div>
+            <div className="adm-modal-sub">{order.order_id} &middot; {order.nama_driver || "Driver belum diisi"}</div>
+          </div>
+          <button className="adm-modal-close" onClick={onClose} aria-label="Tutup"><IcoX /></button>
+        </div>
+        <div className="adm-modal-body">
+          {loading ? (
+            <div className="adm-mute">Memuat nilai bonus saat ini...</div>
+          ) : (
+            <div className="adm-form-grid">
+              <Field label="Bonus Harian" hint="Per foto checkpoint terkirim">
+                <input type="number" min="0" className="adm-input" value={bd} onChange={(e) => setBd(e.target.value)} data-testid="adm-bonus-daily" />
+              </Field>
+              <Field label="Bonus Kerajinan" hint="Dicairkan di Tahap 3">
+                <input type="number" min="0" className="adm-input" value={bk} onChange={(e) => setBk(e.target.value)} data-testid="adm-bonus-kerajinan" />
+              </Field>
+            </div>
+          )}
+        </div>
+        <div className="adm-modal-foot">
+          <button className="adm-btn adm-btn-ghost" onClick={onClose} disabled={submitting}>Batal</button>
+          <button className="adm-btn adm-btn-gold" onClick={submit} disabled={submitting || loading} data-testid="adm-bonus-submit">
+            {submitting ? "Menyimpan..." : "Simpan"}
           </button>
         </div>
       </div>

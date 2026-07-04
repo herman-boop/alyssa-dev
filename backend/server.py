@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Any, Dict
 from datetime import datetime, timezone, timedelta
 from odoo_client import OdooClient
+from playwright.async_api import async_playwright
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -34,6 +35,18 @@ ODOO_WEBHOOK = os.environ.get("ODOO_WEBHOOK_URL", "").strip()
 FONNTE_TOKEN     = os.environ.get("FONNTE_TOKEN", "").strip()
 REMINDER_TARGET  = os.environ.get("REMINDER_TARGET", "087779270110").strip()
 CRON_SECRET      = os.environ.get("CRON_SECRET", "").strip()
+
+# Backend-generated PDF (BASTK) — Chromium headless via Playwright renders the
+# real frontend page (same JSX/CSS as on-screen), then page.pdf() produces a
+# genuine vector PDF. Jauh lebih konsisten daripada window.print() + dialog
+# print bawaan Android, yang perilakunya beda-beda tergantung device/driver.
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "").strip().rstrip("/")
+# Override opsional untuk path executable Chromium (dev/sandbox saja — di
+# production biarkan kosong, biar Playwright pakai browser hasil
+# `playwright install chromium` saat build).
+PLAYWRIGHT_CHROMIUM_PATH = os.environ.get("PLAYWRIGHT_CHROMIUM_PATH", "").strip() or None
+_pw = None
+_browser = None
 
 
 def _validate_env_on_startup() -> None:
@@ -63,6 +76,9 @@ def _validate_env_on_startup() -> None:
     if odoo_keys and len(odoo_keys) < 4:
         warnings.append(f"[ENV] Partial Odoo config ({odoo_keys}) — all 4 required to enable XML-RPC sync.")
 
+    if not (os.environ.get("FRONTEND_URL") or "").strip():
+        warnings.append("[ENV] FRONTEND_URL not set — GET /api/trips/{id}/bastk/pdf will return 503.")
+
     for w in warnings:
         logging.warning(w)
 
@@ -73,6 +89,27 @@ app = FastAPI()
 api_router = APIRouter(prefix="/api")
 
 logger = logging.getLogger(__name__)
+
+
+@app.on_event("startup")
+async def _launch_pdf_browser():
+    """Satu instance Chromium headless dipakai bersama untuk semua request
+    PDF (page baru per-request, browser tetap hidup) — launch sekali di
+    startup jauh lebih cepat daripada launch Chromium per-request."""
+    global _pw, _browser
+    if not FRONTEND_URL:
+        logger.warning("[pdf] FRONTEND_URL kosong — endpoint /bastk/pdf akan mengembalikan 503.")
+        return
+    try:
+        _pw = await async_playwright().start()
+        _browser = await _pw.chromium.launch(
+            executable_path=PLAYWRIGHT_CHROMIUM_PATH,
+            args=["--no-sandbox"],
+        )
+        logger.info("[pdf] Chromium headless siap untuk generate BASTK PDF.")
+    except Exception as e:
+        logger.error(f"[pdf] Gagal launch Chromium: {e}")
+        _pw, _browser = None, None
 
 # ----- Admin PIN guard (simple, env-driven) -----
 def require_admin_pin(x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin")) -> bool:
@@ -712,6 +749,49 @@ async def public_trip(trip_id: str):
         "created_at": doc.get("created_at"),
         "updated_at": doc.get("updated_at"),
     }
+
+
+@api_router.get("/trips/{trip_id}/bastk/pdf")
+async def bastk_pdf(trip_id: str):
+    """Generate BASTK sebagai PDF vector asli (backend-rendered), pengganti
+    window.print() + dialog print bawaan Android yang hasilnya tidak
+    konsisten antar device. Chromium headless me-render halaman BASTK yang
+    SAMA PERSIS dengan tampilan di layar (JSX/CSS asli produksi), lalu
+    page.pdf() menghasilkan PDF dengan teks/garis/QR tetap vector (bukan
+    screenshot raster) — kualitasnya setara PDF invoice Odoo/ERP dan tidak
+    tergantung device/driver print pengguna.
+    """
+    doc = await db.trips.find_one({"trip_id": trip_id})
+    if not doc:
+        raise HTTPException(404, "Trip not found")
+    if not FRONTEND_URL:
+        raise HTTPException(503, "FRONTEND_URL belum diset di backend.")
+    if _browser is None:
+        raise HTTPException(503, "PDF generator belum siap (Chromium gagal start saat startup).")
+
+    page = await _browser.new_page(viewport={"width": 900, "height": 1400})
+    try:
+        await page.goto(f"{FRONTEND_URL}/bastk/{trip_id}", wait_until="networkidle", timeout=30_000)
+        await page.wait_for_selector('[data-testid="bk-print"]', timeout=15_000)
+        await page.evaluate("document.fonts ? document.fonts.ready : Promise.resolve()")
+        await page.emulate_media(media="print")
+        await page.wait_for_timeout(200)  # kasih waktu render ulang (QR/gambar) setelah emulate_media
+        pdf_bytes = await page.pdf(
+            format="A4",
+            print_background=True,
+            margin={"top": "5mm", "bottom": "5mm", "left": "5mm", "right": "5mm"},
+        )
+    except Exception as e:
+        logger.error(f"[pdf] Gagal render BASTK PDF untuk trip {trip_id}: {e}")
+        raise HTTPException(500, "Gagal membuat PDF, coba lagi.")
+    finally:
+        await page.close()
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="BASTK-{trip_id}.pdf"'},
+    )
 
 
 @api_router.get("/odoo/ping")
@@ -1525,6 +1605,36 @@ async def admin_patch_trip_koordinator(trip_id: str, body: KoordinatorBody):
     return {"ok": True, "trip_id": trip_id}
 
 
+class BonusBody(BaseModel):
+    bonus_daily: Optional[int] = None
+    bonus_kerajinan: Optional[int] = None
+
+@api_router.patch("/admin/trips/{trip_id}/bonus", dependencies=[Depends(require_admin_pin)])
+async def admin_patch_trip_bonus(trip_id: str, body: BonusBody):
+    """Update bonus_daily / bonus_kerajinan pada trip yang SUDAH jalan.
+    Sebelumnya nilai ini cuma bisa diisi sekali waktu convert order -> trip
+    (form Convert cuma tampil selagi order.status == NEW) — jadi kalau mau
+    di-nol-in / diubah setelah trip aktif, nggak ada endpoint yang nyimpen
+    perubahannya. Endpoint ini nutup celah itu."""
+    trip = await db.trips.find_one({"trip_id": trip_id})
+    if not trip:
+        raise HTTPException(404, "Trip not found")
+    upd: dict = {"updated_at": datetime.now(timezone.utc).isoformat()}
+    if body.bonus_daily is not None:
+        if body.bonus_daily < 0:
+            raise HTTPException(400, "bonus_daily tidak boleh negatif")
+        upd["bonus_daily"] = body.bonus_daily
+    if body.bonus_kerajinan is not None:
+        if body.bonus_kerajinan < 0:
+            raise HTTPException(400, "bonus_kerajinan tidak boleh negatif")
+        upd["bonus_kerajinan"] = body.bonus_kerajinan
+    if len(upd) == 1:
+        raise HTTPException(400, "No fields to update")
+    await db.trips.update_one({"trip_id": trip_id}, {"$set": upd})
+    doc = await db.trips.find_one({"trip_id": trip_id})
+    return trip_doc_to_public(doc)
+
+
 # ══════════════════════════════════════════════════════
 # KOORDINATOR ACCOUNT SYSTEM
 # ══════════════════════════════════════════════════════
@@ -2150,3 +2260,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+    if _browser is not None:
+        await _browser.close()
+    if _pw is not None:
+        await _pw.stop()
