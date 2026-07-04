@@ -1036,7 +1036,7 @@ async def convert_order_to_trip(order_id: str, payload: OrderConvertBody):
             "nama":    (order.get("customer_nama") or "")[:120],
             "hp":      (order.get("customer_hp") or "")[:30],
             "alamat":  (order.get("tujuan_alamat") or order.get("asal_alamat") or "")[:300],
-            "pic":     (order.get("delivery_pic") or order.get("pickup_pic") or "")[:120],
+            "pic":     (order.get("customer_nama") or order.get("delivery_pic") or order.get("pickup_pic") or "")[:120],
             "warna":   (order.get("warna") or "")[:40],
             "tahun":   (order.get("tahun") or "")[:6],
             "km":      (order.get("km") or "")[:12],
