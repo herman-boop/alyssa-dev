@@ -223,7 +223,7 @@ export default function BASTKPage() {
         <div className="bk-header">
           <div className="bk-header-left">
             <div className="bk-logo-box">
-              <img src="/logo.png" alt="PT Alyssa Auto Logistik" width={56} height={56} style={{ objectFit: "contain" }} />
+              <img src="/logo.png" alt="PT Alyssa Auto Logistik" width={66} height={66} style={{ objectFit: "contain" }} />
             </div>
             <div>
               <div className="bk-brand-name">PT ALYSSA AUTO LOGISTIK</div>
