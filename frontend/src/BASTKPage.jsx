@@ -152,25 +152,34 @@ export default function BASTKPage() {
     } finally { setSaving(false); }
   };
 
-  // Cetak lewat dialog print bawaan browser (window.print), BUKAN html2canvas+jsPDF.
-  // html2canvas merender jadi satu gambar raster (PNG/JPEG) yang resolusinya mentok
-  // di scale capture-nya — begitu di-print fisik lalu discan HP, teks kecil pecah/blur
-  // karena sudah 2x proses rasterisasi (capture -> scan). window.print() memakai CSS
-  // @media print di bawah dan menghasilkan PDF dengan TEKS VEKTOR asli (selectable,
-  // tajam di DPI berapa pun printer-nya) kalau driver pilih "Simpan sebagai PDF" di
-  // dialog print, atau langsung tajam kalau dicetak ke printer fisik.
+  // PDF di-generate di BACKEND (Chromium headless via Playwright merender
+  // halaman ini apa adanya, lalu page.pdf()) — BUKAN window.print() + dialog
+  // print bawaan Android yang hasilnya beda-beda tergantung device/driver,
+  // dan BUKAN html2canvas/screenshot raster. Hasilnya genuinely PDF vector
+  // (teks selectable, garis & QR tajam di DPI berapa pun) — setara kualitas
+  // PDF invoice Odoo/ERP, konsisten di semua device.
   const printBASTK = async () => {
     setGen(true);
     try {
       await saveBASTK();
-      // Tunggu font Inter/JetBrains Mono fully loaded biar layout print stabil
-      // (menghindari reflow/wrap berubah gara-gara FOUT saat dialog print dibuka).
-      if (document.fonts && document.fonts.ready) {
-        await document.fonts.ready;
-      }
-      window.print();
+      const r = await axios.get(`${API}/trips/${tripId}/bastk/pdf`, { responseType: "blob" });
+      const url = window.URL.createObjectURL(new Blob([r.data], { type: "application/pdf" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `BASTK-${tripId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
     } catch (e) {
-      showToast("Gagal menyiapkan cetak: " + e.message, "err");
+      let msg = e.message;
+      if (e.response?.data instanceof Blob) {
+        try {
+          const text = await e.response.data.text();
+          msg = JSON.parse(text)?.detail || msg;
+        } catch { /* keep e.message */ }
+      }
+      showToast("Gagal membuat PDF: " + msg, "err");
     } finally {
       setGen(false);
     }
