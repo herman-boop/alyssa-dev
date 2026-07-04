@@ -505,7 +505,9 @@
 }
 .bk-sig-line {
   border-bottom: 1.5px solid #000000;
-  margin: 1px 8px 0;
+  /* Ruang kosong di atas garis TTD — cukup untuk cap perusahaan (~38mm)
+     tanpa menutupi tanda tangan/nama tercetak. */
+  margin: 38mm 8px 0;
 }
 .bk-sig-name {
   font-size: 13px;
