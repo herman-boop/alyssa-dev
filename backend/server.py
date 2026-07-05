@@ -1132,6 +1132,93 @@ async def _odoo_service_product_id(odoo) -> Optional[int]:
     return pid
 
 
+ODOO_VEHICLE_ATTRIBUTE = "JENIS KENDARAAN"
+
+
+async def _odoo_vehicle_variant_product_id(odoo, vehicle_type: str) -> Optional[int]:
+    """Cari (atau buat) product.product varian dari "Jasa Pengiriman Kendaraan"
+    sesuai vehicle_type, pakai product attribute "JENIS KENDARAAN" yang sudah ada
+    di Odoo (Penjualan > Konfigurasi > Atribut). Best-effort: kalau attribute/
+    template belum ada atau salah satu langkah gagal, fallback ke produk generik
+    (_odoo_service_product_id) — SO tetap ke-buat walau variant-nya gagal."""
+    vt = (vehicle_type or "").strip()
+    base_product_id = await _odoo_service_product_id(odoo)
+    if not vt or not base_product_id:
+        return base_product_id
+
+    try:
+        # 1. Attribute "JENIS KENDARAAN" (sudah ada, dibuat manual di Odoo).
+        attr_ids = await asyncio.to_thread(
+            odoo.call, "product.attribute", "search",
+            [[["name", "=", ODOO_VEHICLE_ATTRIBUTE]]], {"limit": 1},
+        )
+        if not attr_ids:
+            logger.warning(f"[odoo:variant] attribute '{ODOO_VEHICLE_ATTRIBUTE}' tidak ditemukan, fallback ke produk generik")
+            return base_product_id
+        attr_id = attr_ids[0]
+
+        # 2. Cari/buat attribute value sesuai vehicle_type persis.
+        val_ids = await asyncio.to_thread(
+            odoo.call, "product.attribute.value", "search",
+            [[["attribute_id", "=", attr_id], ["name", "=", vt]]], {"limit": 1},
+        )
+        if val_ids:
+            val_id = val_ids[0]
+        else:
+            val_id = await asyncio.to_thread(
+                odoo.call, "product.attribute.value", "create",
+                [{"name": vt, "attribute_id": attr_id}],
+            )
+        if not val_id:
+            return base_product_id
+
+        # 3. Template dari produk dasar.
+        prod_rows = await asyncio.to_thread(
+            odoo.call, "product.product", "read", [[base_product_id]], {"fields": ["product_tmpl_id"]},
+        )
+        if not prod_rows or not prod_rows[0].get("product_tmpl_id"):
+            return base_product_id
+        tmpl_id = prod_rows[0]["product_tmpl_id"][0]
+
+        # 4. Pastikan template punya attribute line "JENIS KENDARAAN" yang include value ini.
+        line_ids = await asyncio.to_thread(
+            odoo.call, "product.template.attribute.line", "search",
+            [[["product_tmpl_id", "=", tmpl_id], ["attribute_id", "=", attr_id]]], {"limit": 1},
+        )
+        if line_ids:
+            line_id = line_ids[0]
+            line_rows = await asyncio.to_thread(
+                odoo.call, "product.template.attribute.line", "read", [[line_id]], {"fields": ["value_ids"]},
+            )
+            current_values = (line_rows[0].get("value_ids") or []) if line_rows else []
+            if val_id not in current_values:
+                await asyncio.to_thread(
+                    odoo.call, "product.template.attribute.line", "write",
+                    [[line_id], {"value_ids": [(4, val_id)]}],
+                )
+        else:
+            await asyncio.to_thread(
+                odoo.call, "product.template.attribute.line", "create",
+                [{"product_tmpl_id": tmpl_id, "attribute_id": attr_id, "value_ids": [(6, 0, [val_id])]}],
+            )
+
+        # 5. Cari product.product varian yang match kombinasi value ini (Odoo
+        #    auto-generate variant begitu attribute line di-update di step 4).
+        variant_ids = await asyncio.to_thread(
+            odoo.call, "product.product", "search",
+            [[["product_tmpl_id", "=", tmpl_id],
+              ["product_template_attribute_value_ids.product_attribute_value_id", "=", val_id]]],
+            {"limit": 1},
+        )
+        if variant_ids:
+            return variant_ids[0]
+        logger.warning(f"[odoo:variant] varian utk '{vt}' belum ke-generate Odoo, fallback ke produk dasar")
+        return base_product_id
+    except Exception as e:
+        logger.warning(f"[odoo:variant:exception] vehicle_type={vt}: {e}")
+        return base_product_id
+
+
 def _odoo_line_desc(order: dict, order_id: str, trip_id: str) -> str:
     """Build a human-readable order-line description from the customer's real input."""
     route = f"{order.get('asal_kota','')} → {order.get('tujuan_kota','')}".strip(" →")
@@ -1171,7 +1258,7 @@ async def _odoo_sync_order(order_id: str, trip_id: str, order: dict, price: floa
         return {"ok": False, "sale_id": None, "partner_id": None, "error": "Gagal autentikasi ke Odoo (cek ODOO_DB/USER/KEY)"}
 
     try:
-        product_id = await _odoo_service_product_id(odoo)
+        product_id = await _odoo_vehicle_variant_product_id(odoo, order.get("vehicle_type"))
         line_desc = _odoo_line_desc(order, order_id, trip_id)
 
         def _build_line():
