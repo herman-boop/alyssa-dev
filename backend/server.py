@@ -1134,6 +1134,22 @@ async def _odoo_service_product_id(odoo) -> Optional[int]:
 
 ODOO_VEHICLE_ATTRIBUTE = "JENIS KENDARAAN"
 
+ODOO_LOGISTIK_TAX_NAME = "PPn Logistik (1.1%)"
+ODOO_LOGISTIK_TAX_RATE = 0.011
+
+
+async def _odoo_find_tax_id(odoo, name: str) -> Optional[int]:
+    """Cari account.tax by exact name. Best-effort — None kalau nggak ketemu/error."""
+    try:
+        tax_ids = await asyncio.to_thread(
+            odoo.call, "account.tax", "search",
+            [[["name", "=", name]]], {"limit": 1},
+        )
+        return tax_ids[0] if tax_ids else None
+    except Exception as e:
+        logger.warning(f"[odoo:tax:exception] name={name}: {e}")
+        return None
+
 
 async def _odoo_vehicle_variant_product_id(odoo, vehicle_type: str) -> Optional[int]:
     """Cari (atau buat) product.product varian dari "Jasa Pengiriman Kendaraan"
@@ -1220,32 +1236,36 @@ async def _odoo_vehicle_variant_product_id(odoo, vehicle_type: str) -> Optional[
 
 
 def _odoo_line_desc(order: dict, order_id: str, trip_id: str) -> str:
-    """Build a human-readable order-line description from the customer's real input."""
-    route = f"{order.get('asal_kota','')} → {order.get('tujuan_kota','')}".strip(" →")
-    head = f"Pengiriman {order.get('vehicle_type','Kendaraan')} | {route}".strip()
-    parts = [head]
+    """Build a concise order-line description — cuma detail unit kendaraan +
+    catatan customer. Route/Pickup/Ref order-trip udah ada di catatan internal
+    SO (lihat `note` di _odoo_sync_order), jadi nggak diulang di sini biar
+    baris produk nggak kepanjangan."""
     veh = []
-    if order.get("nopol"):  veh.append(f"Nopol {order['nopol']}")
-    if order.get("warna"):  veh.append(order["warna"])
-    if order.get("tahun"):  veh.append(f"Th {order['tahun']}")
+    if order.get("nopol"):     veh.append(f"Nopol {order['nopol']}")
+    if order.get("warna"):     veh.append(order["warna"])
+    if order.get("tahun"):     veh.append(f"Th {order['tahun']}")
     if order.get("no_rangka"): veh.append(f"Rangka {order['no_rangka']}")
-    if veh:
-        parts.append(" · ".join(veh))
-    if order.get("pickup_date"):
-        parts.append(f"Pickup: {order['pickup_date']} {order.get('pickup_time','')}".strip())
+    parts = [" · ".join(veh)] if veh else []
     if order.get("catatan"):
         parts.append(f"Catatan: {order['catatan']}")
-    parts.append(f"Ref: {order_id}" + (f" / {trip_id}" if trip_id else ""))
-    return "\n".join(parts)
+    return "\n".join(parts) if parts else (order.get("vehicle_type") or "Kendaraan")
 
 
-async def _odoo_sync_order(order_id: str, trip_id: str, order: dict, price: float = 0.0) -> dict:
+async def _odoo_sync_order(
+    order_id: str, trip_id: str, order: dict, price: float = 0.0,
+    tax_mode: str = "logistik", price_includes_tax: bool = False,
+) -> dict:
     """Best-effort real Odoo XML-RPC sync.
     - Find/creates res.partner (customer) with address from the order.
     - Creates sale.order linked to partner with origin=order_id AND a real order
       line (service product + route/vehicle description + price).
     - Idempotent: reuses existing sale.order for this origin; if that SO has no
       lines yet, backfills one so old empty SOs get fixed on re-click.
+    - tax_mode: "logistik" (default, pakai PPn Logistik 1.1%) atau "no_tax"
+      (baris tanpa pajak sama sekali — dipakai kadang buat pengiriman fretail).
+    - price_includes_tax: kalau True, `price` dianggap harga jual sudah termasuk
+      PPN, jadi price_unit yang dikirim ke Odoo di-back-calculate supaya total
+      SO (setelah Odoo hitung pajak) tetep sama dengan `price` yang diinput.
     Returns {"ok": bool, "sale_id": int|None, "partner_id": int|None, "error": str|None}.
     No-op when OdooClient.enabled is False. Never raises."""
     odoo = OdooClient()
@@ -1261,10 +1281,23 @@ async def _odoo_sync_order(order_id: str, trip_id: str, order: dict, price: floa
         product_id = await _odoo_vehicle_variant_product_id(odoo, order.get("vehicle_type"))
         line_desc = _odoo_line_desc(order, order_id, trip_id)
 
+        unit_price = float(price or 0)
+        tax_ids: Optional[List[int]] = None
+        if tax_mode == "no_tax":
+            tax_ids = []
+        else:
+            logistik_tax_id = await _odoo_find_tax_id(odoo, ODOO_LOGISTIK_TAX_NAME)
+            if logistik_tax_id:
+                tax_ids = [logistik_tax_id]
+            if price_includes_tax and unit_price:
+                unit_price = unit_price / (1 + ODOO_LOGISTIK_TAX_RATE)
+
         def _build_line():
-            vals = {"name": line_desc, "product_uom_qty": 1, "price_unit": float(price or 0)}
+            vals = {"name": line_desc, "product_uom_qty": 1, "price_unit": unit_price}
             if product_id:
                 vals["product_id"] = product_id
+            if tax_ids is not None:
+                vals["tax_id"] = [(6, 0, tax_ids)]
             return [(0, 0, vals)]
 
         note = (
@@ -1988,6 +2021,8 @@ async def admin_delete_order(order_id: str):
 class OdooSyncBody(BaseModel):
     with_invoice: bool = False
     price: float = 0.0
+    tax_mode: str = "logistik"  # "logistik" (PPn Logistik 1.1%) | "no_tax"
+    price_includes_tax: bool = False
 
 
 @api_router.post("/admin/orders/{order_id}/odoo-sync", dependencies=[Depends(require_admin_pin)])
@@ -2006,7 +2041,10 @@ async def admin_odoo_sync(order_id: str, body: OdooSyncBody = OdooSyncBody()):
         raise HTTPException(400, "Odoo belum dikonfigurasi (ODOO_URL/DB/USER/KEY kosong di Railway).")
 
     # Step 1: sync sale.order — AWAIT so we get the real sale_id and can report it.
-    sync = await _odoo_sync_order(order_id, trip_id or "", order, price=body.price)
+    sync = await _odoo_sync_order(
+        order_id, trip_id or "", order, price=body.price,
+        tax_mode=body.tax_mode, price_includes_tax=body.price_includes_tax,
+    )
     if not sync.get("ok"):
         raise HTTPException(502, f"Gagal sync ke Odoo: {sync.get('error') or 'unknown error'}")
 
