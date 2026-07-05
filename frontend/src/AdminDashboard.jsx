@@ -1159,6 +1159,8 @@ function BonusModal({ tripId, order, headers, onClose, onSave }) {
 function OdooModal({ order, orderId, headers, onClose }) {
   const [withInvoice, setWithInvoice] = useState(false);
   const [price, setPrice] = useState("");
+  const [taxMode, setTaxMode] = useState("logistik"); // "logistik" | "no_tax"
+  const [priceIncludesTax, setPriceIncludesTax] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null); // { message, odoo_url }
   const [err, setErr] = useState("");
@@ -1171,7 +1173,12 @@ function OdooModal({ order, orderId, headers, onClose }) {
     try {
       const r = await axios.post(
         `${API}/admin/orders/${orderId}/odoo-sync`,
-        { with_invoice: withInvoice, price: priceNum },
+        {
+          with_invoice: withInvoice,
+          price: priceNum,
+          tax_mode: taxMode,
+          price_includes_tax: taxMode === "logistik" ? priceIncludesTax : false,
+        },
         { headers }
       );
       setResult(r.data);
@@ -1223,6 +1230,45 @@ function OdooModal({ order, orderId, headers, onClose }) {
                   Harga yang disepakati pelanggan. Kosongkan kalau mau isi manual di Odoo.
                 </span>
               </label>
+              <div style={{ marginBottom:14 }}>
+                <span style={{ display:"block", fontSize:12, color:"var(--text-3)", marginBottom:5, fontWeight:700 }}>Pajak</span>
+                <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                  <label style={{ display:"flex", alignItems:"center", gap:10, cursor:"pointer" }}>
+                    <input
+                      type="radio"
+                      name="odoo-tax-mode"
+                      checked={taxMode === "logistik"}
+                      onChange={() => setTaxMode("logistik")}
+                      style={{ accentColor:"#7c3aed", width:16, height:16 }}
+                      data-testid="adm-odoo-tax-logistik"
+                    />
+                    <span>PPn Logistik (1.1%)</span>
+                  </label>
+                  <label style={{ display:"flex", alignItems:"center", gap:10, cursor:"pointer" }}>
+                    <input
+                      type="radio"
+                      name="odoo-tax-mode"
+                      checked={taxMode === "no_tax"}
+                      onChange={() => setTaxMode("no_tax")}
+                      style={{ accentColor:"#7c3aed", width:16, height:16 }}
+                      data-testid="adm-odoo-tax-none"
+                    />
+                    <span>Tanpa Pajak — pengiriman fretail</span>
+                  </label>
+                </div>
+                {taxMode === "logistik" && (
+                  <label style={{ display:"flex", alignItems:"center", gap:10, marginTop:8, cursor:"pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={priceIncludesTax}
+                      onChange={(e) => setPriceIncludesTax(e.target.checked)}
+                      style={{ accentColor:"#7c3aed", width:16, height:16 }}
+                      data-testid="adm-odoo-price-incl-tax"
+                    />
+                    <span>Harga di atas sudah termasuk PPN</span>
+                  </label>
+                )}
+              </div>
               <label style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12, cursor:"pointer" }}>
                 <input type="checkbox" checked={true} readOnly style={{ accentColor:"#7c3aed", width:16, height:16 }} />
                 <span>Sales Order — PO jadi SO di Odoo</span>
