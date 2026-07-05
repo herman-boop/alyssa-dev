@@ -560,9 +560,13 @@ async def xendit_disburse(trip_id: str, payload: CairBody):
 VALID_VEHICLE_TYPES = {
     # Tipe utama
     "Sedan", "MPV / SUV", "MPV / SUV Lainnya", "Pickup / Double Cabin",
-    "Truck Box", "Truck Bak", "Dump Truck", "Truck Tangki", "Concrete Pump",
-    "Fire Truck", "Motor", "Excavator", "Grader", "Dozer", "Vibro Roller",
+    "Concrete Pump", "Motor", "Excavator", "Grader", "Dozer", "Vibro Roller",
     "Forklift", "Dump Crawler",
+    # Mitsubishi Fuso Canter (chassis + karoseri)
+    "Canter FE 71 D4 STD - Bak", "Canter FE 71 D4 STD - Box",
+    "Canter FE 71 D4 STD - Dumptruck", "Canter FE 71 D4 STD - Tangki",
+    "Canter FE 71 D4 STD - Damkar", "Canter FE 71 D4 LONG - Karoseri",
+    "Canter D6 STD - Karoseri",
     # Toyota
     "Toyota Avanza", "Toyota Veloz", "Toyota Rush", "Toyota Fortuner",
     "Toyota Kijang Innova", "Toyota Innova Zenix", "Toyota Raize",
@@ -595,6 +599,7 @@ VALID_VEHICLE_TYPES = {
     "Alat Berat 44 - 46,9 Ton", "Alat Berat 47 - 54,9 Ton",
     "MPV", "SUV", "Pickup", "Double Cabin", "CDD", "Tangki", "Tronton",
     "Box Besar", "Canter", "Canter Pemadam", "Motor 2 Roda", "Motor 3 Roda",
+    "Truck Box", "Truck Bak", "Dump Truck", "Truck Tangki", "Fire Truck",
 }
 VALID_DAMAGE_CODES = {"RSK", "B", "P", "PC", "CL", "L"}
 
