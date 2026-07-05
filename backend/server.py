@@ -557,26 +557,30 @@ async def xendit_disburse(trip_id: str, payload: CairBody):
 
 
 # ---------- BASTK (Berita Acara Serah Terima Kendaraan) — v2.6a ADDITIVE ----------
-VALID_VEHICLE_TYPES = {
+# Karoseri (body type) x chassis truk — "satu opsi per kombinasi", sinkron
+# dengan TRUCK_KAROSERI_COMBOS di frontend/src/VehicleSketches.jsx.
+_KAROSERI_VARIANTS = ["Bak", "Box", "Dumptruck", "Tangki", "Damkar"]
+_CHASSIS_TRUCK = [
+    "Canter FE 71 D4 STD", "Canter FE 71 D4 LONG", "Canter D6 STD",
+    "Hino Ranger F6 STD", "Hino Ranger F6 LONG",
+    "Hino 500 F6 STD", "Hino 500 F6 LONG",
+    "Fuso Fighter FM 65 F6 STD", "Fuso Fighter FM 65 F6 LONG",
+    "Isuzu Giga FTR F6 STD", "Isuzu Giga FTR F6 LONG",
+    "Hino FM 260 JW T10 STD", "Hino FM 260 JW T10 LONG",
+    "Fuso Fighter FN 62 T10 STD", "Fuso Fighter FN 62 T10 LONG",
+    "Isuzu Giga FVM T10 STD", "Isuzu Giga FVM T10 LONG",
+]
+_TRUCK_KAROSERI_COMBOS = {
+    f"{chassis} - {karoseri}"
+    for chassis in _CHASSIS_TRUCK
+    for karoseri in _KAROSERI_VARIANTS
+}
+
+VALID_VEHICLE_TYPES = _TRUCK_KAROSERI_COMBOS | {
     # Tipe utama
     "Sedan", "MPV / SUV", "MPV / SUV Lainnya", "Pickup / Double Cabin",
     "Concrete Pump", "Motor", "Excavator", "Grader", "Dozer", "Vibro Roller",
     "Forklift", "Dump Crawler",
-    # Mitsubishi Fuso Canter (chassis + karoseri)
-    "Canter FE 71 D4 STD - Bak", "Canter FE 71 D4 STD - Box",
-    "Canter FE 71 D4 STD - Dumptruck", "Canter FE 71 D4 STD - Tangki",
-    "Canter FE 71 D4 STD - Damkar", "Canter FE 71 D4 LONG - Karoseri",
-    "Canter D6 STD - Karoseri",
-    # Hino (kelas F6 / T10)
-    "Hino Ranger F6 STD - Karoseri", "Hino Ranger F6 LONG - Karoseri",
-    "Hino 500 F6 STD - Karoseri", "Hino 500 F6 LONG - Karoseri",
-    "Hino FM 260 JW T10 STD - Karoseri", "Hino FM 260 JW T10 LONG - Karoseri",
-    # Mitsubishi Fuso Fighter (kelas F6 / T10)
-    "Fuso Fighter FM 65 F6 STD - Karoseri", "Fuso Fighter FM 65 F6 LONG - Karoseri",
-    "Fuso Fighter FN 62 T10 STD - Karoseri", "Fuso Fighter FN 62 T10 LONG - Karoseri",
-    # Isuzu Giga (kelas F6 / T10)
-    "Isuzu Giga FTR F6 STD - Karoseri", "Isuzu Giga FTR F6 LONG - Karoseri",
-    "Isuzu Giga FVM T10 STD - Karoseri", "Isuzu Giga FVM T10 LONG - Karoseri",
     # Toyota
     "Toyota Avanza", "Toyota Veloz", "Toyota Rush", "Toyota Fortuner",
     "Toyota Kijang Innova", "Toyota Innova Zenix", "Toyota Raize",

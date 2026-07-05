@@ -322,33 +322,60 @@ export function SketchVibroRoller(p) {
   );
 }
 
+/* Karoseri (body type) yang sudah ada sketsanya — dipakai berulang utk tiap
+   chassis truk (D4/D6/F6/T10) supaya "satu opsi per kombinasi" chassis x
+   karoseri, bukan satu opsi generik "Karoseri" per chassis. */
+const KAROSERI_VARIANTS = [
+  { label: "Bak",       sketch: SketchCDD,           filename: "truck-bak" },
+  { label: "Box",       sketch: SketchTruckBox,      filename: "truck-box" },
+  { label: "Dumptruck", sketch: SketchDumpTruck,     filename: "dump-truck" },
+  { label: "Tangki",    sketch: SketchTangki,        filename: "tangki" },
+  { label: "Damkar",    sketch: SketchCanterPemadam, filename: "fire-truck" },
+];
+
+// Chassis 6-roda (single rear axle, kelas D4/D6/F6) — pakai foto asli sesuai karoseri.
+const CHASSIS_6_RODA = [
+  "Canter FE 71 D4 STD", "Canter FE 71 D4 LONG", "Canter D6 STD",
+  "Hino Ranger F6 STD", "Hino Ranger F6 LONG",
+  "Hino 500 F6 STD", "Hino 500 F6 LONG",
+  "Fuso Fighter FM 65 F6 STD", "Fuso Fighter FM 65 F6 LONG",
+  "Isuzu Giga FTR F6 STD", "Isuzu Giga FTR F6 LONG",
+];
+
+// Chassis tronton 10-roda (kelas T10) — belum ada foto asli per-karoseri,
+// jadi semua varian karoseri fallback ke SVG SketchTronton generik.
+const CHASSIS_10_RODA = [
+  "Hino FM 260 JW T10 STD", "Hino FM 260 JW T10 LONG",
+  "Fuso Fighter FN 62 T10 STD", "Fuso Fighter FN 62 T10 LONG",
+  "Isuzu Giga FVM T10 STD", "Isuzu Giga FVM T10 LONG",
+];
+
+function buildKaroseriCombos(chassisList, useRealPhoto) {
+  const combos = [];
+  for (const chassis of chassisList) {
+    for (const v of KAROSERI_VARIANTS) {
+      combos.push({
+        name: `${chassis} - ${v.label}`,
+        sketch: useRealPhoto ? v.sketch : SketchTronton,
+        filename: useRealPhoto ? v.filename : null,
+      });
+    }
+  }
+  return combos;
+}
+
+const TRUCK_KAROSERI_COMBOS = [
+  ...buildKaroseriCombos(CHASSIS_6_RODA, true),
+  ...buildKaroseriCombos(CHASSIS_10_RODA, false),
+];
+
 /* SVG fallback (dipakai kalau gambar /vehicles/*.jpg gagal load). */
 export const VEHICLE_SKETCH_MAP = {
   /* ── 16 bentuk unit (dropdown) ── */
   "Sedan": SketchSedan,
   "MPV / SUV": SketchMPV,
   "Pickup / Double Cabin": SketchDoubleCabin,
-  "Canter FE 71 D4 STD - Bak": SketchCDD,
-  "Canter FE 71 D4 STD - Box": SketchTruckBox,
-  "Canter FE 71 D4 STD - Dumptruck": SketchDumpTruck,
-  "Canter FE 71 D4 STD - Tangki": SketchTangki,
-  "Canter FE 71 D4 STD - Damkar": SketchCanterPemadam,
-  "Canter FE 71 D4 LONG - Karoseri": SketchCDD,
-  "Canter D6 STD - Karoseri": SketchCDD,
-  "Hino Ranger F6 STD - Karoseri": SketchCDD,
-  "Hino Ranger F6 LONG - Karoseri": SketchCDD,
-  "Hino 500 F6 STD - Karoseri": SketchCDD,
-  "Hino 500 F6 LONG - Karoseri": SketchCDD,
-  "Hino FM 260 JW T10 STD - Karoseri": SketchTronton,
-  "Hino FM 260 JW T10 LONG - Karoseri": SketchTronton,
-  "Fuso Fighter FM 65 F6 STD - Karoseri": SketchCDD,
-  "Fuso Fighter FM 65 F6 LONG - Karoseri": SketchCDD,
-  "Fuso Fighter FN 62 T10 STD - Karoseri": SketchTronton,
-  "Fuso Fighter FN 62 T10 LONG - Karoseri": SketchTronton,
-  "Isuzu Giga FTR F6 STD - Karoseri": SketchCDD,
-  "Isuzu Giga FTR F6 LONG - Karoseri": SketchCDD,
-  "Isuzu Giga FVM T10 STD - Karoseri": SketchTronton,
-  "Isuzu Giga FVM T10 LONG - Karoseri": SketchTronton,
+  ...Object.fromEntries(TRUCK_KAROSERI_COMBOS.map(c => [c.name, c.sketch])),
   "Concrete Pump": SketchTruckBox,
   "Motor": SketchMotor2,
   "Excavator": SketchExcavator,
@@ -438,31 +465,8 @@ export const VEHICLE_TYPE_LIST = [
   // ── Lainnya ──
   "MPV / SUV Lainnya",
   "Pickup / Double Cabin",
-  // ── Mitsubishi Fuso Canter (chassis + karoseri) ──
-  "Canter FE 71 D4 STD - Bak",
-  "Canter FE 71 D4 STD - Box",
-  "Canter FE 71 D4 STD - Dumptruck",
-  "Canter FE 71 D4 STD - Tangki",
-  "Canter FE 71 D4 STD - Damkar",
-  "Canter FE 71 D4 LONG - Karoseri",
-  "Canter D6 STD - Karoseri",
-  // ── Hino (kelas F6 / T10) ──
-  "Hino Ranger F6 STD - Karoseri",
-  "Hino Ranger F6 LONG - Karoseri",
-  "Hino 500 F6 STD - Karoseri",
-  "Hino 500 F6 LONG - Karoseri",
-  "Hino FM 260 JW T10 STD - Karoseri",
-  "Hino FM 260 JW T10 LONG - Karoseri",
-  // ── Mitsubishi Fuso Fighter (kelas F6 / T10) ──
-  "Fuso Fighter FM 65 F6 STD - Karoseri",
-  "Fuso Fighter FM 65 F6 LONG - Karoseri",
-  "Fuso Fighter FN 62 T10 STD - Karoseri",
-  "Fuso Fighter FN 62 T10 LONG - Karoseri",
-  // ── Isuzu Giga (kelas F6 / T10) ──
-  "Isuzu Giga FTR F6 STD - Karoseri",
-  "Isuzu Giga FTR F6 LONG - Karoseri",
-  "Isuzu Giga FVM T10 STD - Karoseri",
-  "Isuzu Giga FVM T10 LONG - Karoseri",
+  // ── Truk (chassis x karoseri: Bak/Box/Dumptruck/Tangki/Damkar) ──
+  ...TRUCK_KAROSERI_COMBOS.map(c => c.name),
   "Concrete Pump",
   "Motor",
   "Excavator",
@@ -532,25 +536,11 @@ const TYPE_TO_FILENAME = {
   "Suzuki Ignis":           "sedan",
   "Suzuki Carry":           "pickup",
   "Pickup / Double Cabin":  "pickup",
-  // Mitsubishi Fuso Canter (chassis + karoseri)
-  "Canter FE 71 D4 STD - Bak":        "truck-bak",
-  "Canter FE 71 D4 STD - Box":        "truck-box",
-  "Canter FE 71 D4 STD - Dumptruck":  "dump-truck",
-  "Canter FE 71 D4 STD - Tangki":     "tangki",
-  "Canter FE 71 D4 STD - Damkar":     "fire-truck",
-  "Canter FE 71 D4 LONG - Karoseri":  "truck-bak",
-  "Canter D6 STD - Karoseri":         "truck-bak",
-  "Hino Ranger F6 STD - Karoseri":    "truck-bak",
-  "Hino Ranger F6 LONG - Karoseri":   "truck-bak",
-  "Hino 500 F6 STD - Karoseri":       "truck-bak",
-  "Hino 500 F6 LONG - Karoseri":      "truck-bak",
-  "Fuso Fighter FM 65 F6 STD - Karoseri":  "truck-bak",
-  "Fuso Fighter FM 65 F6 LONG - Karoseri": "truck-bak",
-  "Isuzu Giga FTR F6 STD - Karoseri":      "truck-bak",
-  "Isuzu Giga FTR F6 LONG - Karoseri":     "truck-bak",
-  // T10 (tronton 10 roda) belum ada foto asli — pakai SVG SketchTronton
-  // (VEHICLE_SKETCH_MAP) via fallback otomatis, sengaja tidak dipetakan ke
-  // filename foto supaya nggak salah nampilin truk 4/6-roda buat tronton.
+  // Truk (chassis x karoseri) — T10/tronton sengaja tidak dipetakan ke foto
+  // (filename null di TRUCK_KAROSERI_COMBOS), fallback otomatis ke SVG
+  // SketchTronton lewat VEHICLE_SKETCH_MAP supaya nggak salah nampilin truk
+  // 4/6-roda buat tronton 10-roda.
+  ...Object.fromEntries(TRUCK_KAROSERI_COMBOS.filter(c => c.filename).map(c => [c.name, c.filename])),
   // Backward-compat: data lama tetap render
   "Truck Box":              "truck-box",
   "Truck Bak":              "truck-bak",
