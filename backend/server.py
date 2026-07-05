@@ -567,6 +567,16 @@ VALID_VEHICLE_TYPES = {
     "Canter FE 71 D4 STD - Dumptruck", "Canter FE 71 D4 STD - Tangki",
     "Canter FE 71 D4 STD - Damkar", "Canter FE 71 D4 LONG - Karoseri",
     "Canter D6 STD - Karoseri",
+    # Hino (kelas F6 / T10)
+    "Hino Ranger F6 STD - Karoseri", "Hino Ranger F6 LONG - Karoseri",
+    "Hino 500 F6 STD - Karoseri", "Hino 500 F6 LONG - Karoseri",
+    "Hino FM 260 JW T10 STD - Karoseri", "Hino FM 260 JW T10 LONG - Karoseri",
+    # Mitsubishi Fuso Fighter (kelas F6 / T10)
+    "Fuso Fighter FM 65 F6 STD - Karoseri", "Fuso Fighter FM 65 F6 LONG - Karoseri",
+    "Fuso Fighter FN 62 T10 STD - Karoseri", "Fuso Fighter FN 62 T10 LONG - Karoseri",
+    # Isuzu Giga (kelas F6 / T10)
+    "Isuzu Giga FTR F6 STD - Karoseri", "Isuzu Giga FTR F6 LONG - Karoseri",
+    "Isuzu Giga FVM T10 STD - Karoseri", "Isuzu Giga FVM T10 LONG - Karoseri",
     # Toyota
     "Toyota Avanza", "Toyota Veloz", "Toyota Rush", "Toyota Fortuner",
     "Toyota Kijang Innova", "Toyota Innova Zenix", "Toyota Raize",
