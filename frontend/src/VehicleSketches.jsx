@@ -342,8 +342,10 @@ const CHASSIS_6_RODA = [
   "Isuzu Giga FTR F6 STD", "Isuzu Giga FTR F6 LONG",
 ];
 
-// Chassis tronton 10-roda (kelas T10) — belum ada foto asli per-karoseri,
-// jadi semua varian karoseri fallback ke SVG SketchTronton generik.
+// Chassis tronton 10-roda (kelas T10) — belum ada foto tronton 10-roda asli,
+// jadi dipetakan pakai foto karoseri yang sama dengan kelas 6-roda (D4/D6/F6)
+// biar minimal body type-nya (Bak/Box/Dumptruck/Tangki/Damkar) tetap kebaca,
+// daripada cuma silhouette generik tanpa detail karoseri.
 const CHASSIS_10_RODA = [
   "Hino FM 260 JW T10 STD", "Hino FM 260 JW T10 LONG",
   "Fuso Fighter FN 62 T10 STD", "Fuso Fighter FN 62 T10 LONG",
@@ -366,7 +368,7 @@ function buildKaroseriCombos(chassisList, useRealPhoto) {
 
 const TRUCK_KAROSERI_COMBOS = [
   ...buildKaroseriCombos(CHASSIS_6_RODA, true),
-  ...buildKaroseriCombos(CHASSIS_10_RODA, false),
+  ...buildKaroseriCombos(CHASSIS_10_RODA, true),
 ];
 
 /* SVG fallback (dipakai kalau gambar /vehicles/*.jpg gagal load). */
@@ -536,10 +538,9 @@ const TYPE_TO_FILENAME = {
   "Suzuki Ignis":           "sedan",
   "Suzuki Carry":           "pickup",
   "Pickup / Double Cabin":  "pickup",
-  // Truk (chassis x karoseri) — T10/tronton sengaja tidak dipetakan ke foto
-  // (filename null di TRUCK_KAROSERI_COMBOS), fallback otomatis ke SVG
-  // SketchTronton lewat VEHICLE_SKETCH_MAP supaya nggak salah nampilin truk
-  // 4/6-roda buat tronton 10-roda.
+  // Truk (chassis x karoseri, termasuk T10/tronton) — dipetakan ke foto
+  // karoseri yang sama (truck-bak/truck-box/dump-truck/tangki/fire-truck)
+  // karena belum ada foto tronton 10-roda asli.
   ...Object.fromEntries(TRUCK_KAROSERI_COMBOS.filter(c => c.filename).map(c => [c.name, c.filename])),
   // Backward-compat: data lama tetap render
   "Truck Box":              "truck-box",
