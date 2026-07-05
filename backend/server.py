@@ -1236,19 +1236,24 @@ async def _odoo_vehicle_variant_product_id(odoo, vehicle_type: str) -> Optional[
 
 
 def _odoo_line_desc(order: dict, order_id: str, trip_id: str) -> str:
-    """Build a concise order-line description — cuma detail unit kendaraan +
-    catatan customer. Route/Pickup/Ref order-trip udah ada di catatan internal
-    SO (lihat `note` di _odoo_sync_order), jadi nggak diulang di sini biar
-    baris produk nggak kepanjangan."""
+    """Build a tight, one-line order-line description — cuma detail unit
+    kendaraan. Route/Pickup/Ref/Catatan customer udah ada di catatan internal
+    SO (lihat `note` di _odoo_sync_order), jadi nggak diulang di kolom produk
+    biar nggak boros (dan placeholder kosong kayak "-" nggak ikut ke-print)."""
+    def clean(v):
+        v = str(v or "").strip()
+        return v if v and v not in ("-", "--", "—") else ""
+
+    nopol = clean(order.get("nopol"))
+    warna = clean(order.get("warna"))
+    tahun = clean(order.get("tahun"))
+    rangka = clean(order.get("no_rangka"))
     veh = []
-    if order.get("nopol"):     veh.append(f"Nopol {order['nopol']}")
-    if order.get("warna"):     veh.append(order["warna"])
-    if order.get("tahun"):     veh.append(f"Th {order['tahun']}")
-    if order.get("no_rangka"): veh.append(f"Rangka {order['no_rangka']}")
-    parts = [" · ".join(veh)] if veh else []
-    if order.get("catatan"):
-        parts.append(f"Catatan: {order['catatan']}")
-    return "\n".join(parts) if parts else (order.get("vehicle_type") or "Kendaraan")
+    if nopol:  veh.append(f"Nopol {nopol}")
+    if warna:  veh.append(warna)
+    if tahun:  veh.append(f"Th {tahun}")
+    if rangka: veh.append(f"Rangka {rangka}")
+    return " · ".join(veh) if veh else (order.get("vehicle_type") or "Kendaraan")
 
 
 async def _odoo_sync_order(
