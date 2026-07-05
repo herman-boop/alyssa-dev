@@ -1151,6 +1151,20 @@ async def _odoo_find_tax_id(odoo, name: str) -> Optional[int]:
         return None
 
 
+async def _odoo_post_internal_note(odoo, sale_id: int, note: str) -> None:
+    """Log `note` sebagai chatter internal (mail.mt_note) di sale.order, BUKAN di
+    field `note`/Terms & Conditions bawaan Odoo — field itu ikut ke-print di
+    quotation/invoice PDF yang dikirim ke customer. Chatter log cuma keliatan
+    di backend Odoo. Best-effort, never raises."""
+    try:
+        await asyncio.to_thread(
+            odoo.call, "sale.order", "message_post",
+            [[sale_id]], {"body": note.replace("\n", "<br/>"), "subtype_xmlid": "mail.mt_note"},
+        )
+    except Exception as e:
+        logger.warning(f"[odoo:note:exception] sale_id={sale_id}: {e}")
+
+
 async def _odoo_vehicle_variant_product_id(odoo, vehicle_type: str) -> Optional[int]:
     """Cari (atau buat) product.product varian dari "Jasa Pengiriman Kendaraan"
     sesuai vehicle_type, pakai product attribute "JENIS KENDARAAN" yang sudah ada
@@ -1305,6 +1319,11 @@ async def _odoo_sync_order(
                 vals["tax_id"] = [(6, 0, tax_ids)]
             return [(0, 0, vals)]
 
+        # NB: sale.order punya 1 field `note` doang, dan itu sebenarnya field
+        # "Terms & Conditions" yang IKUT KE-PRINT di quotation/invoice PDF customer
+        # -- bukan internal-only. Jadi info operasional (route/pickup/ref/catatan)
+        # nggak boleh taruh di situ; dipost sebagai chatter log note (mail.mt_note)
+        # lewat _odoo_post_internal_note, yang cuma keliatan di backend Odoo.
         note = (
             f"Order: {order_id} | Trip: {trip_id}\n"
             f"Route: {order.get('asal_kota','')} → {order.get('tujuan_kota','')}\n"
@@ -1335,6 +1354,7 @@ async def _odoo_sync_order(
                     await asyncio.to_thread(
                         odoo.call, "sale.order", "write", [[sale_id], {"order_line": _build_line(force_tax=False)}],
                     )
+                await _odoo_post_internal_note(odoo, sale_id, note)
                 logger.info(f"[odoo:sync_order:backfill_line] order={order_id} sale={sale_id}")
             logger.info(f"[odoo:sync_order:reuse] order={order_id} sale={sale_id}")
             await db.orders.update_one(
@@ -1379,7 +1399,6 @@ async def _odoo_sync_order(
                 "partner_id": partner_id,
                 "origin": order_id,
                 "client_order_ref": trip_id,
-                "note": note,
                 "order_line": _build_line(),
             }],
         )
@@ -1394,12 +1413,12 @@ async def _odoo_sync_order(
                     "partner_id": partner_id,
                     "origin": order_id,
                     "client_order_ref": trip_id,
-                    "note": note,
                     "order_line": _build_line(force_tax=False),
                 }],
             )
         if sale_id:
             logger.info(f"[odoo:sync_order:ok] order={order_id} trip={trip_id} partner={partner_id} sale={sale_id}")
+            await _odoo_post_internal_note(odoo, sale_id, note)
             await db.orders.update_one(
                 {"order_id": order_id},
                 {"$set": {
