@@ -1292,11 +1292,11 @@ async def _odoo_sync_order(
             if price_includes_tax and unit_price:
                 unit_price = unit_price / (1 + ODOO_LOGISTIK_TAX_RATE)
 
-        def _build_line():
+        def _build_line(force_tax: bool = True):
             vals = {"name": line_desc, "product_uom_qty": 1, "price_unit": unit_price}
             if product_id:
                 vals["product_id"] = product_id
-            if tax_ids is not None:
+            if force_tax and tax_ids is not None:
                 vals["tax_id"] = [(6, 0, tax_ids)]
             return [(0, 0, vals)]
 
@@ -1321,9 +1321,15 @@ async def _odoo_sync_order(
             )
             has_lines = bool(rows and rows[0].get("order_line"))
             if not has_lines:
-                await asyncio.to_thread(
+                wrote = await asyncio.to_thread(
                     odoo.call, "sale.order", "write", [[sale_id], {"order_line": _build_line()}],
                 )
+                if not wrote and tax_ids is not None:
+                    # Kemungkinan tax record beda company/incompatible — retry tanpa override tax.
+                    logger.warning(f"[odoo:sync_order:backfill_line_tax_retry] order={order_id} sale={sale_id}")
+                    await asyncio.to_thread(
+                        odoo.call, "sale.order", "write", [[sale_id], {"order_line": _build_line(force_tax=False)}],
+                    )
                 logger.info(f"[odoo:sync_order:backfill_line] order={order_id} sale={sale_id}")
             logger.info(f"[odoo:sync_order:reuse] order={order_id} sale={sale_id}")
             await db.orders.update_one(
@@ -1372,6 +1378,21 @@ async def _odoo_sync_order(
                 "order_line": _build_line(),
             }],
         )
+        if not sale_id and tax_ids is not None:
+            # Create gagal, kemungkinan tax record incompatible (beda company/dll).
+            # Retry sekali tanpa override tax_id (ikut default pajak produk) biar
+            # SO tetep ke-buat walau fitur tax-nya nggak jalan.
+            logger.warning(f"[odoo:sync_order:create_tax_retry] order_id={order_id}")
+            sale_id = await asyncio.to_thread(
+                odoo.call, "sale.order", "create",
+                [{
+                    "partner_id": partner_id,
+                    "origin": order_id,
+                    "client_order_ref": trip_id,
+                    "note": note,
+                    "order_line": _build_line(force_tax=False),
+                }],
+            )
         if sale_id:
             logger.info(f"[odoo:sync_order:ok] order={order_id} trip={trip_id} partner={partner_id} sale={sale_id}")
             await db.orders.update_one(
