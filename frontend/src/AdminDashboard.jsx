@@ -579,6 +579,11 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
 
   const uploadFotoAlbum = async (stage, files) => {
     if (!order.trip_id || !files?.length) return;
+    const catatan = window.prompt(
+      `Catatan buat foto ${ALBUM_STAGES.find(s => s.key === stage)?.label || stage} ini (opsional, misal nama kapal):`,
+      ""
+    );
+    if (catatan === null) return; // batal
     setUploadingStage(stage);
     try {
       for (const file of Array.from(files)) {
@@ -586,6 +591,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
         fd.append("foto", file);
         fd.append("stage", stage);
         fd.append("uploaded_by", "admin");
+        if (catatan.trim()) fd.append("catatan", catatan.trim());
         await axios.post(`${API}/trips/${order.trip_id}/album`, fd, { headers: { ...headers, "Content-Type": "multipart/form-data" } });
       }
       alert(`${files.length} foto berhasil diupload ke album ${ALBUM_STAGES.find(s => s.key === stage)?.label || stage}`);

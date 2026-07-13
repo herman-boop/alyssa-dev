@@ -868,7 +868,7 @@ export default function CustomerTracking() {
             ) : (
               <div className="trk-album-grid">
                 {(album[stage] || []).map((p, i) => (
-                  <PhotoCard key={p.id} url={p.url} label={`${stageLabel(stage)} ${i + 1}`}
+                  <PhotoCard key={p.id} url={p.url} label={`${stageLabel(stage)} ${i + 1}`} caption={p.catatan}
                     isPdf={(p.url || "").toLowerCase().endsWith(".pdf")} />
                 ))}
               </div>
