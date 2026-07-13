@@ -12,6 +12,16 @@ function pNum(s) {
   const n = parseInt(String(s || "").replace(/[^0-9]/g, ""), 10);
   return isNaN(n) ? 0 : n;
 }
+function todayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function fDate(s) {
+  if (!s) return "";
+  const [y, m, d] = s.split("-");
+  if (!y || !m || !d) return s;
+  return `${d}/${m}/${y}`;
+}
 
 const I = { background: "#1c2128", border: "1px solid #30363d", borderRadius: 8, padding: "9px 12px", color: "#e6edf3", fontSize: 13, outline: "none", width: "100%", fontFamily: "inherit" };
 const L = { fontSize: 11, color: "#8b949e", display: "block", marginBottom: 4, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".4px" };
@@ -106,11 +116,12 @@ export default function SupplierPage() {
   const [payOpen, setPayOpen] = useState(null); // job_id lagi buka form bayar
   const [payAmount, setPayAmount] = useState("");
   const [payCatatan, setPayCatatan] = useState("");
+  const [payTanggal, setPayTanggal] = useState(todayStr());
   const [payFile, setPayFile] = useState(null);
   const [paySaving, setPaySaving] = useState(false);
   const fileRef = useRef();
 
-  const openPay = (jobId) => { setPayOpen(jobId); setPayAmount(""); setPayCatatan(""); setPayFile(null); };
+  const openPay = (jobId) => { setPayOpen(jobId); setPayAmount(""); setPayCatatan(""); setPayTanggal(todayStr()); setPayFile(null); };
 
   const submitPay = async (jobId) => {
     const amt = pNum(payAmount);
@@ -120,6 +131,7 @@ export default function SupplierPage() {
       const fd = new FormData();
       fd.append("amount", amt);
       fd.append("catatan", payCatatan.trim());
+      fd.append("tanggal", payTanggal || todayStr());
       if (payFile) fd.append("bukti", payFile);
       await axios.post(`${API}/admin/suppliers/${selected.id}/jobs/${jobId}/payments`, fd, { headers });
       setPayOpen(null);
@@ -245,7 +257,7 @@ export default function SupplierPage() {
                   {job.payments.map((p) => (
                     <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, padding: "4px 0", color: "#c9d1d9" }}>
                       <span>
-                        {fRp(p.amount)} {p.catatan && <span style={{ color: "#8b949e" }}>— {p.catatan}</span>}
+                        <span style={{ color: "#8b949e" }}>{fDate(p.tanggal)}</span> — {fRp(p.amount)} {p.catatan && <span style={{ color: "#8b949e" }}>— {p.catatan}</span>}
                         {p.bukti_url && <a href={resolveUrl(p.bukti_url)} target="_blank" rel="noreferrer" style={{ marginLeft: 8, color: "#58a6ff" }}>📎 bukti</a>}
                       </span>
                       <button onClick={() => deletePayment(job.id, p.id)} style={{ background: "none", border: "none", color: "#f85149", cursor: "pointer", fontSize: 11 }}>Hapus</button>
@@ -260,6 +272,7 @@ export default function SupplierPage() {
                     <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
                       <input style={{ ...I, flex: 1, minWidth: 120 }} inputMode="numeric" placeholder="Jumlah bayar (Rp)" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} autoFocus data-testid={`sup-pay-amount-${job.id}`} />
                       <input style={{ ...I, flex: 1, minWidth: 120 }} placeholder="Catatan (mis. DP 1)" value={payCatatan} onChange={(e) => setPayCatatan(e.target.value)} />
+                      <input type="date" style={{ ...I, flex: 1, minWidth: 140 }} value={payTanggal} onChange={(e) => setPayTanggal(e.target.value)} data-testid={`sup-pay-date-${job.id}`} />
                     </div>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                       <input ref={fileRef} type="file" accept="image/*,application/pdf" style={{ display: "none" }} onChange={(e) => setPayFile(e.target.files?.[0] || null)} />

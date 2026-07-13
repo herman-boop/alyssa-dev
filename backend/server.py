@@ -2766,6 +2766,7 @@ async def delete_supplier_job(supplier_id: str, job_id: str):
 async def add_supplier_payment(
     supplier_id: str, job_id: str,
     amount: int = Form(...), catatan: str = Form(""),
+    tanggal: Optional[str] = Form(None),
     bukti: Optional[UploadFile] = File(None),
 ):
     """Catat 1 pembayaran (DP/cicilan) ke job/unit ini. Upload bukti transfer
@@ -2786,12 +2787,18 @@ async def add_supplier_payment(
     if bukti is not None and bukti.filename:
         bukti_url = _save_upload(supplier_id, f"payment/{job_id}", bukti, ALLOWED_IMG | ALLOWED_DOC)
 
+    # Tanggal default = hari ini (WIB), tapi admin bisa pilih tanggal lain manual
+    # (misal input telat / bayar beberapa hari lalu) lewat date picker di frontend.
+    tgl = (tanggal or "").strip()
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", tgl):
+        tgl = today_wib()
+
     payment = {
         "id": _gen_supplier_id(),
         "amount": amount,
         "catatan": catatan.strip(),
         "bukti_url": bukti_url,
-        "tanggal": datetime.utcnow().isoformat(),
+        "tanggal": tgl,
     }
     # Update seluruh array `jobs` sekaligus (bukan pakai positional operator
     # $ di nested array) -- lebih portable & nggak bergantung ke edge-case
