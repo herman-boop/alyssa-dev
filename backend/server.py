@@ -2497,6 +2497,224 @@ async def public_pelanggan_harga(token: str):
     return {"nama_pt": doc["nama_pt"], "harga_history": safe_history}
 
 
+# ══════════════════════════════════════════════════════
+# SUPPLIER PAYMENT SYSTEM (jasa supir/SDM per unit — DP bertahap,
+# bukti transfer, sisa otomatis kehitung). Struktur & pola endpoint-nya
+# sengaja disamain kayak Pelanggan Profile System di atas.
+# ══════════════════════════════════════════════════════
+
+def _gen_supplier_id() -> str:
+    return uuid.uuid4().hex[:8]
+
+
+def _supplier_job_totals(job: dict) -> dict:
+    """Hitung total_terbayar & sisa dari daftar payments — bukan disimpan,
+    dihitung ulang tiap read biar nggak pernah nyimpang dari data payments."""
+    terbayar = sum((p.get("amount") or 0) for p in (job.get("payments") or []))
+    job = dict(job)
+    job["total_terbayar"] = terbayar
+    job["sisa"] = (job.get("total_harga") or 0) - terbayar
+    return job
+
+
+class SupplierCreateBody(BaseModel):
+    nama: str
+    jenis: str = ""       # cth: "Jasa Supir", "SDM", "Lainnya" — bebas teks
+    no_hp: str = ""
+    catatan: str = ""
+
+
+class SupplierPatchBody(BaseModel):
+    jenis: Optional[str] = None
+    no_hp: Optional[str] = None
+    catatan: Optional[str] = None
+
+
+class SupplierJobBody(BaseModel):
+    vehicle_type: str = ""
+    nopol: str = ""
+    asal_kota: str = ""
+    tujuan_kota: str = ""
+    total_harga: int
+    catatan: str = ""
+
+
+@api_router.post("/admin/suppliers", dependencies=[Depends(require_admin_pin)])
+async def create_supplier(body: SupplierCreateBody):
+    """Create supplier baru, atau return yang udah ada (case-insensitive by nama)."""
+    import re as _re
+    nama = body.nama.strip()
+    if not nama:
+        raise HTTPException(400, "nama tidak boleh kosong")
+    existing = await db.supplier_profiles.find_one(
+        {"nama": _re.compile(r"^\s*" + _re.escape(nama) + r"\s*$", _re.IGNORECASE)},
+        {"_id": 0},
+    )
+    if existing:
+        return existing
+    now = datetime.utcnow().isoformat()
+    doc = {
+        "id": _gen_supplier_id(),
+        "nama": nama,
+        "jenis": body.jenis.strip(),
+        "no_hp": body.no_hp.strip(),
+        "catatan": body.catatan.strip(),
+        "created_at": now,
+        "jobs": [],
+    }
+    await db.supplier_profiles.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.get("/admin/suppliers", dependencies=[Depends(require_admin_pin)])
+async def list_suppliers(q: Optional[str] = None):
+    """List semua supplier, urut nama, optional search by q. Ikutan hitung
+    grand total (semua job) per supplier biar kelihatan di daftar tanpa
+    perlu buka detail satu-satu."""
+    import re as _re
+    filt = {}
+    if q:
+        filt["nama"] = _re.compile(_re.escape(q.strip()), _re.IGNORECASE)
+    items = []
+    async for s in db.supplier_profiles.find(filt).sort("nama", 1):
+        s.pop("_id", None)
+        jobs = [_supplier_job_totals(j) for j in (s.get("jobs") or [])]
+        s["grand_total_harga"] = sum(j.get("total_harga") or 0 for j in jobs)
+        s["grand_total_terbayar"] = sum(j.get("total_terbayar") or 0 for j in jobs)
+        s["grand_sisa"] = sum(j.get("sisa") or 0 for j in jobs)
+        s["jumlah_unit"] = len(jobs)
+        s.pop("jobs", None)  # daftar ringkas — detail job cuma di endpoint detail
+        items.append(s)
+    return {"count": len(items), "items": items}
+
+
+@api_router.get("/admin/suppliers/{supplier_id}", dependencies=[Depends(require_admin_pin)])
+async def get_supplier(supplier_id: str):
+    """Detail supplier lengkap — semua job/unit + payments + grand total."""
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    jobs = [_supplier_job_totals(j) for j in (doc.get("jobs") or [])]
+    doc["jobs"] = jobs
+    doc["grand_total_harga"] = sum(j.get("total_harga") or 0 for j in jobs)
+    doc["grand_total_terbayar"] = sum(j.get("total_terbayar") or 0 for j in jobs)
+    doc["grand_sisa"] = sum(j.get("sisa") or 0 for j in jobs)
+    return doc
+
+
+@api_router.patch("/admin/suppliers/{supplier_id}", dependencies=[Depends(require_admin_pin)])
+async def patch_supplier(supplier_id: str, body: SupplierPatchBody):
+    upd = {}
+    if body.jenis is not None: upd["jenis"] = body.jenis.strip()
+    if body.no_hp is not None: upd["no_hp"] = body.no_hp.strip()
+    if body.catatan is not None: upd["catatan"] = body.catatan.strip()
+    if not upd:
+        raise HTTPException(400, "Tidak ada field yang diupdate")
+    res = await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": upd})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    return {"ok": True}
+
+
+@api_router.delete("/admin/suppliers/{supplier_id}", dependencies=[Depends(require_admin_pin)])
+async def delete_supplier(supplier_id: str):
+    result = await db.supplier_profiles.delete_one({"id": supplier_id})
+    if result.deleted_count == 0:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    return {"ok": True}
+
+
+@api_router.post("/admin/suppliers/{supplier_id}/jobs", dependencies=[Depends(require_admin_pin)])
+async def add_supplier_job(supplier_id: str, body: SupplierJobBody):
+    """Tambah 1 unit/job baru buat supplier ini — misal 1 mobil 1 rute yang
+    biayanya dibayar ke supplier ini, mulai dari 0 terbayar."""
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    if body.total_harga < 0:
+        raise HTTPException(400, "total_harga tidak boleh negatif")
+    job = {
+        "id": _gen_supplier_id(),
+        "vehicle_type": body.vehicle_type.strip(),
+        "nopol": body.nopol.strip().upper(),
+        "asal_kota": body.asal_kota.strip(),
+        "tujuan_kota": body.tujuan_kota.strip(),
+        "total_harga": body.total_harga,
+        "catatan": body.catatan.strip(),
+        "tanggal": datetime.utcnow().isoformat(),
+        "payments": [],
+    }
+    await db.supplier_profiles.update_one({"id": supplier_id}, {"$push": {"jobs": job}})
+    return _supplier_job_totals(job)
+
+
+@api_router.delete("/admin/suppliers/{supplier_id}/jobs/{job_id}", dependencies=[Depends(require_admin_pin)])
+async def delete_supplier_job(supplier_id: str, job_id: str):
+    result = await db.supplier_profiles.update_one(
+        {"id": supplier_id}, {"$pull": {"jobs": {"id": job_id}}}
+    )
+    if result.modified_count == 0:
+        raise HTTPException(404, "Unit/job tidak ditemukan")
+    return {"ok": True}
+
+
+@api_router.post("/admin/suppliers/{supplier_id}/jobs/{job_id}/payments", dependencies=[Depends(require_admin_pin)])
+async def add_supplier_payment(
+    supplier_id: str, job_id: str,
+    amount: int = Form(...), catatan: str = Form(""),
+    bukti: Optional[UploadFile] = File(None),
+):
+    """Catat 1 pembayaran (DP/cicilan) ke job/unit ini. Upload bukti transfer
+    opsional (kalau ada, disimpan & linknya ke-record). Sisa otomatis
+    kehitung ulang di response (nggak disimpan sbg field terpisah, biar
+    nggak pernah nyimpang dari total payments yang beneran ada)."""
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    jobs = doc.get("jobs") or []
+    job_idx = next((i for i, j in enumerate(jobs) if j.get("id") == job_id), None)
+    if job_idx is None:
+        raise HTTPException(404, "Unit/job tidak ditemukan")
+    if amount <= 0:
+        raise HTTPException(400, "amount harus lebih dari 0")
+
+    bukti_url = None
+    if bukti is not None and bukti.filename:
+        bukti_url = _save_upload(supplier_id, f"payment/{job_id}", bukti, ALLOWED_IMG | ALLOWED_DOC)
+
+    payment = {
+        "id": _gen_supplier_id(),
+        "amount": amount,
+        "catatan": catatan.strip(),
+        "bukti_url": bukti_url,
+        "tanggal": datetime.utcnow().isoformat(),
+    }
+    # Update seluruh array `jobs` sekaligus (bukan pakai positional operator
+    # $ di nested array) -- lebih portable & nggak bergantung ke edge-case
+    # implementasi $push/$pull nested tiap driver Mongo/mock.
+    jobs[job_idx].setdefault("payments", []).append(payment)
+    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
+    return _supplier_job_totals(jobs[job_idx])
+
+
+@api_router.delete("/admin/suppliers/{supplier_id}/jobs/{job_id}/payments/{payment_id}", dependencies=[Depends(require_admin_pin)])
+async def delete_supplier_payment(supplier_id: str, job_id: str, payment_id: str):
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    jobs = doc.get("jobs") or []
+    job_idx = next((i for i, j in enumerate(jobs) if j.get("id") == job_id), None)
+    if job_idx is None:
+        raise HTTPException(404, "Unit/job tidak ditemukan")
+    before = len(jobs[job_idx].get("payments") or [])
+    jobs[job_idx]["payments"] = [p for p in (jobs[job_idx].get("payments") or []) if p.get("id") != payment_id]
+    if len(jobs[job_idx]["payments"]) == before:
+        raise HTTPException(404, "Pembayaran tidak ditemukan")
+    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
+    return _supplier_job_totals(jobs[job_idx])
+
+
 # ---------- Static file serving for uploads ----------
 app.add_middleware(
     CORSMiddleware,

@@ -4,6 +4,7 @@ import axios from "axios";
 import { VEHICLE_TYPE_LIST } from "@/VehicleSketches";
 import CostCalculator from "@/CostCalculator";
 import DriverData from "@/DriverData";
+import SupplierPage from "@/SupplierPage";
 import "@/App.css";
 import "@/Driver.css";
 import "@/Admin.css";
@@ -326,6 +327,13 @@ function Dashboard({ pin, onLogout }) {
             color: activeTab === "koordinator" ? "var(--gold)" : "var(--text-3)",
             borderBottom: activeTab === "koordinator" ? "2px solid var(--gold)" : "2px solid transparent" }}
         >🧑‍💼 Koordinator</button>
+        <button
+          onClick={() => setActiveTab("supplier")}
+          style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: "8px 8px 0 0", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 700,
+            background: activeTab === "supplier" ? "var(--bg-card)" : "transparent",
+            color: activeTab === "supplier" ? "var(--gold)" : "var(--text-3)",
+            borderBottom: activeTab === "supplier" ? "2px solid var(--gold)" : "2px solid transparent" }}
+        >💸 Supplier</button>
       </div>
 
       {activeTab === "kalkulator" && (
@@ -354,6 +362,10 @@ function Dashboard({ pin, onLogout }) {
 
       {activeTab === "koordinator" && (
         <KordManageTab headers={headers} />
+      )}
+
+      {activeTab === "supplier" && (
+        <SupplierPage />
       )}
 
       {activeTab === "pesanan" && <>
