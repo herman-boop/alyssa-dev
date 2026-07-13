@@ -203,9 +203,13 @@ function CropModal({ url, file, onCancel, onConfirm }) {
   const [sharp, setSharp] = useState(50);   // 0..100
   const [hint, setHint] = useState("");
   const [work, setWork] = useState({ url, file }); // gambar kerja (bisa dirotate)
+  const [review, setReview] = useState(null); // { url, file } — hasil scan, nunggu konfirmasi user sblm upload
   const drag = useRef(null);
   const workRef = useRef(work);
   workRef.current = work;
+
+  // Bersihkan objectURL hasil review saat modal ditutup
+  useEffect(() => () => { if (review?.url) { try { URL.revokeObjectURL(review.url); } catch {} } }, [review]);
 
   // Bersihkan objectURL hasil rotasi saat modal ditutup
   useEffect(() => () => { if (workRef.current.url !== url) { try { URL.revokeObjectURL(workRef.current.url); } catch {} } }, [url]);
@@ -384,8 +388,11 @@ function CropModal({ url, file, onCancel, onConfirm }) {
       const finalCanvas = applyFilter(canvas);
       const blob = await new Promise((r) => finalCanvas.toBlob(r, "image/jpeg", 0.95));
       const out = blob ? new File([blob], (file.name || "resi").replace(/\.\w+$/, "") + "_scan.jpg", { type: "image/jpeg" }) : file;
-      onConfirm(out);
-    } catch { onConfirm(file); }
+      // Jangan langsung upload -- tampilin hasilnya dulu, biar user bisa cek/edit ulang
+      // sebelum beneran dikirim (matching Office Lens/CamScanner-style review step).
+      setReview({ url: URL.createObjectURL(out), file: out });
+    } catch { setReview({ url: URL.createObjectURL(file), file }); }
+    finally { setBusy(false); }
   };
 
   const H = (key) => (
@@ -399,6 +406,28 @@ function CropModal({ url, file, onCancel, onConfirm }) {
       style={{ flex: 1, padding: "7px", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer",
         border: mode === m ? "2px solid #EF9F27" : "1px solid #555", background: mode === m ? "#3a2c10" : "none", color: mode === m ? "#EF9F27" : "#bbb" }}>{lbl}</button>
   );
+
+  // Layar review: hasil scan udah jadi, tunggu user cek dulu sebelum beneran dipakai/upload.
+  if (review) {
+    return (
+      <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.94)", zIndex: 9999, display: "flex", flexDirection: "column", padding: 12 }}>
+        <div style={{ color: "#fff", textAlign: "center", fontWeight: 800, fontSize: 13, padding: "4px 0 10px" }}>
+          ✓ Hasil Scan — Cek dulu sebelum dipakai
+        </div>
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+          <img src={review.url} alt="hasil scan" style={{ maxWidth: "100%", maxHeight: "72vh", display: "block", borderRadius: 6 }} />
+        </div>
+        <div style={{ display: "flex", gap: 8, padding: "10px 0 4px" }}>
+          <button onClick={() => setReview(null)} style={{ flex: 1, padding: "13px", borderRadius: 10, border: "1px solid #555", background: "none", color: "#ccc", fontWeight: 700, fontSize: 13 }}>
+            ◀ Edit Lagi
+          </button>
+          <button onClick={() => onConfirm(review.file)} style={{ flex: 1.5, padding: "13px", borderRadius: 10, border: "none", background: "#2ea043", color: "#fff", fontWeight: 900, fontSize: 13 }}>
+            ✓ Gunakan Foto Ini
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div onMouseMove={move} onMouseUp={end} onMouseLeave={end} onTouchMove={move} onTouchEnd={end} onTouchCancel={end}
