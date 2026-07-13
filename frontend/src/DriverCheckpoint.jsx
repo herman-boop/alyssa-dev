@@ -4,6 +4,7 @@ import "@/App.css";
 import "@/Driver.css";
 import PoDCard from "@/PoDCard";
 import { convertHeicIfNeeded } from "@/lib/heic";
+import { Home, Camera, Image as ImageIcon, FileText, ChevronRight, CheckCircle2, Circle, Truck, MapPin } from "lucide-react";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -618,6 +619,7 @@ export default function DriverCheckpoint() {
   const [error, setError] = useState("");
   const [toast, setToast] = useState(null);
   const [celebration, setCelebration] = useState(false);
+  const [activeView, setActiveView] = useState("beranda"); // "beranda" | "checkpoint" | "foto" | "dokumen"
 
   const [showSOP, setShowSOP] = useState(false);
   const [namaInput, setNamaInput] = useState("");
@@ -1202,8 +1204,48 @@ export default function DriverCheckpoint() {
 
   const cair = trip.cair || {};
 
+  // ── Sprint 1: Beranda + Bottom Nav (shell baru, tidak ubah logic/section di bawahnya) ──
+  const albumTotal = ALBUM_STAGES.reduce((s, k) => s + (trip.album?.[k] || []).length, 0);
+  const taskSteps = [
+    { key: "sop", label: "Baca SOP Driver", done: true, view: null, target: null },
+    { key: "foto-awal", label: "Foto Awal Kendaraan (5 foto)", done: allInitialDone, view: "checkpoint", target: "initial-card" },
+    { key: "checkpoint", label: "Checkpoint Hari Ini", done: todayDone, view: "checkpoint", target: "daily-card" },
+    { key: "album", label: "Album Perjalanan", done: albumTotal > 0, view: "foto", target: "album-card" },
+    { key: "dokumen", label: "BASTK & Resi", done: handoverDone, view: "dokumen", target: "handover-card" },
+  ];
+  const doneCount = taskSteps.filter((s) => s.done).length;
+  const progressPct = Math.round((doneCount / taskSteps.length) * 100);
+  const nextStep = taskSteps.find((s) => !s.done) || taskSteps[taskSteps.length - 1];
+
+  const scrollToCard = (testid) => {
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        const el = document.querySelector(`[data-testid="${testid}"]`);
+        if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 60);
+    });
+  };
+  const NAV_DEFAULT_TARGET = { checkpoint: "initial-card", foto: "album-card", dokumen: "handover-card" };
+  const goToView = (view, explicitTarget) => {
+    setActiveView(view);
+    if (view === "beranda") { window.scrollTo({ top: 0, behavior: "smooth" }); return; }
+    const target = explicitTarget || NAV_DEFAULT_TARGET[view];
+    if (target) scrollToCard(target);
+  };
+
   return (
-    <div className="drv-root" data-testid="drv-root">
+    <>
+    <BerandaScreen
+      trip={trip}
+      progressPct={progressPct}
+      doneCount={doneCount}
+      totalSteps={taskSteps.length}
+      taskSteps={taskSteps}
+      nextStep={nextStep}
+      visible={activeView === "beranda"}
+      onNavigate={goToView}
+    />
+    <div className="drv-root" data-testid="drv-root" style={{ display: activeView === "beranda" ? "none" : "block", paddingBottom: 96 }}>
       {/* HEADER */}
       <header className="drv-header" data-testid="drv-header">
         <div className="drv-brand">
@@ -1926,6 +1968,162 @@ export default function DriverCheckpoint() {
         />
       )}
     </div>
+    <BottomNav active={activeView} onChange={goToView} />
+    </>
+  );
+}
+
+/* ── Sprint 1: Beranda premium (task-flow, bukan dashboard penuh menu) ──
+   Cuma nampilin 1 fokus: progress perjalanan & tugas berikutnya yang harus
+   dikerjakan. Ngambil data dari state trip yang sama, gak nyentuh logic apa pun. */
+function BerandaScreen({ trip, progressPct, doneCount, totalSteps, taskSteps, nextStep, visible, onNavigate }) {
+  if (!visible) return null;
+  const hour = new Date().getHours();
+  const greeting = hour < 11 ? "Selamat Pagi" : hour < 15 ? "Selamat Siang" : hour < 18 ? "Selamat Sore" : "Selamat Malam";
+  const allDone = progressPct >= 100;
+
+  return (
+    <div
+      className="drv2-beranda"
+      data-testid="beranda-screen"
+      style={{
+        minHeight: "100vh", background: "#0A0E1A", color: "#F1F5F9",
+        maxWidth: 560, margin: "0 auto", padding: "28px 20px 120px",
+        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif",
+      }}
+    >
+      {/* Greeting */}
+      <div style={{ marginBottom: 22 }}>
+        <div style={{ fontSize: 14, color: "#94A3B8", fontWeight: 600 }}>{greeting},</div>
+        <div style={{ fontSize: 27, fontWeight: 800, color: "#fff", marginTop: 2, letterSpacing: -0.3 }} data-testid="beranda-nama">
+          {trip.nama_driver || "Driver"}
+        </div>
+      </div>
+
+      {/* Progress card */}
+      <div
+        style={{
+          background: "linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%)",
+          borderRadius: 24, padding: 24, marginBottom: 16,
+          boxShadow: "0 10px 32px rgba(37,99,235,0.35)",
+        }}
+        data-testid="beranda-progress"
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.75)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6 }}>
+              Progress Perjalanan
+            </div>
+            <div style={{ fontSize: 38, fontWeight: 900, color: "#fff", marginTop: 4, letterSpacing: -1 }}>{progressPct}%</div>
+          </div>
+          <div style={{ fontSize: 13, color: "#fff", fontWeight: 700, background: "rgba(255,255,255,0.18)", borderRadius: 12, padding: "7px 13px", whiteSpace: "nowrap" }}>
+            {doneCount}/{totalSteps} tugas
+          </div>
+        </div>
+        <div style={{ marginTop: 18, height: 9, background: "rgba(255,255,255,0.22)", borderRadius: 999, overflow: "hidden" }}>
+          <div style={{ height: "100%", width: `${progressPct}%`, background: "#fff", borderRadius: 999, transition: "width .6s cubic-bezier(.4,0,.2,1)" }} />
+        </div>
+      </div>
+
+      {/* Trip info card */}
+      <div style={{ background: "#131A2C", border: "1px solid #1E293B", borderRadius: 20, padding: 20, marginBottom: 16 }} data-testid="beranda-tripinfo">
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+          <div style={{ width: 38, height: 38, borderRadius: 12, background: "#0C2D52", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <MapPin size={19} color="#60A5FA" />
+          </div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#E2E8F0", lineHeight: 1.35 }}>{trip.route || "Rute belum diisi"}</div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: 38, height: 38, borderRadius: 12, background: "#0C2D52", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <Truck size={19} color="#60A5FA" />
+          </div>
+          <div style={{ fontSize: 14, color: "#94A3B8", fontWeight: 600 }}>
+            {trip.tipe_kendaraan || "—"} · {isRealPlate(trip.nopol) ? trip.nopol : (trip.no_rangka || "—")}
+          </div>
+        </div>
+      </div>
+
+      {/* Checklist */}
+      <div style={{ background: "#131A2C", border: "1px solid #1E293B", borderRadius: 20, padding: 20, marginBottom: 26 }} data-testid="beranda-checklist">
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 16 }}>
+          Checklist Tugas
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {taskSteps.map((s) => (
+            <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 12 }} data-testid={`checklist-${s.key}`}>
+              {s.done
+                ? <CheckCircle2 size={22} color="#22C55E" style={{ flexShrink: 0 }} />
+                : <Circle size={22} color="#475569" style={{ flexShrink: 0 }} />}
+              <div style={{ fontSize: 15, fontWeight: 600, color: s.done ? "#64748B" : "#E2E8F0", textDecoration: s.done ? "line-through" : "none" }}>
+                {s.label}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* CTA — satu tombol besar, satu fokus tugas berikutnya */}
+      <button
+        onClick={() => nextStep.view && onNavigate(nextStep.view, nextStep.target)}
+        disabled={allDone}
+        style={{
+          width: "100%", padding: "19px", borderRadius: 18, border: "none",
+          background: allDone ? "#166534" : "#2563EB",
+          color: "#fff", fontSize: 16, fontWeight: 800,
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+          cursor: allDone ? "default" : "pointer",
+          boxShadow: allDone ? "none" : "0 10px 26px rgba(37,99,235,0.4)",
+        }}
+        data-testid="btn-lanjutkan-tugas"
+      >
+        {allDone ? "Semua Tugas Selesai ✓" : `Lanjutkan: ${nextStep.label}`}
+        {!allDone && <ChevronRight size={20} />}
+      </button>
+    </div>
+  );
+}
+
+/* ── Sprint 1: Bottom Navigation (maks 4 menu) ── */
+function BottomNav({ active, onChange }) {
+  const items = [
+    { key: "beranda", label: "Beranda", icon: Home },
+    { key: "checkpoint", label: "Checkpoint", icon: Camera },
+    { key: "foto", label: "Foto", icon: ImageIcon },
+    { key: "dokumen", label: "Dokumen", icon: FileText },
+  ];
+  return (
+    <nav
+      style={{
+        position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 500,
+        maxWidth: 560, margin: "0 auto",
+        background: "rgba(15,20,35,0.92)", backdropFilter: "blur(18px)", WebkitBackdropFilter: "blur(18px)",
+        borderTop: "1px solid rgba(255,255,255,0.08)",
+        display: "flex", justifyContent: "space-around", alignItems: "center",
+        padding: "10px 8px calc(10px + env(safe-area-inset-bottom))",
+      }}
+      data-testid="bottom-nav"
+    >
+      {items.map(({ key, label, icon: Icon }) => {
+        const isActive = active === key;
+        return (
+          <button
+            key={key}
+            onClick={() => onChange(key)}
+            style={{
+              display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+              background: "none", border: "none", cursor: "pointer",
+              padding: "6px 16px", borderRadius: 14, minWidth: 64,
+              color: isActive ? "#60A5FA" : "#64748B",
+              transition: "color .2s ease",
+            }}
+            data-testid={`nav-${key}`}
+          >
+            <Icon size={22} strokeWidth={isActive ? 2.5 : 2} />
+            <span style={{ fontSize: 11, fontWeight: isActive ? 700 : 600 }}>{label}</span>
+          </button>
+        );
+      })}
+    </nav>
   );
 }
 
