@@ -606,6 +606,7 @@ export function VehicleSketch({ type, className, style, color = "#D4A847", strok
         <img
           src={imgUrl}
           alt={type}
+          data-testid="bk-vehicle-photo"
           style={{ width: "100%", height: "100%", objectFit: "contain" }}
           onError={() => setImgOk(false)}
         />

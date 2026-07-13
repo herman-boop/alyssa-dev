@@ -822,6 +822,25 @@ async def bastk_pdf(trip_id: str):
         await page.goto(f"{FRONTEND_URL}/bastk/{trip_id}", wait_until="networkidle", timeout=30_000)
         await page.wait_for_selector('[data-testid="bk-print"]', timeout=15_000)
         await page.evaluate("document.fonts ? document.fonts.ready : Promise.resolve()")
+
+        # Foto sketsa kendaraan (/vehicles/*.jpg) kadang gagal load pas race
+        # dengan networkidle (request-nya sempat gagal/lambat), bikin PDF
+        # ke-capture pas lagi fallback ke SVG generic. networkidle nggak
+        # ngejamin gambar itu BERHASIL, cuma ngejamin network-nya udah diem.
+        # Jadi cek eksplisit: kalau ada <img data-testid="bk-vehicle-photo">
+        # tapi gagal load (naturalWidth 0), reload sekali & tunggu ulang.
+        img_ok = await page.evaluate(
+            """() => {
+                const img = document.querySelector('[data-testid="bk-vehicle-photo"]');
+                if (!img) return true; // nggak ada foto (vehicle_type nggak dikenal) -> ok, biarin SVG
+                return img.complete && img.naturalWidth > 0;
+            }"""
+        )
+        if not img_ok:
+            logger.warning(f"[pdf] foto sketsa kendaraan gagal load, retry sekali: trip={trip_id}")
+            await page.reload(wait_until="networkidle", timeout=30_000)
+            await page.wait_for_selector('[data-testid="bk-print"]', timeout=15_000)
+
         await page.emulate_media(media="print")
         await page.wait_for_timeout(200)  # kasih waktu render ulang (QR/gambar) setelah emulate_media
         pdf_bytes = await page.pdf(
