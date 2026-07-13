@@ -4,7 +4,7 @@ import "@/App.css";
 import "@/Driver.css";
 import PoDCard from "@/PoDCard";
 import { convertHeicIfNeeded } from "@/lib/heic";
-import { Home, Camera, Image as ImageIcon, FileText, ChevronRight, CheckCircle2, Circle, Truck, MapPin, ArrowLeft, Flag, X, RotateCcw, LocateFixed, Clock } from "lucide-react";
+import { Home, Camera, Image as ImageIcon, FileText, ChevronRight, CheckCircle2, Circle, Truck, MapPin, ArrowLeft, Flag, X, RotateCcw, LocateFixed, Clock, Plus, Trash2 } from "lucide-react";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -1208,9 +1208,9 @@ export default function DriverCheckpoint() {
   const albumTotal = ALBUM_STAGES.reduce((s, k) => s + (trip.album?.[k] || []).length, 0);
   const taskSteps = [
     { key: "sop", label: "Baca SOP Driver", done: true, view: null, target: null },
-    { key: "foto-awal", label: "Foto Awal Kendaraan (5 foto)", done: allInitialDone, view: "foto", target: "initial-card" },
+    { key: "foto-awal", label: "Foto Awal Kendaraan (5 foto)", done: allInitialDone, view: "legacy", target: "initial-card" },
     { key: "checkpoint", label: "Checkpoint Hari Ini", done: todayDone, view: "checkpoint", target: null },
-    { key: "album", label: "Album Perjalanan", done: albumTotal > 0, view: "foto", target: "album-card" },
+    { key: "album", label: "Album Perjalanan", done: albumTotal > 0, view: "foto", target: null },
     { key: "dokumen", label: "BASTK & Resi", done: handoverDone, view: "dokumen", target: "handover-card" },
   ];
   const doneCount = taskSteps.filter((s) => s.done).length;
@@ -1225,10 +1225,13 @@ export default function DriverCheckpoint() {
       }, 60);
     });
   };
-  const NAV_DEFAULT_TARGET = { foto: "album-card", dokumen: "handover-card" };
+  // "legacy" = konten lama (belum di-redesign) yang masih ditampilkan apa adanya --
+  // dipakai buat jangkauan ke bagian yang belum masuk sprint mana pun (mis. Foto Awal Wajib).
+  const NAV_DEFAULT_TARGET = { dokumen: "handover-card" };
+  const FULLSCREEN_VIEWS = ["beranda", "checkpoint", "foto"];
   const goToView = (view, explicitTarget) => {
     setActiveView(view);
-    if (view === "beranda" || view === "checkpoint") { window.scrollTo({ top: 0, behavior: "smooth" }); return; }
+    if (FULLSCREEN_VIEWS.includes(view)) { window.scrollTo({ top: 0, behavior: "smooth" }); return; }
     const target = explicitTarget || NAV_DEFAULT_TARGET[view];
     if (target) scrollToCard(target);
   };
@@ -1248,7 +1251,7 @@ export default function DriverCheckpoint() {
     <CheckpointScreen
       visible={activeView === "checkpoint"}
       onBack={() => goToView("beranda")}
-      onGoFotoAwal={() => goToView("foto", "initial-card")}
+      onGoFotoAwal={() => goToView("legacy", "initial-card")}
       trip={trip}
       daily={daily}
       allInitialDone={allInitialDone}
@@ -1264,7 +1267,17 @@ export default function DriverCheckpoint() {
       gpsState={gpsState}
       cachedGpsPoint={cachedGps.current}
     />
-    <div className="drv-root" data-testid="drv-root" style={{ display: (activeView === "beranda" || activeView === "checkpoint") ? "none" : "block", paddingBottom: 96 }}>
+    <AlbumScreen
+      visible={activeView === "foto"}
+      onBack={() => goToView("beranda")}
+      trip={trip}
+      albumStage={albumStage}
+      setAlbumStage={setAlbumStage}
+      albumUploading={albumUploading}
+      uploadAlbum={uploadAlbum}
+      deleteAlbum={deleteAlbum}
+    />
+    <div className="drv-root" data-testid="drv-root" style={{ display: (activeView === "beranda" || activeView === "checkpoint" || activeView === "foto") ? "none" : "block", paddingBottom: 96 }}>
       {/* HEADER */}
       <header className="drv-header" data-testid="drv-header">
         <div className="drv-brand">
@@ -2404,6 +2417,165 @@ function CheckpointScreen({
               nopol={trip.nopol}
               dayIndex={daily.findIndex((d) => d.id === detailPhoto.id)}
             />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const ALBUM_STAGE_META = {
+  asal:   { label: "Asal",        short: "Asal" },
+  kapal:  { label: "Dalam Kapal", short: "Kapal" },
+  tujuan: { label: "Tujuan",      short: "Tujuan" },
+  dokumen:{ label: "Dokumen",     short: "Dokumen" },
+};
+
+/* ── Sprint 3: Album Perjalanan premium -- 1 fokus utama (Tambah Foto),
+   gallery ala Google Photos di bawahnya. Upload/hapus tetap lewat
+   uploadAlbum()/deleteAlbum() yang sudah ada, gak ada logic baru. ── */
+function AlbumScreen({ visible, onBack, trip, albumStage, setAlbumStage, albumUploading, uploadAlbum, deleteAlbum }) {
+  const [viewerPhoto, setViewerPhoto] = useState(null);
+  const fileRef = useRef(null);
+
+  if (!visible) return null;
+
+  const stagePhotos = trip.album?.[albumStage] || [];
+  const isDokumen = albumStage === "dokumen";
+  const stageLabel = ALBUM_STAGE_META[albumStage]?.label || albumStage;
+
+  const pick = (file) => { if (file) uploadAlbum(file); };
+  const handleDelete = async (photoId) => {
+    if (!window.confirm("Hapus foto ini?")) return;
+    await deleteAlbum(albumStage, photoId);
+    setViewerPhoto(null);
+  };
+
+  return (
+    <div style={{
+      minHeight: "100vh", background: "#0A0E1A", color: "#F1F5F9",
+      maxWidth: 560, margin: "0 auto", paddingBottom: 110,
+      fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif",
+    }} data-testid="album-screen">
+
+      {/* HEADER */}
+      <header style={{
+        display: "flex", alignItems: "center", gap: 14, padding: "20px 20px 16px",
+        position: "sticky", top: 0, zIndex: 50,
+        background: "rgba(10,14,26,0.92)", backdropFilter: "blur(14px)",
+      }}>
+        <button onClick={onBack} data-testid="btn-album-back"
+          style={{ width: 40, height: 40, borderRadius: 12, border: "1px solid #1E293B", background: "#131A2C", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+          <ArrowLeft size={20} color="#E2E8F0" />
+        </button>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 19, fontWeight: 800, color: "#fff" }}>Album Perjalanan</div>
+          <div style={{ fontSize: 13, color: "#94A3B8", fontWeight: 600 }}>{stagePhotos.length} foto di {stageLabel}</div>
+        </div>
+      </header>
+
+      <div style={{ padding: "0 20px" }}>
+
+        {/* STAGE SELECTOR — segmented pills */}
+        <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4, marginBottom: 20 }} data-testid="album-stage-selector">
+          {ALBUM_STAGES.map((s) => {
+            const active = albumStage === s;
+            const count = (trip.album?.[s] || []).length;
+            return (
+              <button key={s} onClick={() => setAlbumStage(s)} data-testid={`album-stage-${s}`}
+                style={{
+                  display: "flex", alignItems: "center", gap: 6, padding: "10px 16px", borderRadius: 999, whiteSpace: "nowrap",
+                  border: active ? "none" : "1px solid #1E293B",
+                  background: active ? "#2563EB" : "#131A2C",
+                  color: active ? "#fff" : "#94A3B8", fontSize: 14, fontWeight: 700, cursor: "pointer", flexShrink: 0,
+                }}>
+                {ALBUM_STAGE_META[s]?.short || s}
+                {count > 0 && (
+                  <span style={{
+                    fontSize: 11, fontWeight: 800, minWidth: 18, height: 18, borderRadius: 9, padding: "0 5px",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    background: active ? "rgba(255,255,255,0.25)" : "#1E293B", color: active ? "#fff" : "#94A3B8",
+                  }}>{count}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* CTA UTAMA — satu fokus: Tambah Foto */}
+        <input
+          ref={fileRef} type="file"
+          accept={isDokumen ? "image/*,application/pdf" : "image/*"}
+          capture={isDokumen ? undefined : "environment"}
+          style={{ display: "none" }}
+          onChange={(e) => { pick(e.target.files?.[0]); e.target.value = ""; }}
+        />
+        <button onClick={() => fileRef.current?.click()} disabled={albumUploading} data-testid="btn-tambah-foto"
+          style={{
+            width: "100%", padding: 18, borderRadius: 18, border: "none", marginBottom: 24,
+            background: "#2563EB", color: "#fff", fontSize: 16, fontWeight: 800,
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+            cursor: albumUploading ? "default" : "pointer", opacity: albumUploading ? 0.7 : 1,
+            boxShadow: "0 10px 26px rgba(37,99,235,0.4)",
+          }}>
+          {albumUploading
+            ? "Mengupload..."
+            : <>{isDokumen ? <Plus size={22} /> : <Camera size={22} />} {isDokumen ? "Tambah Foto / PDF Dokumen" : `Tambah Foto ${stageLabel}`}</>}
+        </button>
+
+        {/* GALLERY */}
+        {stagePhotos.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "40px 0", color: "#64748B" }} data-testid="album-empty">
+            <ImageIcon size={36} color="#334155" style={{ marginBottom: 10 }} />
+            <div style={{ fontSize: 14 }}>Belum ada foto {stageLabel.toLowerCase()}.</div>
+          </div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 20 }} data-testid={`album-gallery-${albumStage}`}>
+            {stagePhotos.map((p) => {
+              const isPdf = (p.url || "").toLowerCase().endsWith(".pdf");
+              return (
+                <button key={p.id} onClick={() => setViewerPhoto(p)} data-testid={`album-thumb-${p.id}`}
+                  style={{ aspectRatio: "1/1", borderRadius: 14, overflow: "hidden", border: "1px solid #1E293B", padding: 0, cursor: "pointer", background: "#131A2C" }}>
+                  {isPdf ? (
+                    <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 4 }}>
+                      <FileText size={26} color="#60A5FA" />
+                      <span style={{ fontSize: 10, fontWeight: 700, color: "#60A5FA" }}>PDF</span>
+                    </div>
+                  ) : (
+                    <img src={resolveUrl(p.url)} alt={stageLabel} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* LIGHTBOX VIEWER */}
+      {viewerPhoto && (
+        <div
+          onClick={() => setViewerPhoto(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 999, display: "flex", flexDirection: "column" }}
+          data-testid="album-viewer"
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", padding: 16 }}>
+            <button onClick={(e) => { e.stopPropagation(); handleDelete(viewerPhoto.id); }} data-testid="btn-viewer-delete"
+              style={{ width: 40, height: 40, borderRadius: 12, border: "1px solid rgba(255,255,255,0.2)", background: "rgba(239,68,68,0.15)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+              <Trash2 size={18} color="#F87171" />
+            </button>
+            <button onClick={() => setViewerPhoto(null)} data-testid="btn-viewer-close"
+              style={{ width: 40, height: 40, borderRadius: 12, border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+              <X size={18} color="#fff" />
+            </button>
+          </div>
+          <div onClick={(e) => e.stopPropagation()} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 16px 16px" }}>
+            {(viewerPhoto.url || "").toLowerCase().endsWith(".pdf") ? (
+              <a href={resolveUrl(viewerPhoto.url)} target="_blank" rel="noreferrer" style={{ color: "#60A5FA", fontSize: 15, fontWeight: 700, textDecoration: "underline" }}>
+                Buka Dokumen PDF
+              </a>
+            ) : (
+              <img src={resolveUrl(viewerPhoto.url)} alt="preview" style={{ maxWidth: "100%", maxHeight: "100%", borderRadius: 12, objectFit: "contain" }} />
+            )}
           </div>
         </div>
       )}
