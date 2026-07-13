@@ -2545,6 +2545,34 @@ async def add_pelanggan_harga(pelanggan_id: str, body: PelangganHargaBody):
     updated["harga_history"] = (updated.get("harga_history") or [])[-200:]
     return updated
 
+
+class PelangganHargaPatchBody(BaseModel):
+    harga_deal: int
+
+
+@api_router.patch("/admin/pelanggan/{pelanggan_id}/harga/{harga_id}", dependencies=[Depends(require_admin_pin)])
+async def patch_pelanggan_harga(pelanggan_id: str, harga_id: str, body: PelangganHargaPatchBody):
+    """Ubah harga_deal 1 entry yang udah ada -- buat kasus pelanggan nego dan
+    harga final beda dari hasil kalkulasi HPP+margin awal. margin_aktual
+    dihitung ulang otomatis biar tetap konsisten sama harga_deal barunya."""
+    if body.harga_deal <= 0:
+        raise HTTPException(400, "harga_deal harus lebih dari 0")
+    doc = await db.pelanggan_profiles.find_one({"id": pelanggan_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Pelanggan tidak ditemukan")
+    history = doc.get("harga_history") or []
+    idx = next((i for i, h in enumerate(history) if h.get("id") == harga_id), None)
+    if idx is None:
+        raise HTTPException(404, "Data harga tidak ditemukan")
+    history[idx]["harga_deal"] = body.harga_deal
+    hpp = history[idx].get("hpp") or 0
+    history[idx]["margin_aktual"] = round((body.harga_deal / hpp - 1) * 100, 1) if hpp else 0
+    await db.pelanggan_profiles.update_one({"id": pelanggan_id}, {"$set": {"harga_history": history}})
+    updated = await db.pelanggan_profiles.find_one({"id": pelanggan_id}, {"_id": 0})
+    updated["harga_history"] = (updated.get("harga_history") or [])[-200:]
+    return updated
+
+
 @api_router.delete("/admin/pelanggan/{pelanggan_id}", dependencies=[Depends(require_admin_pin)])
 async def delete_pelanggan(pelanggan_id: str):
     """Delete a pelanggan profile entirely."""

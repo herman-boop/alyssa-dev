@@ -287,6 +287,7 @@ export default function CostCalculator() {
 
   const [addModal, setAddModal] = useState(null); // { hargaOptions, routeData }
   const [addPilihan, setAddPilihan] = useState(null);
+  const [manualHargaInput, setManualHargaInput] = useState("");
 
   const addToList = () => {
     if (!asal.trim() || !tujuan.trim()) { alert("Isi Asal dan Tujuan dulu!"); return; }
@@ -309,12 +310,16 @@ export default function CostCalculator() {
       ]
     });
     setAddPilihan(null);
+    setManualHargaInput("");
   };
 
   const confirmAddToList = () => {
     if (!addModal || !addPilihan) return;
-    setRouteList((rl) => [...rl, { ...addModal.routeData, price_deal: addPilihan.val, price_lbl: addPilihan.lbl }]);
-    setAddModal(null); setAddPilihan(null);
+    const val = addPilihan.manual ? pNum(manualHargaInput) : addPilihan.val;
+    if (!val || val <= 0) { alert("Isi harga manual dulu"); return; }
+    const lbl = addPilihan.manual ? "Manual (Nego)" : addPilihan.lbl;
+    setRouteList((rl) => [...rl, { ...addModal.routeData, price_deal: val, price_lbl: lbl }]);
+    setAddModal(null); setAddPilihan(null); setManualHargaInput("");
     setAsal(""); setTujuan(""); setCatatan(""); setTop("cash"); setRisiko("normal"); setModa(""); setModaManual(false);
     setLegs((ls) => ls.map((l) => ({ ...l, cost: "" }))); setAdmin("0"); setAsuransi("0"); setLain("0");
   };
@@ -329,6 +334,18 @@ export default function CostCalculator() {
       const res = await axios.delete(`${API}/admin/pelanggan/${selectedPt.id}/harga/${hargaId}`, { headers: { "x-admin-pin": adminPin } });
       setSelectedPt(res.data);
     } catch { alert("Gagal hapus"); }
+  };
+
+  const editHargaPT = async (entry) => {
+    if (!selectedPt) return;
+    const input = window.prompt(`Harga deal baru buat rute "${entry.rute}" (misal setelah nego sama pelanggan):`, String(entry.harga_deal || ""));
+    if (input === null) return; // batal
+    const val = pNum(input);
+    if (!val || val <= 0) { alert("Harga tidak valid"); return; }
+    try {
+      const res = await axios.patch(`${API}/admin/pelanggan/${selectedPt.id}/harga/${entry.id}`, { harga_deal: val }, { headers: { "x-admin-pin": adminPin } });
+      setSelectedPt(res.data);
+    } catch { alert("Gagal ubah harga"); }
   };
 
   const clearAllHarga = async () => {
@@ -459,7 +476,7 @@ export default function CostCalculator() {
           <div style={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 12, width: "100%", maxWidth: 420, padding: 20 }}>
             <div style={{ fontWeight: 800, fontSize: 14, color: "#fff", marginBottom: 4 }}>+ Tambah ke List — Pilih Harga</div>
             <div style={{ fontSize: 11, color: "#8b949e", marginBottom: 14 }}>{addModal.routeData.asal} → {addModal.routeData.tujuan} &nbsp;·&nbsp; HPP: {fRp(addModal.routeData.hpp)}</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
               {addModal.options.map(opt => (
                 <div key={opt.lbl} onClick={() => setAddPilihan(opt)}
                   style={{ cursor: "pointer", padding: "12px 10px", borderRadius: 8, border: `2px solid ${addPilihan?.lbl === opt.lbl ? opt.color : "#30363d"}`, background: addPilihan?.lbl === opt.lbl ? "rgba(255,255,255,0.05)" : "#0d1117", textAlign: "center" }}>
@@ -469,11 +486,26 @@ export default function CostCalculator() {
                 </div>
               ))}
             </div>
+            <div onClick={() => setAddPilihan({ lbl: "Manual", manual: true })}
+              style={{ cursor: "pointer", padding: "10px", borderRadius: 8, border: `2px solid ${addPilihan?.manual ? "#EF9F27" : "#30363d"}`, background: addPilihan?.manual ? "rgba(239,159,39,0.08)" : "#0d1117", textAlign: "center", marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#EF9F27" }}>✏️ Harga Manual (Nego)</div>
+              {addPilihan?.manual && (
+                <input
+                  type="text" inputMode="numeric" autoFocus
+                  value={manualHargaInput}
+                  onChange={(e) => setManualHargaInput(e.target.value)}
+                  placeholder="Ketik harga hasil nego, misal 8500000"
+                  style={{ marginTop: 8, width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #30363d", background: "#0d1117", color: "#fff", fontSize: 13, textAlign: "center" }}
+                />
+              )}
+            </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={() => setAddModal(null)} style={{ flex: 1, padding: 9, borderRadius: 7, border: "1px solid #30363d", background: "none", color: "#8b949e", cursor: "pointer" }}>Batal</button>
-              <button onClick={confirmAddToList} disabled={!addPilihan}
-                style={{ flex: 2, padding: 9, borderRadius: 7, border: "none", background: addPilihan ? "#2ea043" : "#21262d", color: addPilihan ? "#fff" : "#484f58", cursor: addPilihan ? "pointer" : "not-allowed", fontWeight: 700 }}>
-                {addPilihan ? `✓ Masukkan ${addPilihan.lbl} — ${fRp(addPilihan.val)}` : "Pilih harga dulu"}
+              <button onClick={confirmAddToList} disabled={!addPilihan || (addPilihan.manual && pNum(manualHargaInput) <= 0)}
+                style={{ flex: 2, padding: 9, borderRadius: 7, border: "none", background: (addPilihan && !(addPilihan.manual && pNum(manualHargaInput) <= 0)) ? "#2ea043" : "#21262d", color: (addPilihan && !(addPilihan.manual && pNum(manualHargaInput) <= 0)) ? "#fff" : "#484f58", cursor: addPilihan ? "pointer" : "not-allowed", fontWeight: 700 }}>
+                {addPilihan?.manual
+                  ? (pNum(manualHargaInput) > 0 ? `✓ Masukkan Manual — ${fRp(pNum(manualHargaInput))}` : "Ketik harga dulu")
+                  : (addPilihan ? `✓ Masukkan ${addPilihan.lbl} — ${fRp(addPilihan.val)}` : "Pilih harga dulu")}
               </button>
             </div>
           </div>
@@ -789,7 +821,10 @@ export default function CostCalculator() {
                         <div style={{ fontSize: 9, marginTop: 2, color: sudahAsuransi ? "#3fb950" : "#f85149", fontWeight: 600 }}>{sudahAsuransi ? "✓ Termasuk asuransi" : "⚠ Belum termasuk asuransi"}</div>
                       </td>
                       <td style={{ ...TD, textAlign: "center", color: mc, fontWeight: 700 }}>{entry.margin_aktual}%</td>
-                      <td style={TD}><button onClick={() => deleteHargaPT(entry.id)} style={{ background: "none", border: "none", color: "#f85149", cursor: "pointer", fontSize: 14 }}>🗑</button></td>
+                      <td style={TD}>
+                        <button onClick={() => editHargaPT(entry)} title="Ubah harga (misal setelah nego)" style={{ background: "none", border: "none", color: "#58a6ff", cursor: "pointer", fontSize: 14, marginRight: 6 }}>✏️</button>
+                        <button onClick={() => deleteHargaPT(entry.id)} style={{ background: "none", border: "none", color: "#f85149", cursor: "pointer", fontSize: 14 }}>🗑</button>
+                      </td>
                     </tr>
                   );
                 })}
