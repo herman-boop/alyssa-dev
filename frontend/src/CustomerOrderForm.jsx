@@ -370,7 +370,7 @@ export default function CustomerOrderForm() {
                     placeholder="Jakarta" data-testid="ord-asal-kota" />
                 </Field>
                 <Field label="Alamat Lengkap" full>
-                  <textarea className="of-inp of-textarea" rows={3} value={data.asal_alamat} maxLength={300}
+                  <textarea className="of-inp of-textarea" rows={2} value={data.asal_alamat} maxLength={120}
                     onChange={(e) => set("asal_alamat", e.target.value)}
                     placeholder="Jl. Sudirman No. 123, Jakarta Selatan"
                     data-testid="ord-asal-alamat" />
@@ -416,7 +416,7 @@ export default function CustomerOrderForm() {
                     placeholder="Surabaya" data-testid="ord-tujuan-kota" />
                 </Field>
                 <Field label="Alamat Lengkap" full>
-                  <textarea className="of-inp of-textarea" rows={3} value={data.tujuan_alamat} maxLength={300}
+                  <textarea className="of-inp of-textarea" rows={2} value={data.tujuan_alamat} maxLength={120}
                     onChange={(e) => set("tujuan_alamat", e.target.value)}
                     placeholder="Jl. Pemuda No. 45, Surabaya"
                     data-testid="ord-tujuan-alamat" />

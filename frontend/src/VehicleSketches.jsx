@@ -423,6 +423,7 @@ export const VEHICLE_TYPE_LIST = [
   "Toyota Alphard",
   "Toyota Vellfire",
   "Toyota Hilux",
+  "Toyota Agya",
   // ── Daihatsu ──
   "Daihatsu Xenia",
   "Daihatsu Terios",
@@ -438,6 +439,8 @@ export const VEHICLE_TYPE_LIST = [
   "Honda Brio",
   "Honda WR-V",
   "Honda Pilot",
+  "Honda Civic",
+  "Honda City",
   // ── Mitsubishi ──
   "Mitsubishi Xpander",
   "Mitsubishi Xpander Cross",
@@ -445,6 +448,7 @@ export const VEHICLE_TYPE_LIST = [
   "Mitsubishi Outlander",
   "Mitsubishi Eclipse Cross",
   "Mitsubishi L300",
+  "Mitsubishi Triton",
   // ── Wuling ──
   "Wuling Almaz",
   "Wuling Alvez",
@@ -496,6 +500,7 @@ const TYPE_TO_FILENAME = {
   "Toyota Alphard":         "mpv-suv",
   "Toyota Vellfire":        "mpv-suv",
   "Toyota Hilux":           "pickup",
+  "Toyota Agya":            "sedan",
   // Daihatsu
   "Daihatsu Xenia":         "mpv-suv",
   "Daihatsu Terios":        "mpv-suv",
@@ -511,6 +516,8 @@ const TYPE_TO_FILENAME = {
   "Honda Brio":             "sedan",
   "Honda WR-V":             "mpv-suv",
   "Honda Pilot":            "mpv-suv",
+  "Honda Civic":            "sedan",
+  "Honda City":             "sedan",
   // Mitsubishi
   "Mitsubishi Xpander":     "mpv-suv",
   "Mitsubishi Xpander Cross": "mpv-suv",
@@ -518,6 +525,7 @@ const TYPE_TO_FILENAME = {
   "Mitsubishi Outlander":   "mpv-suv",
   "Mitsubishi Eclipse Cross": "mpv-suv",
   "Mitsubishi L300":        "pickup",
+  "Mitsubishi Triton":      "pickup",
   // Wuling
   "Wuling Almaz":           "mpv-suv",
   "Wuling Alvez":           "mpv-suv",
