@@ -620,15 +620,17 @@ VALID_VEHICLE_TYPES = _TRUCK_KAROSERI_COMBOS | {
     "Toyota Avanza", "Toyota Veloz", "Toyota Rush", "Toyota Fortuner",
     "Toyota Kijang Innova", "Toyota Innova Zenix", "Toyota Raize",
     "Toyota Yaris Cross", "Toyota Alphard", "Toyota Vellfire", "Toyota Hilux",
+    "Toyota Agya",
     # Daihatsu
     "Daihatsu Xenia", "Daihatsu Terios", "Daihatsu Rocky", "Daihatsu Sigra",
     "Daihatsu Ayla", "Daihatsu Gran Max",
     # Honda
     "Honda BR-V", "Honda HR-V", "Honda CR-V", "Honda Mobilio", "Honda Brio",
-    "Honda WR-V", "Honda Pilot",
+    "Honda WR-V", "Honda Pilot", "Honda Civic", "Honda City",
     # Mitsubishi
     "Mitsubishi Xpander", "Mitsubishi Xpander Cross", "Mitsubishi Pajero Sport",
     "Mitsubishi Outlander", "Mitsubishi Eclipse Cross", "Mitsubishi L300",
+    "Mitsubishi Triton",
     # Wuling
     "Wuling Almaz", "Wuling Alvez", "Wuling Confero", "Wuling Air EV", "Wuling BinguoEV",
     # BYD
