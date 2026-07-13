@@ -151,7 +151,9 @@ export default function DriverData({ embedded = false }) {
       </div>`;
     const fotoBox = (src, label) => src ? `
       <div style="flex:1;text-align:center">
-        <img src="${src}" style="width:100%;height:100px;object-fit:cover;border:1px solid ${border};border-radius:10px;display:block;image-orientation:from-image" />
+        <div style="width:100%;height:110px;border:1px solid ${border};border-radius:10px;background:#f9fafb;display:flex;align-items:center;justify-content:center;overflow:hidden">
+          <img src="${src}" style="max-width:100%;max-height:100%;object-fit:contain;display:block;image-orientation:from-image" />
+        </div>
         <div style="font-size:10px;color:${gray};margin-top:6px;font-weight:600">${label}</div>
       </div>` : "";
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Surat Pengantar Driver — ${drv.nama}</title>
