@@ -3281,6 +3281,67 @@ async def delete_selisih_payment(pic_id: str, tagihan_id: str, payment_id: str):
     return _selisih_tagihan_totals(tagihan_list[idx])
 
 
+@api_router.get("/admin/selisih/{pic_id}/ringkasan")
+async def selisih_ringkasan_data(pic_id: str, pin: str = Query(...)):
+    """Data buat kartu Ringkasan Selisih Harga (dirender Chromium headless jadi
+    gambar). PIN lewat query karena cuma dipanggil browser headless internal,
+    sama polanya kayak supplier_ringkasan_data."""
+    expected = (os.environ.get("ADMIN_PIN") or "").strip()
+    if not expected or pin.strip() != expected:
+        raise HTTPException(401, "Invalid PIN")
+    doc = await db.selisih_profiles.find_one({"id": pic_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "PIC tidak ditemukan")
+    tagihan = [_selisih_tagihan_totals(t) for t in (doc.get("tagihan") or [])]
+    doc["tagihan"] = tagihan
+    doc["grand_total_selisih"] = sum(t["total_selisih"] for t in tagihan)
+    doc["grand_total_terbayar"] = sum(t["total_terbayar"] for t in tagihan)
+    doc["grand_sisa"] = sum(t["sisa"] for t in tagihan)
+    return doc
+
+
+@api_router.get("/admin/selisih/{pic_id}/ringkasan/image", dependencies=[Depends(require_admin_pin)])
+async def selisih_ringkasan_image(pic_id: str, x_admin_pin: str = Header(..., alias="X-Admin-Pin")):
+    """Render kartu Ringkasan Selisih Harga jadi PNG lewat Chromium headless --
+    sama pola kayak supplier_ringkasan_image."""
+    doc = await db.selisih_profiles.find_one({"id": pic_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "PIC tidak ditemukan")
+    if not FRONTEND_URL:
+        raise HTTPException(
+            503,
+            "FRONTEND_URL belum diset di backend. Set di Railway dashboard (backend "
+            "service -> Variables) sebagai Reference Variable: "
+            "FRONTEND_URL=https://${{<nama-service-frontend>.RAILWAY_PUBLIC_DOMAIN}}",
+        )
+    if _browser is None:
+        raise HTTPException(503, "Generator gambar belum siap (Chromium gagal start saat startup).")
+
+    page = await _browser.new_page(viewport={"width": 640, "height": 1200}, device_scale_factor=2)
+    try:
+        await page.goto(
+            f"{FRONTEND_URL}/selisih-ringkasan/{pic_id}?pin={x_admin_pin}",
+            wait_until="networkidle", timeout=30_000,
+        )
+        await page.wait_for_selector('[data-testid="ringkasan-ready"]', timeout=15_000)
+        await page.evaluate("document.fonts ? document.fonts.ready : Promise.resolve()")
+        await page.wait_for_timeout(150)
+        card = page.locator('[data-testid="ringkasan-card"]')
+        img_bytes = await card.screenshot(type="png")
+    except Exception as e:
+        logger.error(f"[ringkasan] gagal render untuk PIC {pic_id}: {e}")
+        raise HTTPException(500, "Gagal membuat ringkasan, coba lagi.")
+    finally:
+        await page.close()
+
+    fname = "".join(c for c in (doc.get("nama") or "pic") if c.isalnum() or c in " -_").strip() or "pic"
+    return Response(
+        content=img_bytes,
+        media_type="image/png",
+        headers={"Content-Disposition": f'attachment; filename="Ringkasan-Selisih-{fname}.png"'},
+    )
+
+
 # ---------- Static file serving for uploads ----------
 app.add_middleware(
     CORSMiddleware,

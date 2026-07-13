@@ -190,6 +190,24 @@ export default function SelisihPage() {
     return `${BACKEND_URL}${u}`;
   };
 
+  const [ringkasanBusy, setRingkasanBusy] = useState(false);
+  const downloadRingkasan = async () => {
+    if (!selected) return;
+    setRingkasanBusy(true);
+    try {
+      const r = await axios.get(`${API}/admin/selisih/${selected.id}/ringkasan/image`, { headers, responseType: "blob" });
+      const blob = new Blob([r.data], { type: "image/png" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Ringkasan-Selisih-${selected.nama.replace(/[^a-z0-9]+/gi, "-")}.png`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      flash("Ringkasan diunduh — siap dikirim ke WhatsApp");
+    } catch (e) { flash("Gagal buat ringkasan, coba lagi"); }
+    finally { setRingkasanBusy(false); }
+  };
+
   return (
     <div style={{ maxWidth: 900, margin: "12px auto 0", padding: "0 16px 40px" }}>
       <div style={{ background: "#161b22", border: "1px solid #21262d", borderRadius: 12, padding: 18, marginBottom: 16 }}>
@@ -232,9 +250,14 @@ export default function SelisihPage() {
             <div>
               <div style={{ fontWeight: 800, fontSize: 16 }}>{selected.nama}</div>
               <div style={{ fontSize: 11, color: "#8b949e" }}>PIC Purchasing {selected.no_hp && `· ${selected.no_hp}`}</div>
-              <button style={{ ...BTN_GHOST, marginTop: 8, fontSize: 11, padding: "6px 12px", color: "#f85149", borderColor: "#f85149" }} onClick={deletePic} data-testid="sel-delete">
-                🗑 Hapus PIC
-              </button>
+              <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                <button style={{ ...BTN_GHOST, fontSize: 11, padding: "6px 12px" }} onClick={downloadRingkasan} disabled={ringkasanBusy} data-testid="sel-ringkasan-download">
+                  {ringkasanBusy ? "⏳ Membuat..." : "📄 Download Ringkasan"}
+                </button>
+                <button style={{ ...BTN_GHOST, fontSize: 11, padding: "6px 12px", color: "#f85149", borderColor: "#f85149" }} onClick={deletePic} data-testid="sel-delete">
+                  🗑 Hapus PIC
+                </button>
+              </div>
             </div>
             <div style={{ display: "flex", gap: 16, textAlign: "right" }}>
               <div>
