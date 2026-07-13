@@ -193,6 +193,77 @@ async function imageToA4DataUrl(imgUrl) {
   return cnv.toDataURL("image/jpeg", 0.95);
 }
 
+/* Ratakan pencahayaan (hilangkan bayangan/uneven lighting) -- background-estimate
+   (blur skala besar) lalu bagi & rescale, teknik standar document-scanner. Pure
+   canvas (gak gantung OpenCV) biar tetep jalan walau auto-crop OpenCV gagal load. */
+function flattenBackground(canvas) {
+  const w = canvas.width, h = canvas.height;
+  const ctx = canvas.getContext("2d");
+  const src = ctx.getImageData(0, 0, w, h);
+  const d = src.data;
+  const bw = Math.max(8, Math.round(w / 24)), bh = Math.max(8, Math.round(h / 24));
+  const small = document.createElement("canvas"); small.width = bw; small.height = bh;
+  const sctx = small.getContext("2d");
+  sctx.filter = "blur(2px)";
+  sctx.drawImage(canvas, 0, 0, bw, bh);
+  const bgCanvas = document.createElement("canvas"); bgCanvas.width = w; bgCanvas.height = h;
+  const bgCtx = bgCanvas.getContext("2d");
+  bgCtx.imageSmoothingEnabled = true;
+  bgCtx.drawImage(small, 0, 0, w, h);
+  const bgData = bgCtx.getImageData(0, 0, w, h).data;
+  for (let i = 0; i < d.length; i += 4) {
+    for (let c = 0; c < 3; c++) {
+      const bgv = Math.max(20, bgData[i + c]);
+      const v = (d[i + c] / bgv) * 205;
+      d[i + c] = v < 0 ? 0 : v > 255 ? 255 : v;
+    }
+  }
+  ctx.putImageData(src, 0, 0);
+  return canvas;
+}
+
+/* Pertajam teks -- unsharp mask ringan (orig + amount*(orig-blur)), pure canvas. */
+function unsharpMask(canvas, amount = 0.6) {
+  const w = canvas.width, h = canvas.height;
+  const ctx = canvas.getContext("2d");
+  const id = ctx.getImageData(0, 0, w, h);
+  const d = id.data;
+  const blurCanvas = document.createElement("canvas"); blurCanvas.width = w; blurCanvas.height = h;
+  const bctx = blurCanvas.getContext("2d");
+  bctx.filter = "blur(1.2px)";
+  bctx.drawImage(canvas, 0, 0);
+  const bd = bctx.getImageData(0, 0, w, h).data;
+  for (let i = 0; i < d.length; i += 4) {
+    for (let c = 0; c < 3; c++) {
+      const v = d[i + c] + amount * (d[i + c] - bd[i + c]);
+      d[i + c] = v < 0 ? 0 : v > 255 ? 255 : v;
+    }
+  }
+  ctx.putImageData(id, 0, 0);
+  return canvas;
+}
+
+/* Canvas hasil scan -> PDF A4 300dpi berkualitas tinggi (File, siap diupload).
+   Sama persis polanya kayak imageToA4DataUrl/downloadPDF yang udah ada -- cuma
+   dibangun langsung dari canvas di memori (bukan reload dari URL) dan hasilnya
+   File PDF, bukan trigger download lokal. */
+async function canvasToPdfFile(canvas, baseName) {
+  const jsPDF = await loadJsPDF();
+  const AW = 2480, AH = 3508, m = 70;
+  const a4 = document.createElement("canvas"); a4.width = AW; a4.height = AH;
+  const actx = a4.getContext("2d");
+  actx.fillStyle = "#fff"; actx.fillRect(0, 0, AW, AH);
+  const sc = Math.min((AW - m * 2) / canvas.width, (AH - m * 2) / canvas.height);
+  const dw = canvas.width * sc, dh = canvas.height * sc;
+  actx.imageSmoothingEnabled = true; actx.imageSmoothingQuality = "high";
+  actx.drawImage(canvas, (AW - dw) / 2, (AH - dh) / 2, dw, dh);
+  const dataUrl = a4.toDataURL("image/jpeg", 0.95);
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  doc.addImage(dataUrl, "JPEG", 0, 0, 210, 297, undefined, "FAST");
+  const pdfBlob = doc.output("blob");
+  return new File([pdfBlob], (baseName || "dokumen").replace(/\.\w+$/, "") + ".pdf", { type: "application/pdf" });
+}
+
 /* Modal scanner: auto-deteksi 4 sudut (OpenCV) + geser manual + perspective transform + filter. */
 function CropModal({ url, file, onCancel, onConfirm }) {
   const imgRef = useRef(null);
@@ -387,13 +458,26 @@ function CropModal({ url, file, onCancel, onConfirm }) {
         canvas.width = cw; canvas.height = ch;
         ctx.drawImage(img, x0, y0, cw, ch, 0, 0, cw, ch);
       }
+      // Ratakan pencahayaan (hilangkan bayangan) + tajamkan teks -- sebelum filter
+      // warna/kontras yang sudah ada, biar hasil akhir kelihatan kayak scanner asli.
+      try { flattenBackground(canvas); } catch {}
+      try { unsharpMask(canvas); } catch {}
       const finalCanvas = applyFilter(canvas);
-      const blob = await new Promise((r) => finalCanvas.toBlob(r, "image/jpeg", 0.95));
-      const out = blob ? new File([blob], (file.name || "resi").replace(/\.\w+$/, "") + "_scan.jpg", { type: "image/jpeg" }) : file;
+
+      // Hasil akhir dokumen scan SELALU PDF (bukan JPG) -- sesuai standar
+      // Adobe Scan/MS Lens. Kalau pembuatan PDF gagal (mis. CDN jsPDF gak
+      // kejangkau), fallback ke JPG scan biasa biar driver tetap bisa lanjut.
+      try {
+        const pdfFile = await canvasToPdfFile(finalCanvas, file.name || "dokumen");
+        setReview({ url: URL.createObjectURL(pdfFile), file: pdfFile, isPdf: true });
+      } catch {
+        const blob = await new Promise((r) => finalCanvas.toBlob(r, "image/jpeg", 0.95));
+        const out = blob ? new File([blob], (file.name || "resi").replace(/\.\w+$/, "") + "_scan.jpg", { type: "image/jpeg" }) : file;
+        setReview({ url: URL.createObjectURL(out), file: out, isPdf: false });
+      }
       // Jangan langsung upload -- tampilin hasilnya dulu, biar user bisa cek/edit ulang
       // sebelum beneran dikirim (matching Office Lens/CamScanner-style review step).
-      setReview({ url: URL.createObjectURL(out), file: out });
-    } catch { setReview({ url: URL.createObjectURL(file), file }); }
+    } catch { setReview({ url: URL.createObjectURL(file), file, isPdf: false }); }
     finally { setBusy(false); }
   };
 
@@ -414,17 +498,19 @@ function CropModal({ url, file, onCancel, onConfirm }) {
     return (
       <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.94)", zIndex: 9999, display: "flex", flexDirection: "column", padding: 12 }}>
         <div style={{ color: "#fff", textAlign: "center", fontWeight: 800, fontSize: 13, padding: "4px 0 10px" }}>
-          ✓ Hasil Scan — Cek dulu sebelum dipakai
+          {review.isPdf ? "✓ Dokumen PDF Siap — Cek dulu sebelum dikirim" : "✓ Hasil Scan — Cek dulu sebelum dipakai"}
         </div>
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
-          <img src={review.url} alt="hasil scan" style={{ maxWidth: "100%", maxHeight: "72vh", display: "block", borderRadius: 6 }} />
+          {review.isPdf
+            ? <iframe title="preview dokumen pdf" src={review.url} style={{ width: "100%", height: "100%", maxHeight: "72vh", border: "none", background: "#fff", borderRadius: 6 }} />
+            : <img src={review.url} alt="hasil scan" style={{ maxWidth: "100%", maxHeight: "72vh", display: "block", borderRadius: 6 }} />}
         </div>
         <div style={{ display: "flex", gap: 8, padding: "10px 0 4px" }}>
           <button onClick={() => setReview(null)} style={{ flex: 1, padding: "13px", borderRadius: 10, border: "1px solid #555", background: "none", color: "#ccc", fontWeight: 700, fontSize: 13 }}>
             ◀ Edit Lagi
           </button>
           <button onClick={() => onConfirm(review.file)} style={{ flex: 1.5, padding: "13px", borderRadius: 10, border: "none", background: "#2ea043", color: "#fff", fontWeight: 900, fontSize: 13 }}>
-            ✓ Gunakan Foto Ini
+            {review.isPdf ? "✓ Gunakan PDF Ini" : "✓ Gunakan Foto Ini"}
           </button>
         </div>
       </div>
