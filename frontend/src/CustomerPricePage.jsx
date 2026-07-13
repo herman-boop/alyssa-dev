@@ -10,6 +10,7 @@ function fRp(n) {
 const navy = "#1e3a8a";
 const gray = "#6b7280";
 const border = "#e5e7eb";
+const gold = "#b8860b";
 
 export default function CustomerPricePage() {
   const token = window.location.pathname.replace(/^\/harga\//, "").split("?")[0].trim();
@@ -88,11 +89,12 @@ export default function CustomerPricePage() {
 
         {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: `3px solid ${navy}`, paddingBottom: 16, marginBottom: 6, flexWrap: "wrap", gap: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <img src="/logo.png" alt="Logo" width={44} height={44} style={{ objectFit: "contain" }} />
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <img src="/logo.png" alt="Logo" width={52} height={52} style={{ objectFit: "contain" }} />
             <div>
-              <div style={{ fontSize: 20, fontWeight: 900, color: navy, letterSpacing: 0.4 }}>PENAWARAN HARGA</div>
-              <div style={{ fontSize: 12, color: gray, marginTop: 4 }}>PT Alyssa Auto Logistik — Solusi Transportasi &amp; Logistik Kendaraan</div>
+              <div style={{ fontSize: 19, fontWeight: 900, color: gold, letterSpacing: 0.6 }}>PT ALYSSA AUTO LOGISTIK</div>
+              <div style={{ fontSize: 11, color: gray, marginTop: 2 }}>Solusi Transportasi &amp; Logistik Kendaraan</div>
+              <div style={{ display: "inline-block", marginTop: 8, fontSize: 11, fontWeight: 800, color: navy, background: "#eff6ff", borderRadius: 4, padding: "3px 10px", letterSpacing: 0.4 }}>PENAWARAN HARGA</div>
             </div>
           </div>
           <div style={{ textAlign: "right", fontSize: 11 }}>
