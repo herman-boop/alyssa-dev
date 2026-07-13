@@ -161,6 +161,18 @@ export default function CustomerPricePage() {
           </div>
         )}
 
+        <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "22px 0 10px" }}>
+          <div style={{ width: 24, height: 24, borderRadius: 6, background: navy, color: "#fff", fontWeight: 800, fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>2</div>
+          <div style={{ fontWeight: 800, fontSize: 13, color: navy, letterSpacing: 0.3 }}>INFORMASI PEMBAYARAN</div>
+        </div>
+        <div style={{ border: `1px solid ${border}`, borderRadius: 10, padding: 16, background: "linear-gradient(135deg, #eff6ff 0%, #ffffff 100%)", display: "flex", alignItems: "center", gap: 16 }}>
+          <div style={{ width: 56, height: 56, borderRadius: 10, background: "#0054a6", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: 16, letterSpacing: 0.5, flexShrink: 0 }}>BCA</div>
+          <div>
+            <div style={{ fontSize: 20, fontWeight: 900, color: "#1f2937", letterSpacing: 1 }}>0072-8902-71</div>
+            <div style={{ fontSize: 12, color: gray, marginTop: 3 }}>a.n. PT ALYSSA AUTO LOGISTIK</div>
+          </div>
+        </div>
+
         <div style={{ marginTop: 16, background: "#eff6ff", borderRadius: 8, padding: 12, fontSize: 11, color: "#374151", display: "flex", gap: 8 }}>
           <span>📋</span>
           <span>Harga berlaku 7 hari sejak tanggal penawaran. Hubungi kami untuk konfirmasi: <strong>0818 631 135</strong></span>
