@@ -921,6 +921,9 @@ class OrderBody(BaseModel):
     # Deskripsi barang — dipakai di Surat Jalan (kolom "Isi Menurut Pengirim")
     # buat kiriman cargo/barang umum (bukan kendaraan/alat berat).
     isi_kiriman: str = ""
+    # Jumlah colly/koli (jumlah jenis kemasan) — dipakai di kolom "Jml Jns Colly"
+    # di Surat Jalan, diisi manual (bisa 1, 3, 4, dst).
+    jumlah_colly: str = ""
     # Asal
     asal_kota: str
     asal_alamat: str = ""
@@ -973,6 +976,7 @@ async def create_order(payload: OrderBody):
         "lebar": (payload.lebar or "").strip()[:12],
         "tinggi": (payload.tinggi or "").strip()[:12],
         "isi_kiriman": (payload.isi_kiriman or "").strip()[:200],
+        "jumlah_colly": (payload.jumlah_colly or "").strip()[:10],
         "asal_kota": payload.asal_kota.strip()[:80],
         "asal_alamat": (payload.asal_alamat or "").strip()[:300],
         "pickup_date": (payload.pickup_date or "").strip()[:10],
@@ -1850,6 +1854,7 @@ class OrderPatchBody(BaseModel):
     vehicle_type: Optional[str] = None
     nopol: Optional[str] = None
     no_rangka: Optional[str] = None
+    jumlah_colly: Optional[str] = None
 
 
 @api_router.patch("/admin/orders/{order_id}", dependencies=[Depends(require_admin_pin)])
@@ -1879,6 +1884,8 @@ async def admin_patch_order(order_id: str, payload: OrderPatchBody):
         upd["nopol"] = payload.nopol.strip()[:20]
     if payload.no_rangka is not None:
         upd["no_rangka"] = payload.no_rangka.strip()[:40]
+    if payload.jumlah_colly is not None:
+        upd["jumlah_colly"] = payload.jumlah_colly.strip()[:10]
     if len(upd) == 1:
         raise HTTPException(400, "No fields to update")
     await db.orders.update_one({"order_id": order_id}, {"$set": upd})

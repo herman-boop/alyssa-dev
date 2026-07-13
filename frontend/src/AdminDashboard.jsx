@@ -620,45 +620,12 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
     // Kiriman cargo/barang umum pakai isi_kiriman; kiriman kendaraan pakai vehicle_type+nopol.
     const isiContents = (order.isi_kiriman || "").trim()
       || `${order.vehicle_type || ""} ${order.nopol ? "· " + order.nopol : ""}`.trim();
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Surat Jalan ${noSurat}</title>
-    <style>
-      * { margin:0; padding:0; box-sizing:border-box; }
-      body { font-family: Arial, sans-serif; font-size: 11px; color: #000; background: #fff; padding: 8mm; }
-      .outer { border: 2px solid #000; width: 100%; }
-      .header { display: flex; border-bottom: 2px solid #000; }
-      .logo-box { width: 200px; border-right: 2px solid #000; padding: 8px 10px; display: flex; flex-direction: column; justify-content: center; }
-      .logo-name { font-size: 14px; font-weight: 900; color: #000; letter-spacing: 1px; line-height: 1.2; }
-      .logo-tagline { font-size: 8px; color: #333; margin-top: 3px; font-style: italic; }
-      .logo-addr { font-size: 8px; color: #333; margin-top: 4px; line-height: 1.4; }
-      .title-box { flex: 1; padding: 8px 12px; }
-      .title-main { font-size: 13px; font-weight: 900; text-align: center; letter-spacing: 1px; }
-      .title-sub { font-size: 10px; text-align: center; color: #333; margin-top: 2px; font-style: italic; }
-      .no-box { border: 1px solid #000; display: inline-block; padding: 2px 10px; margin-top: 6px; font-size: 14px; font-weight: 900; letter-spacing: 2px; }
-      .info-row { display: flex; border-bottom: 1px solid #000; }
-      .info-cell { flex: 1; border-right: 1px solid #000; padding: 5px 8px; }
-      .info-cell:last-child { border-right: none; }
-      .lbl { font-size: 8px; font-weight: 700; text-transform: uppercase; color: #555; letter-spacing: .5px; }
-      .val { font-size: 11px; font-weight: 600; margin-top: 2px; min-height: 18px; }
-      table { width: 100%; border-collapse: collapse; }
-      th { background: #e8e8e8; border: 1px solid #000; padding: 5px 6px; font-size: 9px; text-align: center; font-weight: 700; text-transform: uppercase; }
-      td { border: 1px solid #000; padding: 5px 6px; font-size: 11px; min-height: 36px; vertical-align: top; }
-      .td-no { text-align: center; width: 30px; }
-      .td-isi { width: 40%; }
-      .service-box { border-bottom: 1px solid #000; padding: 6px 8px; display: flex; gap: 20px; align-items: center; }
-      .svc-lbl { font-size: 9px; font-weight: 700; text-transform: uppercase; margin-right: 8px; }
-      .svc-opt { display: flex; align-items: center; gap: 4px; font-size: 10px; }
-      .chk { width: 12px; height: 12px; border: 1px solid #000; display: inline-block; }
-      .chk.checked { background: #000; }
-      .sign-row { display: flex; border-top: 1px solid #000; }
-      .sign-cell { flex: 1; border-right: 1px solid #000; padding: 6px 8px; }
-      .sign-cell:last-child { border-right: none; }
-      .sign-lbl { font-size: 8px; font-weight: 700; text-transform: uppercase; color: #555; }
-      .sign-space { height: 40px; }
-      .sign-name { font-size: 9px; border-top: 1px solid #555; margin-top: 4px; padding-top: 2px; color: #333; }
-      .catatan { padding: 6px 8px; border-top: 1px solid #000; font-size: 9px; color: #333; line-height: 1.5; }
-      @media print { @page { margin: 5mm; size: A5 landscape; } body { padding: 0; } }
-    </style></head><body>
+    const jmlColly = (order.jumlah_colly || "").trim() || "1";
+    // 2 lembar identik ditumpuk 1 halaman A4 (lebar A4, tinggi A4/2 per lembar) biar sekali
+    // cetak langsung dapet 2 rangkap (arsip kantor + tanda terima) tanpa buang kertas kosong.
+    const renderCopy = (copyLabel) => `
     <div class="outer">
+      <div class="copy-tag">${copyLabel}</div>
       <!-- HEADER -->
       <div class="header">
         <div class="logo-box">
@@ -727,7 +694,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
         <tbody>
           <tr>
             <td class="td-no">1</td>
-            <td style="text-align:center">1</td>
+            <td style="text-align:center">${jmlColly}</td>
             <td>Unit</td>
             <td></td>
             <td class="td-isi">${isiContents}</td>
@@ -738,7 +705,6 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
             <td style="text-align:center;font-weight:700">${m3}</td>
           </tr>
           <tr><td class="td-no">2</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
-          <tr><td class="td-no">3</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
         </tbody>
       </table>
 
@@ -781,6 +747,54 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
         Kerusakan/kehilangan yang disebabkan bukan karena kelalaian PT. Alyssa Auto Logistik tidak menjadi tanggung jawab perusahaan.
         &nbsp;|&nbsp; <i>Goods have been inspected and match the description above.</i>
       </div>
+    </div>`;
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Surat Jalan ${noSurat}</title>
+    <style>
+      * { margin:0; padding:0; box-sizing:border-box; }
+      body { font-family: Arial, sans-serif; font-size: 11px; color: #000; background: #fff; }
+      .sheet { display: flex; flex-direction: column; height: 285mm; padding: 6mm; gap: 4mm; }
+      .copy-slot { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+      .cutline { display: flex; align-items: center; gap: 8px; color: #888; font-size: 9px; flex: 0 0 auto; }
+      .cutline .dash { flex: 1; border-top: 1px dashed #999; }
+      .outer { border: 2px solid #000; width: 100%; flex: 1; display: flex; flex-direction: column; position: relative; }
+      .copy-tag { position: absolute; top: 4px; right: 8px; font-size: 8px; font-weight: 700; color: #666; letter-spacing: .5px; text-transform: uppercase; }
+      .header { display: flex; border-bottom: 2px solid #000; }
+      .logo-box { width: 200px; border-right: 2px solid #000; padding: 8px 10px; display: flex; flex-direction: column; justify-content: center; }
+      .logo-name { font-size: 14px; font-weight: 900; color: #000; letter-spacing: 1px; line-height: 1.2; }
+      .logo-tagline { font-size: 8px; color: #333; margin-top: 3px; font-style: italic; }
+      .logo-addr { font-size: 8px; color: #333; margin-top: 4px; line-height: 1.4; }
+      .title-box { flex: 1; padding: 8px 12px; }
+      .title-main { font-size: 13px; font-weight: 900; text-align: center; letter-spacing: 1px; }
+      .title-sub { font-size: 10px; text-align: center; color: #333; margin-top: 2px; font-style: italic; }
+      .no-box { border: 1px solid #000; display: inline-block; padding: 2px 10px; margin-top: 6px; font-size: 14px; font-weight: 900; letter-spacing: 2px; }
+      .info-row { display: flex; border-bottom: 1px solid #000; }
+      .info-cell { flex: 1; border-right: 1px solid #000; padding: 5px 8px; }
+      .info-cell:last-child { border-right: none; }
+      .lbl { font-size: 8px; font-weight: 700; text-transform: uppercase; color: #555; letter-spacing: .5px; }
+      .val { font-size: 11px; font-weight: 600; margin-top: 2px; min-height: 18px; }
+      table { width: 100%; border-collapse: collapse; }
+      th { background: #e8e8e8; border: 1px solid #000; padding: 5px 6px; font-size: 9px; text-align: center; font-weight: 700; text-transform: uppercase; }
+      td { border: 1px solid #000; padding: 5px 6px; font-size: 11px; min-height: 36px; vertical-align: top; }
+      .td-no { text-align: center; width: 30px; }
+      .td-isi { width: 40%; }
+      .service-box { border-bottom: 1px solid #000; padding: 6px 8px; display: flex; gap: 20px; align-items: center; }
+      .svc-lbl { font-size: 9px; font-weight: 700; text-transform: uppercase; margin-right: 8px; }
+      .svc-opt { display: flex; align-items: center; gap: 4px; font-size: 10px; }
+      .chk { width: 12px; height: 12px; border: 1px solid #000; display: inline-block; }
+      .chk.checked { background: #000; }
+      .sign-row { display: flex; border-top: 1px solid #000; }
+      .sign-cell { flex: 1; border-right: 1px solid #000; padding: 6px 8px; }
+      .sign-cell:last-child { border-right: none; }
+      .sign-lbl { font-size: 8px; font-weight: 700; text-transform: uppercase; color: #555; }
+      .sign-space { height: 40px; }
+      .sign-name { font-size: 9px; border-top: 1px solid #555; margin-top: 4px; padding-top: 2px; color: #333; }
+      .catatan { padding: 6px 8px; border-top: 1px solid #000; font-size: 9px; color: #333; line-height: 1.5; }
+      @media print { @page { margin: 0; size: A4 portrait; } body { padding: 0; } }
+    </style></head><body>
+    <div class="sheet">
+      <div class="copy-slot">${renderCopy("Lembar 1 — Arsip Kantor")}</div>
+      <div class="cutline"><span class="dash"></span>&nbsp;✂ potong di sini&nbsp;<span class="dash"></span></div>
+      <div class="copy-slot">${renderCopy("Lembar 2 — Tanda Terima")}</div>
     </div>
     <script>window.onload=()=>window.print()<\/script>
     </body></html>`;
@@ -796,6 +810,8 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
   const [nopolDraft, setNopolDraft] = useState(order.nopol || "");
   const [editRangka, setEditRangka] = useState(false);
   const [rangkaDraft, setRangkaDraft] = useState(order.no_rangka || "");
+  const [editColly, setEditColly] = useState(false);
+  const [collyDraft, setCollyDraft] = useState(order.jumlah_colly || "");
   const [kordDraft, setKordDraft] = useState(order.koordinator_id || "");
   const [kordSaving, setKordSaving] = useState(false);
   const lbl = STATUS_LABEL[order.status] || { txt: order.status, cls: "adm-chip-new" };
@@ -838,6 +854,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
   const saveDriver = async () => { await onPatch({ driver_id: driverDraft }); setEditDriver(false); };
   const saveNama = async () => { await onPatch({ nama_driver: namaDraft.trim() }); setEditNama(false); };
   const saveRangka = async () => { await onPatch({ no_rangka: rangkaDraft.trim().toUpperCase() }); setEditRangka(false); };
+  const saveColly = async () => { await onPatch({ jumlah_colly: collyDraft.replace(/[^0-9]/g, "") }); setEditColly(false); };
 
   return (
     <article
@@ -926,6 +943,33 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
                   ? <span className="adm-pill adm-mono">{order.no_rangka}</span>
                   : <i className="adm-mute">belum diisi</i>}
                 <button className="adm-link" onClick={() => setEditRangka(true)} data-testid={`adm-rangka-edit-${order.order_id}`}><IcoPencil /></button>
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="adm-field-row">
+          <div className="adm-field-key">Jumlah Colly</div>
+          <div className="adm-field-val">
+            {editColly ? (
+              <span className="adm-driver-edit-row">
+                <input
+                  className="adm-input-inline adm-mono"
+                  inputMode="numeric"
+                  value={collyDraft}
+                  onChange={(e) => setCollyDraft(e.target.value.replace(/[^0-9]/g, ""))}
+                  placeholder="Cth: 3"
+                  autoFocus
+                  data-testid={`adm-colly-input-${order.order_id}`}
+                />
+                <button className="adm-btn adm-btn-gold adm-btn-xs" onClick={saveColly} data-testid={`adm-colly-save-${order.order_id}`}>OK</button>
+                <button className="adm-btn adm-btn-ghost adm-btn-xs" onClick={() => { setEditColly(false); setCollyDraft(order.jumlah_colly || ""); }}><IcoX /></button>
+              </span>
+            ) : (
+              <span className="adm-driver-row">
+                {order.jumlah_colly
+                  ? <span className="adm-pill adm-mono">{order.jumlah_colly}</span>
+                  : <i className="adm-mute">belum diisi</i>}
+                <button className="adm-link" onClick={() => setEditColly(true)} data-testid={`adm-colly-edit-${order.order_id}`}><IcoPencil /></button>
               </span>
             )}
           </div>

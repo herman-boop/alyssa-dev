@@ -120,7 +120,7 @@ export default function CustomerOrderForm() {
   const [shipmentType, setShipmentType] = useState("kendaraan"); // "kendaraan" | "cargo"
   const [data, setData] = useState({
     vehicle_type: "", nopol: "", warna: "", tahun: "", km: "", kondisi: "Bekas", no_rangka: "",
-    panjang: "", lebar: "", tinggi: "", isi_kiriman: "",
+    panjang: "", lebar: "", tinggi: "", isi_kiriman: "", jumlah_colly: "",
     asal_kota: "", asal_alamat: "", pickup_date: "", pickup_time: "", pickup_pic: "", pickup_hp: "",
     tujuan_kota: "", tujuan_alamat: "", delivery_pic: "", delivery_hp: "",
     customer_nama: "", customer_hp: "", customer_email: "", catatan: "",
@@ -168,7 +168,7 @@ export default function CustomerOrderForm() {
 
   const addAnother = () => {
     // Reset hanya data kendaraan, sisanya (asal/tujuan/customer) tetap
-    setData(d => ({ ...d, vehicle_type: "", nopol: "", warna: "", tahun: "", km: "", kondisi: "Bekas", no_rangka: "", panjang: "", lebar: "", tinggi: "", isi_kiriman: "" }));
+    setData(d => ({ ...d, vehicle_type: "", nopol: "", warna: "", tahun: "", km: "", kondisi: "Bekas", no_rangka: "", panjang: "", lebar: "", tinggi: "", isi_kiriman: "", jumlah_colly: "" }));
     setShipmentType("kendaraan");
     setFiles([]);
     setResult(null);
@@ -342,6 +342,14 @@ export default function CustomerOrderForm() {
                   </Field>
                 </div>
               )}
+
+              <div className="of-grid" style={{ marginTop: 4 }}>
+                <Field label="Jumlah Colly" hint="Jumlah jenis kemasan/koli — muncul di kolom Jml Jns Colly di Surat Jalan.">
+                  <input type="text" inputMode="numeric" className="of-inp" value={data.jumlah_colly}
+                    onChange={(e) => set("jumlah_colly", e.target.value.replace(/[^0-9]/g, ""))}
+                    placeholder="Cth: 3" data-testid="ord-jumlah-colly" />
+                </Field>
+              </div>
             </div>
           )}
 
@@ -492,6 +500,7 @@ export default function CustomerOrderForm() {
                   {(data.panjang || data.lebar || data.tinggi) && (
                     <SRow k="Dimensi (P×L×T cm)" v={`${data.panjang || "—"} × ${data.lebar || "—"} × ${data.tinggi || "—"}`} />
                   )}
+                  {data.jumlah_colly && <SRow k="Jumlah Colly" v={data.jumlah_colly} />}
                   <SRow k="Asal"         v={`${data.asal_kota}${data.asal_alamat ? ` — ${data.asal_alamat}` : ""}`} />
                   <SRow k="Jadwal"       v={`${data.pickup_date || "—"} ${data.pickup_time || ""}`.trim()} />
                   <SRow k="Tujuan"       v={`${data.tujuan_kota}${data.tujuan_alamat ? ` — ${data.tujuan_alamat}` : ""}`} />
