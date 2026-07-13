@@ -1744,7 +1744,7 @@ export default function DriverCheckpoint() {
                       type="file"
                       accept="image/*,application/pdf"
                       capture="environment"
-                      onChange={(e) => uploadBastk(e.target.files?.[0])}
+                      onChange={(e) => openCrop(e.target.files?.[0], uploadBastk)}
                       style={{ display: "none" }}
                     />
                     <button onClick={() => triggerFile("bastk")} disabled={uploadingBastk} data-testid="btn-add-bastk"
