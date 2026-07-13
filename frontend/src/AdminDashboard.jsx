@@ -566,23 +566,31 @@ function StatTile({ label, value, cls = "", onClick, active, testid }) {
 /* ════════════════════════════════════════
    ORDER CARD
 ════════════════════════════════════════ */
-function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLegs, onOpenBonus, headers, kordList = [] }) {
-  const [uploadingKapal, setUploadingKapal] = useState(false);
-  const kapalFileRef = useRef();
+const ALBUM_STAGES = [
+  { key: "asal", label: "Asal", icon: "📍" },
+  { key: "kapal", label: "Di Kapal", icon: "⚓" },
+  { key: "tujuan", label: "Tujuan", icon: "🏁" },
+  { key: "dokumen", label: "Dokumen", icon: "📄" },
+];
 
-  const uploadFotoKapal = async (files) => {
+function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLegs, onOpenBonus, headers, kordList = [] }) {
+  const [uploadingStage, setUploadingStage] = useState(null); // stage key lagi upload
+  const albumFileRefs = useRef({});
+
+  const uploadFotoAlbum = async (stage, files) => {
     if (!order.trip_id || !files?.length) return;
-    setUploadingKapal(true);
+    setUploadingStage(stage);
     try {
       for (const file of Array.from(files)) {
         const fd = new FormData();
-        fd.append("file", file);
-        fd.append("stage", "kapal");
+        fd.append("foto", file);
+        fd.append("stage", stage);
+        fd.append("uploaded_by", "admin");
         await axios.post(`${API}/trips/${order.trip_id}/album`, fd, { headers: { ...headers, "Content-Type": "multipart/form-data" } });
       }
-      alert(`${files.length} foto berhasil diupload ke album Di Kapal`);
+      alert(`${files.length} foto berhasil diupload ke album ${ALBUM_STAGES.find(s => s.key === stage)?.label || stage}`);
     } catch { alert("Gagal upload foto"); }
-    setUploadingKapal(false);
+    setUploadingStage(null);
   };
 
   const printSuratJalan = () => {
@@ -1048,15 +1056,23 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
         {linkDriver && <a className="adm-btn adm-btn-ghost adm-btn-sm" href={linkDriver} target="_blank" rel="noreferrer" data-testid={`adm-link-driver-${order.order_id}`}>Driver</a>}
         {linkTrack  && <a className="adm-btn adm-btn-ghost adm-btn-sm" href={linkTrack}  target="_blank" rel="noreferrer" data-testid={`adm-link-track-${order.order_id}`}>Track</a>}
         {linkBastk  && <a className="adm-btn adm-btn-ghost adm-btn-sm" href={linkBastk}  target="_blank" rel="noreferrer" data-testid={`adm-link-bastk-${order.order_id}`}>BASTK</a>}
-        {order.trip_id && (
-          <>
-            <input ref={kapalFileRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={e => uploadFotoKapal(e.target.files)} />
-            <button className="adm-btn adm-btn-sm" onClick={() => kapalFileRef.current?.click()} disabled={uploadingKapal}
-              style={{ background: "#1a3a5c", border: "1px solid #1f6feb", color: "#60a5fa" }}>
-              {uploadingKapal ? "Uploading..." : "⚓ Upload Di Kapal"}
+        {order.trip_id && ALBUM_STAGES.map(({ key, label, icon }) => (
+          <span key={key}>
+            <input
+              ref={(el) => { albumFileRefs.current[key] = el; }}
+              type="file"
+              accept={key === "dokumen" ? "image/*,application/pdf" : "image/*"}
+              multiple
+              style={{ display: "none" }}
+              onChange={(e) => uploadFotoAlbum(key, e.target.files)}
+            />
+            <button className="adm-btn adm-btn-sm" onClick={() => albumFileRefs.current[key]?.click()} disabled={uploadingStage === key}
+              style={{ background: "#1a3a5c", border: "1px solid #1f6feb", color: "#60a5fa" }}
+              title={`Upload foto ke album ${label} (kalau driver belum sempat)`}>
+              {uploadingStage === key ? "Uploading..." : `${icon} ${label}`}
             </button>
-          </>
-        )}
+          </span>
+        ))}
         <button className="adm-btn adm-btn-sm" onClick={() => printSuratJalan()}
           style={{ background: "#1a2e1a", border: "1px solid #3fb950", color: "#3fb950" }}>
           📄 Surat Jalan
