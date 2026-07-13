@@ -79,7 +79,7 @@ export default function SupplierPage() {
   };
 
   // ── Job (unit) form ──
-  const [jobForm, setJobForm] = useState({ vehicle_type: "", nopol: "", asal_kota: "", tujuan_kota: "", total_harga: "", catatan: "" });
+  const [jobForm, setJobForm] = useState({ vehicle_type: "", nopol: "", no_rangka: "", asal_kota: "", tujuan_kota: "", total_harga: "", catatan: "" });
   const [jobSaving, setJobSaving] = useState(false);
   const addJob = async () => {
     if (!selected) return;
@@ -90,12 +90,13 @@ export default function SupplierPage() {
       await axios.post(`${API}/admin/suppliers/${selected.id}/jobs`, {
         vehicle_type: jobForm.vehicle_type.trim(),
         nopol: jobForm.nopol.trim(),
+        no_rangka: jobForm.no_rangka.trim(),
         asal_kota: jobForm.asal_kota.trim(),
         tujuan_kota: jobForm.tujuan_kota.trim(),
         total_harga: harga,
         catatan: jobForm.catatan.trim(),
       }, { headers });
-      setJobForm({ vehicle_type: "", nopol: "", asal_kota: "", tujuan_kota: "", total_harga: "", catatan: "" });
+      setJobForm({ vehicle_type: "", nopol: "", no_rangka: "", asal_kota: "", tujuan_kota: "", total_harga: "", catatan: "" });
       await reloadSelected(selected.id);
       setListRefreshTick((t) => t + 1);
       flash("Unit ditambahkan");
@@ -157,6 +158,24 @@ export default function SupplierPage() {
     return `${BACKEND_URL}${u}`;
   };
 
+  const [ringkasanBusy, setRingkasanBusy] = useState(false);
+  const downloadRingkasan = async () => {
+    if (!selected) return;
+    setRingkasanBusy(true);
+    try {
+      const r = await axios.get(`${API}/admin/suppliers/${selected.id}/ringkasan/image`, { headers, responseType: "blob" });
+      const blob = new Blob([r.data], { type: "image/png" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Ringkasan-${selected.nama.replace(/[^a-z0-9]+/gi, "-")}.png`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      flash("Ringkasan diunduh — siap dikirim ke WhatsApp");
+    } catch (e) { flash("Gagal buat ringkasan, coba lagi"); }
+    finally { setRingkasanBusy(false); }
+  };
+
   return (
     <div style={{ maxWidth: 900, margin: "12px auto 0", padding: "0 16px 40px" }}>
       <div style={{ background: "#161b22", border: "1px solid #21262d", borderRadius: 12, padding: 18, marginBottom: 16 }}>
@@ -199,6 +218,9 @@ export default function SupplierPage() {
             <div>
               <div style={{ fontWeight: 800, fontSize: 16 }}>{selected.nama}</div>
               <div style={{ fontSize: 11, color: "#8b949e" }}>{selected.jenis || "Supplier"} {selected.no_hp && `· ${selected.no_hp}`}</div>
+              <button style={{ ...BTN_GHOST, marginTop: 8, fontSize: 11, padding: "6px 12px" }} onClick={downloadRingkasan} disabled={ringkasanBusy} data-testid="sup-ringkasan-download">
+                {ringkasanBusy ? "⏳ Membuat..." : "📄 Download Ringkasan"}
+              </button>
             </div>
             <div style={{ display: "flex", gap: 16, textAlign: "right" }}>
               <div>
@@ -221,7 +243,8 @@ export default function SupplierPage() {
             <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 10, color: "#EF9F27" }}>+ Tambah Unit</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
               <input style={I} placeholder="Tipe kendaraan" value={jobForm.vehicle_type} onChange={(e) => setJobForm((f) => ({ ...f, vehicle_type: e.target.value }))} data-testid="sup-job-vehicle" />
-              <input style={I} placeholder="No. Polisi" value={jobForm.nopol} onChange={(e) => setJobForm((f) => ({ ...f, nopol: e.target.value.toUpperCase() }))} data-testid="sup-job-nopol" />
+              <input style={I} placeholder="No. Polisi (kalau mobil baru, kosongkan)" value={jobForm.nopol} onChange={(e) => setJobForm((f) => ({ ...f, nopol: e.target.value.toUpperCase() }))} data-testid="sup-job-nopol" />
+              <input style={I} placeholder="No. Rangka" value={jobForm.no_rangka} onChange={(e) => setJobForm((f) => ({ ...f, no_rangka: e.target.value.toUpperCase() }))} data-testid="sup-job-rangka" />
               <input style={I} placeholder="Kota asal" value={jobForm.asal_kota} onChange={(e) => setJobForm((f) => ({ ...f, asal_kota: e.target.value }))} />
               <input style={I} placeholder="Kota tujuan" value={jobForm.tujuan_kota} onChange={(e) => setJobForm((f) => ({ ...f, tujuan_kota: e.target.value }))} />
               <input style={I} inputMode="numeric" placeholder="Total harga (Rp)" value={jobForm.total_harga} onChange={(e) => setJobForm((f) => ({ ...f, total_harga: e.target.value }))} data-testid="sup-job-harga" />
@@ -240,7 +263,7 @@ export default function SupplierPage() {
             <div key={job.id} style={{ border: "1px solid #21262d", borderRadius: 10, padding: 14, marginBottom: 10 }} data-testid={`sup-job-${job.id}`}>
               <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
                 <div>
-                  <div style={{ fontWeight: 700, fontSize: 13 }}>{job.vehicle_type || "—"} {job.nopol && <span style={{ color: "#8b949e" }}>· {job.nopol}</span>}</div>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>{job.vehicle_type || "—"} {job.nopol && <span style={{ color: "#8b949e" }}>· {job.nopol}</span>} {job.no_rangka && <span style={{ color: "#8b949e" }}>· {job.no_rangka}</span>}</div>
                   <div style={{ fontSize: 12, color: "#8b949e" }}>{job.asal_kota || "—"} &rarr; {job.tujuan_kota || "—"}</div>
                   {job.catatan && <div style={{ fontSize: 11, color: "#8b949e", marginTop: 2 }}>{job.catatan}</div>}
                 </div>

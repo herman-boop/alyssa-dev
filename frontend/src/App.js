@@ -13,6 +13,7 @@ import DriverData from "@/DriverData";
 import DriverRegister from "@/DriverRegister";
 import KoordinatorPage from "@/KoordinatorPage";
 import CustomerPricePage from "@/CustomerPricePage";
+import SupplierRingkasan from "@/SupplierRingkasan";
 
 // Resolve path segment: /track/TRIP-XXX -> "TRIP-XXX"
 function pathSegment(pathname, prefix) {
@@ -39,6 +40,7 @@ function App() {
     if (p.startsWith("/trip/"))     return { route: "driver" };
     if (p.startsWith("/bastk/"))    return { route: "bastk" };
     if (p.startsWith("/status/"))   return { route: "status" };
+    if (p.startsWith("/supplier-ringkasan/")) return { route: "supplier-ringkasan" };
 
     // ── Legacy query-param redirect to new paths ────────────────────
     if (sp.get("guide") !== null)   return { redirect: "/guide" };
@@ -88,6 +90,7 @@ function App() {
   if (route === "driver") return <DriverCheckpoint />;
   if (route === "koordinator") return <KoordinatorPage />;
   if (route === "harga") return <CustomerPricePage />;
+  if (route === "supplier-ringkasan") return <SupplierRingkasan />;
   return <Homepage />;
 }
 

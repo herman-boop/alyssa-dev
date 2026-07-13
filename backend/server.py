@@ -2636,6 +2636,7 @@ class SupplierPatchBody(BaseModel):
 class SupplierJobBody(BaseModel):
     vehicle_type: str = ""
     nopol: str = ""
+    no_rangka: str = ""
     asal_kota: str = ""
     tujuan_kota: str = ""
     total_harga: int
@@ -2741,6 +2742,7 @@ async def add_supplier_job(supplier_id: str, body: SupplierJobBody):
         "id": _gen_supplier_id(),
         "vehicle_type": body.vehicle_type.strip(),
         "nopol": body.nopol.strip().upper(),
+        "no_rangka": body.no_rangka.strip().upper(),
         "asal_kota": body.asal_kota.strip(),
         "tujuan_kota": body.tujuan_kota.strip(),
         "total_harga": body.total_harga,
@@ -2823,6 +2825,70 @@ async def delete_supplier_payment(supplier_id: str, job_id: str, payment_id: str
         raise HTTPException(404, "Pembayaran tidak ditemukan")
     await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
     return _supplier_job_totals(jobs[job_idx])
+
+
+@api_router.get("/admin/suppliers/{supplier_id}/ringkasan")
+async def supplier_ringkasan_data(supplier_id: str, pin: str = Query(...)):
+    """Data buat halaman kartu Ringkasan Pembayaran (dirender Chromium headless
+    jadi gambar). PIN dikirim lewat query karena yang manggil endpoint ini
+    cuma browser headless internal (lihat supplier_ringkasan_image di bawah),
+    bukan dari browser admin langsung -- makanya nggak lewat header X-Admin-Pin
+    kayak endpoint admin lain."""
+    expected = (os.environ.get("ADMIN_PIN") or "").strip()
+    if not expected or pin.strip() != expected:
+        raise HTTPException(401, "Invalid PIN")
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    jobs = [_supplier_job_totals(j) for j in (doc.get("jobs") or [])]
+    doc["jobs"] = jobs
+    doc["grand_total_harga"] = sum(j.get("total_harga") or 0 for j in jobs)
+    doc["grand_total_terbayar"] = sum(j.get("total_terbayar") or 0 for j in jobs)
+    doc["grand_sisa"] = sum(j.get("sisa") or 0 for j in jobs)
+    return doc
+
+
+@api_router.get("/admin/suppliers/{supplier_id}/ringkasan/image", dependencies=[Depends(require_admin_pin)])
+async def supplier_ringkasan_image(supplier_id: str, x_admin_pin: str = Header(..., alias="X-Admin-Pin")):
+    """Render kartu Ringkasan Pembayaran (frontend page) jadi PNG lewat Chromium
+    headless -- sama seperti pola BASTK PDF, supaya hasilnya konsisten (bukan
+    screenshot manual device driver) dan gampang dikirim ke WA/supplier."""
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    if not FRONTEND_URL:
+        raise HTTPException(
+            503,
+            "FRONTEND_URL belum diset di backend. Set di Railway dashboard (backend "
+            "service -> Variables) sebagai Reference Variable: "
+            "FRONTEND_URL=https://${{<nama-service-frontend>.RAILWAY_PUBLIC_DOMAIN}}",
+        )
+    if _browser is None:
+        raise HTTPException(503, "Generator gambar belum siap (Chromium gagal start saat startup).")
+
+    page = await _browser.new_page(viewport={"width": 640, "height": 1200}, device_scale_factor=2)
+    try:
+        await page.goto(
+            f"{FRONTEND_URL}/supplier-ringkasan/{supplier_id}?pin={x_admin_pin}",
+            wait_until="networkidle", timeout=30_000,
+        )
+        await page.wait_for_selector('[data-testid="ringkasan-ready"]', timeout=15_000)
+        await page.evaluate("document.fonts ? document.fonts.ready : Promise.resolve()")
+        await page.wait_for_timeout(150)
+        card = page.locator('[data-testid="ringkasan-card"]')
+        img_bytes = await card.screenshot(type="png")
+    except Exception as e:
+        logger.error(f"[ringkasan] gagal render untuk supplier {supplier_id}: {e}")
+        raise HTTPException(500, "Gagal membuat ringkasan, coba lagi.")
+    finally:
+        await page.close()
+
+    fname = "".join(c for c in (doc.get("nama") or "supplier") if c.isalnum() or c in " -_").strip() or "supplier"
+    return Response(
+        content=img_bytes,
+        media_type="image/png",
+        headers={"Content-Disposition": f'attachment; filename="Ringkasan-{fname}.png"'},
+    )
 
 
 # ---------- Static file serving for uploads ----------
