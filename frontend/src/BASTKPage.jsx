@@ -424,7 +424,7 @@ export default function BASTKPage() {
               <div className="bk-sig-box-label">Driver / Ekspedisi</div>
               {sigDriver && <img src={sigDriver} alt="ttd driver" className="bk-sig-img" />}
               <div className="bk-sig-line" />
-              <div className="bk-sig-name">{data.nama_driver || "—"}</div>
+              <div className="bk-sig-name">{data.nama_driver || data.driver_id || "—"}</div>
             </div>
             <div className="bk-sig-box">
               <div className="bk-sig-box-label">Menerima / Customer</div>
