@@ -3005,6 +3005,266 @@ async def supplier_ringkasan_image(supplier_id: str, x_admin_pin: str = Header(.
     )
 
 
+# ══════════════════════════════════════════════════════
+# SELISIH HARGA SYSTEM (harga di-upping pas invoice — selisih antara
+# Harga Deal & Harga Invoice punya PIC purchasing, ditransfer balik ke
+# PIC itu). Dicari/dibuat per nama PIC (kayak Supplier), tapi dikelompokkan
+# per Tagihan (No Invoice) -- lunas/belum-nya dihitung per Tagihan, bukan
+# gabungan semua tagihan kayak grand total Supplier.
+# ══════════════════════════════════════════════════════
+
+def _gen_selisih_id() -> str:
+    return uuid.uuid4().hex[:8]
+
+
+def _selisih_item_totals(item: dict) -> dict:
+    item = dict(item)
+    item["selisih"] = (item.get("harga_invoice") or 0) - (item.get("harga_deal") or 0)
+    return item
+
+
+def _selisih_tagihan_totals(tagihan: dict) -> dict:
+    """Hitung total_selisih (dari semua item), total_terbayar & sisa (dari
+    payments) -- semuanya dihitung ulang tiap read, nggak disimpan."""
+    tagihan = dict(tagihan)
+    items = [_selisih_item_totals(i) for i in (tagihan.get("items") or [])]
+    tagihan["items"] = items
+    total_selisih = sum(i["selisih"] for i in items)
+    terbayar = sum((p.get("amount") or 0) for p in (tagihan.get("payments") or []))
+    tagihan["total_selisih"] = total_selisih
+    tagihan["total_terbayar"] = terbayar
+    tagihan["sisa"] = total_selisih - terbayar
+    tagihan["lunas"] = len(items) > 0 and tagihan["sisa"] <= 0
+    return tagihan
+
+
+class SelisihCreateBody(BaseModel):
+    nama: str      # nama PIC/orang purchasing
+    no_hp: str = ""
+    catatan: str = ""
+
+
+class SelisihPatchBody(BaseModel):
+    no_hp: Optional[str] = None
+    catatan: Optional[str] = None
+
+
+class SelisihTagihanBody(BaseModel):
+    no_invoice: str = ""
+    catatan: str = ""
+
+
+class SelisihItemBody(BaseModel):
+    vehicle_type: str = ""
+    no_unit: str = ""       # no pol ATAU no rangka, satu field bebas isi
+    asal_kota: str = ""
+    tujuan_kota: str = ""
+    harga_deal: int = 0
+    harga_invoice: int = 0
+
+
+@api_router.post("/admin/selisih", dependencies=[Depends(require_admin_pin)])
+async def create_selisih_pic(body: SelisihCreateBody):
+    """Create PIC baru, atau return yang udah ada (case-insensitive by nama)."""
+    import re as _re
+    nama = body.nama.strip()
+    if not nama:
+        raise HTTPException(400, "nama tidak boleh kosong")
+    existing = await db.selisih_profiles.find_one(
+        {"nama": _re.compile(r"^\s*" + _re.escape(nama) + r"\s*$", _re.IGNORECASE)},
+        {"_id": 0},
+    )
+    if existing:
+        return existing
+    doc = {
+        "id": _gen_selisih_id(),
+        "nama": nama,
+        "no_hp": body.no_hp.strip(),
+        "catatan": body.catatan.strip(),
+        "created_at": datetime.utcnow().isoformat(),
+        "tagihan": [],
+    }
+    await db.selisih_profiles.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.get("/admin/selisih", dependencies=[Depends(require_admin_pin)])
+async def list_selisih_pic(q: Optional[str] = None):
+    import re as _re
+    filt = {}
+    if q:
+        filt["nama"] = _re.compile(_re.escape(q.strip()), _re.IGNORECASE)
+    items = []
+    async for s in db.selisih_profiles.find(filt).sort("nama", 1):
+        s.pop("_id", None)
+        tagihan = [_selisih_tagihan_totals(t) for t in (s.get("tagihan") or [])]
+        s["grand_total_selisih"] = sum(t["total_selisih"] for t in tagihan)
+        s["grand_total_terbayar"] = sum(t["total_terbayar"] for t in tagihan)
+        s["grand_sisa"] = sum(t["sisa"] for t in tagihan)
+        s["jumlah_tagihan"] = len(tagihan)
+        s.pop("tagihan", None)
+        items.append(s)
+    return {"count": len(items), "items": items}
+
+
+@api_router.get("/admin/selisih/{pic_id}", dependencies=[Depends(require_admin_pin)])
+async def get_selisih_pic(pic_id: str):
+    doc = await db.selisih_profiles.find_one({"id": pic_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "PIC tidak ditemukan")
+    tagihan = [_selisih_tagihan_totals(t) for t in (doc.get("tagihan") or [])]
+    doc["tagihan"] = tagihan
+    doc["grand_total_selisih"] = sum(t["total_selisih"] for t in tagihan)
+    doc["grand_total_terbayar"] = sum(t["total_terbayar"] for t in tagihan)
+    doc["grand_sisa"] = sum(t["sisa"] for t in tagihan)
+    return doc
+
+
+@api_router.patch("/admin/selisih/{pic_id}", dependencies=[Depends(require_admin_pin)])
+async def patch_selisih_pic(pic_id: str, body: SelisihPatchBody):
+    upd = {}
+    if body.no_hp is not None: upd["no_hp"] = body.no_hp.strip()
+    if body.catatan is not None: upd["catatan"] = body.catatan.strip()
+    if not upd:
+        raise HTTPException(400, "Tidak ada field yang diupdate")
+    res = await db.selisih_profiles.update_one({"id": pic_id}, {"$set": upd})
+    if res.matched_count == 0:
+        raise HTTPException(404, "PIC tidak ditemukan")
+    return {"ok": True}
+
+
+@api_router.delete("/admin/selisih/{pic_id}", dependencies=[Depends(require_admin_pin)])
+async def delete_selisih_pic(pic_id: str):
+    result = await db.selisih_profiles.delete_one({"id": pic_id})
+    if result.deleted_count == 0:
+        raise HTTPException(404, "PIC tidak ditemukan")
+    return {"ok": True}
+
+
+@api_router.post("/admin/selisih/{pic_id}/tagihan", dependencies=[Depends(require_admin_pin)])
+async def add_selisih_tagihan(pic_id: str, body: SelisihTagihanBody):
+    """Tagihan = 1 No Invoice, isinya bisa beberapa unit/pengiriman (item).
+    Lunas/belumnya dihitung per Tagihan ini, bukan gabungan semua tagihan."""
+    doc = await db.selisih_profiles.find_one({"id": pic_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "PIC tidak ditemukan")
+    tagihan = {
+        "id": _gen_selisih_id(),
+        "no_invoice": body.no_invoice.strip(),
+        "catatan": body.catatan.strip(),
+        "created_at": datetime.utcnow().isoformat(),
+        "items": [],
+        "payments": [],
+    }
+    await db.selisih_profiles.update_one({"id": pic_id}, {"$push": {"tagihan": tagihan}})
+    return _selisih_tagihan_totals(tagihan)
+
+
+@api_router.delete("/admin/selisih/{pic_id}/tagihan/{tagihan_id}", dependencies=[Depends(require_admin_pin)])
+async def delete_selisih_tagihan(pic_id: str, tagihan_id: str):
+    result = await db.selisih_profiles.update_one(
+        {"id": pic_id}, {"$pull": {"tagihan": {"id": tagihan_id}}}
+    )
+    if result.modified_count == 0:
+        raise HTTPException(404, "Tagihan tidak ditemukan")
+    return {"ok": True}
+
+
+@api_router.post("/admin/selisih/{pic_id}/tagihan/{tagihan_id}/items", dependencies=[Depends(require_admin_pin)])
+async def add_selisih_item(pic_id: str, tagihan_id: str, body: SelisihItemBody):
+    doc = await db.selisih_profiles.find_one({"id": pic_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "PIC tidak ditemukan")
+    tagihan_list = doc.get("tagihan") or []
+    idx = next((i for i, t in enumerate(tagihan_list) if t.get("id") == tagihan_id), None)
+    if idx is None:
+        raise HTTPException(404, "Tagihan tidak ditemukan")
+    item = {
+        "id": _gen_selisih_id(),
+        "vehicle_type": body.vehicle_type.strip(),
+        "no_unit": body.no_unit.strip().upper(),
+        "asal_kota": body.asal_kota.strip(),
+        "tujuan_kota": body.tujuan_kota.strip(),
+        "harga_deal": body.harga_deal,
+        "harga_invoice": body.harga_invoice,
+    }
+    tagihan_list[idx].setdefault("items", []).append(item)
+    await db.selisih_profiles.update_one({"id": pic_id}, {"$set": {"tagihan": tagihan_list}})
+    return _selisih_tagihan_totals(tagihan_list[idx])
+
+
+@api_router.delete("/admin/selisih/{pic_id}/tagihan/{tagihan_id}/items/{item_id}", dependencies=[Depends(require_admin_pin)])
+async def delete_selisih_item(pic_id: str, tagihan_id: str, item_id: str):
+    doc = await db.selisih_profiles.find_one({"id": pic_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "PIC tidak ditemukan")
+    tagihan_list = doc.get("tagihan") or []
+    idx = next((i for i, t in enumerate(tagihan_list) if t.get("id") == tagihan_id), None)
+    if idx is None:
+        raise HTTPException(404, "Tagihan tidak ditemukan")
+    before = len(tagihan_list[idx].get("items") or [])
+    tagihan_list[idx]["items"] = [i for i in (tagihan_list[idx].get("items") or []) if i.get("id") != item_id]
+    if len(tagihan_list[idx]["items"]) == before:
+        raise HTTPException(404, "Unit tidak ditemukan")
+    await db.selisih_profiles.update_one({"id": pic_id}, {"$set": {"tagihan": tagihan_list}})
+    return _selisih_tagihan_totals(tagihan_list[idx])
+
+
+@api_router.post("/admin/selisih/{pic_id}/tagihan/{tagihan_id}/payments", dependencies=[Depends(require_admin_pin)])
+async def add_selisih_payment(
+    pic_id: str, tagihan_id: str,
+    amount: int = Form(...), catatan: str = Form(""),
+    tanggal: Optional[str] = Form(None),
+    bukti: Optional[UploadFile] = File(None),
+):
+    doc = await db.selisih_profiles.find_one({"id": pic_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "PIC tidak ditemukan")
+    tagihan_list = doc.get("tagihan") or []
+    idx = next((i for i, t in enumerate(tagihan_list) if t.get("id") == tagihan_id), None)
+    if idx is None:
+        raise HTTPException(404, "Tagihan tidak ditemukan")
+    if amount <= 0:
+        raise HTTPException(400, "amount harus lebih dari 0")
+
+    bukti_url = None
+    if bukti is not None and bukti.filename:
+        bukti_url = _save_upload(pic_id, f"selisih/{tagihan_id}", bukti, ALLOWED_IMG | ALLOWED_DOC)
+
+    tgl = (tanggal or "").strip()
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", tgl):
+        tgl = today_wib()
+
+    payment = {
+        "id": _gen_selisih_id(),
+        "amount": amount,
+        "catatan": catatan.strip(),
+        "bukti_url": bukti_url,
+        "tanggal": tgl,
+    }
+    tagihan_list[idx].setdefault("payments", []).append(payment)
+    await db.selisih_profiles.update_one({"id": pic_id}, {"$set": {"tagihan": tagihan_list}})
+    return _selisih_tagihan_totals(tagihan_list[idx])
+
+
+@api_router.delete("/admin/selisih/{pic_id}/tagihan/{tagihan_id}/payments/{payment_id}", dependencies=[Depends(require_admin_pin)])
+async def delete_selisih_payment(pic_id: str, tagihan_id: str, payment_id: str):
+    doc = await db.selisih_profiles.find_one({"id": pic_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "PIC tidak ditemukan")
+    tagihan_list = doc.get("tagihan") or []
+    idx = next((i for i, t in enumerate(tagihan_list) if t.get("id") == tagihan_id), None)
+    if idx is None:
+        raise HTTPException(404, "Tagihan tidak ditemukan")
+    before = len(tagihan_list[idx].get("payments") or [])
+    tagihan_list[idx]["payments"] = [p for p in (tagihan_list[idx].get("payments") or []) if p.get("id") != payment_id]
+    if len(tagihan_list[idx]["payments"]) == before:
+        raise HTTPException(404, "Pembayaran tidak ditemukan")
+    await db.selisih_profiles.update_one({"id": pic_id}, {"$set": {"tagihan": tagihan_list}})
+    return _selisih_tagihan_totals(tagihan_list[idx])
+
+
 # ---------- Static file serving for uploads ----------
 app.add_middleware(
     CORSMiddleware,
