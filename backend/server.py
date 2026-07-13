@@ -1746,6 +1746,7 @@ class OrderPatchBody(BaseModel):
     catatan: Optional[str] = None
     vehicle_type: Optional[str] = None
     nopol: Optional[str] = None
+    no_rangka: Optional[str] = None
 
 
 @api_router.patch("/admin/orders/{order_id}", dependencies=[Depends(require_admin_pin)])
@@ -1773,6 +1774,8 @@ async def admin_patch_order(order_id: str, payload: OrderPatchBody):
         upd["vehicle_type"] = vt
     if payload.nopol is not None:
         upd["nopol"] = payload.nopol.strip()[:20]
+    if payload.no_rangka is not None:
+        upd["no_rangka"] = payload.no_rangka.strip()[:40]
     if len(upd) == 1:
         raise HTTPException(400, "No fields to update")
     await db.orders.update_one({"order_id": order_id}, {"$set": upd})
@@ -1785,13 +1788,15 @@ async def admin_patch_order(order_id: str, payload: OrderPatchBody):
     if tid and "nama_driver" in upd:
         await db.trips.update_one({"trip_id": tid}, {"$set": {"nama_driver": upd["nama_driver"], "updated_at": upd["updated_at"]}})
     # Mirror vehicle changes to linked trip too
-    if tid and ("vehicle_type" in upd or "nopol" in upd):
+    if tid and ("vehicle_type" in upd or "nopol" in upd or "no_rangka" in upd):
         tupd = {"updated_at": upd["updated_at"]}
         if "vehicle_type" in upd:
             tupd["vehicle_type"] = upd["vehicle_type"]
             tupd["tipe_kendaraan"] = upd["vehicle_type"]
         if "nopol" in upd and upd["nopol"]:
             tupd["nopol"] = upd["nopol"]
+        if "no_rangka" in upd:
+            tupd["no_rangka"] = upd["no_rangka"]
         await db.trips.update_one({"trip_id": tid}, {"$set": tupd})
 
     # Reload

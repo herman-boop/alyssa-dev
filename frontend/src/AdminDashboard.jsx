@@ -729,6 +729,8 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
   const [editVehicle, setEditVehicle] = useState(false);
   const [vtDraft, setVtDraft] = useState(order.vehicle_type || "");
   const [nopolDraft, setNopolDraft] = useState(order.nopol || "");
+  const [editRangka, setEditRangka] = useState(false);
+  const [rangkaDraft, setRangkaDraft] = useState(order.no_rangka || "");
   const [kordDraft, setKordDraft] = useState(order.koordinator_id || "");
   const [kordSaving, setKordSaving] = useState(false);
   const lbl = STATUS_LABEL[order.status] || { txt: order.status, cls: "adm-chip-new" };
@@ -770,6 +772,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
 
   const saveDriver = async () => { await onPatch({ driver_id: driverDraft }); setEditDriver(false); };
   const saveNama = async () => { await onPatch({ nama_driver: namaDraft.trim() }); setEditNama(false); };
+  const saveRangka = async () => { await onPatch({ no_rangka: rangkaDraft.trim().toUpperCase() }); setEditRangka(false); };
 
   return (
     <article
@@ -828,8 +831,36 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
             ) : (
               <span className="adm-driver-row">
                 {order.vehicle_type || "—"}
-                {order.nopol && <span className="adm-pill adm-mono">{order.nopol}</span>}
+                {order.nopol
+                  ? <span className="adm-pill adm-mono">{order.nopol}</span>
+                  : <i className="adm-mute">nopol belum diisi</i>}
                 <button className="adm-link" onClick={() => setEditVehicle(true)} data-testid={`adm-vehicle-edit-${order.order_id}`}><IcoPencil /></button>
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="adm-field-row">
+          <div className="adm-field-key">No Rangka</div>
+          <div className="adm-field-val">
+            {editRangka ? (
+              <span className="adm-driver-edit-row">
+                <input
+                  className="adm-input-inline adm-mono"
+                  value={rangkaDraft}
+                  onChange={(e) => setRangkaDraft(e.target.value.toUpperCase())}
+                  placeholder="MHKA..."
+                  autoFocus
+                  data-testid={`adm-rangka-input-${order.order_id}`}
+                />
+                <button className="adm-btn adm-btn-gold adm-btn-xs" onClick={saveRangka} data-testid={`adm-rangka-save-${order.order_id}`}>OK</button>
+                <button className="adm-btn adm-btn-ghost adm-btn-xs" onClick={() => { setEditRangka(false); setRangkaDraft(order.no_rangka || ""); }}><IcoX /></button>
+              </span>
+            ) : (
+              <span className="adm-driver-row">
+                {order.no_rangka
+                  ? <span className="adm-pill adm-mono">{order.no_rangka}</span>
+                  : <i className="adm-mute">belum diisi</i>}
+                <button className="adm-link" onClick={() => setEditRangka(true)} data-testid={`adm-rangka-edit-${order.order_id}`}><IcoPencil /></button>
               </span>
             )}
           </div>
