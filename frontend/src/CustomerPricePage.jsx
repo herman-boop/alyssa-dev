@@ -7,6 +7,10 @@ function fRp(n) {
   return "Rp " + Math.round(n).toLocaleString("id-ID");
 }
 
+const navy = "#1e3a8a";
+const gray = "#6b7280";
+const border = "#e5e7eb";
+
 export default function CustomerPricePage() {
   const token = window.location.pathname.replace(/^\/harga\//, "").split("?")[0].trim();
   const [data, setData] = useState(null);
@@ -24,12 +28,9 @@ export default function CustomerPricePage() {
       });
   }, [token]);
 
-  const bg = "#0d1117";
-  const card = { background: "#161b22", border: "1px solid #21262d", borderRadius: 10, padding: 20, marginBottom: 16 };
-
   if (loading) {
     return (
-      <div style={{ background: bg, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif", color: "#8b949e", fontSize: 14 }}>
+      <div style={{ background: "#f3f4f6", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Segoe UI', Arial, sans-serif", color: gray, fontSize: 14 }}>
         Memuat data...
       </div>
     );
@@ -37,13 +38,14 @@ export default function CustomerPricePage() {
 
   if (error || !data) {
     return (
-      <div style={{ background: bg, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif", color: "#f85149", fontSize: 14 }}>
+      <div style={{ background: "#f3f4f6", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Segoe UI', Arial, sans-serif", color: "#dc2626", fontSize: 14 }}>
         {error || "Data tidak ditemukan"}
       </div>
     );
   }
 
   const history = data.harga_history || [];
+  const todayFmt = new Date().toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
 
   const exportExcel = () => {
     const tglExport = new Date().toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
@@ -81,39 +83,49 @@ export default function CustomerPricePage() {
   };
 
   return (
-    <div style={{ fontFamily: "-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif", background: bg, color: "#e6edf3", minHeight: "100vh", padding: 20 }}>
-      {/* Header */}
-      <div style={{ borderBottom: "2px solid #EF9F27", paddingBottom: 16, marginBottom: 20, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-        <div>
-          <div style={{ fontSize: 18, fontWeight: 800, color: "#EF9F27", letterSpacing: ".5px" }}>PT ALYSSA AUTO LOGISTIK</div>
-          <div style={{ fontSize: 11, color: "#8b949e", marginTop: 2 }}>Solusi Transportasi &amp; Logistik Kendaraan</div>
+    <div style={{ background: "#f3f4f6", minHeight: "100vh", padding: 24, display: "flex", justifyContent: "center", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
+      <div style={{ width: "100%", maxWidth: 720, background: "#fff", borderRadius: 14, padding: 32, color: "#1f2937" }}>
+
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: `3px solid ${navy}`, paddingBottom: 16, marginBottom: 6, flexWrap: "wrap", gap: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <img src="/logo.png" alt="Logo" width={44} height={44} style={{ objectFit: "contain" }} />
+            <div>
+              <div style={{ fontSize: 20, fontWeight: 900, color: navy, letterSpacing: 0.4 }}>PENAWARAN HARGA</div>
+              <div style={{ fontSize: 12, color: gray, marginTop: 4 }}>PT Alyssa Auto Logistik — Solusi Transportasi &amp; Logistik Kendaraan</div>
+            </div>
+          </div>
+          <div style={{ textAlign: "right", fontSize: 11 }}>
+            <div style={{ color: gray }}>📅 Tanggal</div>
+            <div style={{ fontWeight: 700, marginBottom: 8 }}>{todayFmt}</div>
+            <div style={{ color: gray }}>🏢 Untuk</div>
+            <div style={{ fontWeight: 700 }}>{data.nama_pt}</div>
+          </div>
         </div>
-        <div style={{ textAlign: "right", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "#e6edf3" }}>Penawaran Harga</div>
-          <div style={{ fontSize: 12, color: "#EF9F27", fontWeight: 600 }}>{data.nama_pt}</div>
-          {history.length > 0 && (
+
+        {history.length > 0 && (
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
             <button onClick={exportExcel}
-              style={{ padding: "6px 14px", borderRadius: 6, border: "1px solid #2ea043", background: "#0d2818", color: "#3fb950", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
+              style={{ padding: "8px 16px", borderRadius: 8, border: `1px solid ${navy}`, background: "#eff6ff", color: navy, fontSize: 12, fontWeight: 800, cursor: "pointer" }}>
               📥 Download Excel
             </button>
-          )}
-        </div>
-      </div>
+          </div>
+        )}
 
-      <div style={card}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: "#EF9F27", marginBottom: 14, textTransform: "uppercase", letterSpacing: ".5px" }}>
-          Daftar Harga — {data.nama_pt}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "22px 0 10px" }}>
+          <div style={{ width: 24, height: 24, borderRadius: 6, background: navy, color: "#fff", fontWeight: 800, fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>1</div>
+          <div style={{ fontWeight: 800, fontSize: 13, color: navy, letterSpacing: 0.3 }}>DAFTAR HARGA</div>
         </div>
 
         {history.length === 0 ? (
-          <div style={{ color: "#8b949e", fontSize: 13, padding: "20px 0", textAlign: "center" }}>Belum ada data penawaran</div>
+          <div style={{ padding: 20, textAlign: "center", color: gray, fontSize: 13 }}>Belum ada data penawaran</div>
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
-                <tr style={{ background: "#21262d" }}>
+                <tr style={{ background: "#f8fafc" }}>
                   {["Tanggal", "Rute", "Moda", "Tipe Kendaraan", "Harga"].map((th) => (
-                    <th key={th} style={{ padding: "8px 10px", textAlign: "left", color: "#8b949e", fontWeight: 600, border: "1px solid #30363d" }}>{th}</th>
+                    <th key={th} style={{ textAlign: th === "Harga" ? "right" : "left", padding: "8px 10px", color: gray, fontWeight: 700, borderBottom: `1px solid ${border}` }}>{th}</th>
                   ))}
                 </tr>
               </thead>
@@ -124,18 +136,19 @@ export default function CustomerPricePage() {
                     : "-";
                   const sudahAsuransi = entry.asuransi && entry.asuransi > 0;
                   return (
-                    <tr key={i} style={{ background: i % 2 === 1 ? "#0d1117" : "transparent" }}>
-                      <td style={{ padding: "8px 10px", border: "1px solid #21262d", color: "#8b949e", fontSize: 11 }}>{tgl}</td>
-                      <td style={{ padding: "8px 10px", border: "1px solid #21262d", fontWeight: 600 }}>
+                    <tr key={i}>
+                      <td style={{ padding: "10px", borderBottom: `1px solid ${border}`, color: gray, fontSize: 11, verticalAlign: "top" }}>{tgl}</td>
+                      <td style={{ padding: "10px", borderBottom: `1px solid ${border}`, fontWeight: 700, verticalAlign: "top" }}>
                         {entry.rute}
-                        {entry.catatan && <div style={{ fontSize: 10, color: "#8b949e", marginTop: 3, fontStyle: "italic" }}>{entry.catatan}</div>}
+                        {entry.catatan && <div style={{ fontSize: 11, color: gray, marginTop: 3, fontStyle: "italic" }}>{entry.catatan}</div>}
                       </td>
-                      <td style={{ padding: "8px 10px", border: "1px solid #21262d", color: "#58a6ff", fontSize: 11, fontWeight: 600 }}>{entry.moda || "—"}</td>
-                      <td style={{ padding: "8px 10px", border: "1px solid #21262d", color: "#8b949e", fontSize: 11 }}>{entry.tipe_kendaraan}</td>
-                      <td style={{ padding: "8px 10px", border: "1px solid #21262d", textAlign: "right" }}>
-                        <div style={{ fontWeight: 800, color: "#EF9F27", fontSize: 13 }}>{fRp(entry.harga_deal)}</div>
-                        <div style={{ fontSize: 10, marginTop: 3, color: sudahAsuransi ? "#3fb950" : "#f85149", fontWeight: 600 }}>
-                          {sudahAsuransi ? "✓ Sudah termasuk asuransi" : "⚠ Belum termasuk asuransi"}
+                      <td style={{ padding: "10px", borderBottom: `1px solid ${border}`, color: navy, fontSize: 11, fontWeight: 700, verticalAlign: "top" }}>{entry.moda || "—"}</td>
+                      <td style={{ padding: "10px", borderBottom: `1px solid ${border}`, color: gray, fontSize: 11, verticalAlign: "top" }}>{entry.tipe_kendaraan}</td>
+                      <td style={{ padding: "10px", borderBottom: `1px solid ${border}`, textAlign: "right", verticalAlign: "top" }}>
+                        <div style={{ fontWeight: 800, color: navy, fontSize: 13 }}>{fRp(entry.harga_deal)}</div>
+                        <div style={{ display: "inline-block", marginTop: 4, fontSize: 10, fontWeight: 800, borderRadius: 12, padding: "2px 8px",
+                          background: sudahAsuransi ? "#d1fae5" : "#fef2f2", color: sudahAsuransi ? "#065f46" : "#991b1b" }}>
+                          {sudahAsuransi ? "✓ Termasuk Asuransi" : "⚠ Belum Termasuk Asuransi"}
                         </div>
                       </td>
                     </tr>
@@ -146,9 +159,11 @@ export default function CustomerPricePage() {
           </div>
         )}
 
-        <div style={{ marginTop: 16, padding: "10px 14px", background: "#0d1117", borderRadius: 8, border: "1px solid #30363d", fontSize: 11, color: "#8b949e", lineHeight: 1.6 }}>
-          ⚠ Harga berlaku 7 hari sejak tanggal penawaran. Hubungi kami untuk konfirmasi: <strong style={{ color: "#e6edf3" }}>0818 631 135</strong>
+        <div style={{ marginTop: 16, background: "#eff6ff", borderRadius: 8, padding: 12, fontSize: 11, color: "#374151", display: "flex", gap: 8 }}>
+          <span>📋</span>
+          <span>Harga berlaku 7 hari sejak tanggal penawaran. Hubungi kami untuk konfirmasi: <strong>0818 631 135</strong></span>
         </div>
+        <div style={{ textAlign: "center", marginTop: 16, fontSize: 11, color: gray }}>Terima kasih atas kerja sama dan kepercayaannya.</div>
       </div>
     </div>
   );
