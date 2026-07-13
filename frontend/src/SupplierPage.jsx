@@ -113,16 +113,24 @@ export default function SupplierPage() {
     } catch { flash("Gagal hapus unit"); }
   };
 
-  // ── Payment form (per job) ──
+  // ── Payment form (per job) — transfer cash biasa, atau kompensasi (supplier kirim unit) ──
   const [payOpen, setPayOpen] = useState(null); // job_id lagi buka form bayar
+  const [payTipe, setPayTipe] = useState("transfer"); // "transfer" | "kompensasi"
   const [payAmount, setPayAmount] = useState("");
   const [payCatatan, setPayCatatan] = useState("");
   const [payTanggal, setPayTanggal] = useState(todayStr());
   const [payFile, setPayFile] = useState(null);
+  const [kompVehicle, setKompVehicle] = useState("");
+  const [kompNoUnit, setKompNoUnit] = useState("");
+  const [kompAsal, setKompAsal] = useState("");
+  const [kompTujuan, setKompTujuan] = useState("");
   const [paySaving, setPaySaving] = useState(false);
   const fileRef = useRef();
 
-  const openPay = (jobId) => { setPayOpen(jobId); setPayAmount(""); setPayCatatan(""); setPayTanggal(todayStr()); setPayFile(null); };
+  const openPay = (jobId) => {
+    setPayOpen(jobId); setPayTipe("transfer"); setPayAmount(""); setPayCatatan(""); setPayTanggal(todayStr()); setPayFile(null);
+    setKompVehicle(""); setKompNoUnit(""); setKompAsal(""); setKompTujuan("");
+  };
 
   const submitPay = async (jobId) => {
     const amt = pNum(payAmount);
@@ -133,12 +141,19 @@ export default function SupplierPage() {
       fd.append("amount", amt);
       fd.append("catatan", payCatatan.trim());
       fd.append("tanggal", payTanggal || todayStr());
+      fd.append("tipe", payTipe);
+      if (payTipe === "kompensasi") {
+        fd.append("kompensasi_vehicle_type", kompVehicle.trim());
+        fd.append("kompensasi_no_unit", kompNoUnit.trim());
+        fd.append("kompensasi_asal_kota", kompAsal.trim());
+        fd.append("kompensasi_tujuan_kota", kompTujuan.trim());
+      }
       if (payFile) fd.append("bukti", payFile);
       await axios.post(`${API}/admin/suppliers/${selected.id}/jobs/${jobId}/payments`, fd, { headers });
       setPayOpen(null);
       await reloadSelected(selected.id);
       setListRefreshTick((t) => t + 1);
-      flash("Pembayaran tercatat, sisa otomatis dikurangi");
+      flash(payTipe === "kompensasi" ? "Kompensasi tercatat, sisa otomatis dikurangi" : "Pembayaran tercatat, sisa otomatis dikurangi");
     } catch (e) { flash(e?.response?.data?.detail || "Gagal simpan pembayaran"); }
     finally { setPaySaving(false); }
   };
@@ -350,33 +365,69 @@ export default function SupplierPage() {
                       </div>
                     </div>
 
-                    {/* Riwayat pembayaran */}
+                    {/* Riwayat pembayaran (transfer cash atau kompensasi kirim unit) */}
                     {(job.payments || []).length > 0 && (
                       <div style={{ marginTop: 10, borderTop: "1px solid #21262d", paddingTop: 8 }}>
-                        {job.payments.map((p) => (
-                          <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, padding: "4px 0", color: "#c9d1d9" }}>
-                            <span>
-                              <span style={{ color: "#8b949e" }}>{fDate(p.tanggal)}</span> — {fRp(p.amount)} {p.catatan && <span style={{ color: "#8b949e" }}>— {p.catatan}</span>}
-                              {p.bukti_url && <a href={resolveUrl(p.bukti_url)} target="_blank" rel="noreferrer" style={{ marginLeft: 8, color: "#58a6ff" }}>📎 bukti</a>}
-                            </span>
-                            <button onClick={() => deletePayment(job.id, p.id)} style={{ background: "none", border: "none", color: "#f85149", cursor: "pointer", fontSize: 11 }}>Hapus</button>
-                          </div>
-                        ))}
+                        {job.payments.map((p) => {
+                          const ku = p.kompensasi_unit;
+                          return (
+                            <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, padding: "4px 0", color: "#c9d1d9" }}>
+                              <span>
+                                <span style={{ color: "#8b949e" }}>{fDate(p.tanggal)}</span> — {fRp(p.amount)}
+                                {p.tipe === "kompensasi" ? (
+                                  <span style={{ color: "#79c0ff" }}>
+                                    {" "}— 🚗 Kompensasi{ku?.vehicle_type && `: ${ku.vehicle_type}`}{ku?.no_unit && ` · ${ku.no_unit}`}
+                                    {(ku?.asal_kota || ku?.tujuan_kota) && ` (${ku?.asal_kota || "?"} → ${ku?.tujuan_kota || "?"})`}
+                                  </span>
+                                ) : (
+                                  p.catatan && <span style={{ color: "#8b949e" }}>— {p.catatan}</span>
+                                )}
+                                {p.tipe === "kompensasi" && p.catatan && <span style={{ color: "#8b949e" }}> — {p.catatan}</span>}
+                                {p.bukti_url && <a href={resolveUrl(p.bukti_url)} target="_blank" rel="noreferrer" style={{ marginLeft: 8, color: "#58a6ff" }}>📎 bukti</a>}
+                              </span>
+                              <button onClick={() => deletePayment(job.id, p.id)} style={{ background: "none", border: "none", color: "#f85149", cursor: "pointer", fontSize: 11 }}>Hapus</button>
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
 
                     <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
                       {payOpen === job.id ? (
                         <div style={{ width: "100%", background: "#0d1117", borderRadius: 8, padding: 10 }}>
+                          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                            <button type="button" onClick={() => setPayTipe("transfer")}
+                              style={{ flex: 1, padding: "8px", borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: "pointer",
+                                border: payTipe === "transfer" ? "2px solid #EF9F27" : "1px solid #30363d",
+                                background: payTipe === "transfer" ? "#2a1f0d" : "none", color: payTipe === "transfer" ? "#EF9F27" : "#8b949e" }}
+                              data-testid={`sup-pay-tipe-transfer-${job.id}`}>
+                              💵 Transfer Cash
+                            </button>
+                            <button type="button" onClick={() => setPayTipe("kompensasi")}
+                              style={{ flex: 1, padding: "8px", borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: "pointer",
+                                border: payTipe === "kompensasi" ? "2px solid #58a6ff" : "1px solid #30363d",
+                                background: payTipe === "kompensasi" ? "#0d1b2a" : "none", color: payTipe === "kompensasi" ? "#58a6ff" : "#8b949e" }}
+                              data-testid={`sup-pay-tipe-kompensasi-${job.id}`}>
+                              🚗 Kompensasi (Kirim Unit)
+                            </button>
+                          </div>
+                          {payTipe === "kompensasi" && (
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+                              <input style={I} placeholder="Tipe kendaraan" value={kompVehicle} onChange={(e) => setKompVehicle(e.target.value)} data-testid={`sup-komp-vehicle-${job.id}`} />
+                              <input style={I} placeholder="No. Pol / No. Rangka" value={kompNoUnit} onChange={(e) => setKompNoUnit(e.target.value.toUpperCase())} data-testid={`sup-komp-nounit-${job.id}`} />
+                              <input style={I} placeholder="Kota asal" value={kompAsal} onChange={(e) => setKompAsal(e.target.value)} />
+                              <input style={I} placeholder="Kota tujuan" value={kompTujuan} onChange={(e) => setKompTujuan(e.target.value)} />
+                            </div>
+                          )}
                           <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-                            <input style={{ ...I, flex: 1, minWidth: 120 }} inputMode="numeric" placeholder="Jumlah bayar (Rp)" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} autoFocus data-testid={`sup-pay-amount-${job.id}`} />
-                            <input style={{ ...I, flex: 1, minWidth: 120 }} placeholder="Catatan (mis. DP 1)" value={payCatatan} onChange={(e) => setPayCatatan(e.target.value)} />
+                            <input style={{ ...I, flex: 1, minWidth: 120 }} inputMode="numeric" placeholder={payTipe === "kompensasi" ? "Nilai unit (Rp)" : "Jumlah bayar (Rp)"} value={payAmount} onChange={(e) => setPayAmount(e.target.value)} autoFocus data-testid={`sup-pay-amount-${job.id}`} />
+                            <input style={{ ...I, flex: 1, minWidth: 120 }} placeholder="Catatan (opsional)" value={payCatatan} onChange={(e) => setPayCatatan(e.target.value)} />
                             <input type="date" style={{ ...I, flex: 1, minWidth: 140 }} value={payTanggal} onChange={(e) => setPayTanggal(e.target.value)} data-testid={`sup-pay-date-${job.id}`} />
                           </div>
                           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                             <input ref={fileRef} type="file" accept="image/*,application/pdf" style={{ display: "none" }} onChange={(e) => setPayFile(e.target.files?.[0] || null)} />
                             <button style={BTN_GHOST} onClick={() => fileRef.current?.click()}>
-                              {payFile ? `📎 ${payFile.name.slice(0, 20)}` : "📎 Upload Bukti Transfer"}
+                              {payFile ? `📎 ${payFile.name.slice(0, 20)}` : (payTipe === "kompensasi" ? "📎 Upload Foto Unit (opsional)" : "📎 Upload Bukti Transfer")}
                             </button>
                             <button style={BTN} onClick={() => submitPay(job.id)} disabled={paySaving} data-testid={`sup-pay-save-${job.id}`}>
                               {paySaving ? "Menyimpan..." : "Simpan Pembayaran"}

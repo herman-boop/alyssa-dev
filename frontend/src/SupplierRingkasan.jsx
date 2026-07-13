@@ -141,20 +141,33 @@ export default function SupplierRingkasan() {
             {payments.length === 0 && (
               <tr><td colSpan={5} style={{ padding: 14, textAlign: "center", color: gray }}>Belum ada pembayaran.</td></tr>
             )}
-            {payments.map((p, i) => (
-              <tr key={p.id}>
-                <td style={{ padding: "8px 10px", borderBottom: `1px solid ${border}` }}>{i + 1}</td>
-                <td style={{ padding: "8px 10px", borderBottom: `1px solid ${border}` }}>{fDate(p.tanggal)}</td>
-                <td style={{ padding: "8px 10px", borderBottom: `1px solid ${border}` }}>
-                  {p.catatan || `Transfer ${p.jobLabel}`.trim()}
-                  {jobs.length > 1 && p.jobLabel && <div style={{ fontSize: 10, color: gray }}>{p.jobLabel}</div>}
-                </td>
-                <td style={{ padding: "8px 10px", borderBottom: `1px solid ${border}`, textAlign: "right", fontWeight: 700 }}>{fRp(p.amount)}</td>
-                <td style={{ padding: "8px 10px", borderBottom: `1px solid ${border}`, textAlign: "center" }}>
-                  <span style={{ background: "#d1fae5", color: "#065f46", borderRadius: 12, padding: "3px 10px", fontSize: 10, fontWeight: 800 }}>✓ Berhasil</span>
-                </td>
-              </tr>
-            ))}
+            {payments.map((p, i) => {
+              const ku = p.kompensasi_unit;
+              const isKomp = p.tipe === "kompensasi";
+              return (
+                <tr key={p.id}>
+                  <td style={{ padding: "8px 10px", borderBottom: `1px solid ${border}` }}>{i + 1}</td>
+                  <td style={{ padding: "8px 10px", borderBottom: `1px solid ${border}` }}>{fDate(p.tanggal)}</td>
+                  <td style={{ padding: "8px 10px", borderBottom: `1px solid ${border}` }}>
+                    {isKomp
+                      ? `Kompensasi${ku?.vehicle_type ? `: ${ku.vehicle_type}` : ""}${ku?.no_unit ? ` · ${ku.no_unit}` : ""}`
+                      : (p.catatan || `Transfer ${p.jobLabel}`.trim())}
+                    {isKomp && (ku?.asal_kota || ku?.tujuan_kota) && (
+                      <div style={{ fontSize: 10, color: gray }}>{ku?.asal_kota || "?"} → {ku?.tujuan_kota || "?"}</div>
+                    )}
+                    {jobs.length > 1 && p.jobLabel && <div style={{ fontSize: 10, color: gray }}>{p.jobLabel}</div>}
+                  </td>
+                  <td style={{ padding: "8px 10px", borderBottom: `1px solid ${border}`, textAlign: "right", fontWeight: 700 }}>{fRp(p.amount)}</td>
+                  <td style={{ padding: "8px 10px", borderBottom: `1px solid ${border}`, textAlign: "center" }}>
+                    {isKomp ? (
+                      <span style={{ background: "#dbeafe", color: "#1e40af", borderRadius: 12, padding: "3px 10px", fontSize: 10, fontWeight: 800 }}>🚗 Kompensasi</span>
+                    ) : (
+                      <span style={{ background: "#d1fae5", color: "#065f46", borderRadius: 12, padding: "3px 10px", fontSize: 10, fontWeight: 800 }}>✓ Berhasil</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#eff6ff", borderRadius: 8, padding: "10px 14px", marginTop: 8, fontWeight: 800, fontSize: 13, color: navy }}>

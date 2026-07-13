@@ -2883,12 +2883,19 @@ async def add_supplier_payment(
     supplier_id: str, job_id: str,
     amount: int = Form(...), catatan: str = Form(""),
     tanggal: Optional[str] = Form(None),
+    tipe: str = Form("transfer"),   # "transfer" (cash) | "kompensasi" (supplier kirim unit sbg pengganti bayar)
+    kompensasi_vehicle_type: str = Form(""),
+    kompensasi_no_unit: str = Form(""),   # no pol / no rangka unit yg dikirim buat kompensasi
+    kompensasi_asal_kota: str = Form(""),
+    kompensasi_tujuan_kota: str = Form(""),
     bukti: Optional[UploadFile] = File(None),
 ):
-    """Catat 1 pembayaran (DP/cicilan) ke job/unit ini. Upload bukti transfer
-    opsional (kalau ada, disimpan & linknya ke-record). Sisa otomatis
-    kehitung ulang di response (nggak disimpan sbg field terpisah, biar
-    nggak pernah nyimpang dari total payments yang beneran ada)."""
+    """Catat 1 pembayaran (DP/cicilan) ke job/unit ini -- bisa transfer cash
+    biasa, atau 'kompensasi' (supplier kirim unit/mobil ke kita sbg pengganti
+    bayar, nilainya dipakai buat ngurangin sisa persis kayak transfer cash).
+    Upload bukti opsional. Sisa otomatis kehitung ulang di response (nggak
+    disimpan sbg field terpisah, biar nggak pernah nyimpang dari data
+    payments yang beneran ada)."""
     doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Supplier tidak ditemukan")
@@ -2898,6 +2905,7 @@ async def add_supplier_payment(
         raise HTTPException(404, "Unit/job tidak ditemukan")
     if amount <= 0:
         raise HTTPException(400, "amount harus lebih dari 0")
+    tipe = tipe.strip().lower() if tipe.strip().lower() in ("transfer", "kompensasi") else "transfer"
 
     bukti_url = None
     if bukti is not None and bukti.filename:
@@ -2915,7 +2923,15 @@ async def add_supplier_payment(
         "catatan": catatan.strip(),
         "bukti_url": bukti_url,
         "tanggal": tgl,
+        "tipe": tipe,
     }
+    if tipe == "kompensasi":
+        payment["kompensasi_unit"] = {
+            "vehicle_type": kompensasi_vehicle_type.strip(),
+            "no_unit": kompensasi_no_unit.strip().upper(),
+            "asal_kota": kompensasi_asal_kota.strip(),
+            "tujuan_kota": kompensasi_tujuan_kota.strip(),
+        }
     # Update seluruh array `jobs` sekaligus (bukan pakai positional operator
     # $ di nested array) -- lebih portable & nggak bergantung ke edge-case
     # implementasi $push/$pull nested tiap driver Mongo/mock.
