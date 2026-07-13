@@ -6,6 +6,7 @@ import CostCalculator from "@/CostCalculator";
 import DriverData from "@/DriverData";
 import SupplierPage from "@/SupplierPage";
 import SelisihPage from "@/SelisihPage";
+import KompensasiPage from "@/KompensasiPage";
 import "@/App.css";
 import "@/Driver.css";
 import "@/Admin.css";
@@ -357,6 +358,13 @@ function Dashboard({ pin, onLogout }) {
             color: activeTab === "selisih" ? "var(--gold)" : "var(--text-3)",
             borderBottom: activeTab === "selisih" ? "2px solid var(--gold)" : "2px solid transparent" }}
         >📊 Selisih Harga</button>
+        <button
+          onClick={() => setActiveTab("kompensasi")}
+          style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: "8px 8px 0 0", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 700,
+            background: activeTab === "kompensasi" ? "var(--bg-card)" : "transparent",
+            color: activeTab === "kompensasi" ? "var(--gold)" : "var(--text-3)",
+            borderBottom: activeTab === "kompensasi" ? "2px solid var(--gold)" : "2px solid transparent" }}
+        >🔄 Kompensasi</button>
       </div>
 
       {activeTab === "kalkulator" && (
@@ -393,6 +401,10 @@ function Dashboard({ pin, onLogout }) {
 
       {activeTab === "selisih" && (
         <SelisihPage />
+      )}
+
+      {activeTab === "kompensasi" && (
+        <KompensasiPage />
       )}
 
       {activeTab === "pesanan" && <>

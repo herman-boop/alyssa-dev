@@ -3370,6 +3370,233 @@ async def selisih_ringkasan_image(pic_id: str, x_admin_pin: str = Header(..., al
     )
 
 
+# ══════════════════════════════════════════════════════
+# KOMPENSASI HUTANG PIUTANG SYSTEM (netting utang-piutang 2 arah antara kita
+# & 1 rekanan -- misal saling kirim unit/invoice, lalu diselisihkan jadi 1
+# angka "sisa kewajiban", kayak surat pengajuan kompensasi hutang piutang.
+# Beda sama Supplier (yg cuma 1 arah: kita berutang ke supplier) -- di sini
+# dicatat 2 rincian: kewajiban KITA ke rekanan, & kewajiban REKANAN ke kita,
+# lalu di-net.
+# ══════════════════════════════════════════════════════
+
+def _gen_kompensasi_id() -> str:
+    return uuid.uuid4().hex[:8]
+
+
+def _kompensasi_totals(doc: dict) -> dict:
+    """Hitung total_kita (kewajiban kita ke rekanan), total_mereka (kewajiban
+    rekanan ke kita), & sisa (net, positif = rekanan masih berkewajiban ke
+    kita) -- dihitung ulang tiap read, nggak disimpan."""
+    doc = dict(doc)
+    items = doc.get("items") or []
+    total_kita = sum((i.get("nilai") or 0) for i in items if i.get("arah") == "kita_ke_mereka")
+    total_mereka = sum((i.get("nilai") or 0) for i in items if i.get("arah") == "mereka_ke_kita")
+    doc["total_kita"] = total_kita
+    doc["total_mereka"] = total_mereka
+    doc["sisa"] = total_mereka - total_kita
+    return doc
+
+
+class KompensasiCreateBody(BaseModel):
+    nama: str      # nama rekanan/pihak
+    no_hp: str = ""
+    catatan: str = ""
+
+
+class KompensasiPatchBody(BaseModel):
+    no_hp: Optional[str] = None
+    catatan: Optional[str] = None
+
+
+@api_router.post("/admin/kompensasi", dependencies=[Depends(require_admin_pin)])
+async def create_kompensasi_pihak(body: KompensasiCreateBody):
+    """Create rekanan baru, atau return yang udah ada (case-insensitive by nama)."""
+    import re as _re
+    nama = body.nama.strip()
+    if not nama:
+        raise HTTPException(400, "nama tidak boleh kosong")
+    existing = await db.kompensasi_profiles.find_one(
+        {"nama": _re.compile(r"^\s*" + _re.escape(nama) + r"\s*$", _re.IGNORECASE)},
+        {"_id": 0},
+    )
+    if existing:
+        return existing
+    doc = {
+        "id": _gen_kompensasi_id(),
+        "nama": nama,
+        "no_hp": body.no_hp.strip(),
+        "catatan": body.catatan.strip(),
+        "created_at": datetime.utcnow().isoformat(),
+        "items": [],
+    }
+    await db.kompensasi_profiles.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.get("/admin/kompensasi", dependencies=[Depends(require_admin_pin)])
+async def list_kompensasi_pihak(q: Optional[str] = None):
+    import re as _re
+    filt = {}
+    if q:
+        filt["nama"] = _re.compile(_re.escape(q.strip()), _re.IGNORECASE)
+    items = []
+    async for s in db.kompensasi_profiles.find(filt).sort("nama", 1):
+        s.pop("_id", None)
+        s = _kompensasi_totals(s)
+        s["jumlah_item"] = len(s.get("items") or [])
+        s.pop("items", None)
+        items.append(s)
+    return {"count": len(items), "items": items}
+
+
+@api_router.get("/admin/kompensasi/{pihak_id}", dependencies=[Depends(require_admin_pin)])
+async def get_kompensasi_pihak(pihak_id: str):
+    doc = await db.kompensasi_profiles.find_one({"id": pihak_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Rekanan tidak ditemukan")
+    return _kompensasi_totals(doc)
+
+
+@api_router.patch("/admin/kompensasi/{pihak_id}", dependencies=[Depends(require_admin_pin)])
+async def patch_kompensasi_pihak(pihak_id: str, body: KompensasiPatchBody):
+    upd = {}
+    if body.no_hp is not None: upd["no_hp"] = body.no_hp.strip()
+    if body.catatan is not None: upd["catatan"] = body.catatan.strip()
+    if not upd:
+        raise HTTPException(400, "Tidak ada field yang diupdate")
+    res = await db.kompensasi_profiles.update_one({"id": pihak_id}, {"$set": upd})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Rekanan tidak ditemukan")
+    return {"ok": True}
+
+
+@api_router.delete("/admin/kompensasi/{pihak_id}", dependencies=[Depends(require_admin_pin)])
+async def delete_kompensasi_pihak(pihak_id: str):
+    result = await db.kompensasi_profiles.delete_one({"id": pihak_id})
+    if result.deleted_count == 0:
+        raise HTTPException(404, "Rekanan tidak ditemukan")
+    return {"ok": True}
+
+
+@api_router.post("/admin/kompensasi/{pihak_id}/items", dependencies=[Depends(require_admin_pin)])
+async def add_kompensasi_item(
+    pihak_id: str,
+    arah: str = Form(...),   # "kita_ke_mereka" | "mereka_ke_kita"
+    tanggal: Optional[str] = Form(None),
+    keterangan: str = Form(""),
+    vehicle_type: str = Form(""),
+    no_unit: str = Form(""),
+    asal_kota: str = Form(""),
+    tujuan_kota: str = Form(""),
+    nilai: int = Form(...),
+    catatan: str = Form(""),
+    bukti: Optional[UploadFile] = File(None),
+):
+    """1 baris rincian kompensasi -- 'kita_ke_mereka' = unit/kewajiban yang kita
+    kirim/tanggung ke rekanan, 'mereka_ke_kita' = sebaliknya. Sisa dihitung
+    otomatis dari selisih total kedua arah."""
+    if arah not in ("kita_ke_mereka", "mereka_ke_kita"):
+        raise HTTPException(400, "arah harus 'kita_ke_mereka' atau 'mereka_ke_kita'")
+    if nilai <= 0:
+        raise HTTPException(400, "nilai harus lebih dari 0")
+    doc = await db.kompensasi_profiles.find_one({"id": pihak_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Rekanan tidak ditemukan")
+
+    bukti_url = None
+    if bukti is not None and bukti.filename:
+        bukti_url = _save_upload(pihak_id, "kompensasi", bukti, ALLOWED_IMG | ALLOWED_DOC)
+
+    tgl = (tanggal or "").strip()
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", tgl):
+        tgl = today_wib()
+
+    item = {
+        "id": _gen_kompensasi_id(),
+        "arah": arah,
+        "tanggal": tgl,
+        "keterangan": keterangan.strip(),
+        "vehicle_type": vehicle_type.strip(),
+        "no_unit": no_unit.strip().upper(),
+        "asal_kota": asal_kota.strip(),
+        "tujuan_kota": tujuan_kota.strip(),
+        "nilai": nilai,
+        "catatan": catatan.strip(),
+        "bukti_url": bukti_url,
+    }
+    await db.kompensasi_profiles.update_one({"id": pihak_id}, {"$push": {"items": item}})
+    updated = await db.kompensasi_profiles.find_one({"id": pihak_id}, {"_id": 0})
+    return _kompensasi_totals(updated)
+
+
+@api_router.delete("/admin/kompensasi/{pihak_id}/items/{item_id}", dependencies=[Depends(require_admin_pin)])
+async def delete_kompensasi_item(pihak_id: str, item_id: str):
+    result = await db.kompensasi_profiles.update_one(
+        {"id": pihak_id}, {"$pull": {"items": {"id": item_id}}}
+    )
+    if result.modified_count == 0:
+        raise HTTPException(404, "Item tidak ditemukan")
+    updated = await db.kompensasi_profiles.find_one({"id": pihak_id}, {"_id": 0})
+    return _kompensasi_totals(updated)
+
+
+@api_router.get("/admin/kompensasi/{pihak_id}/ringkasan")
+async def kompensasi_ringkasan_data(pihak_id: str, pin: str = Query(...)):
+    """Data buat kartu Ringkasan Kompensasi (dirender Chromium headless jadi
+    gambar). PIN lewat query karena cuma dipanggil browser headless internal,
+    sama polanya kayak supplier/selisih ringkasan."""
+    expected = (os.environ.get("ADMIN_PIN") or "").strip()
+    if not expected or pin.strip() != expected:
+        raise HTTPException(401, "Invalid PIN")
+    doc = await db.kompensasi_profiles.find_one({"id": pihak_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Rekanan tidak ditemukan")
+    return _kompensasi_totals(doc)
+
+
+@api_router.get("/admin/kompensasi/{pihak_id}/ringkasan/image", dependencies=[Depends(require_admin_pin)])
+async def kompensasi_ringkasan_image(pihak_id: str, x_admin_pin: str = Header(..., alias="X-Admin-Pin")):
+    """Render kartu Ringkasan Kompensasi jadi PNG lewat Chromium headless --
+    sama pola kayak supplier/selisih ringkasan image."""
+    doc = await db.kompensasi_profiles.find_one({"id": pihak_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Rekanan tidak ditemukan")
+    if not FRONTEND_URL:
+        raise HTTPException(
+            503,
+            "FRONTEND_URL belum diset di backend. Set di Railway dashboard (backend "
+            "service -> Variables) sebagai Reference Variable: "
+            "FRONTEND_URL=https://${{<nama-service-frontend>.RAILWAY_PUBLIC_DOMAIN}}",
+        )
+    if _browser is None:
+        raise HTTPException(503, "Generator gambar belum siap (Chromium gagal start saat startup).")
+
+    page = await _browser.new_page(viewport={"width": 640, "height": 1200}, device_scale_factor=2)
+    try:
+        await page.goto(
+            f"{FRONTEND_URL}/kompensasi-ringkasan/{pihak_id}?pin={x_admin_pin}",
+            wait_until="networkidle", timeout=30_000,
+        )
+        await page.wait_for_selector('[data-testid="ringkasan-ready"]', timeout=15_000)
+        await page.evaluate("document.fonts ? document.fonts.ready : Promise.resolve()")
+        await page.wait_for_timeout(150)
+        card = page.locator('[data-testid="ringkasan-card"]')
+        img_bytes = await card.screenshot(type="png")
+    except Exception as e:
+        logger.error(f"[ringkasan] gagal render kompensasi untuk {pihak_id}: {e}")
+        raise HTTPException(500, "Gagal membuat ringkasan, coba lagi.")
+    finally:
+        await page.close()
+
+    fname = "".join(c for c in (doc.get("nama") or "rekanan") if c.isalnum() or c in " -_").strip() or "rekanan"
+    return Response(
+        content=img_bytes,
+        media_type="image/png",
+        headers={"Content-Disposition": f'attachment; filename="Ringkasan-Kompensasi-{fname}.png"'},
+    )
+
+
 # ---------- Static file serving for uploads ----------
 app.add_middleware(
     CORSMiddleware,
