@@ -289,9 +289,29 @@ export default function CostCalculator() {
   const [addPilihan, setAddPilihan] = useState(null);
   const [manualHargaInput, setManualHargaInput] = useState("");
 
+  const norm = (s) => (s || "").trim().toLowerCase();
+
+  const findDuplicateRoute = () => {
+    const routeKey = `${norm(asal)}→${norm(tujuan)}`;
+    const inQueue = routeList.find((r) => `${norm(r.asal)}→${norm(r.tujuan)}` === routeKey);
+    if (inQueue) return { where: "list yang belum disimpan", tanggal: null, harga: inQueue.price_deal };
+    const inHistory = (selectedPt?.harga_history || []).find((h) => norm(h.rute) === routeKey);
+    if (inHistory) return { where: selectedPt?.nama_pt, tanggal: inHistory.tanggal, harga: inHistory.harga_deal };
+    return null;
+  };
+
   const addToList = () => {
     if (!asal.trim() || !tujuan.trim()) { alert("Isi Asal dan Tujuan dulu!"); return; }
     if (!calc.hppFinal) { alert("Isi minimal 1 komponen biaya dulu!"); return; }
+    const dup = findDuplicateRoute();
+    if (dup) {
+      const tglTxt = dup.tanggal ? ` (${new Date(dup.tanggal).toLocaleDateString("id-ID")})` : "";
+      const hargaTxt = dup.harga ? ` — ${fRp(dup.harga)}` : "";
+      const ok = window.confirm(
+        `⚠️ Rute ${asal.trim()} → ${tujuan.trim()} udah pernah ada di ${dup.where}${tglTxt}${hargaTxt}.\n\nTetap tambahkan lagi (dobel)?`
+      );
+      if (!ok) return;
+    }
     const h = calc.h;
     setAddModal({
       routeData: {
