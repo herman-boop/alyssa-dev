@@ -224,6 +224,30 @@ export default function DriverRegister() {
               <div style={{ fontSize: 20, fontWeight: 800, color: "#EF9F27", letterSpacing: 2 }}>{driverId}</div>
               <div style={{ fontSize: 11, color: "#8b949e", marginTop: 4 }}>Simpan ID ini untuk referensi</div>
             </div>
+
+            {/* Arahan singkat biar driver udah ada gambaran sebelum dikasih link trip
+                pertamanya — bukan pengganti tutorial lengkap di /guide, cuma orientasi awal. */}
+            <div style={{ background: "#161b22", border: "1px solid #21262d", borderRadius: 12, padding: 18, marginBottom: 20, textAlign: "left" }}>
+              <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 12, textAlign: "center" }}>
+                📋 Apa yang terjadi selanjutnya?
+              </div>
+              <ol style={{ listStyle: "decimal", margin: 0, paddingLeft: 20, fontSize: 13, color: "#c9d1d9", lineHeight: 1.9 }}>
+                <li>Tim Alyssa verifikasi data kamu, lalu kamu ditugaskan ke sebuah pengiriman.</li>
+                <li>Admin bakal kirim <b>link trip</b> ke WhatsApp kamu — nggak perlu login/password, langsung buka aja.</li>
+                <li>Di dalam link itu: baca <b>SOP</b> dulu, upload <b>5 foto kondisi kendaraan</b> sebelum berangkat.</li>
+                <li>Selama perjalanan, update <b>checkpoint</b> minimal 1× sehari + upload foto per tahap (Asal/Kapal/Tujuan/Dokumen).</li>
+                <li>Setelah sampai tujuan, minta <b>tanda tangan customer</b> buat BASTK — selesai.</li>
+              </ol>
+              <a
+                href="/guide"
+                target="_blank"
+                rel="noreferrer"
+                style={{ display: "block", textAlign: "center", marginTop: 14, padding: "10px", borderRadius: 8, background: "#1a2233", border: "1px solid #30363d", color: "#EF9F27", fontWeight: 700, fontSize: 13, textDecoration: "none" }}
+              >
+                📖 Baca Tutorial Lengkap Driver
+              </a>
+            </div>
+
             <div style={{ fontSize: 13, color: "#8b949e" }}>
               Ada pertanyaan? Hubungi admin via WhatsApp:<br />
               <a href="https://wa.me/6281863113500" style={{ color: "#EF9F27", fontWeight: 700 }}>0818-6311-3500</a>
