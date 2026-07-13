@@ -2620,6 +2620,47 @@ def _supplier_job_totals(job: dict) -> dict:
     return job
 
 
+async def _ensure_supplier_projects(doc: dict) -> dict:
+    """Migrasi lazy buat supplier lama (sebelum fitur Projek ada): job yang
+    belum punya project_id di-assign ke 'Projek 1' yang auto-dibikin, sekali,
+    lalu disimpan balik. Setelah ini, semua kode boleh asumsikan tiap job
+    punya project_id dan supplier punya minimal 1 project."""
+    jobs = doc.get("jobs") or []
+    projects = doc.get("projects") or []
+    orphan = [j for j in jobs if not j.get("project_id")]
+    if not orphan:
+        return doc
+    if not projects:
+        projects = [{
+            "id": _gen_supplier_id(), "nama": "Projek 1", "status": "open",
+            "created_at": doc.get("created_at") or datetime.utcnow().isoformat(),
+            "closed_at": None,
+        }]
+    target_id = projects[0]["id"]
+    for j in orphan:
+        j["project_id"] = target_id
+    await db.supplier_profiles.update_one({"id": doc["id"]}, {"$set": {"jobs": jobs, "projects": projects}})
+    doc["jobs"] = jobs
+    doc["projects"] = projects
+    return doc
+
+
+def _get_or_create_active_project(doc: dict):
+    """Return (project_id, projects_list). Projek 'aktif' = projek open yang
+    paling baru dibikin -- unit baru otomatis masuk ke situ. Kalau semua
+    projek udah closed (atau belum ada sama sekali), auto-bikin projek baru."""
+    projects = list(doc.get("projects") or [])
+    open_projects = [p for p in projects if p.get("status") == "open"]
+    if open_projects:
+        return open_projects[-1]["id"], projects
+    new_proj = {
+        "id": _gen_supplier_id(), "nama": f"Projek {len(projects) + 1}", "status": "open",
+        "created_at": datetime.utcnow().isoformat(), "closed_at": None,
+    }
+    projects.append(new_proj)
+    return new_proj["id"], projects
+
+
 class SupplierCreateBody(BaseModel):
     nama: str
     jenis: str = ""       # cth: "Jasa Supir", "SDM", "Lainnya" — bebas teks
@@ -2641,6 +2682,11 @@ class SupplierJobBody(BaseModel):
     tujuan_kota: str = ""
     total_harga: int
     catatan: str = ""
+    project_id: Optional[str] = None
+
+
+class SupplierProjectBody(BaseModel):
+    nama: str = ""
 
 
 @api_router.post("/admin/suppliers", dependencies=[Depends(require_admin_pin)])
@@ -2695,12 +2741,15 @@ async def list_suppliers(q: Optional[str] = None):
 
 @api_router.get("/admin/suppliers/{supplier_id}", dependencies=[Depends(require_admin_pin)])
 async def get_supplier(supplier_id: str):
-    """Detail supplier lengkap — semua job/unit + payments + grand total."""
+    """Detail supplier lengkap — semua job/unit + payments + grand total,
+    dikelompokkan per Projek."""
     doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Supplier tidak ditemukan")
+    doc = await _ensure_supplier_projects(doc)
     jobs = [_supplier_job_totals(j) for j in (doc.get("jobs") or [])]
     doc["jobs"] = jobs
+    doc["projects"] = doc.get("projects") or []
     doc["grand_total_harga"] = sum(j.get("total_harga") or 0 for j in jobs)
     doc["grand_total_terbayar"] = sum(j.get("total_terbayar") or 0 for j in jobs)
     doc["grand_sisa"] = sum(j.get("sisa") or 0 for j in jobs)
@@ -2732,14 +2781,24 @@ async def delete_supplier(supplier_id: str):
 @api_router.post("/admin/suppliers/{supplier_id}/jobs", dependencies=[Depends(require_admin_pin)])
 async def add_supplier_job(supplier_id: str, body: SupplierJobBody):
     """Tambah 1 unit/job baru buat supplier ini — misal 1 mobil 1 rute yang
-    biayanya dibayar ke supplier ini, mulai dari 0 terbayar."""
+    biayanya dibayar ke supplier ini, mulai dari 0 terbayar. Otomatis masuk ke
+    Projek yang lagi aktif (open); kalau semua Projek udah closed, auto-bikin
+    Projek baru."""
     doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Supplier tidak ditemukan")
+    doc = await _ensure_supplier_projects(doc)
     if body.total_harga < 0:
         raise HTTPException(400, "total_harga tidak boleh negatif")
+
+    projects = doc.get("projects") or []
+    project_id = body.project_id if body.project_id and any(p["id"] == body.project_id for p in projects) else None
+    if not project_id:
+        project_id, projects = _get_or_create_active_project(doc)
+
     job = {
         "id": _gen_supplier_id(),
+        "project_id": project_id,
         "vehicle_type": body.vehicle_type.strip(),
         "nopol": body.nopol.strip().upper(),
         "no_rangka": body.no_rangka.strip().upper(),
@@ -2750,7 +2809,10 @@ async def add_supplier_job(supplier_id: str, body: SupplierJobBody):
         "tanggal": datetime.utcnow().isoformat(),
         "payments": [],
     }
-    await db.supplier_profiles.update_one({"id": supplier_id}, {"$push": {"jobs": job}})
+    upd = {"jobs": (doc.get("jobs") or []) + [job]}
+    if projects != (doc.get("projects") or []):
+        upd["projects"] = projects
+    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": upd})
     return _supplier_job_totals(job)
 
 
@@ -2761,6 +2823,58 @@ async def delete_supplier_job(supplier_id: str, job_id: str):
     )
     if result.modified_count == 0:
         raise HTTPException(404, "Unit/job tidak ditemukan")
+    return {"ok": True}
+
+
+@api_router.post("/admin/suppliers/{supplier_id}/projects", dependencies=[Depends(require_admin_pin)])
+async def add_supplier_project(supplier_id: str, body: SupplierProjectBody):
+    """Mulai Projek baru buat supplier ini -- unit yang ditambah sesudah ini
+    otomatis masuk ke Projek baru ini (jadi yang paling baru = aktif)."""
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    doc = await _ensure_supplier_projects(doc)
+    projects = doc.get("projects") or []
+    nama = body.nama.strip() or f"Projek {len(projects) + 1}"
+    new_proj = {
+        "id": _gen_supplier_id(), "nama": nama, "status": "open",
+        "created_at": datetime.utcnow().isoformat(), "closed_at": None,
+    }
+    projects = projects + [new_proj]
+    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"projects": projects}})
+    return new_proj
+
+
+@api_router.patch("/admin/suppliers/{supplier_id}/projects/{project_id}/close", dependencies=[Depends(require_admin_pin)])
+async def close_supplier_project(supplier_id: str, project_id: str):
+    """Tutup Projek (ditandai Lunas/selesai) -- bisa dipaksa walau masih ada
+    sisa pembayaran (kesepakatan khusus admin)."""
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    projects = doc.get("projects") or []
+    idx = next((i for i, p in enumerate(projects) if p.get("id") == project_id), None)
+    if idx is None:
+        raise HTTPException(404, "Projek tidak ditemukan")
+    projects[idx]["status"] = "closed"
+    projects[idx]["closed_at"] = datetime.utcnow().isoformat()
+    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"projects": projects}})
+    return {"ok": True}
+
+
+@api_router.patch("/admin/suppliers/{supplier_id}/projects/{project_id}/reopen", dependencies=[Depends(require_admin_pin)])
+async def reopen_supplier_project(supplier_id: str, project_id: str):
+    """Buka lagi Projek yang kadung ke-close (misal kepencet salah)."""
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    projects = doc.get("projects") or []
+    idx = next((i for i, p in enumerate(projects) if p.get("id") == project_id), None)
+    if idx is None:
+        raise HTTPException(404, "Projek tidak ditemukan")
+    projects[idx]["status"] = "open"
+    projects[idx]["closed_at"] = None
+    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"projects": projects}})
     return {"ok": True}
 
 

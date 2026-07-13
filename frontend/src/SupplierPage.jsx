@@ -158,6 +158,49 @@ export default function SupplierPage() {
     return `${BACKEND_URL}${u}`;
   };
 
+  const deleteSupplier = async () => {
+    if (!selected) return;
+    if (!window.confirm(`Hapus supplier "${selected.nama}" beserta semua unit & riwayat pembayarannya? Tindakan ini tidak bisa dibatalkan.`)) return;
+    try {
+      await axios.delete(`${API}/admin/suppliers/${selected.id}`, { headers });
+      setSelected(null);
+      setQuery("");
+      setListRefreshTick((t) => t + 1);
+      flash("Supplier dihapus");
+    } catch { flash("Gagal hapus supplier"); }
+  };
+
+  // ── Projek (batch unit yang bisa di-close kalau udah lunas semua) ──
+  const [projSaving, setProjSaving] = useState(false);
+  const addProject = async () => {
+    if (!selected) return;
+    setProjSaving(true);
+    try {
+      await axios.post(`${API}/admin/suppliers/${selected.id}/projects`, {}, { headers });
+      await reloadSelected(selected.id);
+      flash("Projek baru dibuat — unit selanjutnya masuk ke sini");
+    } catch { flash("Gagal bikin projek baru"); }
+    finally { setProjSaving(false); }
+  };
+  const closeProject = async (projectId, sisa) => {
+    const msg = sisa > 0
+      ? `Projek ini masih ada sisa ${fRp(sisa)} yang belum kebayar. Tetap tutup projek?`
+      : "Tutup projek ini (tandai lunas/selesai)?";
+    if (!window.confirm(msg)) return;
+    try {
+      await axios.patch(`${API}/admin/suppliers/${selected.id}/projects/${projectId}/close`, {}, { headers });
+      await reloadSelected(selected.id);
+      flash("Projek ditutup");
+    } catch { flash("Gagal tutup projek"); }
+  };
+  const reopenProject = async (projectId) => {
+    try {
+      await axios.patch(`${API}/admin/suppliers/${selected.id}/projects/${projectId}/reopen`, {}, { headers });
+      await reloadSelected(selected.id);
+      flash("Projek dibuka lagi");
+    } catch { flash("Gagal buka projek"); }
+  };
+
   const [ringkasanBusy, setRingkasanBusy] = useState(false);
   const downloadRingkasan = async () => {
     if (!selected) return;
@@ -218,9 +261,17 @@ export default function SupplierPage() {
             <div>
               <div style={{ fontWeight: 800, fontSize: 16 }}>{selected.nama}</div>
               <div style={{ fontSize: 11, color: "#8b949e" }}>{selected.jenis || "Supplier"} {selected.no_hp && `· ${selected.no_hp}`}</div>
-              <button style={{ ...BTN_GHOST, marginTop: 8, fontSize: 11, padding: "6px 12px" }} onClick={downloadRingkasan} disabled={ringkasanBusy} data-testid="sup-ringkasan-download">
-                {ringkasanBusy ? "⏳ Membuat..." : "📄 Download Ringkasan"}
-              </button>
+              <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                <button style={{ ...BTN_GHOST, fontSize: 11, padding: "6px 12px" }} onClick={downloadRingkasan} disabled={ringkasanBusy} data-testid="sup-ringkasan-download">
+                  {ringkasanBusy ? "⏳ Membuat..." : "📄 Download Ringkasan"}
+                </button>
+                <button style={{ ...BTN_GHOST, fontSize: 11, padding: "6px 12px" }} onClick={addProject} disabled={projSaving} data-testid="sup-project-add">
+                  {projSaving ? "⏳..." : "📁 + Projek Baru"}
+                </button>
+                <button style={{ ...BTN_GHOST, fontSize: 11, padding: "6px 12px", color: "#f85149", borderColor: "#f85149" }} onClick={deleteSupplier} data-testid="sup-delete">
+                  🗑 Hapus Supplier
+                </button>
+              </div>
             </div>
             <div style={{ display: "flex", gap: 16, textAlign: "right" }}>
               <div>
@@ -255,68 +306,96 @@ export default function SupplierPage() {
             </button>
           </div>
 
-          {/* Daftar unit/job */}
-          {(selected.jobs || []).length === 0 && (
+          {/* Daftar unit/job, dikelompokkan per Projek */}
+          {(selected.projects || []).length === 0 && (
             <div style={{ textAlign: "center", padding: 20, color: "#8b949e", fontSize: 13 }}>Belum ada unit buat supplier ini.</div>
           )}
-          {(selected.jobs || []).map((job) => (
-            <div key={job.id} style={{ border: "1px solid #21262d", borderRadius: 10, padding: 14, marginBottom: 10 }} data-testid={`sup-job-${job.id}`}>
-              <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 13 }}>{job.vehicle_type || "—"} {job.nopol && <span style={{ color: "#8b949e" }}>· {job.nopol}</span>} {job.no_rangka && <span style={{ color: "#8b949e" }}>· {job.no_rangka}</span>}</div>
-                  <div style={{ fontSize: 12, color: "#8b949e" }}>{job.asal_kota || "—"} &rarr; {job.tujuan_kota || "—"}</div>
-                  {job.catatan && <div style={{ fontSize: 11, color: "#8b949e", marginTop: 2 }}>{job.catatan}</div>}
+          {(selected.projects || []).map((proj) => {
+            const jobs = (selected.jobs || []).filter((j) => j.project_id === proj.id);
+            const projSisa = jobs.reduce((s, j) => s + (j.sisa || 0), 0);
+            const isClosed = proj.status === "closed";
+            return (
+              <div key={proj.id} style={{ marginBottom: 18 }} data-testid={`sup-project-${proj.id}`}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, padding: "6px 2px", borderBottom: "1px solid #21262d" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontWeight: 800, fontSize: 13 }}>📁 {proj.nama}</span>
+                    {isClosed ? (
+                      <span style={{ background: "#0d2818", color: "#3fb950", borderRadius: 12, padding: "2px 10px", fontSize: 10, fontWeight: 800 }}>✓ Lunas</span>
+                    ) : (
+                      <span style={{ background: "#1a2233", color: "#58a6ff", borderRadius: 12, padding: "2px 10px", fontSize: 10, fontWeight: 800 }}>🟢 Aktif</span>
+                    )}
+                    {isClosed && projSisa > 0 && <span style={{ fontSize: 10, color: "#f85149" }}>(masih ada sisa {fRp(projSisa)})</span>}
+                  </div>
+                  {isClosed ? (
+                    <button onClick={() => reopenProject(proj.id)} style={{ ...BTN_GHOST, fontSize: 11, padding: "5px 10px" }} data-testid={`sup-project-reopen-${proj.id}`}>🔓 Buka Lagi</button>
+                  ) : (
+                    <button onClick={() => closeProject(proj.id, projSisa)} style={{ ...BTN_GHOST, fontSize: 11, padding: "5px 10px" }} data-testid={`sup-project-close-${proj.id}`}>🔒 Close Projek</button>
+                  )}
                 </div>
-                <div style={{ textAlign: "right" }}>
-                  <div style={{ fontSize: 11, color: "#8b949e" }}>Harga: {fRp(job.total_harga)}</div>
-                  <div style={{ fontSize: 11, color: "#3fb950" }}>Terbayar: {fRp(job.total_terbayar)}</div>
-                  <div style={{ fontSize: 13, fontWeight: 900, color: job.sisa > 0 ? "#f85149" : "#3fb950" }}>Sisa: {fRp(job.sisa)}</div>
-                </div>
-              </div>
 
-              {/* Riwayat pembayaran */}
-              {(job.payments || []).length > 0 && (
-                <div style={{ marginTop: 10, borderTop: "1px solid #21262d", paddingTop: 8 }}>
-                  {job.payments.map((p) => (
-                    <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, padding: "4px 0", color: "#c9d1d9" }}>
-                      <span>
-                        <span style={{ color: "#8b949e" }}>{fDate(p.tanggal)}</span> — {fRp(p.amount)} {p.catatan && <span style={{ color: "#8b949e" }}>— {p.catatan}</span>}
-                        {p.bukti_url && <a href={resolveUrl(p.bukti_url)} target="_blank" rel="noreferrer" style={{ marginLeft: 8, color: "#58a6ff" }}>📎 bukti</a>}
-                      </span>
-                      <button onClick={() => deletePayment(job.id, p.id)} style={{ background: "none", border: "none", color: "#f85149", cursor: "pointer", fontSize: 11 }}>Hapus</button>
-                    </div>
-                  ))}
-                </div>
-              )}
+                {jobs.length === 0 && <div style={{ fontSize: 12, color: "#8b949e", padding: "6px 2px" }}>Belum ada unit di projek ini.</div>}
 
-              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                {payOpen === job.id ? (
-                  <div style={{ width: "100%", background: "#0d1117", borderRadius: 8, padding: 10 }}>
-                    <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-                      <input style={{ ...I, flex: 1, minWidth: 120 }} inputMode="numeric" placeholder="Jumlah bayar (Rp)" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} autoFocus data-testid={`sup-pay-amount-${job.id}`} />
-                      <input style={{ ...I, flex: 1, minWidth: 120 }} placeholder="Catatan (mis. DP 1)" value={payCatatan} onChange={(e) => setPayCatatan(e.target.value)} />
-                      <input type="date" style={{ ...I, flex: 1, minWidth: 140 }} value={payTanggal} onChange={(e) => setPayTanggal(e.target.value)} data-testid={`sup-pay-date-${job.id}`} />
+                {jobs.map((job) => (
+                  <div key={job.id} style={{ border: "1px solid #21262d", borderRadius: 10, padding: 14, marginBottom: 10 }} data-testid={`sup-job-${job.id}`}>
+                    <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 13 }}>{job.vehicle_type || "—"} {job.nopol && <span style={{ color: "#8b949e" }}>· {job.nopol}</span>} {job.no_rangka && <span style={{ color: "#8b949e" }}>· {job.no_rangka}</span>}</div>
+                        <div style={{ fontSize: 12, color: "#8b949e" }}>{job.asal_kota || "—"} &rarr; {job.tujuan_kota || "—"}</div>
+                        {job.catatan && <div style={{ fontSize: 11, color: "#8b949e", marginTop: 2 }}>{job.catatan}</div>}
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontSize: 11, color: "#8b949e" }}>Harga: {fRp(job.total_harga)}</div>
+                        <div style={{ fontSize: 11, color: "#3fb950" }}>Terbayar: {fRp(job.total_terbayar)}</div>
+                        <div style={{ fontSize: 13, fontWeight: 900, color: job.sisa > 0 ? "#f85149" : "#3fb950" }}>Sisa: {fRp(job.sisa)}</div>
+                      </div>
                     </div>
-                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                      <input ref={fileRef} type="file" accept="image/*,application/pdf" style={{ display: "none" }} onChange={(e) => setPayFile(e.target.files?.[0] || null)} />
-                      <button style={BTN_GHOST} onClick={() => fileRef.current?.click()}>
-                        {payFile ? `📎 ${payFile.name.slice(0, 20)}` : "📎 Upload Bukti Transfer"}
-                      </button>
-                      <button style={BTN} onClick={() => submitPay(job.id)} disabled={paySaving} data-testid={`sup-pay-save-${job.id}`}>
-                        {paySaving ? "Menyimpan..." : "Simpan Pembayaran"}
-                      </button>
-                      <button style={BTN_GHOST} onClick={() => setPayOpen(null)}>Batal</button>
+
+                    {/* Riwayat pembayaran */}
+                    {(job.payments || []).length > 0 && (
+                      <div style={{ marginTop: 10, borderTop: "1px solid #21262d", paddingTop: 8 }}>
+                        {job.payments.map((p) => (
+                          <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, padding: "4px 0", color: "#c9d1d9" }}>
+                            <span>
+                              <span style={{ color: "#8b949e" }}>{fDate(p.tanggal)}</span> — {fRp(p.amount)} {p.catatan && <span style={{ color: "#8b949e" }}>— {p.catatan}</span>}
+                              {p.bukti_url && <a href={resolveUrl(p.bukti_url)} target="_blank" rel="noreferrer" style={{ marginLeft: 8, color: "#58a6ff" }}>📎 bukti</a>}
+                            </span>
+                            <button onClick={() => deletePayment(job.id, p.id)} style={{ background: "none", border: "none", color: "#f85149", cursor: "pointer", fontSize: 11 }}>Hapus</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                      {payOpen === job.id ? (
+                        <div style={{ width: "100%", background: "#0d1117", borderRadius: 8, padding: 10 }}>
+                          <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+                            <input style={{ ...I, flex: 1, minWidth: 120 }} inputMode="numeric" placeholder="Jumlah bayar (Rp)" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} autoFocus data-testid={`sup-pay-amount-${job.id}`} />
+                            <input style={{ ...I, flex: 1, minWidth: 120 }} placeholder="Catatan (mis. DP 1)" value={payCatatan} onChange={(e) => setPayCatatan(e.target.value)} />
+                            <input type="date" style={{ ...I, flex: 1, minWidth: 140 }} value={payTanggal} onChange={(e) => setPayTanggal(e.target.value)} data-testid={`sup-pay-date-${job.id}`} />
+                          </div>
+                          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                            <input ref={fileRef} type="file" accept="image/*,application/pdf" style={{ display: "none" }} onChange={(e) => setPayFile(e.target.files?.[0] || null)} />
+                            <button style={BTN_GHOST} onClick={() => fileRef.current?.click()}>
+                              {payFile ? `📎 ${payFile.name.slice(0, 20)}` : "📎 Upload Bukti Transfer"}
+                            </button>
+                            <button style={BTN} onClick={() => submitPay(job.id)} disabled={paySaving} data-testid={`sup-pay-save-${job.id}`}>
+                              {paySaving ? "Menyimpan..." : "Simpan Pembayaran"}
+                            </button>
+                            <button style={BTN_GHOST} onClick={() => setPayOpen(null)}>Batal</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <button style={BTN} onClick={() => openPay(job.id)} data-testid={`sup-pay-open-${job.id}`}>+ Catat Bayar</button>
+                          <button style={{ ...BTN_GHOST, color: "#f85149", borderColor: "#f85149" }} onClick={() => deleteJob(job.id)}>Hapus Unit</button>
+                        </>
+                      )}
                     </div>
                   </div>
-                ) : (
-                  <>
-                    <button style={BTN} onClick={() => openPay(job.id)} data-testid={`sup-pay-open-${job.id}`}>+ Catat Bayar</button>
-                    <button style={{ ...BTN_GHOST, color: "#f85149", borderColor: "#f85149" }} onClick={() => deleteJob(job.id)}>Hapus Unit</button>
-                  </>
-                )}
+                ))}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
