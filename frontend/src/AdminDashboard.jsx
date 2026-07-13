@@ -259,6 +259,18 @@ function Dashboard({ pin, onLogout }) {
     } catch (e) { flash("Gagal export: " + (e?.response?.data?.detail || "error")); }
   };
 
+  const [fixingHeic, setFixingHeic] = useState(false);
+  const fixHeicPhotos = async () => {
+    if (!window.confirm("Perbaiki semua foto lama yang tersimpan format HEIC (broken image) jadi JPEG? Proses ini aman dijalankan berkali-kali.")) return;
+    setFixingHeic(true);
+    try {
+      const r = await axios.post(`${API}/admin/migrate-heic`, null, { headers });
+      const { trips_scanned, count } = r.data;
+      flash(count > 0 ? `Beres! ${count} trip diperbaiki (dari ${trips_scanned} discan)` : `Tidak ada foto HEIC ditemukan (dari ${trips_scanned} trip discan)`);
+    } catch (e) { flash("Gagal perbaiki foto: " + (e?.response?.data?.detail || "error")); }
+    finally { setFixingHeic(false); }
+  };
+
   return (
     <div className="adm-root" data-testid="adm-dashboard">
 
@@ -282,6 +294,9 @@ function Dashboard({ pin, onLogout }) {
           </button>
           <button className="adm-btn adm-btn-ghost adm-btn-sm" onClick={loadAll} data-testid="adm-refresh">
             <IcoRefresh /> Refresh
+          </button>
+          <button className="adm-btn adm-btn-ghost adm-btn-sm" onClick={fixHeicPhotos} disabled={fixingHeic} data-testid="adm-fix-heic" title="Perbaiki foto lama yang tersimpan format HEIC (broken image)">
+            {fixingHeic ? "⏳ Memperbaiki..." : "🩹 Perbaiki Foto HEIC"}
           </button>
           <button className="adm-btn adm-btn-ghost adm-btn-sm" onClick={onLogout} data-testid="adm-logout">
             <IcoLogout /> Keluar

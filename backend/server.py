@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse, Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
-import os, logging, uuid, shutil, asyncio, io
+import os, logging, uuid, shutil, asyncio, io, re
 import requests as _requests
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
@@ -19,7 +19,7 @@ load_dotenv(ROOT_DIR / '.env')
 UPLOAD_DIR = ROOT_DIR / 'uploads'
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-ALLOWED_IMG = {'.jpg', '.jpeg', '.png', '.webp', '.heic'}
+ALLOWED_IMG = {'.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif'}
 ALLOWED_DOC = {'.pdf'}
 
 mongo_url = os.environ['MONGO_URL']
@@ -324,17 +324,25 @@ SUPABASE_URL    = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
 SUPABASE_KEY    = os.environ.get("SUPABASE_SERVICE_KEY", "").strip()
 SUPABASE_BUCKET = os.environ.get("SUPABASE_BUCKET", "fleet-photos").strip()
 
-def _save_upload(trip_id: str, sub: str, file: UploadFile, allowed: set) -> str:
-    ext = Path(file.filename or "").suffix.lower()
-    if not ext or ext not in allowed:
-        ext = MIME_TO_EXT.get((file.content_type or "").split(";")[0].strip().lower(), ext)
-    if ext not in allowed:
-        raise HTTPException(400, f"Format file tidak didukung: {file.content_type or ext}")
+def _is_heic(ext: str, content_type: str) -> bool:
+    return ext in (".heic", ".heif") or content_type in ("image/heic", "image/heif")
 
+def _convert_heic_bytes(data: bytes) -> bytes:
+    """HEIC/HEIF -> JPEG bytes. Jaring pengaman server-side: browser Chrome/Edge/
+    Firefox tidak bisa decode HEIC (format default kamera iPhone), jadi walaupun
+    konversi di sisi browser gagal/dilewati, yang tersimpan di storage tidak
+    pernah HEIC mentah."""
+    import pillow_heif
+    from PIL import Image
+    heif = pillow_heif.read_heif(data)
+    img = Image.frombytes(heif.mode, heif.size, heif.data, "raw")
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, format="JPEG", quality=90)
+    return buf.getvalue()
+
+def _store_bytes(entity_id: str, sub: str, data: bytes, ext: str, content_type: str) -> str:
     fname = f"{uuid.uuid4().hex}{ext}"
-    storage_path = f"{trip_id}/{sub}/{fname}"
-    content_type = (file.content_type or "application/octet-stream").split(";")[0].strip()
-    data = file.file.read()
+    storage_path = f"{entity_id}/{sub}/{fname}"
 
     if SUPABASE_URL and SUPABASE_KEY:
         # Upload ke Supabase Storage
@@ -357,12 +365,39 @@ def _save_upload(trip_id: str, sub: str, file: UploadFile, allowed: set) -> str:
         return public_url
     else:
         # Fallback ke filesystem lokal (development)
-        folder = UPLOAD_DIR / trip_id / sub
+        folder = UPLOAD_DIR / entity_id / sub
         folder.mkdir(parents=True, exist_ok=True)
         fpath = folder / fname
         with fpath.open("wb") as f:
             f.write(data)
-        return f"/api/uploads/{trip_id}/{sub}/{fname}"
+        return f"/api/uploads/{entity_id}/{sub}/{fname}"
+
+def _fetch_upload_bytes(url: str) -> bytes:
+    if url.startswith("http://") or url.startswith("https://"):
+        resp = _requests.get(url, timeout=30)
+        resp.raise_for_status()
+        return resp.content
+    rel = url.split("/api/uploads/", 1)[-1]
+    return (UPLOAD_DIR / rel).read_bytes()
+
+def _save_upload(trip_id: str, sub: str, file: UploadFile, allowed: set) -> str:
+    ext = Path(file.filename or "").suffix.lower()
+    if not ext or ext not in allowed:
+        ext = MIME_TO_EXT.get((file.content_type or "").split(";")[0].strip().lower(), ext)
+    if ext not in allowed:
+        raise HTTPException(400, f"Format file tidak didukung: {file.content_type or ext}")
+
+    content_type = (file.content_type or "application/octet-stream").split(";")[0].strip()
+    data = file.file.read()
+
+    if _is_heic(ext, content_type):
+        try:
+            data = _convert_heic_bytes(data)
+            ext, content_type = ".jpg", "image/jpeg"
+        except Exception as e:
+            logger.warning(f"[heic] gagal convert server-side, simpan HEIC asli: {trip_id}/{sub}: {e}")
+
+    return _store_bytes(trip_id, sub, data, ext, content_type)
 
 
 @api_router.post("/trips/{trip_id}/photos/initial")
@@ -1576,6 +1611,74 @@ async def admin_auth(body: AdminAuthBody):
     if not body.pin or body.pin.strip() != expected:
         raise HTTPException(401, "Invalid PIN")
     return {"ok": True}
+
+
+_HEIC_URL_RE = re.compile(r"\.hei[cf](\?|$)", re.I)
+
+
+async def _migrate_entry_if_heic(trip_id: str, sub: str, entry: dict) -> bool:
+    """entry punya key 'url'. Kalau url-nya HEIC/HEIF -> download, convert ke JPEG,
+    upload ulang, dan entry['url'] diganti in-place. Return True kalau berubah."""
+    url = (entry or {}).get("url") or ""
+    if not _HEIC_URL_RE.search(url):
+        return False
+    try:
+        data = _fetch_upload_bytes(url)
+        jpg = _convert_heic_bytes(data)
+        entry["url"] = _store_bytes(trip_id, sub, jpg, ".jpg", "image/jpeg")
+        return True
+    except Exception as e:
+        logger.warning(f"[heic-migrate] gagal convert {trip_id}/{sub}: {e}")
+        return False
+
+
+@api_router.post("/admin/migrate-heic", dependencies=[Depends(require_admin_pin)])
+async def migrate_heic_photos(trip_id: Optional[str] = Query(None)):
+    """One-time perbaikan: scan foto yang sudah kadung tersimpan sebagai HEIC
+    (sebelum konversi otomatis ada) dan convert jadi JPEG in-place. Idempotent -
+    aman dipanggil berkali-kali, cuma foto yang masih HEIC yang diproses."""
+    query = {"trip_id": trip_id} if trip_id else {}
+    trips = await db.trips.find(query).to_list(length=None)
+    updated_trips = []
+
+    for trip in trips:
+        tid = trip["trip_id"]
+        changed = False
+
+        initial = trip.get("initial_photos") or {}
+        for slot, entry in initial.items():
+            if isinstance(entry, dict) and await _migrate_entry_if_heic(tid, f"initial/{slot}", entry):
+                changed = True
+
+        daily = trip.get("daily_checkpoints") or []
+        for entry in daily:
+            if await _migrate_entry_if_heic(tid, "daily", entry):
+                changed = True
+
+        handover = trip.get("handover") or {}
+        for entry in (handover.get("bastk") or []):
+            if await _migrate_entry_if_heic(tid, "handover/bastk", entry):
+                changed = True
+        if handover.get("resi") and await _migrate_entry_if_heic(tid, "handover/resi", handover["resi"]):
+            changed = True
+
+        album = trip.get("album") or {}
+        for stage, entries in album.items():
+            for entry in (entries or []):
+                if await _migrate_entry_if_heic(tid, f"album/{stage}", entry):
+                    changed = True
+
+        if changed:
+            await db.trips.update_one({"trip_id": tid}, {"$set": {
+                "initial_photos": initial,
+                "daily_checkpoints": daily,
+                "handover": handover,
+                "album": album,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }})
+            updated_trips.append(tid)
+
+    return {"trips_scanned": len(trips), "trips_fixed": updated_trips, "count": len(updated_trips)}
 
 
 @api_router.get("/admin/stats", dependencies=[Depends(require_admin_pin)])
