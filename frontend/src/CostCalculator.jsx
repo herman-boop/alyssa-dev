@@ -292,10 +292,10 @@ export default function CostCalculator() {
   const norm = (s) => (s || "").trim().toLowerCase();
 
   const findDuplicateRoute = () => {
-    const routeKey = `${norm(asal)}→${norm(tujuan)}`;
-    const inQueue = routeList.find((r) => `${norm(r.asal)}→${norm(r.tujuan)}` === routeKey);
+    const routeKey = `${norm(asal)}→${norm(tujuan)}|${norm(tipe)}`;
+    const inQueue = routeList.find((r) => `${norm(r.asal)}→${norm(r.tujuan)}|${norm(r.tipe)}` === routeKey);
     if (inQueue) return { where: "list yang belum disimpan", tanggal: null, harga: inQueue.price_deal };
-    const inHistory = (selectedPt?.harga_history || []).find((h) => norm(h.rute) === routeKey);
+    const inHistory = (selectedPt?.harga_history || []).find((h) => `${norm(h.rute)}|${norm(h.tipe_kendaraan)}` === routeKey);
     if (inHistory) return { where: selectedPt?.nama_pt, tanggal: inHistory.tanggal, harga: inHistory.harga_deal };
     return null;
   };
@@ -308,7 +308,7 @@ export default function CostCalculator() {
       const tglTxt = dup.tanggal ? ` (${new Date(dup.tanggal).toLocaleDateString("id-ID")})` : "";
       const hargaTxt = dup.harga ? ` — ${fRp(dup.harga)}` : "";
       const ok = window.confirm(
-        `⚠️ Rute ${asal.trim()} → ${tujuan.trim()} udah pernah ada di ${dup.where}${tglTxt}${hargaTxt}.\n\nTetap tambahkan lagi (dobel)?`
+        `⚠️ Rute ${asal.trim()} → ${tujuan.trim()} (${tipe}) udah pernah ada di ${dup.where}${tglTxt}${hargaTxt}.\n\nTetap tambahkan lagi (dobel)?`
       );
       if (!ok) return;
     }
