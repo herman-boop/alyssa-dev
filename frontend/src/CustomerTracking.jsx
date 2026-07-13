@@ -892,7 +892,10 @@ export default function CustomerTracking() {
               )}
               {data.handover?.resi && (
                 <>
-                  <div className="trk-handover-label">Foto Resi Pengiriman</div>
+                  <div className="trk-handover-label">
+                    Foto Resi Pengiriman
+                    {data.handover.resi.no_resi && <span style={{ fontWeight: 700 }}> — No. Resi: {data.handover.resi.no_resi}</span>}
+                  </div>
                   <div className="trk-album-grid" style={{ gridTemplateColumns: "repeat(2,1fr)" }}>
                     <PhotoCard url={data.handover.resi.url} label="Resi Pengiriman"
                       isPdf={(data.handover.resi.url || "").toLowerCase().endsWith(".pdf")} />

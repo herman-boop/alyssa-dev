@@ -4,7 +4,7 @@ import "@/App.css";
 import "@/Driver.css";
 import PoDCard from "@/PoDCard";
 import { convertHeicIfNeeded } from "@/lib/heic";
-import { Home, Camera, Image as ImageIcon, FileText, ChevronRight, CheckCircle2, Circle, Truck, MapPin, ArrowLeft, Flag, X, RotateCcw, LocateFixed, Clock, Plus, Trash2 } from "lucide-react";
+import { Home, Camera, Image as ImageIcon, FileText, ChevronRight, CheckCircle2, Circle, Truck, MapPin, ArrowLeft, Flag, X, RotateCcw, LocateFixed, Clock, Plus, Trash2, ScanLine, Package, Download, Sparkles } from "lucide-react";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -903,7 +903,7 @@ export default function DriverCheckpoint() {
     } finally { setUploadingBastk(false); }
   };
 
-  const uploadResi = async (file) => {
+  const uploadResi = async (file, noResi) => {
     if (!file) return;
     setUploadingResi(true);
     showToast("Memproses scan dokumen...");
@@ -911,6 +911,7 @@ export default function DriverCheckpoint() {
       const enhanced = file.type.startsWith("image/") ? await scanEnhance(file) : file;
       const fd = new FormData();
       fd.append("foto", enhanced);
+      if (noResi && noResi.trim()) fd.append("no_resi", noResi.trim());
       const prevComplete = !!(trip?.handover?.bastk && trip?.handover?.resi);
       const r = await axios.post(`${API}/trips/${trip.trip_id}/photos/handover-resi`, fd);
       setTrip(r.data);
@@ -1211,7 +1212,7 @@ export default function DriverCheckpoint() {
     { key: "foto-awal", label: "Foto Awal Kendaraan (5 foto)", done: allInitialDone, view: "legacy", target: "initial-card" },
     { key: "checkpoint", label: "Checkpoint Hari Ini", done: todayDone, view: "checkpoint", target: null },
     { key: "album", label: "Album Perjalanan", done: albumTotal > 0, view: "foto", target: null },
-    { key: "dokumen", label: "BASTK & Resi", done: handoverDone, view: "dokumen", target: "handover-card" },
+    { key: "dokumen", label: "BASTK & Resi", done: handoverDone, view: "dokumen", target: null },
   ];
   const doneCount = taskSteps.filter((s) => s.done).length;
   const progressPct = Math.round((doneCount / taskSteps.length) * 100);
@@ -1227,8 +1228,8 @@ export default function DriverCheckpoint() {
   };
   // "legacy" = konten lama (belum di-redesign) yang masih ditampilkan apa adanya --
   // dipakai buat jangkauan ke bagian yang belum masuk sprint mana pun (mis. Foto Awal Wajib).
-  const NAV_DEFAULT_TARGET = { dokumen: "handover-card" };
-  const FULLSCREEN_VIEWS = ["beranda", "checkpoint", "foto"];
+  const NAV_DEFAULT_TARGET = {};
+  const FULLSCREEN_VIEWS = ["beranda", "checkpoint", "foto", "dokumen"];
   const goToView = (view, explicitTarget) => {
     setActiveView(view);
     if (FULLSCREEN_VIEWS.includes(view)) { window.scrollTo({ top: 0, behavior: "smooth" }); return; }
@@ -1277,7 +1278,22 @@ export default function DriverCheckpoint() {
       uploadAlbum={uploadAlbum}
       deleteAlbum={deleteAlbum}
     />
-    <div className="drv-root" data-testid="drv-root" style={{ display: (activeView === "beranda" || activeView === "checkpoint" || activeView === "foto") ? "none" : "block", paddingBottom: 96 }}>
+    <DokumenScreen
+      visible={activeView === "dokumen"}
+      onBack={() => goToView("beranda")}
+      trip={trip}
+      bastkList={bastkList}
+      resi={resi}
+      handoverDone={handoverDone}
+      uploadingBastk={uploadingBastk}
+      uploadingResi={uploadingResi}
+      openCrop={openCrop}
+      uploadBastk={uploadBastk}
+      uploadResi={uploadResi}
+      downloadPDF={downloadPDF}
+      pdfBusy={pdfBusy}
+    />
+    <div className="drv-root" data-testid="drv-root" style={{ display: (activeView === "beranda" || activeView === "checkpoint" || activeView === "foto" || activeView === "dokumen") ? "none" : "block", paddingBottom: 96 }}>
       {/* HEADER */}
       <header className="drv-header" data-testid="drv-header">
         <div className="drv-brand">
@@ -1971,35 +1987,37 @@ export default function DriverCheckpoint() {
         </div>
       )}
 
-      {/* CELEBRATION BANNER */}
-      {celebration && (
-        <div style={{
-          position: "fixed", top: 0, left: 0, right: 0, zIndex: 9999,
-          background: "linear-gradient(135deg, #1a7a3c, #2ea043)",
-          color: "#fff", textAlign: "center",
-          padding: "22px 20px",
-          boxShadow: "0 4px 24px rgba(0,0,0,0.5)",
-          fontSize: 17, fontWeight: 800, letterSpacing: 0.3,
-        }}>
-          🎉 SELESAI! Berkas lengkap. Bonus Rp 30.000 diproses admin!
-        </div>
-      )}
-
-      {/* TOAST */}
-      {toast && (
-        <div className={`drv-toast ${toast.type === "err" ? "drv-toast-err" : "drv-toast-ok"}`} data-testid="toast">
-          {toast.msg}
-        </div>
-      )}
-      {cropData && (
-        <CropModal
-          url={cropData.url}
-          file={cropData.file}
-          onCancel={() => { URL.revokeObjectURL(cropData.url); setCropData(null); }}
-          onConfirm={(out) => { URL.revokeObjectURL(cropData.url); const done = cropData.onDone; setCropData(null); done(out); }}
-        />
-      )}
     </div>
+
+    {/* Dipindah ke luar drv-root (bukan di-nest di dalamnya) supaya tetap kelihatan
+        biarpun drv-root lagi disembunyikan (activeView beranda/checkpoint/foto/dokumen) --
+        toast/celebration/CropModal dipakai bareng2 sama layar2 baru di atas juga. */}
+    {celebration && (
+      <div style={{
+        position: "fixed", top: 0, left: 0, right: 0, zIndex: 9999,
+        background: "linear-gradient(135deg, #1a7a3c, #2ea043)",
+        color: "#fff", textAlign: "center",
+        padding: "22px 20px",
+        boxShadow: "0 4px 24px rgba(0,0,0,0.5)",
+        fontSize: 17, fontWeight: 800, letterSpacing: 0.3,
+      }}>
+        🎉 SELESAI! Berkas lengkap. Bonus Rp 30.000 diproses admin!
+      </div>
+    )}
+
+    {toast && (
+      <div className={`drv-toast ${toast.type === "err" ? "drv-toast-err" : "drv-toast-ok"}`} data-testid="toast">
+        {toast.msg}
+      </div>
+    )}
+    {cropData && (
+      <CropModal
+        url={cropData.url}
+        file={cropData.file}
+        onCancel={() => { URL.revokeObjectURL(cropData.url); setCropData(null); }}
+        onConfirm={(out) => { URL.revokeObjectURL(cropData.url); const done = cropData.onDone; setCropData(null); done(out); }}
+      />
+    )}
     <BottomNav active={activeView} onChange={goToView} />
     </>
   );
@@ -2579,6 +2597,268 @@ function AlbumScreen({ visible, onBack, trip, albumStage, setAlbumStage, albumUp
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ── Sprint 4: Scan barcode/QR resi pakai BarcodeDetector native (Chrome/Edge Android
+   sudah dukung). Kalau browser gak dukung atau kamera ditolak -- fallback jelas ke
+   ketik manual, gak nge-block driver. Ini kapabilitas baru (bukan logic lama). ── */
+function BarcodeScannerModal({ onDetected, onClose }) {
+  const videoRef = useRef(null);
+  const [status, setStatus] = useState("init"); // init | scanning | unsupported | denied
+  const streamRef = useRef(null);
+  const rafRef = useRef(null);
+  const doneRef = useRef(false);
+
+  useEffect(() => {
+    let alive = true;
+    if (!("BarcodeDetector" in window)) { setStatus("unsupported"); return; }
+    (async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        if (!alive) { stream.getTracks().forEach((t) => t.stop()); return; }
+        streamRef.current = stream;
+        if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play(); }
+        setStatus("scanning");
+        const detector = new window.BarcodeDetector({ formats: ["code_128", "code_39", "ean_13", "ean_8", "qr_code", "codabar", "itf"] });
+        const loop = async () => {
+          if (!alive || doneRef.current || !videoRef.current) return;
+          try {
+            const codes = await detector.detect(videoRef.current);
+            if (codes && codes[0]?.rawValue) {
+              doneRef.current = true;
+              onDetected(codes[0].rawValue);
+              return;
+            }
+          } catch {}
+          rafRef.current = requestAnimationFrame(loop);
+        };
+        rafRef.current = requestAnimationFrame(loop);
+      } catch {
+        if (alive) setStatus("denied");
+      }
+    })();
+    return () => {
+      alive = false;
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
+    };
+  }, [onDetected]);
+
+  const needsFallback = status === "unsupported" || status === "denied";
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#000", zIndex: 9999, display: "flex", flexDirection: "column" }} data-testid="barcode-scanner-modal">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 16 }}>
+        <div style={{ color: "#fff", fontWeight: 800, fontSize: 15 }}>Scan Barcode Resi</div>
+        <button onClick={onClose} data-testid="btn-close-barcode-scanner"
+          style={{ width: 36, height: 36, borderRadius: 10, border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+          <X size={18} color="#fff" />
+        </button>
+      </div>
+      {needsFallback ? (
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24, textAlign: "center" }} data-testid="barcode-scanner-fallback">
+          <div style={{ color: "#94A3B8", fontSize: 14, marginBottom: 20, lineHeight: 1.6 }}>
+            {status === "unsupported" ? "Scan barcode belum didukung di browser ini." : "Izin kamera ditolak."}<br />Ketik nomor resi manual aja ya.
+          </div>
+          <button onClick={onClose} style={{ padding: "13px 28px", borderRadius: 14, border: "none", background: "#2563EB", color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+            Ketik Manual
+          </button>
+        </div>
+      ) : (
+        <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
+          <video ref={videoRef} playsInline muted style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
+            <div style={{ width: "78%", height: 120, border: "3px solid #2563EB", borderRadius: 16, boxShadow: "0 0 0 2000px rgba(0,0,0,0.5)" }} />
+          </div>
+          <div style={{ position: "absolute", bottom: 30, left: 0, right: 0, textAlign: "center", color: "#fff", fontSize: 13, fontWeight: 600 }}>
+            Arahkan kamera ke barcode/QR resi
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Sprint 4: Dokumen premium -- pengalaman scanner (bukan upload file biasa),
+   lanjut ke Input Resi (ketik/scan barcode). Semua mesin scan/upload sudah ada
+   (openCrop -> CropModal dgn OpenCV auto-crop, uploadBastk, uploadResi) -- di sini
+   cuma dibingkai ulang jadi 1 fokus per langkah, gak ada logic baru selain
+   nomor resi (field tambahan opsional). ── */
+function DokumenScreen({ visible, onBack, trip, bastkList, resi, handoverDone, uploadingBastk, uploadingResi, openCrop, uploadBastk, uploadResi, downloadPDF, pdfBusy }) {
+  const [noResi, setNoResi] = useState("");
+  const [showScanner, setShowScanner] = useState(false);
+  const bastkRef = useRef(null);
+  const resiRef = useRef(null);
+
+  if (!visible) return null;
+
+  const bastkDone = bastkList.length > 0;
+  const step = !bastkDone ? "bastk" : !resi ? "resi" : "done";
+
+  const onDetectedBarcode = (value) => { setNoResi(value); setShowScanner(false); };
+
+  return (
+    <div style={{
+      minHeight: "100vh", background: "#0A0E1A", color: "#F1F5F9",
+      maxWidth: 560, margin: "0 auto", paddingBottom: 110,
+      fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif",
+    }} data-testid="dokumen-screen">
+
+      {/* HEADER */}
+      <header style={{
+        display: "flex", alignItems: "center", gap: 14, padding: "20px 20px 16px",
+        position: "sticky", top: 0, zIndex: 50,
+        background: "rgba(10,14,26,0.92)", backdropFilter: "blur(14px)",
+      }}>
+        <button onClick={onBack} data-testid="btn-dokumen-back"
+          style={{ width: 40, height: 40, borderRadius: 12, border: "1px solid #1E293B", background: "#131A2C", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+          <ArrowLeft size={20} color="#E2E8F0" />
+        </button>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 19, fontWeight: 800, color: "#fff" }}>Dokumen & Resi</div>
+          <div style={{ fontSize: 13, color: "#94A3B8", fontWeight: 600 }}>
+            {handoverDone ? "Serah terima lengkap" : step === "bastk" ? "Langkah 1 dari 2 — Scan BASTK" : "Langkah 2 dari 2 — Input Resi"}
+          </div>
+        </div>
+        {handoverDone && (
+          <div style={{ display: "flex", alignItems: "center", gap: 5, background: "#0F2A1C", border: "1px solid #22C55E", borderRadius: 12, padding: "6px 12px", flexShrink: 0 }}>
+            <CheckCircle2 size={16} color="#22C55E" />
+            <span style={{ fontSize: 12, fontWeight: 800, color: "#22C55E" }}>Lengkap</span>
+          </div>
+        )}
+      </header>
+
+      <div style={{ padding: "0 20px" }}>
+
+        {/* PROGRESS STEP INDICATOR */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 22 }}>
+          <div style={{ flex: 1, height: 4, borderRadius: 999, background: bastkDone ? "#22C55E" : "#2563EB" }} />
+          <div style={{ flex: 1, height: 4, borderRadius: 999, background: resi ? "#22C55E" : (bastkDone ? "#2563EB" : "#1E293B") }} />
+        </div>
+
+        {/* ── STEP 1: SCAN BASTK ── */}
+        {!bastkDone && (
+          <div style={{ background: "#131A2C", border: "1px solid #1E293B", borderRadius: 20, padding: 24, marginBottom: 20 }} data-testid="dokumen-step-bastk">
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+              <Sparkles size={16} color="#60A5FA" />
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#60A5FA", textTransform: "uppercase", letterSpacing: 0.5 }}>Document Scanner</span>
+            </div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: "#fff", marginBottom: 6 }}>Scan Surat BASTK</div>
+            <div style={{ fontSize: 14, color: "#94A3B8", marginBottom: 20, lineHeight: 1.6 }}>
+              Minta pelanggan tanda tangan + stempel dulu. Kamera akan otomatis deteksi tepi kertas,
+              luruskan perspektif, dan pertajam hasil seperti mesin scanner — bukan sekadar foto.
+            </div>
+            <input ref={bastkRef} type="file" accept="image/*,application/pdf" capture="environment"
+              style={{ display: "none" }} onChange={(e) => { openCrop(e.target.files?.[0], uploadBastk); e.target.value = ""; }} />
+            <button onClick={() => bastkRef.current?.click()} disabled={uploadingBastk} data-testid="btn-scan-bastk"
+              style={{ width: "100%", padding: 18, borderRadius: 18, border: "none", background: "#2563EB", color: "#fff", fontSize: 16, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, cursor: "pointer", boxShadow: "0 10px 26px rgba(37,99,235,0.4)" }}>
+              <ScanLine size={22} /> {uploadingBastk ? "Memproses Scan..." : "Buka Scanner Dokumen"}
+            </button>
+          </div>
+        )}
+
+        {/* ── BASTK DONE: gallery + tambah halaman ── */}
+        {bastkDone && (
+          <div style={{ background: "#131A2C", border: "1px solid #1E293B", borderRadius: 20, padding: 20, marginBottom: 20 }} data-testid="dokumen-bastk-done">
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+              <div style={{ width: 32, height: 32, borderRadius: "50%", background: "#166534", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <CheckCircle2 size={18} color="#fff" />
+              </div>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 800, color: "#fff" }}>Dokumen Berhasil Diunggah</div>
+                <div style={{ fontSize: 12, color: "#86EFAC" }}>{bastkList.length} halaman BASTK tersimpan</div>
+              </div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, margin: "16px 0" }} data-testid="dokumen-bastk-gallery">
+              {bastkList.map((b) => {
+                const isPdf = (b.url || "").toLowerCase().endsWith(".pdf");
+                return (
+                  <a key={b.id} href={resolveUrl(b.url)} target="_blank" rel="noreferrer"
+                    style={{ aspectRatio: "1/1", borderRadius: 12, overflow: "hidden", border: "1px solid #1E293B", display: "flex", alignItems: "center", justifyContent: "center", background: "#0E1524" }}>
+                    {isPdf ? <FileText size={20} color="#60A5FA" /> : <img src={resolveUrl(b.url)} alt="bastk" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+                  </a>
+                );
+              })}
+            </div>
+            {bastkList.length < 6 && (
+              <>
+                <input ref={bastkRef} type="file" accept="image/*,application/pdf" capture="environment"
+                  style={{ display: "none" }} onChange={(e) => { openCrop(e.target.files?.[0], uploadBastk); e.target.value = ""; }} />
+                <button onClick={() => bastkRef.current?.click()} disabled={uploadingBastk} data-testid="btn-tambah-halaman-bastk"
+                  style={{ width: "100%", padding: 13, borderRadius: 14, border: "1px solid #2563EB", background: "none", color: "#60A5FA", fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: "pointer" }}>
+                  <Plus size={16} /> {uploadingBastk ? "Memproses..." : "Tambah Halaman"}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ── STEP 2: INPUT RESI ── */}
+        {bastkDone && !resi && (
+          <div style={{ background: "#131A2C", border: "1px solid #1E293B", borderRadius: 20, padding: 24, marginBottom: 20 }} data-testid="dokumen-step-resi">
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+              <Package size={16} color="#EF9F27" />
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#EF9F27", textTransform: "uppercase", letterSpacing: 0.5 }}>Langkah Berikutnya</span>
+            </div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: "#fff", marginBottom: 6 }}>Input Resi JNE / J&T</div>
+            <div style={{ fontSize: 14, color: "#94A3B8", marginBottom: 18, lineHeight: 1.6 }}>
+              Ketik nomor resi atau scan barcode-nya, lalu foto struk resinya.
+            </div>
+
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>Nomor Resi</div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+              <input
+                value={noResi} onChange={(e) => setNoResi(e.target.value)} placeholder="Cth: JP1234567890"
+                data-testid="input-no-resi"
+                style={{ flex: 1, padding: 14, borderRadius: 14, border: "1px solid #1E293B", background: "#0E1524", color: "#E2E8F0", fontSize: 15, fontWeight: 700, fontFamily: "inherit" }}
+              />
+              <button onClick={() => setShowScanner(true)} data-testid="btn-scan-barcode"
+                style={{ width: 50, borderRadius: 14, border: "1px solid #2563EB", background: "rgba(37,99,235,0.12)", color: "#60A5FA", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+                <ScanLine size={22} />
+              </button>
+            </div>
+
+            <input ref={resiRef} type="file" accept="image/*,application/pdf" capture="environment"
+              style={{ display: "none" }}
+              onChange={(e) => { openCrop(e.target.files?.[0], (file) => uploadResi(file, noResi)); e.target.value = ""; }} />
+            <button onClick={() => resiRef.current?.click()} disabled={uploadingResi} data-testid="btn-scan-resi"
+              style={{ width: "100%", padding: 18, borderRadius: 18, border: "none", background: "#2563EB", color: "#fff", fontSize: 16, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, cursor: "pointer", boxShadow: "0 10px 26px rgba(37,99,235,0.4)" }}>
+              <Camera size={22} /> {uploadingResi ? "Memproses Scan..." : "Scan Foto Struk Resi"}
+            </button>
+          </div>
+        )}
+
+        {/* ── SEMUA SELESAI ── */}
+        {handoverDone && (
+          <div style={{ background: "linear-gradient(135deg,#0F2A1C,#0C2318)", border: "1px solid #22C55E", borderRadius: 20, padding: 24, marginBottom: 20 }} data-testid="dokumen-complete">
+            <div style={{ textAlign: "center", marginBottom: 18 }}>
+              <div style={{ width: 56, height: 56, borderRadius: "50%", background: "#166534", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
+                <CheckCircle2 size={30} color="#fff" />
+              </div>
+              <div style={{ fontSize: 17, fontWeight: 800, color: "#fff", marginBottom: 4 }}>Serah Terima Lengkap</div>
+              <div style={{ fontSize: 13, color: "#86EFAC" }}>Pelanggan sudah bisa lihat dokumen & resi di halaman tracking.</div>
+            </div>
+            <div style={{ background: "#0A0E1A", borderRadius: 14, padding: 14, display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ width: 48, height: 48, borderRadius: 10, overflow: "hidden", flexShrink: 0, border: "1px solid #1E293B" }}>
+                {(resi.url || "").toLowerCase().endsWith(".pdf")
+                  ? <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", background: "#131A2C" }}><FileText size={18} color="#60A5FA" /></div>
+                  : <img src={resolveUrl(resi.url)} alt="resi" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#E2E8F0" }}>{resi.no_resi ? `No. Resi: ${resi.no_resi}` : "Foto Resi"}</div>
+                <button onClick={() => downloadPDF(resi.url, "resi-a4.pdf")} disabled={pdfBusy} data-testid="btn-download-resi-pdf"
+                  style={{ display: "flex", alignItems: "center", gap: 5, background: "none", border: "none", color: "#60A5FA", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: "4px 0 0" }}>
+                  <Download size={13} /> {pdfBusy ? "Membuat PDF..." : "Download PDF A4"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {showScanner && <BarcodeScannerModal onDetected={onDetectedBarcode} onClose={() => setShowScanner(false)} />}
     </div>
   );
 }

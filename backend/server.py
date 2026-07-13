@@ -512,12 +512,14 @@ async def upload_bastk(trip_id: str, foto: UploadFile = File(...)):
 
 
 @api_router.post("/trips/{trip_id}/photos/handover-resi")
-async def upload_resi(trip_id: str, foto: UploadFile = File(...)):
+async def upload_resi(trip_id: str, foto: UploadFile = File(...), no_resi: Optional[str] = Form(None)):
     trip = await db.trips.find_one({"trip_id": trip_id})
     if not trip:
         raise HTTPException(404, "Trip not found")
     url = _save_upload(trip_id, "handover/resi", foto, ALLOWED_IMG | ALLOWED_DOC)
     entry = {"url": url, "ts": datetime.now(timezone.utc).isoformat()}
+    if no_resi and no_resi.strip():
+        entry["no_resi"] = no_resi.strip()[:60]
     await db.trips.update_one(
         {"trip_id": trip_id},
         {"$set": {"handover.resi": entry, "updated_at": datetime.now(timezone.utc).isoformat()}}
