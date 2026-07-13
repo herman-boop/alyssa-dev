@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import axios from "axios";
+import { convertHeicIfNeeded } from "@/lib/heic";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -36,8 +37,9 @@ export default function DriverRegister() {
     finally { setSubmitting(false); }
   };
 
-  const pickFile = (slot, file) => {
+  const pickFile = async (slot, file) => {
     if (!file) return;
+    file = await convertHeicIfNeeded(file);
     setUploads(u => ({ ...u, [slot]: file }));
     const url = URL.createObjectURL(file);
     setPreviews(p => ({ ...p, [slot]: url }));

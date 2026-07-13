@@ -3,6 +3,7 @@ import axios from "axios";
 import "@/App.css";
 import "@/Driver.css";
 import PoDCard from "@/PoDCard";
+import { convertHeicIfNeeded } from "@/lib/heic";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -701,6 +702,7 @@ export default function DriverCheckpoint() {
     // PDF -> skip crop. Sisanya (termasuk foto kamera yg type-nya kosong) -> crop.
     const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name || "");
     if (isPdf) { onDone(file); return; }
+    file = await convertHeicIfNeeded(file);
     const norm = await normalizeImage(file);
     setCropData({ url: URL.createObjectURL(norm), file: norm, onDone });
   };
@@ -837,6 +839,7 @@ export default function DriverCheckpoint() {
     if (file.size > 8 * 1024 * 1024) { showToast("Foto terlalu besar (max 8MB)", "err"); return; }
     setUploadingSlot(slot);
     try {
+      file = await convertHeicIfNeeded(file);
       const { file: stamped } = await geotagPhoto(file);
       const fd = new FormData();
       fd.append("slot", slot);
@@ -854,6 +857,7 @@ export default function DriverCheckpoint() {
     if (file.size > 8 * 1024 * 1024) { showToast("Foto terlalu besar (max 8MB)", "err"); return; }
     setUploadingDaily(true);
     try {
+      file = await convertHeicIfNeeded(file);
       const { file: stamped, gps } = await geotagPhoto(file);
       const fd = new FormData();
       fd.append("foto", stamped);
@@ -942,6 +946,7 @@ export default function DriverCheckpoint() {
     if (file.size > 15 * 1024 * 1024) { showToast("File terlalu besar (max 15MB)", "err"); return; }
     setAlbumUploading(true);
     try {
+      if (!isPdf) file = await convertHeicIfNeeded(file);
       const fd = new FormData();
       fd.append("stage", albumStage);
       fd.append("foto", file);
