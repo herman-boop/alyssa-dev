@@ -4,7 +4,7 @@ import "@/App.css";
 import "@/Driver.css";
 import PoDCard from "@/PoDCard";
 import { convertHeicIfNeeded } from "@/lib/heic";
-import { Home, Camera, Image as ImageIcon, FileText, ChevronRight, CheckCircle2, Circle, Truck, MapPin } from "lucide-react";
+import { Home, Camera, Image as ImageIcon, FileText, ChevronRight, CheckCircle2, Circle, Truck, MapPin, ArrowLeft, Flag, X, RotateCcw, LocateFixed, Clock } from "lucide-react";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -1208,8 +1208,8 @@ export default function DriverCheckpoint() {
   const albumTotal = ALBUM_STAGES.reduce((s, k) => s + (trip.album?.[k] || []).length, 0);
   const taskSteps = [
     { key: "sop", label: "Baca SOP Driver", done: true, view: null, target: null },
-    { key: "foto-awal", label: "Foto Awal Kendaraan (5 foto)", done: allInitialDone, view: "checkpoint", target: "initial-card" },
-    { key: "checkpoint", label: "Checkpoint Hari Ini", done: todayDone, view: "checkpoint", target: "daily-card" },
+    { key: "foto-awal", label: "Foto Awal Kendaraan (5 foto)", done: allInitialDone, view: "foto", target: "initial-card" },
+    { key: "checkpoint", label: "Checkpoint Hari Ini", done: todayDone, view: "checkpoint", target: null },
     { key: "album", label: "Album Perjalanan", done: albumTotal > 0, view: "foto", target: "album-card" },
     { key: "dokumen", label: "BASTK & Resi", done: handoverDone, view: "dokumen", target: "handover-card" },
   ];
@@ -1225,10 +1225,10 @@ export default function DriverCheckpoint() {
       }, 60);
     });
   };
-  const NAV_DEFAULT_TARGET = { checkpoint: "initial-card", foto: "album-card", dokumen: "handover-card" };
+  const NAV_DEFAULT_TARGET = { foto: "album-card", dokumen: "handover-card" };
   const goToView = (view, explicitTarget) => {
     setActiveView(view);
-    if (view === "beranda") { window.scrollTo({ top: 0, behavior: "smooth" }); return; }
+    if (view === "beranda" || view === "checkpoint") { window.scrollTo({ top: 0, behavior: "smooth" }); return; }
     const target = explicitTarget || NAV_DEFAULT_TARGET[view];
     if (target) scrollToCard(target);
   };
@@ -1245,7 +1245,26 @@ export default function DriverCheckpoint() {
       visible={activeView === "beranda"}
       onNavigate={goToView}
     />
-    <div className="drv-root" data-testid="drv-root" style={{ display: activeView === "beranda" ? "none" : "block", paddingBottom: 96 }}>
+    <CheckpointScreen
+      visible={activeView === "checkpoint"}
+      onBack={() => goToView("beranda")}
+      onGoFotoAwal={() => goToView("foto", "initial-card")}
+      trip={trip}
+      daily={daily}
+      allInitialDone={allInitialDone}
+      todayDone={todayDone}
+      dailyCount={dailyCount}
+      totalBonusDaily={totalBonusDaily}
+      dailyStatus={dailyStatus}
+      setDailyStatus={setDailyStatus}
+      dailyNote={dailyNote}
+      setDailyNote={setDailyNote}
+      uploadingDaily={uploadingDaily}
+      uploadDaily={uploadDaily}
+      gpsState={gpsState}
+      cachedGpsPoint={cachedGps.current}
+    />
+    <div className="drv-root" data-testid="drv-root" style={{ display: (activeView === "beranda" || activeView === "checkpoint") ? "none" : "block", paddingBottom: 96 }}>
       {/* HEADER */}
       <header className="drv-header" data-testid="drv-header">
         <div className="drv-brand">
@@ -2079,6 +2098,315 @@ function BerandaScreen({ trip, progressPct, doneCount, totalSteps, taskSteps, ne
         {allDone ? "Semua Tugas Selesai ✓" : `Lanjutkan: ${nextStep.label}`}
         {!allDone && <ChevronRight size={20} />}
       </button>
+    </div>
+  );
+}
+
+function ckTime(iso) {
+  if (!iso) return "—";
+  try { return new Date(iso).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", hour12: false }) + " WIB"; } catch { return "—"; }
+}
+function ckDate(iso) {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" });
+  } catch { return "—"; }
+}
+
+const CK_STATUS_OPTIONS = [
+  { value: "Berangkat", label: "Berangkat", icon: Truck },
+  { value: "Checkpoint 1", label: "CP 1", icon: MapPin },
+  { value: "Checkpoint 2", label: "CP 2", icon: MapPin },
+  { value: "Checkpoint 3", label: "CP 3", icon: MapPin },
+  { value: "Tiba Tujuan", label: "Tiba Tujuan", icon: Flag },
+];
+const CK_STATUS_COLOR = {
+  "Berangkat":    "#60A5FA",
+  "Checkpoint 1": "#22C55E",
+  "Checkpoint 2": "#22C55E",
+  "Checkpoint 3": "#22C55E",
+  "Tiba Tujuan":  "#EF9F27",
+};
+
+/* ── Sprint 2: Checkpoint premium (task-flow satu fokus: checkpoint hari ini +
+   riwayat timeline). Nggak bikin ulang logic -- foto/GPS/upload semuanya lewat
+   uploadDaily() yang sama persis, cuma nambahin langkah preview sebelum kirim. ── */
+function CheckpointScreen({
+  visible, onBack, onGoFotoAwal, trip, daily,
+  allInitialDone, todayDone, dailyCount, totalBonusDaily,
+  dailyStatus, setDailyStatus, dailyNote, setDailyNote,
+  uploadingDaily, uploadDaily, gpsState, cachedGpsPoint,
+}) {
+  const [pendingPhoto, setPendingPhoto] = useState(null); // { file, url }
+  const [justSaved, setJustSaved] = useState(false);
+  const [detailPhoto, setDetailPhoto] = useState(null);
+  const fileRef = useRef(null);
+
+  useEffect(() => () => { if (pendingPhoto?.url) URL.revokeObjectURL(pendingPhoto.url); }, [pendingPhoto]);
+
+  if (!visible) return null;
+
+  const pickPhoto = (file) => {
+    if (!file) return;
+    setPendingPhoto((prev) => { if (prev?.url) URL.revokeObjectURL(prev.url); return { file, url: URL.createObjectURL(file) }; });
+  };
+  const retakePhoto = () => {
+    setPendingPhoto((prev) => { if (prev?.url) URL.revokeObjectURL(prev.url); return null; });
+    fileRef.current?.click();
+  };
+  const cancelForm = () => {
+    setPendingPhoto((prev) => { if (prev?.url) URL.revokeObjectURL(prev.url); return null; });
+  };
+  const confirmSave = async () => {
+    if (!pendingPhoto || uploadingDaily) return;
+    await uploadDaily(pendingPhoto.file);
+    setPendingPhoto((prev) => { if (prev?.url) URL.revokeObjectURL(prev.url); return null; });
+    setJustSaved(true);
+    setTimeout(() => setJustSaved(false), 5000);
+  };
+
+  const sortedDaily = [...daily].reverse();
+  const gpsReady = gpsState === "granted" && !!cachedGpsPoint;
+
+  return (
+    <div style={{
+      minHeight: "100vh", background: "#0A0E1A", color: "#F1F5F9",
+      maxWidth: 560, margin: "0 auto", paddingBottom: 110,
+      fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif",
+    }} data-testid="checkpoint-screen">
+
+      {/* HEADER */}
+      <header style={{
+        display: "flex", alignItems: "center", gap: 14, padding: "20px 20px 16px",
+        position: "sticky", top: 0, zIndex: 50,
+        background: "rgba(10,14,26,0.92)", backdropFilter: "blur(14px)",
+      }}>
+        <button onClick={onBack} data-testid="btn-checkpoint-back"
+          style={{ width: 40, height: 40, borderRadius: 12, border: "1px solid #1E293B", background: "#131A2C", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+          <ArrowLeft size={20} color="#E2E8F0" />
+        </button>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 19, fontWeight: 800, color: "#fff" }}>Checkpoint Perjalanan</div>
+          <div style={{ fontSize: 13, color: "#94A3B8", fontWeight: 600 }}>
+            {todayDone ? "Status hari ini: sudah checkpoint" : "Status hari ini: belum checkpoint"}
+          </div>
+        </div>
+        {todayDone ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 5, background: "#0F2A1C", border: "1px solid #22C55E", borderRadius: 12, padding: "6px 12px", flexShrink: 0 }}>
+            <CheckCircle2 size={16} color="#22C55E" />
+            <span style={{ fontSize: 12, fontWeight: 800, color: "#22C55E" }}>Selesai</span>
+          </div>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", gap: 5, background: "#2B1D0E", border: "1px solid #EF9F27", borderRadius: 12, padding: "6px 12px", flexShrink: 0 }}>
+            <Circle size={16} color="#EF9F27" />
+            <span style={{ fontSize: 12, fontWeight: 800, color: "#EF9F27" }}>Belum</span>
+          </div>
+        )}
+      </header>
+
+      <div style={{ padding: "0 20px" }}>
+
+        {/* SUKSES BANNER */}
+        {justSaved && (
+          <div style={{ background: "linear-gradient(135deg,#166534,#15803D)", borderRadius: 18, padding: 18, marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }} data-testid="checkpoint-success-banner">
+            <CheckCircle2 size={28} color="#fff" style={{ flexShrink: 0 }} />
+            <div>
+              <div style={{ fontWeight: 800, fontSize: 15, color: "#fff" }}>Checkpoint Tersimpan!</div>
+              <div style={{ fontSize: 13, color: "rgba(255,255,255,0.85)" }}>Bonus Rp 30.000 sedang diproses admin.</div>
+            </div>
+          </div>
+        )}
+
+        {/* GATE: foto awal belum lengkap */}
+        {!allInitialDone ? (
+          <div style={{ background: "#131A2C", border: "1px solid #1E293B", borderRadius: 20, padding: 24, textAlign: "center" }} data-testid="checkpoint-gate-foto-awal">
+            <Camera size={36} color="#64748B" style={{ marginBottom: 10 }} />
+            <div style={{ fontSize: 16, fontWeight: 800, color: "#E2E8F0", marginBottom: 6 }}>Foto Awal Belum Lengkap</div>
+            <div style={{ fontSize: 14, color: "#94A3B8", marginBottom: 18, lineHeight: 1.5 }}>
+              Selesaikan dulu 5 foto awal kendaraan sebelum bisa mulai checkpoint harian.
+            </div>
+            <button onClick={onGoFotoAwal} data-testid="btn-checkpoint-goto-foto-awal"
+              style={{ width: "100%", padding: 16, borderRadius: 16, border: "none", background: "#2563EB", color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer" }}>
+              Isi Foto Awal Kendaraan
+            </button>
+          </div>
+        ) : todayDone ? (
+          /* SUDAH CHECKPOINT HARI INI */
+          <div style={{ background: "linear-gradient(135deg,#0F2A1C,#0C2318)", border: "1px solid #22C55E", borderRadius: 20, padding: 24, marginBottom: 20, textAlign: "center" }} data-testid="checkpoint-task-done">
+            <div style={{ width: 56, height: 56, borderRadius: "50%", background: "#166534", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
+              <CheckCircle2 size={30} color="#fff" />
+            </div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: "#fff", marginBottom: 4 }}>Checkpoint Hari Ini Selesai</div>
+            <div style={{ fontSize: 13, color: "#86EFAC" }}>Foto lagi besok jam 06.00–18.00 WIB untuk bonus berikutnya.</div>
+          </div>
+        ) : !pendingPhoto ? (
+          /* TUGAS HARI INI — BELUM DILAKUKAN */
+          <div style={{ background: "#131A2C", border: "1px solid #1E293B", borderRadius: 20, padding: 24, marginBottom: 20 }} data-testid="checkpoint-task-todo">
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10 }}>Tugas Hari Ini</div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: "#fff", marginBottom: 6 }}>Belum Checkpoint Hari Ini</div>
+            <div style={{ fontSize: 14, color: "#94A3B8", marginBottom: 20, lineHeight: 1.5 }}>
+              Foto kendaraan (nopol kelihatan) untuk catat lokasi & klaim bonus Rp 30.000.
+            </div>
+            <input
+              ref={fileRef} type="file" accept="image/*" capture="environment"
+              style={{ display: "none" }}
+              onChange={(e) => { pickPhoto(e.target.files?.[0]); e.target.value = ""; }}
+            />
+            <button onClick={() => fileRef.current?.click()} data-testid="btn-tambah-checkpoint"
+              style={{ width: "100%", padding: 18, borderRadius: 18, border: "none", background: "#2563EB", color: "#fff", fontSize: 16, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, cursor: "pointer", boxShadow: "0 10px 26px rgba(37,99,235,0.4)" }}>
+              <Camera size={22} /> Tambah Checkpoint Hari Ini
+            </button>
+          </div>
+        ) : (
+          /* FORM CHECKPOINT (photo udah diambil, blm disimpan) */
+          <div style={{ background: "#131A2C", border: "1px solid #1E293B", borderRadius: 20, padding: 20, marginBottom: 20 }} data-testid="checkpoint-form">
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 14 }}>Status Perjalanan</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 20 }}>
+              {CK_STATUS_OPTIONS.map(({ value, label, icon: Icon }) => {
+                const active = dailyStatus === value;
+                return (
+                  <button key={value} onClick={() => setDailyStatus(value)} data-testid={`ck-status-${value.replace(/\s+/g, "-")}`}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 8, padding: "13px 12px", borderRadius: 14,
+                      border: active ? "2px solid #2563EB" : "1px solid #1E293B",
+                      background: active ? "rgba(37,99,235,0.15)" : "#0E1524",
+                      color: active ? "#60A5FA" : "#94A3B8", fontSize: 14, fontWeight: 700, cursor: "pointer",
+                    }}>
+                    <Icon size={18} />{label}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10 }}>Foto Checkpoint</div>
+            <div style={{ position: "relative", borderRadius: 16, overflow: "hidden", marginBottom: 10, border: "1px solid #1E293B" }}>
+              <img src={pendingPhoto.url} alt="preview checkpoint" style={{ width: "100%", display: "block", maxHeight: 320, objectFit: "cover" }} data-testid="checkpoint-photo-preview" />
+              <button onClick={retakePhoto} data-testid="btn-retake-photo"
+                style={{ position: "absolute", top: 10, right: 10, display: "flex", alignItems: "center", gap: 6, background: "rgba(10,14,26,0.85)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 12, padding: "8px 12px", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                <RotateCcw size={14} /> Ambil Ulang
+              </button>
+            </div>
+
+            <div style={{
+              display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderRadius: 12, marginBottom: 20,
+              background: gpsReady ? "#0F2A1C" : "#2B1D0E", border: `1px solid ${gpsReady ? "#22C55E" : "#EF9F27"}`,
+            }} data-testid="checkpoint-gps-status">
+              <LocateFixed size={16} color={gpsReady ? "#22C55E" : "#EF9F27"} />
+              <span style={{ fontSize: 12, fontWeight: 700, color: gpsReady ? "#86EFAC" : "#FCD34D" }}>
+                {gpsReady
+                  ? `Lokasi GPS aktif · ${cachedGpsPoint.lat.toFixed(5)}, ${cachedGpsPoint.lng.toFixed(5)}`
+                  : "GPS belum terbaca — lokasi tetap dicoba saat simpan"}
+              </span>
+            </div>
+
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>Keterangan (Opsional)</div>
+            <textarea
+              value={dailyNote} onChange={(e) => setDailyNote(e.target.value)} maxLength={200} rows={2}
+              placeholder="Cth: Sudah lewat Cikampek, lalin lancar"
+              data-testid="checkpoint-note-input"
+              style={{ width: "100%", padding: 14, borderRadius: 14, border: "1px solid #1E293B", background: "#0E1524", color: "#E2E8F0", fontSize: 14, fontFamily: "inherit", marginBottom: 20, resize: "none" }}
+            />
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={cancelForm} disabled={uploadingDaily} data-testid="btn-checkpoint-cancel"
+                style={{ flex: 1, padding: 16, borderRadius: 16, border: "1px solid #1E293B", background: "none", color: "#94A3B8", fontSize: 15, fontWeight: 700, cursor: "pointer" }}>
+                Batal
+              </button>
+              <button onClick={confirmSave} disabled={uploadingDaily} data-testid="btn-simpan-checkpoint"
+                style={{ flex: 2, padding: 16, borderRadius: 16, border: "none", background: "#2563EB", color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer", boxShadow: "0 10px 26px rgba(37,99,235,0.4)" }}>
+                {uploadingDaily ? "Menyimpan..." : "Simpan Checkpoint"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* BONUS INFO */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#131A2C", border: "1px solid #1E293B", borderRadius: 16, padding: "14px 18px", marginBottom: 28 }}>
+          <span style={{ fontSize: 13, color: "#94A3B8", fontWeight: 600 }}>Total bonus checkpoint ({dailyCount}x)</span>
+          <span style={{ fontSize: 15, color: "#22C55E", fontWeight: 800 }}>{fmtIDR(totalBonusDaily)}</span>
+        </div>
+
+        {/* TIMELINE RIWAYAT */}
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 16 }}>
+          Riwayat Checkpoint ({sortedDaily.length})
+        </div>
+
+        {sortedDaily.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "30px 0", color: "#64748B", fontSize: 14 }}>Belum ada riwayat checkpoint.</div>
+        ) : (
+          <div style={{ position: "relative", paddingLeft: 4 }}>
+            {sortedDaily.map((cp, i) => {
+              const dotColor = CK_STATUS_COLOR[cp.status] || "#60A5FA";
+              const isLast = i === sortedDaily.length - 1;
+              return (
+                <div key={cp.id || i} style={{ display: "flex", gap: 14, position: "relative" }} data-testid={`ck-timeline-${cp.id || i}`}>
+                  {/* garis + dot */}
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 20, flexShrink: 0 }}>
+                    <div style={{ width: 14, height: 14, borderRadius: "50%", background: dotColor, marginTop: 4, boxShadow: `0 0 0 4px ${dotColor}22`, flexShrink: 0 }} />
+                    {!isLast && <div style={{ flex: 1, width: 2, background: "#1E293B", marginTop: 4 }} />}
+                  </div>
+
+                  {/* card */}
+                  <div style={{ flex: 1, background: "#131A2C", border: "1px solid #1E293B", borderRadius: 16, padding: 14, marginBottom: 16 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10, gap: 8 }}>
+                      <div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                          <Clock size={13} color="#64748B" />
+                          <span style={{ fontSize: 12, color: "#94A3B8", fontWeight: 600 }}>{ckDate(cp.ts)} · {ckTime(cp.ts)}</span>
+                        </div>
+                        <span style={{ fontSize: 13, fontWeight: 800, color: dotColor }}>{cp.status || "Checkpoint"}</span>
+                      </div>
+                      {typeof cp.lat === "number" && typeof cp.lng === "number" && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#64748B", fontWeight: 600, flexShrink: 0 }}>
+                          <MapPin size={12} /> GPS
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                      {cp.url && (
+                        <img src={resolveUrl(cp.url)} alt="checkpoint" style={{ width: 64, height: 64, borderRadius: 12, objectFit: "cover", flexShrink: 0, border: "1px solid #1E293B" }} />
+                      )}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        {cp.keterangan && <div style={{ fontSize: 13, color: "#CBD5E1", marginBottom: 8, lineHeight: 1.4 }}>{cp.keterangan}</div>}
+                        <button onClick={() => setDetailPhoto(cp)} data-testid={`btn-ck-detail-${cp.id || i}`}
+                          style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: "#60A5FA", fontSize: 13, fontWeight: 700, cursor: "pointer", padding: 0 }}>
+                          Lihat Detail <ChevronRight size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* MODAL DETAIL (reuse PoDCard yang sudah ada -- map + download PDF) */}
+      {detailPhoto && (
+        <div
+          onClick={() => setDetailPhoto(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", zIndex: 999, display: "flex", alignItems: "flex-end", justifyContent: "center" }}
+          data-testid="checkpoint-detail-modal"
+        >
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 560, maxHeight: "88vh", overflowY: "auto", background: "#0A1628", borderRadius: "20px 20px 0 0", padding: 16 }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+              <button onClick={() => setDetailPhoto(null)} data-testid="btn-close-detail"
+                style={{ width: 36, height: 36, borderRadius: 10, border: "1px solid #1E293B", background: "#131A2C", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+                <X size={18} color="#E2E8F0" />
+              </button>
+            </div>
+            <PoDCard
+              photo={detailPhoto}
+              backendUrl={BACKEND_URL}
+              namaDriver={trip.nama_driver}
+              nopol={trip.nopol}
+              dayIndex={daily.findIndex((d) => d.id === detailPhoto.id)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
