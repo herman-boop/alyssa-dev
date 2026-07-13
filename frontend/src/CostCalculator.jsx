@@ -7,7 +7,7 @@ import axios from "axios";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "";
 const API = `${BACKEND_URL}/api`;
-const LEG_TYPES = ["Self Drive", "Kapal Laut", "Car Carrier", "Towing", "Self Loader", "Low Bed", "Bongkar/Muat", "Trucking", "Lainnya"];
+const LEG_TYPES = ["Self Drive", "Kapal Laut", "Container", "Car Carrier", "Towing", "Self Loader", "Low Bed", "Bongkar/Muat", "Trucking", "Lainnya"];
 const TIPE_OPTS = [
   "Kendaraan Kecil Biasa", "Kendaraan Kecil Medium", "Truck Ringan D4 Std", "Truck Ringan D4 Long",
   "Truck Sedang D6 Std", "Truck Sedang D6 Long", "Truck Besar F6 Std", "Truck Besar F6 Long",
@@ -588,7 +588,7 @@ export default function CostCalculator() {
         <div style={{ marginBottom: 8 }}>
           <label style={LBL}>Moda Pengiriman <span style={{ color: "#6e7681", fontWeight: 400 }}>(otomatis dari komponen biaya, bisa diedit)</span></label>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {["Self Drive","Kapal Laut","Car Carrier","Towing","Self Loader","Low Bed"].map(m => (
+            {["Self Drive","Kapal Laut","Container","Car Carrier","Towing","Self Loader","Low Bed"].map(m => (
               <button key={m} type="button" onClick={() => { setModaManual(true); setModa(prev => {
                 const parts = prev ? prev.split(" + ").map(s=>s.trim()).filter(Boolean) : [];
                 return parts.includes(m) ? parts.filter(p=>p!==m).join(" + ") : [...parts, m].join(" + ");
