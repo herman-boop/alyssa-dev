@@ -2711,6 +2711,7 @@ class SupplierJobBody(BaseModel):
     total_harga: int
     catatan: str = ""
     project_id: Optional[str] = None
+    tanggal: Optional[str] = None   # manual date (YYYY-MM-DD); kosong = hari ini
 
 
 class SupplierProjectBody(BaseModel):
@@ -2824,6 +2825,10 @@ async def add_supplier_job(supplier_id: str, body: SupplierJobBody):
     if not project_id:
         project_id, projects = _get_or_create_active_project(doc)
 
+    tgl = (body.tanggal or "").strip()
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", tgl):
+        tgl = today_wib()
+
     job = {
         "id": _gen_supplier_id(),
         "project_id": project_id,
@@ -2834,7 +2839,7 @@ async def add_supplier_job(supplier_id: str, body: SupplierJobBody):
         "tujuan_kota": body.tujuan_kota.strip(),
         "total_harga": body.total_harga,
         "catatan": body.catatan.strip(),
-        "tanggal": datetime.utcnow().isoformat(),
+        "tanggal": tgl,
         "payments": [],
     }
     upd = {"jobs": (doc.get("jobs") or []) + [job]}

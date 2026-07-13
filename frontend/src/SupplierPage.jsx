@@ -18,7 +18,7 @@ function todayStr() {
 }
 function fDate(s) {
   if (!s) return "";
-  const [y, m, d] = s.split("-");
+  const [y, m, d] = String(s).slice(0, 10).split("-");
   if (!y || !m || !d) return s;
   return `${d}/${m}/${y}`;
 }
@@ -79,7 +79,8 @@ export default function SupplierPage() {
   };
 
   // ── Job (unit) form ──
-  const [jobForm, setJobForm] = useState({ vehicle_type: "", nopol: "", no_rangka: "", asal_kota: "", tujuan_kota: "", total_harga: "", catatan: "" });
+  const blankJobForm = { vehicle_type: "", nopol: "", no_rangka: "", asal_kota: "", tujuan_kota: "", total_harga: "", catatan: "", tanggal: todayStr() };
+  const [jobForm, setJobForm] = useState(blankJobForm);
   const [jobSaving, setJobSaving] = useState(false);
   const addJob = async () => {
     if (!selected) return;
@@ -95,8 +96,9 @@ export default function SupplierPage() {
         tujuan_kota: jobForm.tujuan_kota.trim(),
         total_harga: harga,
         catatan: jobForm.catatan.trim(),
+        tanggal: jobForm.tanggal || todayStr(),
       }, { headers });
-      setJobForm({ vehicle_type: "", nopol: "", no_rangka: "", asal_kota: "", tujuan_kota: "", total_harga: "", catatan: "" });
+      setJobForm(blankJobForm);
       await reloadSelected(selected.id);
       setListRefreshTick((t) => t + 1);
       flash("Unit ditambahkan");
@@ -314,6 +316,7 @@ export default function SupplierPage() {
               <input style={I} placeholder="Kota asal" value={jobForm.asal_kota} onChange={(e) => setJobForm((f) => ({ ...f, asal_kota: e.target.value }))} />
               <input style={I} placeholder="Kota tujuan" value={jobForm.tujuan_kota} onChange={(e) => setJobForm((f) => ({ ...f, tujuan_kota: e.target.value }))} />
               <input style={I} inputMode="numeric" placeholder="Total harga (Rp)" value={jobForm.total_harga} onChange={(e) => setJobForm((f) => ({ ...f, total_harga: e.target.value }))} data-testid="sup-job-harga" />
+              <input type="date" style={I} value={jobForm.tanggal} onChange={(e) => setJobForm((f) => ({ ...f, tanggal: e.target.value }))} data-testid="sup-job-tanggal" />
               <input style={I} placeholder="Catatan (opsional)" value={jobForm.catatan} onChange={(e) => setJobForm((f) => ({ ...f, catatan: e.target.value }))} />
             </div>
             <button style={BTN} onClick={addJob} disabled={jobSaving} data-testid="sup-job-save">
@@ -355,7 +358,7 @@ export default function SupplierPage() {
                     <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
                       <div>
                         <div style={{ fontWeight: 700, fontSize: 13 }}>{job.vehicle_type || "—"} {job.nopol && <span style={{ color: "#8b949e" }}>· {job.nopol}</span>} {job.no_rangka && <span style={{ color: "#8b949e" }}>· {job.no_rangka}</span>}</div>
-                        <div style={{ fontSize: 12, color: "#8b949e" }}>{job.asal_kota || "—"} &rarr; {job.tujuan_kota || "—"}</div>
+                        <div style={{ fontSize: 12, color: "#8b949e" }}>{job.asal_kota || "—"} &rarr; {job.tujuan_kota || "—"} {job.tanggal && <span style={{ marginLeft: 6 }}>· {fDate(job.tanggal)}</span>}</div>
                         {job.catatan && <div style={{ fontSize: 11, color: "#8b949e", marginTop: 2 }}>{job.catatan}</div>}
                       </div>
                       <div style={{ textAlign: "right" }}>
