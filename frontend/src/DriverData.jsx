@@ -141,53 +141,74 @@ export default function DriverData({ embedded = false }) {
   };
 
   const printSurat = (drv) => {
-    const tgl = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Surat Pengantar Driver</title>
+    const tgl = new Date().toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
+    const navy = "#1e3a8a", gray = "#6b7280", border = "#e5e7eb";
+    const statusOk = (drv.status || "").toLowerCase() === "aktif";
+    const row = (k, v) => `
+      <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid ${border}">
+        <span style="color:${gray};font-size:11px">${k}</span>
+        <span style="font-weight:700;font-size:12px;color:#1f2937">${v}</span>
+      </div>`;
+    const fotoBox = (src, label) => src ? `
+      <div style="flex:1;text-align:center">
+        <img src="${src}" style="width:100%;height:100px;object-fit:cover;border:1px solid ${border};border-radius:10px;display:block;image-orientation:from-image" />
+        <div style="font-size:10px;color:${gray};margin-top:6px;font-weight:600">${label}</div>
+      </div>` : "";
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Surat Pengantar Driver — ${drv.nama}</title>
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
-      body { font-family: Arial, sans-serif; font-size: 11px; color: #222; padding: 30px 40px; }
-      .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #BA7517; padding-bottom: 12px; margin-bottom: 20px; }
-      .co { font-size: 16px; font-weight: 800; color: #BA7517; }
-      .co-sub { font-size: 9px; color: #666; margin-top: 2px; }
-      h2 { font-size: 14px; text-align: center; margin-bottom: 20px; text-decoration: underline; letter-spacing: 1px; }
-      .info-grid { display: grid; grid-template-columns: 140px 1fr; gap: 6px 0; margin-bottom: 20px; }
-      .info-grid .k { color: #555; }
-      .info-grid .v { font-weight: 600; }
-      .info-grid .sep { grid-column: 1/-1; border-bottom: 1px dashed #ddd; margin: 4px 0; }
-      .note { background: #fffbe6; border: 1px solid #ffe066; border-radius: 6px; padding: 10px 14px; font-size: 10px; color: #7a5700; margin-bottom: 20px; }
-      .stamp-area { margin-top: 36px; display: flex; justify-content: flex-end; align-items: center; gap: 16px; }
-      .stamp-box { border: 3px solid #BA7517; border-radius: 50%; width: 90px; height: 90px; display: flex; align-items: center; justify-content: center; opacity: 0.85; }
-      .stamp-box img { width: 70px; height: 70px; object-fit: contain; }
-      .foto-row { display: flex; gap: 16px; margin-bottom: 20px; }
-      .foto-box { text-align: center; }
-      .foto-box img { width: 120px; height: 80px; object-fit: cover; border: 1px solid #ddd; border-radius: 4px; display: block; image-orientation: from-image; }
-      .foto-box .flbl { font-size: 9px; color: #666; margin-top: 4px; }
-      @media print { @page { margin: 15mm; } }
+      body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; color: #1f2937; background: #f3f4f6; padding: 24px; }
+      .card { max-width: 600px; margin: 0 auto; background: #fff; border-radius: 14px; padding: 32px; }
+      .sec-head { display: flex; align-items: center; gap: 10px; margin: 22px 0 10px; }
+      .sec-num { width: 24px; height: 24px; border-radius: 6px; background: ${navy}; color: #fff; font-weight: 800; font-size: 12px; display: flex; align-items: center; justify-content: center; }
+      .sec-title { font-weight: 800; font-size: 13px; color: ${navy}; letter-spacing: 0.3px; }
+      @media print { @page { size: A4 portrait; margin: 10mm; } body { background: #fff; padding: 0; } .card { max-width: 100%; } }
     </style></head><body>
-    <div class="header">
-      <div><div class="co">PT ALYSSA AUTO LOGISTIK</div><div class="co-sub">Solusi Transportasi &amp; Logistik Kendaraan</div></div>
-      <div style="text-align:right;font-size:9px;color:#666">Diterbitkan: ${tgl}</div>
-    </div>
-    <h2>SURAT PENGANTAR DRIVER</h2>
-    <div class="info-grid">
-      <span class="k">Nama Driver</span><span class="v">: ${drv.nama}</span>
-      <div class="sep"></div>
-      <span class="k">No. KTP</span><span class="v">: ${drv.no_ktp || "—"}</span>
-      <span class="k">No. SIM</span><span class="v">: ${drv.no_sim || "—"} ${drv.tipe_sim ? `(SIM ${drv.tipe_sim})` : ""}</span>
-      <div class="sep"></div>
-      <span class="k">ID Driver</span><span class="v">: ${drv.driver_id}</span>
-      <span class="k">Status</span><span class="v">: ${drv.status?.toUpperCase()}</span>
-    </div>
-    ${drv.foto_selfie || drv.foto_ktp || drv.foto_sim ? `
-    <div class="foto-row">
-      ${drv.foto_selfie ? `<div class="foto-box"><img src="${drv.foto_selfie}" /><div class="flbl">Foto Driver</div></div>` : ""}
-      ${drv.foto_ktp ? `<div class="foto-box"><img src="${drv.foto_ktp}" /><div class="flbl">Foto KTP</div></div>` : ""}
-      ${drv.foto_sim ? `<div class="foto-box"><img src="${drv.foto_sim}" /><div class="flbl">Foto SIM</div></div>` : ""}
-    </div>` : ""}
-    <div class="note">Surat ini menyatakan bahwa driver tersebut di atas adalah tenaga pengiriman resmi dari PT Alyssa Auto Logistik dan berwenang untuk melakukan pengiriman kendaraan atas nama perusahaan.</div>
-    <div class="stamp-area">
-      <div style="text-align:right;font-size:9px;color:#888;line-height:1.6">Diterbitkan oleh<br><strong style="color:#BA7517">PT Alyssa Auto Logistik</strong><br>${tgl}</div>
-      <div class="stamp-box"><img src="${window.location.origin}/logo.png" alt="Stempel" /></div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid ${navy};padding-bottom:16px;margin-bottom:6px">
+        <div>
+          <div style="font-size:20px;font-weight:900;color:${navy};letter-spacing:0.3px">SURAT PENGANTAR DRIVER</div>
+          <div style="font-size:12px;color:${gray};margin-top:4px">PT Alyssa Auto Logistik — Solusi Transportasi &amp; Logistik Kendaraan</div>
+        </div>
+        <div style="text-align:right;font-size:11px">
+          <div style="color:${gray}">📅 Diterbitkan</div>
+          <div style="font-weight:700">${tgl}</div>
+        </div>
+      </div>
+
+      <div class="sec-head"><div class="sec-num">1</div><div class="sec-title">DATA DRIVER</div></div>
+      <div style="border:1px solid ${border};border-radius:10px;padding:4px 14px">
+        ${row("Nama Driver", drv.nama || "—")}
+        ${row("No. KTP", drv.no_ktp || "—")}
+        ${row("No. SIM", `${drv.no_sim || "—"}${drv.tipe_sim ? ` (SIM ${drv.tipe_sim})` : ""}`)}
+        ${row("ID Driver", drv.driver_id || "—")}
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0">
+          <span style="color:${gray};font-size:11px">Status</span>
+          <span style="font-weight:800;font-size:11px;padding:3px 10px;border-radius:12px;background:${statusOk ? "#d1fae5" : "#fef2f2"};color:${statusOk ? "#065f46" : "#991b1b"}">${(drv.status || "—").toUpperCase()}</span>
+        </div>
+      </div>
+
+      ${(drv.foto_selfie || drv.foto_ktp || drv.foto_sim) ? `
+      <div class="sec-head"><div class="sec-num">2</div><div class="sec-title">DOKUMEN &amp; FOTO</div></div>
+      <div style="display:flex;gap:12px">
+        ${fotoBox(drv.foto_selfie, "Foto Driver")}
+        ${fotoBox(drv.foto_ktp, "Foto KTP")}
+        ${fotoBox(drv.foto_sim, "Foto SIM")}
+      </div>` : ""}
+
+      <div style="margin-top:20px;background:#eff6ff;border-radius:8px;padding:12px 14px;font-size:11px;color:#374151;display:flex;gap:8px">
+        <span>📋</span>
+        <span>Surat ini menyatakan bahwa driver tersebut di atas adalah tenaga pengiriman resmi dari PT Alyssa Auto Logistik dan berwenang untuk melakukan pengiriman kendaraan atas nama perusahaan.</span>
+      </div>
+
+      <div style="margin-top:28px;display:flex;justify-content:flex-end;align-items:center;gap:16px">
+        <div style="text-align:right;font-size:11px;color:${gray};line-height:1.7">
+          Diterbitkan oleh<br><strong style="color:${navy};font-size:12px">PT Alyssa Auto Logistik</strong><br>${tgl}
+        </div>
+        <div style="border:3px solid ${navy};border-radius:50%;width:80px;height:80px;display:flex;align-items:center;justify-content:center;opacity:0.85;flex-shrink:0">
+          <img src="${window.location.origin}/logo.png" alt="Stempel" style="width:60px;height:60px;object-fit:contain" />
+        </div>
+      </div>
     </div>
     <script>window.onload=()=>window.print()<\/script>
     </body></html>`;
