@@ -67,26 +67,26 @@ export default function KompensasiPage() {
   };
 
   const createOrOpenRekanan = async () => {
-    if (!query.trim()) { flash("Masukkan nama rekanan dulu"); return; }
+    if (!query.trim()) { flash("Masukkan nama supplier dulu"); return; }
     try {
       const r = await axios.post(`${API}/admin/kompensasi`, { nama: query.trim() }, { headers });
       setQuery(r.data.nama);
       await reloadSelected(r.data.id);
       setListRefreshTick((t) => t + 1);
-      flash("Rekanan tersimpan");
-    } catch (e) { flash(e?.response?.data?.detail || "Gagal simpan rekanan"); }
+      flash("Supplier tersimpan");
+    } catch (e) { flash(e?.response?.data?.detail || "Gagal simpan supplier"); }
   };
 
   const deleteRekanan = async () => {
     if (!selected) return;
-    if (!window.confirm(`Hapus rekanan "${selected.nama}" beserta semua rincian kompensasinya? Tindakan ini tidak bisa dibatalkan.`)) return;
+    if (!window.confirm(`Hapus supplier "${selected.nama}" beserta semua rincian kompensasinya? Tindakan ini tidak bisa dibatalkan.`)) return;
     try {
       await axios.delete(`${API}/admin/kompensasi/${selected.id}`, { headers });
       setSelected(null);
       setQuery("");
       setListRefreshTick((t) => t + 1);
-      flash("Rekanan dihapus");
-    } catch { flash("Gagal hapus rekanan"); }
+      flash("Supplier dihapus");
+    } catch { flash("Gagal hapus supplier"); }
   };
 
   // ── Form tambah item (rincian kompensasi, 2 arah) ──
@@ -185,17 +185,17 @@ export default function KompensasiPage() {
       <div style={{ background: "#161b22", border: "1px solid #21262d", borderRadius: 12, padding: 18, marginBottom: 16 }}>
         <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 4 }}>🔄 Kompensasi Hutang Piutang</div>
         <div style={{ fontSize: 12, color: "#8b949e", marginBottom: 14 }}>
-          Buat rekanan yang saling kirim unit/invoice (2 arah) — catat rincian kewajiban kita ke rekanan,
-          dan rincian kewajiban rekanan ke kita, sisa kewajiban dihitung otomatis dari selisihnya.
+          Buat supplier yang saling kirim unit/invoice (2 arah) — catat rincian kewajiban Alyssa Logistik ke supplier,
+          dan rincian kewajiban supplier ke Alyssa Logistik, sisa kewajiban dihitung otomatis dari selisihnya.
         </div>
 
-        <label style={L}>Cari / Buat Rekanan</label>
+        <label style={L}>Cari / Buat Supplier</label>
         <div style={{ position: "relative" }}>
           <input
             style={I}
             value={query}
             onChange={(e) => { setQuery(e.target.value); setSelected(null); }}
-            placeholder="Ketik nama rekanan (PT/perusahaan) untuk mencari atau membuat baru..."
+            placeholder="Ketik nama supplier (PT/perusahaan) untuk mencari atau membuat baru..."
             data-testid="komp-search"
           />
           {!selected && dropdown.length > 0 && (
@@ -221,30 +221,30 @@ export default function KompensasiPage() {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: 14, flexWrap: "wrap", gap: 10 }}>
             <div>
               <div style={{ fontWeight: 800, fontSize: 16 }}>{selected.nama}</div>
-              <div style={{ fontSize: 11, color: "#8b949e" }}>Rekanan Kompensasi {selected.no_hp && `· ${selected.no_hp}`}</div>
+              <div style={{ fontSize: 11, color: "#8b949e" }}>Supplier {selected.no_hp && `· ${selected.no_hp}`}</div>
               <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
                 <button style={{ ...BTN_GHOST, fontSize: 11, padding: "6px 12px" }} onClick={downloadRingkasan} disabled={ringkasanBusy} data-testid="komp-ringkasan-download">
                   {ringkasanBusy ? "⏳ Membuat..." : "📄 Download Ringkasan Terperinci"}
                 </button>
                 <button style={{ ...BTN_GHOST, fontSize: 11, padding: "6px 12px", color: "#f85149", borderColor: "#f85149" }} onClick={deleteRekanan} data-testid="komp-delete">
-                  🗑 Hapus Rekanan
+                  🗑 Hapus Supplier
                 </button>
               </div>
             </div>
             <div style={{ display: "flex", gap: 16, textAlign: "right" }}>
               <div>
-                <div style={{ fontSize: 10, color: "#8b949e" }}>Kewajiban Kita</div>
+                <div style={{ fontSize: 10, color: "#8b949e" }}>Kewajiban Alyssa Logistik</div>
                 <div style={{ fontWeight: 800, fontSize: 14 }}>{fRp(selected.total_kita)}</div>
               </div>
               <div>
-                <div style={{ fontSize: 10, color: "#8b949e" }}>Kewajiban Rekanan</div>
+                <div style={{ fontSize: 10, color: "#8b949e" }}>Kewajiban Supplier</div>
                 <div style={{ fontWeight: 800, fontSize: 14 }}>{fRp(selected.total_mereka)}</div>
               </div>
               <div>
                 <div style={{ fontSize: 10, color: "#8b949e" }}>Sisa Kewajiban</div>
                 <div style={{ fontWeight: 900, fontSize: 14, color: selected.sisa >= 0 ? "#3fb950" : "#f85149" }}>
                   {fRp(Math.abs(selected.sisa))}
-                  <div style={{ fontSize: 9, fontWeight: 600, color: "#8b949e" }}>{selected.sisa >= 0 ? "rekanan → kita" : "kita → rekanan"}</div>
+                  <div style={{ fontSize: 9, fontWeight: 600, color: "#8b949e" }}>{selected.sisa >= 0 ? "supplier → Alyssa Logistik" : "Alyssa Logistik → supplier"}</div>
                 </div>
               </div>
             </div>
@@ -259,14 +259,14 @@ export default function KompensasiPage() {
                   border: itemForm.arah === "kita_ke_mereka" ? "2px solid #EF9F27" : "1px solid #30363d",
                   background: itemForm.arah === "kita_ke_mereka" ? "#2a1f0d" : "none", color: itemForm.arah === "kita_ke_mereka" ? "#EF9F27" : "#8b949e" }}
                 data-testid="komp-arah-kita">
-                📤 Kita → Rekanan
+                📤 Alyssa Logistik → Supplier
               </button>
               <button type="button" onClick={() => setItemForm((f) => ({ ...f, arah: "mereka_ke_kita" }))}
                 style={{ flex: 1, padding: "8px", borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: "pointer",
                   border: itemForm.arah === "mereka_ke_kita" ? "2px solid #58a6ff" : "1px solid #30363d",
                   background: itemForm.arah === "mereka_ke_kita" ? "#0d1b2a" : "none", color: itemForm.arah === "mereka_ke_kita" ? "#58a6ff" : "#8b949e" }}
                 data-testid="komp-arah-mereka">
-                📥 Rekanan → Kita
+                📥 Supplier → Alyssa Logistik
               </button>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
@@ -293,7 +293,7 @@ export default function KompensasiPage() {
           {/* Dua daftar rincian, per arah */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
             <div>
-              <div style={{ fontWeight: 800, fontSize: 12, color: "#EF9F27", marginBottom: 4 }}>📤 Kewajiban Kita → {selected.nama}</div>
+              <div style={{ fontWeight: 800, fontSize: 12, color: "#EF9F27", marginBottom: 4 }}>📤 Kewajiban Alyssa Logistik → {selected.nama}</div>
               {itemsKita.length === 0 && <div style={{ fontSize: 12, color: "#8b949e", padding: "8px 0" }}>Belum ada rincian.</div>}
               {itemsKita.map(renderItemRow)}
               {itemsKita.length > 0 && (
@@ -303,7 +303,7 @@ export default function KompensasiPage() {
               )}
             </div>
             <div>
-              <div style={{ fontWeight: 800, fontSize: 12, color: "#58a6ff", marginBottom: 4 }}>📥 Kewajiban {selected.nama} → Kita</div>
+              <div style={{ fontWeight: 800, fontSize: 12, color: "#58a6ff", marginBottom: 4 }}>📥 Kewajiban {selected.nama} → Alyssa Logistik</div>
               {itemsMereka.length === 0 && <div style={{ fontSize: 12, color: "#8b949e", padding: "8px 0" }}>Belum ada rincian.</div>}
               {itemsMereka.map(renderItemRow)}
               {itemsMereka.length > 0 && (

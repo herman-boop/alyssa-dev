@@ -98,7 +98,7 @@ export default function KompensasiRingkasan() {
   const totalKita = data.total_kita || 0;
   const totalMereka = data.total_mereka || 0;
   const sisa = data.sisa || 0;
-  const rekananNama = data.nama || "Rekanan";
+  const rekananNama = data.nama || "Supplier";
   const todayFmt = new Date().toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
 
   return (
@@ -109,7 +109,7 @@ export default function KompensasiRingkasan() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: `3px solid ${navy}`, paddingBottom: 16, marginBottom: 6 }}>
           <div>
             <div style={{ fontSize: 20, fontWeight: 900, color: navy, letterSpacing: 0.3 }}>RINGKASAN KOMPENSASI HUTANG PIUTANG</div>
-            <div style={{ fontSize: 12, color: gray, marginTop: 4 }}>Rekanan — {rekananNama}</div>
+            <div style={{ fontSize: 12, color: gray, marginTop: 4 }}>Supplier — {rekananNama}</div>
           </div>
           <div style={{ textAlign: "right", fontSize: 11 }}>
             <div style={{ color: gray }}>📅 Tanggal</div>
@@ -119,16 +119,16 @@ export default function KompensasiRingkasan() {
           </div>
         </div>
 
-        {/* Section 1: Rincian Kewajiban Kita -> Rekanan */}
-        <SectionHeader num="1" title={`RINCIAN KEWAJIBAN KITA → ${rekananNama.toUpperCase()}`} />
+        {/* Section 1: Rincian Kewajiban Alyssa Logistik -> Supplier */}
+        <SectionHeader num="1" title={`RINCIAN KEWAJIBAN ALYSSA LOGISTIK → ${rekananNama.toUpperCase()}`} />
         <ItemTable items={itemsKita} emptyLabel="Belum ada rincian." />
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#fef2f2", borderRadius: 8, padding: "10px 14px", marginTop: 4, fontWeight: 800, fontSize: 13, color: "#991b1b" }}>
-          <span>📤 TOTAL KEWAJIBAN KITA</span>
+          <span>📤 TOTAL KEWAJIBAN ALYSSA LOGISTIK</span>
           <span>{fRp(totalKita)}</span>
         </div>
 
-        {/* Section 2: Rincian Kewajiban Rekanan -> Kita */}
-        <SectionHeader num="2" title={`RINCIAN KEWAJIBAN ${rekananNama.toUpperCase()} → KITA`} />
+        {/* Section 2: Rincian Kewajiban Supplier -> Alyssa Logistik */}
+        <SectionHeader num="2" title={`RINCIAN KEWAJIBAN ${rekananNama.toUpperCase()} → ALYSSA LOGISTIK`} />
         <ItemTable items={itemsMereka} emptyLabel="Belum ada rincian." />
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#ecfdf5", borderRadius: 8, padding: "10px 14px", marginTop: 4, fontWeight: 800, fontSize: 13, color: "#065f46" }}>
           <span>📥 TOTAL KEWAJIBAN {rekananNama.toUpperCase()}</span>
@@ -139,16 +139,16 @@ export default function KompensasiRingkasan() {
         <SectionHeader num="3" title="POSISI AKHIR (SISA KEWAJIBAN)" />
         <div style={{ border: `1px solid ${border}`, borderRadius: 10, padding: 14, fontSize: 13 }}>
           <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0" }}>
-            <span style={{ color: gray }}>Kewajiban Kita Terhadap {rekananNama}</span>
+            <span style={{ color: gray }}>Kewajiban Alyssa Logistik Terhadap {rekananNama}</span>
             <span style={{ fontWeight: 700 }}>{fRp(totalKita)}</span>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px solid ${border}` }}>
-            <span style={{ color: gray }}>Kewajiban {rekananNama} Terhadap Kita</span>
+            <span style={{ color: gray }}>Kewajiban {rekananNama} Terhadap Alyssa Logistik</span>
             <span style={{ fontWeight: 700 }}>{fRp(totalMereka)}</span>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, background: sisa >= 0 ? "#ecfdf5" : "#fef2f2", borderRadius: 8, padding: "12px 14px" }}>
             <span style={{ fontWeight: 800, fontSize: 12, color: sisa >= 0 ? "#065f46" : "#991b1b" }}>
-              💳 SISA KEWAJIBAN {sisa >= 0 ? `${rekananNama.toUpperCase()} KEPADA KITA` : `KITA KEPADA ${rekananNama.toUpperCase()}`}
+              💳 SISA KEWAJIBAN {sisa >= 0 ? `${rekananNama.toUpperCase()} KEPADA ALYSSA LOGISTIK` : `ALYSSA LOGISTIK KEPADA ${rekananNama.toUpperCase()}`}
             </span>
             <span style={{ fontWeight: 900, fontSize: 18, color: sisa >= 0 ? "#059669" : "#dc2626" }}>{fRp(Math.abs(sisa))}</span>
           </div>
@@ -157,11 +157,11 @@ export default function KompensasiRingkasan() {
         <div style={{ marginTop: 16, background: "#eff6ff", borderRadius: 8, padding: 12, fontSize: 11, color: "#374151", display: "flex", gap: 8 }}>
           <span>📋</span>
           <span>
-            Berdasarkan rincian kewajiban kita sebesar {fRp(totalKita)} dan kewajiban {rekananNama} sebesar {fRp(totalMereka)},{" "}
+            Berdasarkan rincian kewajiban Alyssa Logistik sebesar {fRp(totalKita)} dan kewajiban {rekananNama} sebesar {fRp(totalMereka)},{" "}
             {sisa > 0
-              ? `maka masih terdapat sisa kewajiban ${rekananNama} kepada kita sebesar ${fRp(sisa)}.`
+              ? `maka masih terdapat sisa kewajiban ${rekananNama} kepada Alyssa Logistik sebesar ${fRp(sisa)}.`
               : sisa < 0
-                ? `maka masih terdapat sisa kewajiban kita kepada ${rekananNama} sebesar ${fRp(Math.abs(sisa))}.`
+                ? `maka masih terdapat sisa kewajiban Alyssa Logistik kepada ${rekananNama} sebesar ${fRp(Math.abs(sisa))}.`
                 : "kedua kewajiban sudah impas (nihil)."}
           </span>
         </div>
