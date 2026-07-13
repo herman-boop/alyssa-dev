@@ -1,6 +1,7 @@
 /* eslint-disable */
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import axios from "axios";
+import { VEHICLE_TYPE_LIST } from "@/VehicleSketches";
 
 /* Port dari cost-calculator.html (app lama). Logika hitung 1:1:
    HPP + Margin bertingkat + Proteksi Risiko + Bunga Dana Talang. */
@@ -8,11 +9,9 @@ import axios from "axios";
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "";
 const API = `${BACKEND_URL}/api`;
 const LEG_TYPES = ["Self Drive", "Kapal Laut", "Container", "Car Carrier", "Towing", "Self Loader", "Low Bed", "Bongkar/Muat", "Trucking", "Lainnya"];
-const TIPE_OPTS = [
-  "Kendaraan Kecil Biasa", "Kendaraan Kecil Medium", "Truck Ringan D4 Std", "Truck Ringan D4 Long",
-  "Truck Sedang D6 Std", "Truck Sedang D6 Long", "Truck Besar F6 Std", "Truck Besar F6 Long",
-  "Tronton T10 Std", "Tronton T10 Long", "Avanza, Veloz, Rush", "Innova Zenix", "Lainnya (custom)",
-];
+// Sama persis dengan daftar Tipe Kendaraan di form Pesanan (VEHICLE_TYPE_LIST),
+// biar istilahnya konsisten di seluruh aplikasi.
+const TIPE_OPTS = VEHICLE_TYPE_LIST;
 const TIERS = ["<1jt", "1-3jt", "3-8jt", "8-15jt", "15-25jt", ">25jt"];
 const MIN_MARGIN_RAWAN = 6;
 const DEFAULT_MARGIN = {
