@@ -159,6 +159,8 @@ function Dashboard({ pin, onLogout }) {
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [driverFilter, setDriverFilter] = useState("");
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [convertModal, setConvertModal] = useState(null);
   const [odooModal, setOdooModal] = useState(null);
   const [legsModal, setLegsModal] = useState(null);
@@ -274,106 +276,49 @@ function Dashboard({ pin, onLogout }) {
     finally { setFixingHeic(false); }
   };
 
+  const driverOptions = useMemo(
+    () => Array.from(new Set(orders.map((o) => o.nama_driver).filter(Boolean))).sort(),
+    [orders]
+  );
+  const visibleOrders = driverFilter ? orders.filter((o) => o.nama_driver === driverFilter) : orders;
+  const anyFilterActive = !!(search || statusFilter || dateFrom || dateTo || driverFilter);
+  const resetFilters = () => { setSearch(""); setStatusFilter(""); setDateFrom(""); setDateTo(""); setDriverFilter(""); };
+
+  const SECTION_META = {
+    pesanan:      { title: "Dashboard", sub: "Ringkasan semua aktivitas pengiriman kendaraan" },
+    kalkulator:   { title: "Kalkulator HPP", sub: "Hitung harga pokok & margin per rute" },
+    drivers:      { title: "Driver", sub: "Kelola data driver & dokumen" },
+    koordinator:  { title: "Koordinator", sub: "Kelola akun koordinator lapangan" },
+    supplier:     { title: "Supplier", sub: "Kelola unit titipan & selisih harga supplier" },
+    selisih:      { title: "Selisih Harga", sub: "Bandingkan HPP vs harga deal pelanggan" },
+    kompensasi:   { title: "Kompensasi", sub: "Kompensasi hutang piutang antar pihak" },
+    "minta-harga":{ title: "Minta Harga", sub: "Permintaan harga ke perwakilan supplier" },
+    laporan:      { title: "Laporan", sub: "Ringkasan performa & ekspor data" },
+    pengaturan:   { title: "Pengaturan", sub: "Preferensi tampilan & akun admin" },
+    "route-leg":  { title: "Route Leg", sub: "Rute & leg pengiriman per order" },
+    kendaraan:    { title: "Kendaraan", sub: "Daftar kendaraan yang pernah dikirim" },
+    dokumen:      { title: "Dokumen", sub: "BASTK, resi, dan dokumen pengiriman" },
+  };
+  const section = SECTION_META[activeTab] || SECTION_META.pesanan;
+
   return (
-    <div className="adm-root" data-testid="adm-dashboard">
+    <div data-testid="adm-dashboard" style={{ display: "flex", minHeight: "100vh", background: "#0a0e14" }}>
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
 
-      {/* ── Topbar ── */}
-      <header className="adm-topbar">
-        <div className="adm-topbar-left">
-          <div className="adm-topbar-logo">
-            <Logo size={38} />
-          </div>
-          <div className="adm-topbar-info">
-            <div className="adm-topbar-title">Admin Control</div>
-            <div className="adm-topbar-sub">PT Alyssa Auto Logistik</div>
-          </div>
-        </div>
-        <div className="adm-topbar-actions">
-          <a href="?guide=1" target="_blank" rel="noreferrer" className="adm-btn adm-btn-ghost adm-btn-sm" data-testid="adm-tutorial-link">
-            <IcoBook /> Tutorial
-          </a>
-          <button className="adm-btn adm-btn-gold adm-btn-sm" onClick={exportCsv} data-testid="adm-export-csv">
-            <IcoDownload /> Export CSV
-          </button>
-          <button className="adm-btn adm-btn-ghost adm-btn-sm" onClick={loadAll} data-testid="adm-refresh">
-            <IcoRefresh /> Refresh
-          </button>
-          <button className="adm-btn adm-btn-ghost adm-btn-sm" onClick={fixHeicPhotos} disabled={fixingHeic} data-testid="adm-fix-heic" title="Perbaiki foto lama yang tersimpan format HEIC (broken image)">
-            {fixingHeic ? "⏳ Memperbaiki..." : "🩹 Perbaiki Foto HEIC"}
-          </button>
-          <button className="adm-btn adm-btn-ghost adm-btn-sm" onClick={onLogout} data-testid="adm-logout">
-            <IcoLogout /> Keluar
-          </button>
-          <button
-            className="theme-toggle"
-            onClick={() => { toggleTheme(); setDark(d => !d); }}
-            aria-label="Toggle dark mode"
-            style={{ marginLeft: 2 }}
-          >
-            {dark ? <IcoSun /> : <IcoMoon />}
-          </button>
-        </div>
-      </header>
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+        <TopHeader
+          title={section.title}
+          sub={section.sub}
+          search={activeTab === "pesanan" ? search : ""}
+          onSearch={activeTab === "pesanan" ? setSearch : undefined}
+          onExport={exportCsv}
+          onRefresh={loadAll}
+          profileMenuOpen={profileMenuOpen}
+          setProfileMenuOpen={setProfileMenuOpen}
+          onLogout={onLogout}
+        />
 
-      {/* ── Tab bar ── */}
-      <div style={{ display: "flex", gap: 4, padding: "10px 16px 0", borderBottom: "1px solid var(--border)", background: "var(--bg-2)" }}>
-        <button
-          onClick={() => setActiveTab("pesanan")}
-          style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: "8px 8px 0 0", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 700,
-            background: activeTab === "pesanan" ? "var(--bg-card)" : "transparent",
-            color: activeTab === "pesanan" ? "var(--gold)" : "var(--text-3)",
-            borderBottom: activeTab === "pesanan" ? "2px solid var(--gold)" : "2px solid transparent" }}
-        ><IcoList /> Pesanan</button>
-        <button
-          onClick={() => setActiveTab("kalkulator")}
-          style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: "8px 8px 0 0", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 700,
-            background: activeTab === "kalkulator" ? "var(--bg-card)" : "transparent",
-            color: activeTab === "kalkulator" ? "var(--gold)" : "var(--text-3)",
-            borderBottom: activeTab === "kalkulator" ? "2px solid var(--gold)" : "2px solid transparent" }}
-        ><IcoCalc /> Kalkulator HPP</button>
-        <button
-          onClick={() => setActiveTab("drivers")}
-          style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: "8px 8px 0 0", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 700,
-            background: activeTab === "drivers" ? "var(--bg-card)" : "transparent",
-            color: activeTab === "drivers" ? "var(--gold)" : "var(--text-3)",
-            borderBottom: activeTab === "drivers" ? "2px solid var(--gold)" : "2px solid transparent" }}
-        >👷 Data Driver</button>
-        <button
-          onClick={() => setActiveTab("koordinator")}
-          style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: "8px 8px 0 0", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 700,
-            background: activeTab === "koordinator" ? "var(--bg-card)" : "transparent",
-            color: activeTab === "koordinator" ? "var(--gold)" : "var(--text-3)",
-            borderBottom: activeTab === "koordinator" ? "2px solid var(--gold)" : "2px solid transparent" }}
-        >🧑‍💼 Koordinator</button>
-        <button
-          onClick={() => setActiveTab("supplier")}
-          style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: "8px 8px 0 0", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 700,
-            background: activeTab === "supplier" ? "var(--bg-card)" : "transparent",
-            color: activeTab === "supplier" ? "var(--gold)" : "var(--text-3)",
-            borderBottom: activeTab === "supplier" ? "2px solid var(--gold)" : "2px solid transparent" }}
-        >💸 Supplier</button>
-        <button
-          onClick={() => setActiveTab("selisih")}
-          style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: "8px 8px 0 0", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 700,
-            background: activeTab === "selisih" ? "var(--bg-card)" : "transparent",
-            color: activeTab === "selisih" ? "var(--gold)" : "var(--text-3)",
-            borderBottom: activeTab === "selisih" ? "2px solid var(--gold)" : "2px solid transparent" }}
-        >📊 Selisih Harga</button>
-        <button
-          onClick={() => setActiveTab("kompensasi")}
-          style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: "8px 8px 0 0", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 700,
-            background: activeTab === "kompensasi" ? "var(--bg-card)" : "transparent",
-            color: activeTab === "kompensasi" ? "var(--gold)" : "var(--text-3)",
-            borderBottom: activeTab === "kompensasi" ? "2px solid var(--gold)" : "2px solid transparent" }}
-        >🔄 Kompensasi</button>
-        <button
-          onClick={() => setActiveTab("minta-harga")}
-          style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: "8px 8px 0 0", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 700,
-            background: activeTab === "minta-harga" ? "var(--bg-card)" : "transparent",
-            color: activeTab === "minta-harga" ? "var(--gold)" : "var(--text-3)",
-            borderBottom: activeTab === "minta-harga" ? "2px solid var(--gold)" : "2px solid transparent" }}
-        >📩 Minta Harga</button>
-      </div>
+        <div style={{ padding: "22px 28px 40px", maxWidth: 1180, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
 
       {activeTab === "kalkulator" && (
         <div style={{ maxWidth: 900, margin: "0 auto" }}>
@@ -419,32 +364,38 @@ function Dashboard({ pin, onLogout }) {
         <PermintaanHargaPage />
       )}
 
+      {activeTab === "laporan" && (
+        <LaporanPage stats={stats} onExportCsv={exportCsv} />
+      )}
+
+      {activeTab === "pengaturan" && (
+        <PengaturanPage dark={dark} onToggleTheme={() => { toggleTheme(); setDark(d => !d); }} onLogout={onLogout} fixHeicPhotos={fixHeicPhotos} fixingHeic={fixingHeic} />
+      )}
+
+      {activeTab === "route-leg" && (
+        <ComingSoon icon="🧭" title="Route Leg" note="Detail rute & leg per pengiriman bisa dibuka lewat tombol “Detail Pengiriman” di setiap kartu pesanan pada tab Dashboard." />
+      )}
+
+      {activeTab === "kendaraan" && (
+        <ComingSoon icon="🚚" title="Kendaraan" note="Daftar kendaraan terpusat akan segera hadir. Untuk saat ini, data kendaraan bisa dilihat per pesanan di tab Dashboard." />
+      )}
+
+      {activeTab === "dokumen" && (
+        <ComingSoon icon="📄" title="Dokumen" note="Dokumen BASTK & resi bisa dilihat lewat tab Dokumen di dalam “Detail Pengiriman” tiap pesanan." />
+      )}
+
       {activeTab === "pesanan" && <>
 
-      {/* ── Link Form Pesanan ── */}
-      <div style={{ maxWidth: 960, margin: "12px auto 0", padding: "0 16px" }}>
-        <div style={{ background: "#1a2d4a", border: "1px solid #1f6feb", borderRadius: 10, padding: "10px 16px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13, color: "#60a5fa", fontWeight: 700 }}>🔗 Link Form Pesanan:</span>
-          <code style={{ flex: 1, fontSize: 13, color: "#e6edf3", background: "#0d1117", padding: "5px 10px", borderRadius: 6, border: "1px solid #30363d", wordBreak: "break-all" }}>
-            {window.location.origin}/order
-          </code>
-          <button onClick={() => navigator.clipboard.writeText(`${window.location.origin}/order`)}
-            style={{ padding: "6px 14px", borderRadius: 7, border: "1px solid #1f6feb", background: "none", color: "#60a5fa", cursor: "pointer", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>
-            📋 Salin
-          </button>
-        </div>
-      </div>
-
-      {/* ── Stats ── */}
+      {/* ── Metric row ── */}
       {stats && (
-        <section className="adm-stats" data-testid="adm-stats">
-          <StatTile label="Total Pesanan" value={stats.total} />
+        <section style={{ display: "flex", gap: 12, marginBottom: 18, overflowX: "auto", paddingBottom: 2 }} data-testid="adm-stats">
+          <MetricCard label="Total Pesanan" value={stats.total} icon="📋" />
           {STATUS_LIST.map((s) => (
-            <StatTile
+            <MetricCard
               key={s}
               label={STATUS_LABEL[s].txt}
               value={stats.by_status?.[s] || 0}
-              cls={STATUS_LABEL[s].cls}
+              tone={STATUS_TONE[s]}
               onClick={() => setStatusFilter(statusFilter === s ? "" : s)}
               active={statusFilter === s}
               testid={`adm-stat-${s.toLowerCase()}`}
@@ -453,9 +404,16 @@ function Dashboard({ pin, onLogout }) {
         </section>
       )}
 
-      {/* ── Filters ── */}
-      <section className="adm-filters">
-        <div className="adm-search-wrap">
+      {/* ── Link Form Pesanan (compact card) ── */}
+      <LinkCardMini
+        title="Link Form Pesanan"
+        sub="Bagikan link ini ke customer untuk membuat pesanan"
+        link={`${window.location.origin}/order`}
+      />
+
+      {/* ── Filters (satu baris) ── */}
+      <section style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 18 }}>
+        <div className="adm-search-wrap" style={{ flex: "1 1 240px", minWidth: 200 }}>
           <span className="adm-search-ico"><IcoSearch /></span>
           <input
             type="search"
@@ -472,17 +430,25 @@ function Dashboard({ pin, onLogout }) {
           onChange={(e) => setStatusFilter(e.target.value)}
           data-testid="adm-status-filter"
         >
-          <option value="">Semua status</option>
+          <option value="">Semua Status</option>
           {STATUS_LIST.map((s) => <option key={s} value={s}>{STATUS_LABEL[s].txt}</option>)}
         </select>
         <div className="adm-date-range">
-          <label className="adm-date-lbl">Dari</label>
-          <input type="date" className="adm-date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} max={dateTo || undefined} data-testid="adm-date-from" />
-          <label className="adm-date-lbl">Sampai</label>
-          <input type="date" className="adm-date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} min={dateFrom || undefined} data-testid="adm-date-to" />
+          <input type="date" className="adm-date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} max={dateTo || undefined} data-testid="adm-date-from" title="Dari tanggal" />
+          <span style={{ color: "#8b949e", fontSize: 12 }}>~</span>
+          <input type="date" className="adm-date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} min={dateFrom || undefined} data-testid="adm-date-to" title="Sampai tanggal" />
         </div>
-        {(search || statusFilter || dateFrom || dateTo) && (
-          <button type="button" className="adm-btn adm-btn-ghost adm-btn-sm" onClick={() => { setSearch(""); setStatusFilter(""); setDateFrom(""); setDateTo(""); }} data-testid="adm-filter-reset">
+        <select
+          className="adm-status-sel"
+          value={driverFilter}
+          onChange={(e) => setDriverFilter(e.target.value)}
+          data-testid="adm-driver-filter"
+        >
+          <option value="">Semua Driver</option>
+          {driverOptions.map((d) => <option key={d} value={d}>{d}</option>)}
+        </select>
+        {anyFilterActive && (
+          <button type="button" className="adm-btn adm-btn-ghost adm-btn-sm" onClick={resetFilters} data-testid="adm-filter-reset">
             <IcoX /> Reset
           </button>
         )}
@@ -503,7 +469,7 @@ function Dashboard({ pin, onLogout }) {
           </div>
         ))}
         {error && <div className="adm-error" data-testid="adm-list-err">{error}</div>}
-        {!loading && !error && orders.length === 0 && (
+        {!loading && !error && visibleOrders.length === 0 && (
           <div className="adm-empty" data-testid="adm-empty">
             <div className="adm-empty-ico"><IcoInbox /></div>
             <div style={{ fontWeight:700, fontSize:15, marginBottom:6, color:"var(--text-2)" }}>
@@ -512,7 +478,7 @@ function Dashboard({ pin, onLogout }) {
             <div>{statusFilter ? `dengan status "${STATUS_LABEL[statusFilter]?.txt}"` : "yang cocok dengan filter saat ini."}</div>
           </div>
         )}
-        {orders.map((o, idx) => (
+        {visibleOrders.map((o, idx) => (
           <OrderCard
             key={o.order_id}
             order={o}
@@ -565,24 +531,340 @@ function Dashboard({ pin, onLogout }) {
       )}
 
       </>}
+        </div>
+      </div>
     </div>
   );
 }
 
 /* ════════════════════════════════════════
-   STAT TILE
+   DESIGN TOKENS — enterprise dashboard shell
 ════════════════════════════════════════ */
-function StatTile({ label, value, cls = "", onClick, active, testid }) {
+const TONE = {
+  navy:    { bg: "#0f1a2e", fg: "#5b8def", ring: "#1d3a63" },
+  blue:    { bg: "#0d2340", fg: "#60a5fa", ring: "#1f6feb" },
+  green:   { bg: "#0d2a10", fg: "#3fb950", ring: "#238636" },
+  orange:  { bg: "#2d2410", fg: "#EF9F27", ring: "#7a5c14" },
+  red:     { bg: "#2d1414", fg: "#f85149", ring: "#7a2020" },
+  purple:  { bg: "#1f1530", fg: "#a78bfa", ring: "#4c2f7a" },
+};
+const STATUS_TONE = { NEW: "orange", DISPATCHED: "blue", ON_TRIP: "purple", DELIVERED: "green", CANCELLED: "red" };
+const SIDEBAR_ICON = {
+  pesanan: "▦", "route-leg": "🧭", drivers: "👤", supplier: "🌿", koordinator: "🧑‍💼",
+  kendaraan: "🚙", dokumen: "📄", laporan: "📑", kalkulator: "🧮", selisih: "📊",
+  kompensasi: "🔄", "minta-harga": "📩", pengaturan: "⚙️",
+};
+
+/* ════════════════════════════════════════
+   SIDEBAR
+════════════════════════════════════════ */
+const SIDEBAR_PRIMARY = [
+  { key: "pesanan", label: "Dashboard" },
+  { key: "pesanan", label: "Pesanan" },
+  { key: "route-leg", label: "Route Leg" },
+  { key: "drivers", label: "Driver" },
+  { key: "supplier", label: "Supplier" },
+  { key: "koordinator", label: "Koordinator" },
+  { key: "kendaraan", label: "Kendaraan" },
+  { key: "dokumen", label: "Dokumen" },
+  { key: "laporan", label: "Laporan" },
+];
+const SIDEBAR_TOOLS = [
+  { key: "kalkulator", label: "Kalkulator HPP" },
+  { key: "selisih", label: "Selisih Harga" },
+  { key: "kompensasi", label: "Kompensasi" },
+  { key: "minta-harga", label: "Minta Harga" },
+];
+
+function Sidebar({ activeTab, setActiveTab }) {
+  const NavItem = ({ item, i }) => (
+    <button
+      key={`${item.key}-${i}`}
+      onClick={() => setActiveTab(item.key)}
+      style={{
+        display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "9px 14px", marginBottom: 2,
+        border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600, textAlign: "left",
+        background: activeTab === item.key ? "rgba(91,141,239,0.14)" : "transparent",
+        color: activeTab === item.key ? "#dbe6ff" : "#8b98ab",
+        transition: "background .12s, color .12s",
+      }}
+      onMouseEnter={(e) => { if (activeTab !== item.key) e.currentTarget.style.background = "rgba(255,255,255,0.04)"; }}
+      onMouseLeave={(e) => { if (activeTab !== item.key) e.currentTarget.style.background = "transparent"; }}
+    >
+      <span style={{ fontSize: 14, width: 18, textAlign: "center", flexShrink: 0, opacity: activeTab === item.key ? 1 : 0.75 }}>{SIDEBAR_ICON[item.key] || "•"}</span>
+      {item.label}
+    </button>
+  );
+
+  return (
+    <aside style={{ width: 232, flexShrink: 0, background: "#0b0f17", borderRight: "1px solid #1a2130", display: "flex", flexDirection: "column", padding: "18px 12px", position: "sticky", top: 0, height: "100vh", overflowY: "auto" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "4px 8px 20px" }}>
+        <Logo size={30} />
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 800, color: "#e6edf3", lineHeight: 1.15 }}>PT Alyssa</div>
+          <div style={{ fontSize: 10, color: "#6b7688", lineHeight: 1.15 }}>Auto Logistik</div>
+        </div>
+      </div>
+
+      <nav style={{ flex: 1 }}>
+        {SIDEBAR_PRIMARY.map((item, i) => <NavItem item={item} i={i} key={i} />)}
+
+        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.6, color: "#495267", textTransform: "uppercase", margin: "18px 10px 8px" }}>Tools</div>
+        {SIDEBAR_TOOLS.map((item, i) => <NavItem item={item} i={i} key={i} />)}
+      </nav>
+
+      <div>
+        <NavItem item={{ key: "pengaturan", label: "Pengaturan" }} i={0} />
+        <div style={{ marginTop: 12, padding: "12px 14px", borderRadius: 10, background: "linear-gradient(135deg, #0f1a2e, #131c2c)", border: "1px solid #1a2334" }}>
+          <div style={{ fontSize: 11, fontWeight: 800, color: "#dbe6ff" }}>PT Alyssa Auto Logistik</div>
+          <div style={{ fontSize: 10, color: "#6b7688", marginTop: 2 }}>Internal Control Panel</div>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+/* ════════════════════════════════════════
+   TOP HEADER
+════════════════════════════════════════ */
+function TopHeader({ title, sub, search, onSearch, onExport, onRefresh, profileMenuOpen, setProfileMenuOpen, onLogout }) {
+  const iconBtn = { width: 34, height: 34, borderRadius: 8, border: "1px solid #1f2937", background: "#111826", color: "#9aa4b6", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: 14, flexShrink: 0 };
+  return (
+    <header style={{ padding: "18px 28px", borderBottom: "1px solid #171e2c", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap", background: "#0a0e14" }}>
+      <div>
+        <div style={{ fontSize: 19, fontWeight: 800, color: "#f2f5fa" }}>{title}</div>
+        <div style={{ fontSize: 12, color: "#6b7688", marginTop: 2 }}>{sub}</div>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        {onSearch && (
+          <div style={{ position: "relative" }}>
+            <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#5b6577", fontSize: 12 }}>⌕</span>
+            <input
+              value={search}
+              onChange={(e) => onSearch(e.target.value)}
+              placeholder="Cari pesanan..."
+              style={{ width: 200, padding: "8px 12px 8px 28px", borderRadius: 8, border: "1px solid #1f2937", background: "#111826", color: "#e6edf3", fontSize: 12.5, outline: "none" }}
+            />
+          </div>
+        )}
+        <a href="?guide=1" target="_blank" rel="noreferrer" style={iconBtn} title="Tutorial" data-testid="adm-tutorial-link">📖</a>
+        <button style={iconBtn} title="Export CSV" onClick={onExport} data-testid="adm-export-csv">⬇</button>
+        <button style={iconBtn} title="Refresh" onClick={onRefresh} data-testid="adm-refresh">↻</button>
+        <div style={{ position: "relative" }}>
+          <button
+            onClick={() => setProfileMenuOpen((v) => !v)}
+            style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 10px 5px 5px", borderRadius: 20, border: "1px solid #1f2937", background: "#111826", cursor: "pointer" }}
+          >
+            <div style={{ width: 26, height: 26, borderRadius: "50%", background: "linear-gradient(135deg,#5b8def,#8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color: "#fff" }}>A</div>
+            <div style={{ textAlign: "left" }}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: "#e6edf3", lineHeight: 1.1 }}>Admin</div>
+              <div style={{ fontSize: 9.5, color: "#6b7688", lineHeight: 1.1 }}>Super Admin</div>
+            </div>
+          </button>
+          {profileMenuOpen && (
+            <div style={{ position: "absolute", top: "110%", right: 0, background: "#111826", border: "1px solid #1f2937", borderRadius: 10, minWidth: 150, overflow: "hidden", zIndex: 50, boxShadow: "0 8px 24px rgba(0,0,0,.4)" }}>
+              <button
+                onClick={() => { setProfileMenuOpen(false); onLogout(); }}
+                style={{ width: "100%", padding: "10px 14px", border: "none", background: "none", color: "#f85149", fontSize: 12.5, fontWeight: 700, textAlign: "left", cursor: "pointer" }}
+                data-testid="adm-logout"
+              >
+                🚪 Keluar
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </header>
+  );
+}
+
+/* ════════════════════════════════════════
+   METRIC CARD
+════════════════════════════════════════ */
+function MetricCard({ label, value, icon, tone, onClick, active, testid }) {
+  const t = TONE[tone] || { bg: "#111826", fg: "#e6edf3", ring: "#1f2937" };
   return (
     <div
-      className={`adm-stat ${cls} ${onClick ? "adm-stat-clickable" : ""} ${active ? "adm-stat-active" : ""}`}
       onClick={onClick}
       role={onClick ? "button" : undefined}
       tabIndex={onClick ? 0 : undefined}
       data-testid={testid}
+      style={{
+        flex: "1 1 140px", minWidth: 130, display: "flex", alignItems: "center", gap: 10,
+        padding: "12px 14px", borderRadius: 12, background: "#0e1420",
+        border: `1px solid ${active ? t.ring : "#1a2130"}`, cursor: onClick ? "pointer" : "default",
+        boxShadow: active ? `0 0 0 1px ${t.ring}` : "none", transition: "border-color .12s",
+      }}
     >
-      <div className="adm-stat-val">{value}</div>
-      <div className="adm-stat-lbl">{label}</div>
+      <div style={{ width: 34, height: 34, borderRadius: 9, background: t.bg, color: t.fg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, flexShrink: 0 }}>
+        {icon || "●"}
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 19, fontWeight: 800, color: "#f2f5fa", lineHeight: 1.1 }}>{value}</div>
+        <div style={{ fontSize: 10.5, color: "#6b7688", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════
+   LINK CARD (compact)
+════════════════════════════════════════ */
+function LinkCardMini({ title, sub, link }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px", borderRadius: 12, background: "#0e1420", border: "1px solid #1a2130", marginBottom: 18 }}>
+      <div style={{ width: 34, height: 34, borderRadius: 9, background: "#0d2340", color: "#60a5fa", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, flexShrink: 0 }}>🔗</div>
+      <div style={{ minWidth: 160 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 700, color: "#e6edf3" }}>{title}</div>
+        <div style={{ fontSize: 10.5, color: "#6b7688", marginTop: 1 }}>{sub}</div>
+      </div>
+      <code style={{ flex: 1, fontSize: 12, color: "#9aa4b6", background: "#0a0e14", padding: "7px 12px", borderRadius: 7, border: "1px solid #1a2130", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{link}</code>
+      <button
+        onClick={() => { navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 1800); }}
+        style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: copied ? "#238636" : "#1f6feb", color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap", flexShrink: 0 }}
+      >
+        {copied ? "✓ Copied" : "Copy Link"}
+      </button>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════
+   PROGRESS TIMELINE — Baru → Driver → Berangkat → Kapal → Sampai → Dokumen
+════════════════════════════════════════ */
+const PROGRESS_STEPS = [
+  { key: "baru", label: "Baru" },
+  { key: "driver", label: "Driver" },
+  { key: "berangkat", label: "Berangkat" },
+  { key: "kapal", label: "Kapal" },
+  { key: "sampai", label: "Sampai" },
+  { key: "dokumen", label: "Dokumen" },
+];
+
+function computeProgress(order) {
+  const legs = Array.isArray(order.legs) ? order.legs : [];
+  const hasKapalLeg = legs.some((l) => (l.tipe || "").startsWith("Kapal"));
+  const kapalDone = legs.some((l) => (l.tipe || "").startsWith("Kapal") && l.status === "Selesai");
+  const berangkatDone = order.status === "ON_TRIP" || order.status === "DELIVERED" || (legs[0] && legs[0].status && legs[0].status !== "Menunggu");
+  const done = {
+    baru: true,
+    driver: !!(order.driver_id || order.nama_driver),
+    berangkat: !!berangkatDone,
+    kapal: hasKapalLeg ? kapalDone : !!berangkatDone,
+    sampai: order.status === "DELIVERED",
+    dokumen: order.status === "DELIVERED",
+  };
+  let idx = -1;
+  PROGRESS_STEPS.forEach((s, i) => { if (done[s.key]) idx = i; });
+  return { done, currentIdx: idx };
+}
+
+function ProgressTimeline({ order }) {
+  const { done, currentIdx } = computeProgress(order);
+  const cancelled = order.status === "CANCELLED";
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 260 }}>
+      <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.6, color: "#5b6577", textTransform: "uppercase" }}>Progress</div>
+      <div style={{ display: "flex", alignItems: "center" }}>
+        {PROGRESS_STEPS.map((s, i) => {
+          const isDone = done[s.key] && !cancelled;
+          const isCurrent = i === currentIdx && !cancelled;
+          const color = cancelled ? "#3a3f4a" : isDone ? (i === PROGRESS_STEPS.length - 1 && isDone ? "#3fb950" : "#5b8def") : "#2a3140";
+          return (
+            <div key={s.key} style={{ display: "flex", alignItems: "center", flex: i < PROGRESS_STEPS.length - 1 ? 1 : "0 0 auto" }}>
+              <div title={s.label} style={{
+                width: isCurrent ? 12 : 9, height: isCurrent ? 12 : 9, borderRadius: "50%",
+                background: isDone ? color : "transparent", border: `2px solid ${color}`,
+                boxShadow: isCurrent ? `0 0 0 3px ${color}33` : "none", flexShrink: 0,
+              }} />
+              {i < PROGRESS_STEPS.length - 1 && (
+                <div style={{ flex: 1, height: 2, background: done[PROGRESS_STEPS[i + 1].key] && !cancelled ? color : "#232a38", minWidth: 14 }} />
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between" }}>
+        {PROGRESS_STEPS.map((s) => (
+          <span key={s.key} style={{ fontSize: 9, color: "#5b6577", flex: 1, textAlign: "center" }}>{s.label}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════
+   LAPORAN PAGE
+════════════════════════════════════════ */
+function LaporanPage({ stats, onExportCsv }) {
+  if (!stats) return <div style={{ color: "#6b7688", fontSize: 13, padding: 40, textAlign: "center" }}>Memuat data...</div>;
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20 }}>
+        <MetricCard label="Total Pesanan" value={stats.total} icon="📋" />
+        {STATUS_LIST.map((s) => (
+          <MetricCard key={s} label={STATUS_LABEL[s].txt} value={stats.by_status?.[s] || 0} tone={STATUS_TONE[s]} />
+        ))}
+      </div>
+      <div style={{ padding: 20, borderRadius: 12, background: "#0e1420", border: "1px solid #1a2130", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: "#e6edf3" }}>Ekspor Data Pesanan</div>
+          <div style={{ fontSize: 11.5, color: "#6b7688", marginTop: 3 }}>Unduh seluruh data pesanan (sesuai filter aktif) dalam format CSV.</div>
+        </div>
+        <button onClick={onExportCsv} style={{ padding: "10px 18px", borderRadius: 9, border: "none", background: "#EF9F27", color: "#1a1208", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>⬇ Export CSV</button>
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════
+   PENGATURAN PAGE
+════════════════════════════════════════ */
+function PengaturanPage({ dark, onToggleTheme, onLogout, fixHeicPhotos, fixingHeic }) {
+  const row = { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 18px", borderRadius: 12, background: "#0e1420", border: "1px solid #1a2130", marginBottom: 12, gap: 12, flexWrap: "wrap" };
+  return (
+    <div style={{ maxWidth: 640 }}>
+      <div style={row}>
+        <div>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: "#e6edf3" }}>Tampilan</div>
+          <div style={{ fontSize: 11.5, color: "#6b7688", marginTop: 3 }}>Ganti antara mode terang dan gelap.</div>
+        </div>
+        <button onClick={onToggleTheme} style={{ padding: "9px 16px", borderRadius: 9, border: "1px solid #1f2937", background: "#111826", color: "#e6edf3", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>
+          {dark ? "☀️ Mode Terang" : "🌙 Mode Gelap"}
+        </button>
+      </div>
+      <div style={row}>
+        <div>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: "#e6edf3" }}>Perbaiki Foto HEIC</div>
+          <div style={{ fontSize: 11.5, color: "#6b7688", marginTop: 3 }}>Konversi foto lama format HEIC (broken image) jadi JPEG.</div>
+        </div>
+        <button onClick={fixHeicPhotos} disabled={fixingHeic} style={{ padding: "9px 16px", borderRadius: 9, border: "1px solid #1f2937", background: "#111826", color: "#e6edf3", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>
+          {fixingHeic ? "⏳ Memperbaiki..." : "🩹 Perbaiki Sekarang"}
+        </button>
+      </div>
+      <div style={row}>
+        <div>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: "#e6edf3" }}>Akun</div>
+          <div style={{ fontSize: 11.5, color: "#6b7688", marginTop: 3 }}>Keluar dari sesi admin ini.</div>
+        </div>
+        <button onClick={onLogout} style={{ padding: "9px 16px", borderRadius: 9, border: "1px solid #7a2020", background: "none", color: "#f85149", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>
+          🚪 Keluar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════
+   COMING SOON PLACEHOLDER
+════════════════════════════════════════ */
+function ComingSoon({ icon, title, note }) {
+  return (
+    <div style={{ textAlign: "center", padding: "70px 20px", color: "#6b7688" }}>
+      <div style={{ fontSize: 42, marginBottom: 14 }}>{icon}</div>
+      <div style={{ fontSize: 16, fontWeight: 800, color: "#e6edf3", marginBottom: 8 }}>{title}</div>
+      <div style={{ fontSize: 12.5, maxWidth: 420, margin: "0 auto", lineHeight: 1.6 }}>{note}</div>
     </div>
   );
 }
@@ -599,6 +881,7 @@ const ALBUM_STAGES = [
 
 function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLegs, onOpenBonus, headers, kordList = [] }) {
   const [uploadingStage, setUploadingStage] = useState(null); // stage key lagi upload
+  const [expanded, setExpanded] = useState(false);
   const albumFileRefs = useRef({});
 
   const uploadFotoAlbum = async (stage, files) => {
@@ -870,20 +1153,60 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
 
   return (
     <article
-      className="adm-card"
       data-status={order.status}
       data-testid={`adm-order-${order.order_id}`}
-      style={{ animationDelay: `${idx * 40}ms` }}
+      style={{ animationDelay: `${idx * 40}ms`, background: "#0e1420", border: "1px solid #1a2130", borderRadius: 14, marginBottom: 12, overflow: "hidden", borderLeft: `3px solid ${TONE[STATUS_TONE[order.status]]?.fg || "#2a3140"}` }}
     >
-      {/* Head */}
-      <header className="adm-card-head">
-        <div className="adm-card-id-row">
-          <span className="adm-card-id adm-mono">{order.order_id}</span>
-          <span className={`adm-chip ${lbl.cls}`} data-testid={`adm-status-${order.order_id}`}>{lbl.txt}</span>
+      {/* Compact summary row — always visible */}
+      <div
+        onClick={() => setExpanded((v) => !v)}
+        style={{ display: "flex", alignItems: "center", gap: 20, padding: "14px 18px", cursor: "pointer", flexWrap: "wrap" }}
+        data-testid={`adm-order-summary-${order.order_id}`}
+      >
+        <div style={{ minWidth: 150 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span className="adm-mono" style={{ fontSize: 12.5, fontWeight: 800, color: "#e6edf3" }}>{order.order_id}</span>
+            <span className={`adm-chip ${lbl.cls}`} data-testid={`adm-status-${order.order_id}`}>{lbl.txt}</span>
+          </div>
+          <div style={{ fontSize: 11, color: "#6b7688", marginTop: 4 }}>{order.customer_nama || "—"}</div>
+          <div style={{ fontSize: 10.5, color: "#495267", marginTop: 1 }}>{order.customer_hp || "—"}</div>
         </div>
-        <div className="adm-card-date">{fmtDate(order.created_at)}</div>
-      </header>
 
+        <div style={{ minWidth: 130 }}>
+          <div style={{ fontSize: 11.5, color: "#c9d1d9", fontWeight: 600 }}>{order.vehicle_type || "—"}</div>
+          <div style={{ fontSize: 10.5, color: "#6b7688", marginTop: 3 }}>{order.nopol || "belum di-assign"}</div>
+          {order.no_rangka && <div style={{ fontSize: 9.5, color: "#495267", marginTop: 1 }}>{order.no_rangka}</div>}
+        </div>
+
+        <div style={{ minWidth: 130 }}>
+          <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.5, color: "#5b6577", textTransform: "uppercase" }}>Rute</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#e6edf3", marginTop: 2 }}>{order.asal_kota || "—"}</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#e6edf3" }}>↓ {order.tujuan_kota || "—"}</div>
+        </div>
+
+        <div style={{ minWidth: 110 }}>
+          <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.5, color: "#5b6577", textTransform: "uppercase" }}>Driver</div>
+          <div style={{ fontSize: 11.5, color: order.nama_driver ? "#c9d1d9" : "#495267", marginTop: 3, fontStyle: order.nama_driver ? "normal" : "italic" }}>
+            {order.nama_driver || "Belum di-assign"}
+          </div>
+        </div>
+
+        <ProgressTimeline order={order} />
+
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
+          <div style={{ fontSize: 10.5, color: "#495267", textAlign: "right" }}>{fmtDate(order.created_at)}</div>
+          <button
+            onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}
+            style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid #1f2937", background: "#111826", color: "#9aa4b6", fontSize: 11.5, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}
+            data-testid={`adm-order-toggle-${order.order_id}`}
+          >
+            {expanded ? "Tutup ↑" : "Buka →"}
+          </button>
+        </div>
+      </div>
+
+      {expanded && (
+      <div style={{ borderTop: "1px solid #1a2130" }}>
       {/* Body — 2-col grid */}
       <div className="adm-card-body">
         <div className="adm-field-row">
@@ -1170,6 +1493,8 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
           <IcoTrash /> Hapus
         </button>
       </footer>
+      </div>
+      )}
     </article>
   );
 }
