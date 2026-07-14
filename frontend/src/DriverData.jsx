@@ -1,6 +1,8 @@
 /* eslint-disable */
 import { useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
+import jsPDF from "jspdf";
+import html2canvas from "html2canvas";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -140,81 +142,105 @@ export default function DriverData({ embedded = false }) {
     } catch { flash("Gagal hapus"); }
   };
 
-  const printSurat = (drv) => {
+  const printSurat = async (drv) => {
     const tgl = new Date().toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
     const navy = "#1e3a8a", gray = "#6b7280", border = "#e5e7eb";
     const statusOk = (drv.status || "").toLowerCase() === "aktif";
+    const cardBase = `background:#fff;border:1px solid ${border};border-radius:14px;padding:20px 22px;`;
     const row = (k, v) => `
-      <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid ${border}">
-        <span style="color:${gray};font-size:11px">${k}</span>
-        <span style="font-weight:700;font-size:12px;color:#1f2937">${v}</span>
+      <div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid ${border}">
+        <span style="color:${gray};font-size:12px">${k}</span>
+        <span style="font-weight:700;font-size:13px;color:#1f2937">${v}</span>
       </div>`;
     const fotoBox = (src, label) => src ? `
       <div style="flex:1;text-align:center">
-        <div style="width:100%;height:110px;border:1px solid ${border};border-radius:10px;background:#f9fafb;display:flex;align-items:center;justify-content:center;overflow:hidden">
-          <img src="${src}" style="max-width:100%;max-height:100%;object-fit:contain;display:block;image-orientation:from-image" />
+        <div style="width:100%;height:170px;border:1px solid ${border};border-radius:10px;background:#f9fafb;display:flex;align-items:center;justify-content:center;overflow:hidden">
+          <img src="${src}" crossorigin="anonymous" style="max-width:100%;max-height:100%;object-fit:contain;display:block" />
         </div>
-        <div style="font-size:10px;color:${gray};margin-top:6px;font-weight:600">${label}</div>
+        <div style="font-size:11px;color:${gray};margin-top:6px;font-weight:600">${label}</div>
       </div>` : "";
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Surat Pengantar Driver — ${drv.nama}</title>
-    <style>
-      * { box-sizing: border-box; margin: 0; padding: 0; }
-      body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; color: #1f2937; background: #f3f4f6; padding: 24px; }
-      .card { max-width: 600px; margin: 0 auto; background: #fff; border-radius: 14px; padding: 32px; }
-      .sec-head { display: flex; align-items: center; gap: 10px; margin: 22px 0 10px; }
-      .sec-num { width: 24px; height: 24px; border-radius: 6px; background: ${navy}; color: #fff; font-weight: 800; font-size: 12px; display: flex; align-items: center; justify-content: center; }
-      .sec-title { font-weight: 800; font-size: 13px; color: ${navy}; letter-spacing: 0.3px; }
-      @media print { @page { size: A4 portrait; margin: 10mm; } body { background: #fff; padding: 0; } .card { max-width: 100%; } }
-    </style></head><body>
-    <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid ${navy};padding-bottom:16px;margin-bottom:6px">
+    const secHead = (num, title) => `
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+        <div style="width:24px;height:24px;border-radius:6px;background:${navy};color:#fff;font-weight:800;font-size:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0">${num}</div>
+        <div style="font-weight:800;font-size:13px;color:${navy};letter-spacing:0.3px">${title}</div>
+      </div>`;
+    const hasFoto = !!(drv.foto_selfie || drv.foto_ktp || drv.foto_sim);
+    const nDok = 2, nPernyataan = hasFoto ? 3 : 2, nPengesahan = hasFoto ? 4 : 3;
+
+    const container = document.createElement("div");
+    container.style.cssText = "position:fixed;left:-9999px;top:0;width:700px;background:#fff;font-family:'Segoe UI',Arial,sans-serif;color:#1f2937;padding:6px;";
+    container.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid ${navy};padding-bottom:14px;margin-bottom:18px">
         <div>
-          <div style="font-size:20px;font-weight:900;color:${navy};letter-spacing:0.3px">SURAT PENGANTAR DRIVER</div>
+          <div style="font-size:21px;font-weight:900;color:${navy};letter-spacing:0.3px">SURAT PENGANTAR DRIVER</div>
           <div style="font-size:12px;color:${gray};margin-top:4px">PT Alyssa Auto Logistik — Solusi Transportasi &amp; Logistik Kendaraan</div>
         </div>
-        <div style="text-align:right;font-size:11px">
-          <div style="color:${gray}">📅 Diterbitkan</div>
-          <div style="font-weight:700">${tgl}</div>
+        <div style="text-align:right;font-size:11px;flex-shrink:0">
+          <div style="color:${gray}">Diterbitkan</div>
+          <div style="font-weight:700;margin-top:2px">${tgl}</div>
         </div>
       </div>
 
-      <div class="sec-head"><div class="sec-num">1</div><div class="sec-title">DATA DRIVER</div></div>
-      <div style="border:1px solid ${border};border-radius:10px;padding:4px 14px">
+      <div style="${cardBase}margin-bottom:14px">
+        ${secHead(1, "DATA DRIVER")}
         ${row("Nama Driver", drv.nama || "—")}
         ${row("No. KTP", drv.no_ktp || "—")}
         ${row("No. SIM", `${drv.no_sim || "—"}${drv.tipe_sim ? ` (SIM ${drv.tipe_sim})` : ""}`)}
-        ${row("ID Driver", drv.driver_id || "—")}
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0">
-          <span style="color:${gray};font-size:11px">Status</span>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0 0">
+          <span style="color:${gray};font-size:12px">Status</span>
           <span style="font-weight:800;font-size:11px;padding:3px 10px;border-radius:12px;background:${statusOk ? "#d1fae5" : "#fef2f2"};color:${statusOk ? "#065f46" : "#991b1b"}">${(drv.status || "—").toUpperCase()}</span>
         </div>
       </div>
 
-      ${(drv.foto_selfie || drv.foto_ktp || drv.foto_sim) ? `
-      <div class="sec-head"><div class="sec-num">2</div><div class="sec-title">DOKUMEN &amp; FOTO</div></div>
-      <div style="display:flex;gap:12px">
-        ${fotoBox(drv.foto_selfie, "Foto Driver")}
-        ${fotoBox(drv.foto_ktp, "Foto KTP")}
-        ${fotoBox(drv.foto_sim, "Foto SIM")}
+      ${hasFoto ? `
+      <div style="${cardBase}margin-bottom:14px">
+        ${secHead(nDok, "DOKUMEN &amp; FOTO")}
+        <div style="display:flex;gap:14px">
+          ${fotoBox(drv.foto_selfie, "Foto Driver")}
+          ${fotoBox(drv.foto_ktp, "Foto KTP")}
+          ${fotoBox(drv.foto_sim, "Foto SIM")}
+        </div>
       </div>` : ""}
 
-      <div style="margin-top:20px;background:#eff6ff;border-radius:8px;padding:12px 14px;font-size:11px;color:#374151;display:flex;gap:8px">
-        <span>📋</span>
-        <span>Surat ini menyatakan bahwa driver tersebut di atas adalah tenaga pengiriman resmi dari PT Alyssa Auto Logistik dan berwenang untuk melakukan pengiriman kendaraan atas nama perusahaan.</span>
+      <div style="${cardBase}background:#eff6ff;margin-bottom:14px">
+        ${secHead(nPernyataan, "PERNYATAAN")}
+        <div style="font-size:12px;color:#374151;line-height:1.6">Surat ini menyatakan bahwa driver tersebut di atas adalah tenaga pengiriman resmi dari PT Alyssa Auto Logistik dan berwenang untuk melakukan pengiriman kendaraan atas nama perusahaan.</div>
       </div>
 
-      <div style="margin-top:28px;display:flex;justify-content:flex-end;align-items:center;gap:16px">
-        <div style="text-align:right;font-size:11px;color:${gray};line-height:1.7">
-          Diterbitkan oleh<br><strong style="color:${navy};font-size:12px">PT Alyssa Auto Logistik</strong><br>${tgl}
-        </div>
-        <div style="border:3px solid ${navy};border-radius:50%;width:80px;height:80px;display:flex;align-items:center;justify-content:center;opacity:0.85;flex-shrink:0">
-          <img src="${window.location.origin}/logo.png" alt="Stempel" style="width:60px;height:60px;object-fit:contain" />
+      <div style="${cardBase}">
+        ${secHead(nPengesahan, "PENGESAHAN")}
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div style="font-size:12px;color:${gray};line-height:1.7">
+            Diterbitkan oleh<br/><strong style="color:${navy};font-size:13px">PT Alyssa Auto Logistik</strong><br/>${tgl}
+          </div>
+          <div style="border:2px solid ${navy};border-radius:50%;width:74px;height:74px;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:#fff">
+            <img src="${window.location.origin}/logo.png" crossorigin="anonymous" style="width:52px;height:52px;object-fit:contain" />
+          </div>
         </div>
       </div>
-    </div>
-    <script>window.onload=()=>window.print()<\/script>
-    </body></html>`;
-    const w = window.open("", "_blank"); w.document.write(html); w.document.close();
+    `;
+    document.body.appendChild(container);
+
+    try {
+      const imgs = Array.from(container.querySelectorAll("img"));
+      await Promise.all(imgs.map((img) => (img.complete ? Promise.resolve() : new Promise((res) => { img.onload = img.onerror = res; }))));
+      await new Promise((r) => setTimeout(r, 60));
+
+      const canvas = await html2canvas(container, { backgroundColor: "#ffffff", scale: 2, useCORS: true, logging: false });
+      const imgData = canvas.toDataURL("image/jpeg", 0.95);
+
+      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const pageW = pdf.internal.pageSize.getWidth();
+      const pageH = pdf.internal.pageSize.getHeight();
+      const margin = 12;
+      const usableW = pageW - margin * 2;
+      const imgH = (canvas.height / canvas.width) * usableW;
+      const finalH = Math.min(imgH, pageH - margin * 2);
+      pdf.addImage(imgData, "JPEG", margin, margin, usableW, finalH, undefined, "FAST");
+      pdf.save(`Surat-Pengantar-Driver-${(drv.nama || "driver").trim().replace(/\s+/g, "_")}.pdf`);
+    } finally {
+      document.body.removeChild(container);
+    }
   };
 
   return (
