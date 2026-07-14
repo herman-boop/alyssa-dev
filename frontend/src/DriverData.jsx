@@ -17,13 +17,13 @@ const fmtDate = (s) => {
   try { return new Date(s).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }); } catch { return s; }
 };
 
-/* ── Kesiapan operasional -- dihitung murni dari data yang beneran ada
-   (kelengkapan profil/foto + rekam jejak pengiriman), BUKAN sistem
-   komplain/pelanggaran (datanya memang belum ada di backend). ── */
+/* ── Kesiapan operasional -- dihitung dari data yang beneran ada:
+   kelengkapan profil, kelengkapan foto KTP/SIM, rekam jejak pengiriman,
+   dan catatan warning/komplain yang dicatat manual oleh admin. ── */
 function computeDriverStats(drv, orders) {
   const profileFields = [drv.no_hp, drv.no_ktp, drv.no_sim, drv.tipe_sim, drv.alamat];
   const profileFilled = profileFields.filter((v) => (v || "").toString().trim()).length;
-  const fotoFilled = ["selfie", "ktp", "sim"].filter((s) => drv[`foto_${s}`]).length;
+  const fotoFilled = ["ktp", "sim"].filter((s) => drv[`foto_${s}`]).length;
 
   const myOrders = orders.filter((o) =>
     (o.driver_id && drv.driver_id && o.driver_id === drv.driver_id) ||
@@ -32,19 +32,25 @@ function computeDriverStats(drv, orders) {
   const selesai = myOrders.filter((o) => o.status === "DELIVERED").length;
   const totalDitugaskan = myOrders.length;
 
+  const catatanLog = Array.isArray(drv.catatan_log) ? drv.catatan_log : [];
+  const warningCount = catatanLog.filter((c) => c.jenis === "warning").length;
+  const komplainCount = catatanLog.filter((c) => c.jenis === "komplain").length;
+  const verified = drv.status !== "pending";
+
   const profilePct = (profileFilled / profileFields.length) * 100;
-  const fotoPct = (fotoFilled / 3) * 100;
+  const fotoPct = (fotoFilled / 2) * 100;
   const deliveryPct = totalDitugaskan > 0 ? (selesai / totalDitugaskan) * 100 : null;
 
   const parts = [profilePct, fotoPct];
   if (deliveryPct !== null) parts.push(deliveryPct);
-  const score = Math.round(parts.reduce((a, b) => a + b, 0) / parts.length);
+  const baseScore = parts.reduce((a, b) => a + b, 0) / parts.length;
+  const score = Math.round(Math.max(0, baseScore - warningCount * 8 - komplainCount * 12));
 
   let tier = "siap", tierLabel = "Siap Ditugaskan";
   if (score < 50) { tier = "belum"; tierLabel = "Data Belum Lengkap"; }
   else if (score < 85) { tier = "perlu"; tierLabel = "Perlu Dilengkapi"; }
 
-  return { profileFilled, profileTotal: profileFields.length, fotoFilled, selesai, totalDitugaskan, score, tier, tierLabel };
+  return { profileFilled, profileTotal: profileFields.length, fotoFilled, selesai, totalDitugaskan, warningCount, komplainCount, verified, score, tier, tierLabel };
 }
 
 const TIER_META = {
@@ -232,7 +238,7 @@ export default function DriverData({ embedded = false }) {
         <div style="width:24px;height:24px;border-radius:6px;background:${navy};color:#fff;font-weight:800;font-size:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0">${num}</div>
         <div style="font-weight:800;font-size:13px;color:${navy};letter-spacing:0.3px">${title}</div>
       </div>`;
-    const hasFoto = !!(drv.foto_selfie || drv.foto_ktp || drv.foto_sim);
+    const hasFoto = !!(drv.foto_ktp || drv.foto_sim);
     const nDok = 2, nPernyataan = hasFoto ? 3 : 2, nPengesahan = hasFoto ? 4 : 3;
 
     const container = document.createElement("div");
@@ -264,7 +270,6 @@ export default function DriverData({ embedded = false }) {
       <div style="${cardBase}margin-bottom:14px">
         ${secHead(nDok, "DOKUMEN &amp; FOTO")}
         <div style="display:flex;gap:14px">
-          ${fotoBox(drv.foto_selfie, "Foto Driver")}
           ${fotoBox(drv.foto_ktp, "Foto KTP")}
           ${fotoBox(drv.foto_sim, "Foto SIM")}
         </div>
@@ -416,13 +421,26 @@ export default function DriverData({ embedded = false }) {
 }
 
 /* ── Driver Card ── */
+function initials(nama) {
+  const parts = (nama || "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+const AVATAR_COLORS = ["#1f6feb", "#8957e5", "#2ea043", "#d29922", "#db6d28", "#bf3989"];
+function avatarColor(seed) {
+  const s = (seed || "").split("").reduce((a, c) => a + c.charCodeAt(0), 0);
+  return AVATAR_COLORS[s % AVATAR_COLORS.length];
+}
+
 function DriverCard({ drv, stats, onEdit, onDelete, onDetail, onPrint }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const t = TIER_META[stats.tier] || TIER_META.perlu;
   const statItems = [
     { label: "Pengiriman Selesai", val: stats.selesai },
     { label: "Total Ditugaskan", val: stats.totalDitugaskan },
-    { label: "Foto Lengkap", val: `${stats.fotoFilled}/3` },
+    { label: "Foto KTP/SIM", val: `${stats.fotoFilled}/2` },
     { label: "Data Profil", val: `${stats.profileFilled}/${stats.profileTotal}` },
   ];
 
@@ -431,16 +449,19 @@ function DriverCard({ drv, stats, onEdit, onDelete, onDetail, onPrint }) {
 
       {/* Identitas */}
       <div style={{ display: "flex", gap: 12, alignItems: "center", minWidth: 220, flex: "1 1 220px" }}>
-        <div style={{ width: 56, height: 56, borderRadius: "50%", overflow: "hidden", border: "2px solid #30363d", flexShrink: 0, background: "#21262d", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, position: "relative" }}>
-          {drv.foto_selfie ? <img src={drv.foto_selfie} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : "👤"}
-          <span style={{ position: "absolute", bottom: 1, right: 1, width: 12, height: 12, borderRadius: "50%", background: drv.status === "aktif" ? "#3fb950" : "#6b7688", border: "2px solid #161b22" }} />
+        <div style={{ width: 52, height: 52, borderRadius: 12, flexShrink: 0, background: avatarColor(drv.driver_id || drv.nama), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 800, color: "#fff", position: "relative" }}>
+          {initials(drv.nama)}
+          <span title={drv.status === "aktif" ? "Aktif" : "Nonaktif"} style={{ position: "absolute", bottom: -2, right: -2, width: 13, height: 13, borderRadius: "50%", background: drv.status === "aktif" ? "#3fb950" : "#6b7688", border: "2px solid #161b22" }} />
         </div>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontWeight: 800, fontSize: 14.5, color: "#e6edf3", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{drv.nama}</div>
           <div style={{ fontSize: 10.5, color: "#8b949e", marginTop: 2 }}>{drv.driver_id}</div>
           <div style={{ marginTop: 5, display: "flex", gap: 6, flexWrap: "wrap" }}>
-            <span style={S.pill(drv.status)}>{drv.status}</span>
+            <span style={S.pill(drv.status === "aktif" ? "aktif" : "nonaktif")}>{drv.status}</span>
             {drv.tipe_sim && <span style={{ fontSize: 10, color: "#EF9F27", fontWeight: 700, border: "1px solid #7a5c14", background: "#2b1d0e", borderRadius: 8, padding: "2px 7px" }}>SIM {drv.tipe_sim}</span>}
+            <span style={{ fontSize: 10, fontWeight: 700, borderRadius: 8, padding: "2px 7px", border: `1px solid ${stats.verified ? "#238636" : "#7a5c14"}`, background: stats.verified ? "#0d2a10" : "#2d2410", color: stats.verified ? "#3fb950" : "#EF9F27" }}>
+              {stats.verified ? "✅ Terverifikasi" : "⏳ Belum Verifikasi"}
+            </span>
           </div>
           {drv.no_hp && <div style={{ fontSize: 11, color: "#8b949e", marginTop: 6 }}>📱 {drv.no_hp}</div>}
           {drv.alamat && <div style={{ fontSize: 10.5, color: "#6b7688", marginTop: 2, maxWidth: 220, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>📍 {drv.alamat}</div>}
@@ -465,18 +486,18 @@ function DriverCard({ drv, stats, onEdit, onDelete, onDetail, onPrint }) {
       </div>
 
       {/* Status kesiapan */}
-      <div style={{ minWidth: 170, flex: "0 0 auto", background: t.bg, border: `1px solid ${t.border}`, borderRadius: 10, padding: "10px 12px" }}>
+      <div style={{ minWidth: 190, flex: "0 0 auto", background: t.bg, border: `1px solid ${t.border}`, borderRadius: 10, padding: "10px 12px" }}>
         <div style={{ fontSize: 11, fontWeight: 800, color: t.color }}>{t.label}</div>
         <div style={{ fontSize: 10, color: "#8b949e", marginTop: 4, lineHeight: 1.4 }}>
-          {stats.tier === "siap" && "Profil & rekam jejak lengkap."}
-          {stats.tier === "perlu" && "Lengkapi foto/data profil driver."}
-          {stats.tier === "belum" && "Data profil & foto masih minim."}
+          {stats.warningCount === 0 && stats.komplainCount === 0
+            ? (stats.tier === "siap" ? "Profil & rekam jejak lengkap." : stats.tier === "perlu" ? "Lengkapi foto/data profil driver." : "Data profil & foto masih minim.")
+            : `⚠️ ${stats.warningCount} warning · 🚩 ${stats.komplainCount} komplain tercatat`}
         </div>
       </div>
 
       {/* Aksi */}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginLeft: "auto", position: "relative" }}>
-        <button style={{ ...S.btn("#EF9F27", "#000"), fontSize: 11, padding: "6px 12px" }} onClick={onDetail}><IcoCamera /> Lihat Detail</button>
+        <button style={{ ...S.btn("#EF9F27", "#000"), fontSize: 11, padding: "6px 12px" }} onClick={onDetail}><IcoId /> Lihat Detail</button>
         <button style={{ ...S.btn("none", "#8b949e"), border: "1px solid #30363d", fontSize: 11, padding: "6px 10px" }} onClick={onEdit}><IcoPencil /> Edit</button>
         <button style={{ ...S.btn("none", "#8b949e"), border: "1px solid #30363d", fontSize: 11, padding: "6px 10px" }} onClick={onPrint}><IcoPrint /> Surat</button>
         <button onClick={() => setMenuOpen((v) => !v)} style={{ ...S.btn("none", "#8b949e"), border: "1px solid #30363d", fontSize: 13, padding: "6px 10px" }}>⋮</button>
@@ -561,9 +582,13 @@ function DriverModal({ mode, driver, headers, onClose, onSaved }) {
 
 /* ── Detail / Foto Modal ── */
 function DetailModal({ drv, headers, onClose, onPrint, flash }) {
-  const fileRefs = { selfie: useRef(), ktp: useRef(), sim: useRef() };
+  const fileRefs = { ktp: useRef(), sim: useRef() };
   const [uploading, setUploading] = useState(null);
   const [localDrv, setLocalDrv] = useState(drv);
+  const [catatanLog, setCatatanLog] = useState(drv.catatan_log || []);
+  const [newJenis, setNewJenis] = useState("warning");
+  const [newCatatan, setNewCatatan] = useState("");
+  const [savingCatatan, setSavingCatatan] = useState(false);
 
   const uploadFoto = async (slot, file) => {
     if (!file) return;
@@ -577,24 +602,47 @@ function DetailModal({ drv, headers, onClose, onPrint, flash }) {
     finally { setUploading(null); }
   };
 
+  const addCatatan = async () => {
+    if (!newCatatan.trim()) return;
+    setSavingCatatan(true);
+    try {
+      const r = await axios.post(`${process.env.REACT_APP_BACKEND_URL}/api/admin/drivers/${drv.driver_id}/catatan`, { jenis: newJenis, catatan: newCatatan.trim() }, { headers });
+      setCatatanLog(log => [...log, r.data]);
+      setNewCatatan("");
+      flash(newJenis === "warning" ? "Warning dicatat" : "Komplain dicatat");
+    } catch { flash("Gagal simpan catatan"); }
+    finally { setSavingCatatan(false); }
+  };
+
+  const deleteCatatan = async (catatanId) => {
+    if (!window.confirm("Hapus catatan ini?")) return;
+    try {
+      await axios.delete(`${process.env.REACT_APP_BACKEND_URL}/api/admin/drivers/${drv.driver_id}/catatan/${catatanId}`, { headers });
+      setCatatanLog(log => log.filter(c => c.id !== catatanId));
+      flash("Catatan dihapus");
+    } catch { flash("Gagal hapus catatan"); }
+  };
+
   const SLOTS = [
-    { key: "selfie", label: "Foto Driver", ico: "📸" },
-    { key: "ktp",    label: "Foto KTP",    ico: "🪪" },
-    { key: "sim",    label: "Foto SIM",    ico: "🚗" },
+    { key: "ktp", label: "Foto KTP", ico: "🪪" },
+    { key: "sim", label: "Foto SIM", ico: "🚗" },
   ];
+  const verified = localDrv.status !== "pending";
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.8)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
-      <div style={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 12, width: "100%", maxWidth: 520, maxHeight: "90vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
+      <div style={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 12, width: "100%", maxWidth: 560, maxHeight: "90vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
         <div style={{ padding: "16px 20px", borderBottom: "1px solid #21262d", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ fontWeight: 800, fontSize: 14, color: "#EF9F27" }}>Foto & Detail — {localDrv.nama}</div>
+          <div style={{ fontWeight: 800, fontSize: 14, color: "#EF9F27" }}>Detail Driver — {localDrv.nama}</div>
           <div style={{ display: "flex", gap: 6 }}>
             <button onClick={onPrint} style={{ ...S.btn("#30363d", "#e6edf3"), fontSize: 11, padding: "5px 10px" }}><IcoPrint /> Surat Pengantar</button>
             <button onClick={onClose} style={{ background: "none", border: "none", color: "#8b949e", cursor: "pointer" }}><IcoX /></button>
           </div>
         </div>
         <div style={{ padding: 20 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 20 }}>
+          {/* Dokumen: hanya KTP & SIM */}
+          <div style={{ fontSize: 10, color: "#8b949e", fontWeight: 700, letterSpacing: .5, textTransform: "uppercase", marginBottom: 8 }}>Dokumen</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12, marginBottom: 16 }}>
             {SLOTS.map(sl => (
               <div key={sl.key} style={{ textAlign: "center" }}>
                 <div style={{ width: "100%", aspectRatio: "4/3", background: "#0d1117", border: "1px solid #30363d", borderRadius: 8, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 8, cursor: "pointer", position: "relative" }}
@@ -617,7 +665,12 @@ function DetailModal({ drv, headers, onClose, onPrint, flash }) {
             ))}
           </div>
 
-          <div style={{ background: "#0d1117", borderRadius: 8, padding: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: verified ? "#0d2a10" : "#2d2410", border: `1px solid ${verified ? "#238636" : "#7a5c14"}`, borderRadius: 8, padding: "9px 12px", marginBottom: 16 }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: verified ? "#3fb950" : "#EF9F27" }}>Status Verifikasi Dokumen</span>
+            <span style={{ fontSize: 11, fontWeight: 800, color: verified ? "#3fb950" : "#EF9F27" }}>{verified ? "✅ Terverifikasi" : "⏳ Belum Diverifikasi"}</span>
+          </div>
+
+          <div style={{ background: "#0d1117", borderRadius: 8, padding: 14, marginBottom: 20 }}>
             {[
               ["ID Driver", localDrv.driver_id], ["Nama", localDrv.nama], ["No. HP", localDrv.no_hp || "—"],
               ["No. KTP", localDrv.no_ktp || "—"], ["No. SIM", localDrv.no_sim ? `${localDrv.no_sim} (SIM ${localDrv.tipe_sim || "?"})` : "—"],
@@ -628,6 +681,32 @@ function DetailModal({ drv, headers, onClose, onPrint, flash }) {
                 <span style={{ fontWeight: 600 }}>{v}</span>
               </div>
             ))}
+          </div>
+
+          {/* Warning & Komplain */}
+          <div style={{ fontSize: 10, color: "#8b949e", fontWeight: 700, letterSpacing: .5, textTransform: "uppercase", marginBottom: 8 }}>Warning &amp; Komplain</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+            {catatanLog.length === 0 && <div style={{ fontSize: 11, color: "#484f58" }}>Belum ada catatan warning/komplain.</div>}
+            {[...catatanLog].reverse().map((c) => (
+              <div key={c.id} style={{ display: "flex", gap: 10, alignItems: "flex-start", background: c.jenis === "warning" ? "#2d2410" : "#2d1414", border: `1px solid ${c.jenis === "warning" ? "#7a5c14" : "#7a2020"}`, borderRadius: 8, padding: "8px 10px" }}>
+                <span style={{ fontSize: 10, fontWeight: 800, color: c.jenis === "warning" ? "#EF9F27" : "#f85149", flexShrink: 0, textTransform: "uppercase" }}>{c.jenis === "warning" ? "⚠️ Warning" : "🚩 Komplain"}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, color: "#e6edf3" }}>{c.catatan}</div>
+                  <div style={{ fontSize: 10, color: "#6b7688", marginTop: 2 }}>{fmtDate(c.tanggal)}</div>
+                </div>
+                <button onClick={() => deleteCatatan(c.id)} style={{ background: "none", border: "none", color: "#6b7688", cursor: "pointer", flexShrink: 0 }}><IcoX /></button>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <select value={newJenis} onChange={e => setNewJenis(e.target.value)} style={{ ...S.input, width: 110, flexShrink: 0 }}>
+              <option value="warning">Warning</option>
+              <option value="komplain">Komplain</option>
+            </select>
+            <input style={S.input} placeholder="Catatan singkat..." value={newCatatan} onChange={e => setNewCatatan(e.target.value)} onKeyDown={e => e.key === "Enter" && addCatatan()} />
+            <button onClick={addCatatan} disabled={savingCatatan || !newCatatan.trim()} style={{ ...S.btn("#EF9F27", "#000"), fontSize: 11, padding: "7px 14px", flexShrink: 0 }}>
+              {savingCatatan ? "..." : "+ Catat"}
+            </button>
           </div>
         </div>
       </div>

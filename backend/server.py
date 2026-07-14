@@ -2428,6 +2428,44 @@ async def get_driver(driver_id: str):
     return drv
 
 
+class DriverCatatanBody(BaseModel):
+    jenis: str  # "warning" | "komplain"
+    catatan: str
+    tanggal: Optional[str] = None
+
+
+@api_router.post("/admin/drivers/{driver_id}/catatan", dependencies=[Depends(require_admin_pin)])
+async def add_driver_catatan(driver_id: str, body: DriverCatatanBody):
+    """Catatan warning/komplain manual per driver -- dicatat admin, dipakai
+    buat riwayat performa driver (bukan sistem otomatis)."""
+    if body.jenis not in ("warning", "komplain"):
+        raise HTTPException(400, "Jenis harus 'warning' atau 'komplain'")
+    catatan = body.catatan.strip()
+    if not catatan:
+        raise HTTPException(400, "Catatan tidak boleh kosong")
+    drv = await db.drivers.find_one({"driver_id": driver_id})
+    if not drv:
+        raise HTTPException(404, "Driver tidak ditemukan")
+    now = datetime.utcnow().isoformat()
+    entry = {
+        "id": uuid.uuid4().hex[:8],
+        "jenis": body.jenis,
+        "catatan": catatan,
+        "tanggal": (body.tanggal or now)[:10],
+        "created_at": now,
+    }
+    await db.drivers.update_one({"driver_id": driver_id}, {"$push": {"catatan_log": entry}, "$set": {"updated_at": now}})
+    return entry
+
+
+@api_router.delete("/admin/drivers/{driver_id}/catatan/{catatan_id}", dependencies=[Depends(require_admin_pin)])
+async def delete_driver_catatan(driver_id: str, catatan_id: str):
+    result = await db.drivers.update_one({"driver_id": driver_id}, {"$pull": {"catatan_log": {"id": catatan_id}}})
+    if result.modified_count == 0:
+        raise HTTPException(404, "Catatan tidak ditemukan")
+    return {"ok": True}
+
+
 # ══════════════════════════════════════════════════════
 # PELANGGAN PROFILE SYSTEM (Customer Price Memory)
 # ══════════════════════════════════════════════════════
