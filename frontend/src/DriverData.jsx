@@ -17,6 +17,61 @@ const fmtDate = (s) => {
   try { return new Date(s).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }); } catch { return s; }
 };
 
+/* ── Kesiapan operasional -- dihitung murni dari data yang beneran ada
+   (kelengkapan profil/foto + rekam jejak pengiriman), BUKAN sistem
+   komplain/pelanggaran (datanya memang belum ada di backend). ── */
+function computeDriverStats(drv, orders) {
+  const profileFields = [drv.no_hp, drv.no_ktp, drv.no_sim, drv.tipe_sim, drv.alamat];
+  const profileFilled = profileFields.filter((v) => (v || "").toString().trim()).length;
+  const fotoFilled = ["selfie", "ktp", "sim"].filter((s) => drv[`foto_${s}`]).length;
+
+  const myOrders = orders.filter((o) =>
+    (o.driver_id && drv.driver_id && o.driver_id === drv.driver_id) ||
+    (!o.driver_id && o.nama_driver && drv.nama && o.nama_driver.trim().toLowerCase() === drv.nama.trim().toLowerCase())
+  );
+  const selesai = myOrders.filter((o) => o.status === "DELIVERED").length;
+  const totalDitugaskan = myOrders.length;
+
+  const profilePct = (profileFilled / profileFields.length) * 100;
+  const fotoPct = (fotoFilled / 3) * 100;
+  const deliveryPct = totalDitugaskan > 0 ? (selesai / totalDitugaskan) * 100 : null;
+
+  const parts = [profilePct, fotoPct];
+  if (deliveryPct !== null) parts.push(deliveryPct);
+  const score = Math.round(parts.reduce((a, b) => a + b, 0) / parts.length);
+
+  let tier = "siap", tierLabel = "Siap Ditugaskan";
+  if (score < 50) { tier = "belum"; tierLabel = "Data Belum Lengkap"; }
+  else if (score < 85) { tier = "perlu"; tierLabel = "Perlu Dilengkapi"; }
+
+  return { profileFilled, profileTotal: profileFields.length, fotoFilled, selesai, totalDitugaskan, score, tier, tierLabel };
+}
+
+const TIER_META = {
+  siap:  { bg: "#0d2a10", color: "#3fb950", border: "#238636", label: "Siap Ditugaskan" },
+  perlu: { bg: "#2d2410", color: "#EF9F27", border: "#7a5c14", label: "Perlu Dilengkapi" },
+  belum: { bg: "#2d1414", color: "#f85149", border: "#7a2020", label: "Data Belum Lengkap" },
+};
+
+function CircularScore({ score, tier, size = 74 }) {
+  const t = TIER_META[tier] || TIER_META.perlu;
+  const r = (size - 8) / 2;
+  const c = 2 * Math.PI * r;
+  const offset = c - (Math.min(100, Math.max(0, score)) / 100) * c;
+  return (
+    <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#21262d" strokeWidth="6" />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={t.color} strokeWidth="6" strokeDasharray={c} strokeDashoffset={offset} strokeLinecap="round" style={{ transition: "stroke-dashoffset .4s" }} />
+      </svg>
+      <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ fontSize: size * 0.24, fontWeight: 800, color: "#e6edf3", lineHeight: 1 }}>{score}</div>
+        <div style={{ fontSize: size * 0.11, color: "#6b7688", marginTop: 1 }}>/100</div>
+      </div>
+    </div>
+  );
+}
+
 /* ── icons ── */
 const IcoSearch  = () => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>;
 const IcoPlus    = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>;
@@ -110,9 +165,12 @@ export default function DriverData({ embedded = false }) {
   const headers = { "X-Admin-Pin": pin };
 
   const [drivers, setDrivers] = useState([]);
+  const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
+  const [filterSim, setFilterSim] = useState("");
+  const [filterTier, setFilterTier] = useState("");
   const [toast, setToast] = useState("");
   const [modal, setModal] = useState(null); // null | { mode:"add"|"edit", driver? }
   const [detail, setDetail] = useState(null); // driver for foto/detail view
@@ -125,13 +183,23 @@ export default function DriverData({ embedded = false }) {
       const params = {};
       if (search.trim()) params.q = search.trim();
       if (filterStatus) params.status = filterStatus;
-      const r = await axios.get(`${API}/admin/drivers`, { headers, params });
-      setDrivers(r.data.items || []);
+      const [rDrivers, rOrders] = await Promise.all([
+        axios.get(`${API}/admin/drivers`, { headers, params }),
+        axios.get(`${API}/admin/orders`, { headers, params: { limit: 500 } }).catch(() => ({ data: { items: [] } })),
+      ]);
+      setDrivers(rDrivers.data.items || []);
+      setOrders(rOrders.data.items || []);
     } catch { flash("Gagal memuat data"); }
     finally { setLoading(false); }
   }, [search, filterStatus, pin]);
 
   useEffect(() => { load(); }, [load]);
+
+  const driversWithStats = drivers.map((d) => ({ ...d, _stats: computeDriverStats(d, orders) }));
+  const visibleDrivers = driversWithStats.filter((d) =>
+    (!filterSim || d.tipe_sim === filterSim) && (!filterTier || d._stats.tier === filterTier)
+  );
+  const tierCounts = driversWithStats.reduce((acc, d) => { acc[d._stats.tier] = (acc[d._stats.tier] || 0) + 1; return acc; }, {});
 
   const deleteDriver = async (driverId, nama) => {
     if (!window.confirm(`Hapus driver "${nama}"? Data tidak bisa dikembalikan.`)) return;
@@ -243,53 +311,85 @@ export default function DriverData({ embedded = false }) {
     }
   };
 
+  const anyDriverFilterActive = !!(search || filterStatus || filterSim || filterTier);
+  const resetDriverFilters = () => { setSearch(""); setFilterStatus(""); setFilterSim(""); setFilterTier(""); };
+
   return (
     <div style={{ ...S.root, minHeight: embedded ? "unset" : "100vh" }}>
-      {/* Topbar */}
-      <div style={{ ...S.topbar, ...(embedded ? { background: "transparent", borderBottom: "1px solid #21262d", paddingLeft: 0 } : {}) }}>
-        {!embedded && <div style={S.title}>👷 Data Driver</div>}
-        <div style={{ position: "relative" }}>
-          <span style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "#8b949e" }}><IcoSearch /></span>
-          <input style={{ ...S.input, paddingLeft: 30, width: 220 }} placeholder="Cari nama, ID, HP..." value={search} onChange={e => setSearch(e.target.value)} />
+      {/* Header */}
+      <div style={{ padding: embedded ? "0 0 4px" : "18px 20px 4px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
+        <div>
+          {!embedded && <div style={{ fontSize: 19, fontWeight: 800, color: "#f2f5fa" }}>Data Driver</div>}
+          <div style={{ fontSize: 12, color: "#6b7688", marginTop: embedded ? 0 : 2 }}>Kelola profil driver &amp; kesiapan operasional</div>
         </div>
-        <select style={{ ...S.input, width: 130 }} value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
-          <option value="">Semua Status</option>
-          <option value="aktif">Aktif</option>
-          <option value="nonaktif">Nonaktif</option>
-        </select>
-        <PrintSuratSearch drivers={drivers} onPrint={printSurat} headers={headers} />
-        <button style={S.btn("#2ea043")} onClick={() => setModal({ mode: "add" })}><IcoPlus /> Tambah Driver</button>
-        <button style={S.btnGhost} onClick={load}><IcoRefresh /> Refresh</button>
-        {!embedded && <a href="/admin" style={{ ...S.btnGhost, textDecoration: "none" }}>← Admin</a>}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <PrintSuratSearch drivers={drivers} onPrint={printSurat} headers={headers} />
+          <button style={S.btn("#2ea043")} onClick={() => setModal({ mode: "add" })}><IcoPlus /> Tambah Driver</button>
+          <button style={S.btnGhost} onClick={load}><IcoRefresh /> Refresh</button>
+          {!embedded && <a href="/admin" style={{ ...S.btnGhost, textDecoration: "none" }}>← Admin</a>}
+        </div>
       </div>
 
-      {/* Stats bar */}
-      <div style={{ display: "flex", gap: 12, padding: "14px 20px", borderBottom: "1px solid #21262d" }}>
+      {/* Metric row */}
+      <div style={{ display: "flex", gap: 10, padding: "14px 20px", flexWrap: "wrap" }}>
         {[
-          { label: "Total Driver", val: drivers.length, color: "#e6edf3" },
-          { label: "Aktif", val: drivers.filter(d => d.status === "aktif").length, color: "#56d364" },
-          { label: "Nonaktif", val: drivers.filter(d => d.status !== "aktif").length, color: "#f85149" },
+          { label: "Total Driver", val: drivers.length, icon: "👤", color: "#e6edf3" },
+          { label: "Aktif", val: drivers.filter(d => d.status === "aktif").length, icon: "🟢", color: "#56d364" },
+          { label: "Nonaktif", val: drivers.filter(d => d.status !== "aktif").length, icon: "⭕", color: "#8b949e" },
+          { label: "Siap Ditugaskan", val: tierCounts.siap || 0, icon: "✅", color: "#3fb950" },
+          { label: "Perlu Dilengkapi", val: tierCounts.perlu || 0, icon: "⚠️", color: "#EF9F27" },
+          { label: "Data Belum Lengkap", val: tierCounts.belum || 0, icon: "🚫", color: "#f85149" },
         ].map(s => (
-          <div key={s.label} style={{ background: "#161b22", border: "1px solid #21262d", borderRadius: 8, padding: "10px 16px", minWidth: 100 }}>
-            <div style={{ fontSize: 20, fontWeight: 800, color: s.color }}>{s.val}</div>
-            <div style={{ fontSize: 10, color: "#8b949e", marginTop: 2 }}>{s.label}</div>
+          <div key={s.label} onClick={() => { if (s.label === "Aktif") setFilterStatus(filterStatus === "aktif" ? "" : "aktif"); if (s.label === "Nonaktif") setFilterStatus(filterStatus === "nonaktif" ? "" : "nonaktif"); if (s.label === "Siap Ditugaskan") setFilterTier(filterTier === "siap" ? "" : "siap"); if (s.label === "Perlu Dilengkapi") setFilterTier(filterTier === "perlu" ? "" : "perlu"); if (s.label === "Data Belum Lengkap") setFilterTier(filterTier === "belum" ? "" : "belum"); }}
+            style={{ flex: "1 1 140px", minWidth: 130, display: "flex", alignItems: "center", gap: 10, background: "#161b22", border: "1px solid #21262d", borderRadius: 12, padding: "12px 14px", cursor: ["Aktif","Nonaktif","Siap Ditugaskan","Perlu Dilengkapi","Data Belum Lengkap"].includes(s.label) ? "pointer" : "default" }}>
+            <div style={{ width: 32, height: 32, borderRadius: 9, background: "#0d1117", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, flexShrink: 0 }}>{s.icon}</div>
+            <div>
+              <div style={{ fontSize: 19, fontWeight: 800, color: s.color, lineHeight: 1.1 }}>{s.val}</div>
+              <div style={{ fontSize: 10, color: "#6b7688", marginTop: 2 }}>{s.label}</div>
+            </div>
           </div>
         ))}
       </div>
 
+      {/* Filter bar */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "0 20px 16px" }}>
+        <div style={{ position: "relative", flex: "1 1 220px", minWidth: 200 }}>
+          <span style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "#8b949e" }}><IcoSearch /></span>
+          <input style={{ ...S.input, paddingLeft: 30 }} placeholder="Cari nama, ID driver, nomor HP..." value={search} onChange={e => setSearch(e.target.value)} />
+        </div>
+        <select style={{ ...S.input, width: 140 }} value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+          <option value="">Semua Status</option>
+          <option value="aktif">Aktif</option>
+          <option value="nonaktif">Nonaktif</option>
+        </select>
+        <select style={{ ...S.input, width: 160 }} value={filterTier} onChange={e => setFilterTier(e.target.value)}>
+          <option value="">Semua Kesiapan</option>
+          <option value="siap">Siap Ditugaskan</option>
+          <option value="perlu">Perlu Dilengkapi</option>
+          <option value="belum">Data Belum Lengkap</option>
+        </select>
+        <select style={{ ...S.input, width: 130 }} value={filterSim} onChange={e => setFilterSim(e.target.value)}>
+          <option value="">Semua SIM</option>
+          {TIPE_SIM.map(t => <option key={t} value={t}>SIM {t}</option>)}
+        </select>
+        {anyDriverFilterActive && (
+          <button style={S.btnGhost} onClick={resetDriverFilters}><IcoX /> Reset</button>
+        )}
+      </div>
+
       {/* Grid */}
-      <div style={{ padding: "16px 20px" }}>
+      <div style={{ padding: "0 20px 20px" }}>
         {loading && <div style={{ color: "#8b949e", padding: 40, textAlign: "center" }}>Memuat...</div>}
-        {!loading && drivers.length === 0 && (
+        {!loading && visibleDrivers.length === 0 && (
           <div style={{ textAlign: "center", padding: 60, color: "#8b949e" }}>
             <div style={{ fontSize: 40, marginBottom: 12 }}>👷</div>
-            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>Belum ada driver</div>
-            <div style={{ fontSize: 12 }}>Klik "Tambah Driver" untuk mulai input data</div>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>{drivers.length === 0 ? "Belum ada driver" : "Tidak ada driver yang cocok"}</div>
+            <div style={{ fontSize: 12 }}>{drivers.length === 0 ? 'Klik "Tambah Driver" untuk mulai input data' : "Coba ubah filter di atas"}</div>
           </div>
         )}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 14 }}>
-          {drivers.map(drv => (
-            <DriverCard key={drv.driver_id} drv={drv}
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {visibleDrivers.map(drv => (
+            <DriverCard key={drv.driver_id} drv={drv} stats={drv._stats}
               onEdit={() => setModal({ mode: "edit", driver: drv })}
               onDelete={() => deleteDriver(drv.driver_id, drv.nama)}
               onDetail={() => setDetail(drv)}
@@ -316,58 +416,78 @@ export default function DriverData({ embedded = false }) {
 }
 
 /* ── Driver Card ── */
-function DriverCard({ drv, onEdit, onDelete, onDetail, onPrint }) {
+function DriverCard({ drv, stats, onEdit, onDelete, onDetail, onPrint }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const t = TIER_META[stats.tier] || TIER_META.perlu;
+  const statItems = [
+    { label: "Pengiriman Selesai", val: stats.selesai },
+    { label: "Total Ditugaskan", val: stats.totalDitugaskan },
+    { label: "Foto Lengkap", val: `${stats.fotoFilled}/3` },
+    { label: "Data Profil", val: `${stats.profileFilled}/${stats.profileTotal}` },
+  ];
+
   return (
-    <div style={{ background: "#161b22", border: "1px solid #21262d", borderRadius: 12, overflow: "hidden", transition: "border-color .2s" }}
-      onMouseEnter={e => e.currentTarget.style.borderColor = "#EF9F27"}
-      onMouseLeave={e => e.currentTarget.style.borderColor = "#21262d"}
-    >
-      {/* Top strip */}
-      <div style={{ background: "#0d1117", padding: "14px 16px", display: "flex", gap: 12, alignItems: "center" }}>
-        <div style={{ width: 52, height: 52, borderRadius: "50%", overflow: "hidden", border: "2px solid #30363d", flexShrink: 0, background: "#21262d", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>
+    <div style={{ background: "#161b22", border: "1px solid #21262d", borderLeft: `3px solid ${t.color}`, borderRadius: 12, padding: "16px 18px", display: "flex", alignItems: "center", gap: 22, flexWrap: "wrap" }}>
+
+      {/* Identitas */}
+      <div style={{ display: "flex", gap: 12, alignItems: "center", minWidth: 220, flex: "1 1 220px" }}>
+        <div style={{ width: 56, height: 56, borderRadius: "50%", overflow: "hidden", border: "2px solid #30363d", flexShrink: 0, background: "#21262d", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, position: "relative" }}>
           {drv.foto_selfie ? <img src={drv.foto_selfie} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : "👤"}
+          <span style={{ position: "absolute", bottom: 1, right: 1, width: 12, height: 12, borderRadius: "50%", background: drv.status === "aktif" ? "#3fb950" : "#6b7688", border: "2px solid #161b22" }} />
         </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 800, fontSize: 14, color: "#e6edf3", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{drv.nama}</div>
-          <div style={{ fontSize: 11, color: "#8b949e", marginTop: 2 }}>{drv.driver_id}</div>
-          <div style={{ marginTop: 5 }}><span style={S.pill(drv.status)}>{drv.status}</span>{drv.tipe_sim && <span style={{ marginLeft: 6, fontSize: 10, color: "#EF9F27", fontWeight: 700 }}>SIM {drv.tipe_sim}</span>}</div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 800, fontSize: 14.5, color: "#e6edf3", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{drv.nama}</div>
+          <div style={{ fontSize: 10.5, color: "#8b949e", marginTop: 2 }}>{drv.driver_id}</div>
+          <div style={{ marginTop: 5, display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <span style={S.pill(drv.status)}>{drv.status}</span>
+            {drv.tipe_sim && <span style={{ fontSize: 10, color: "#EF9F27", fontWeight: 700, border: "1px solid #7a5c14", background: "#2b1d0e", borderRadius: 8, padding: "2px 7px" }}>SIM {drv.tipe_sim}</span>}
+          </div>
+          {drv.no_hp && <div style={{ fontSize: 11, color: "#8b949e", marginTop: 6 }}>📱 {drv.no_hp}</div>}
+          {drv.alamat && <div style={{ fontSize: 10.5, color: "#6b7688", marginTop: 2, maxWidth: 220, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>📍 {drv.alamat}</div>}
+          <div style={{ fontSize: 10, color: "#495267", marginTop: 2 }}>Bergabung {fmtDate(drv.created_at)}</div>
         </div>
       </div>
 
-      {/* Info rows */}
-      <div style={{ padding: "12px 16px", borderTop: "1px solid #21262d" }}>
-        {drv.no_hp && <InfoRow ico="📱" val={drv.no_hp} />}
-        {drv.no_ktp && <InfoRow ico="🪪" val={`KTP: ${drv.no_ktp}`} />}
-        {drv.no_sim && <InfoRow ico="🚗" val={`SIM: ${drv.no_sim}`} />}
-        {drv.alamat && <InfoRow ico="📍" val={drv.alamat} muted />}
-        <InfoRow ico="📅" val={`Bergabung ${fmtDate(drv.created_at)}`} muted />
+      {/* Skor performa */}
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, flexShrink: 0 }}>
+        <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.5, color: "#5b6577", textTransform: "uppercase" }}>Kesiapan</div>
+        <CircularScore score={stats.score} tier={stats.tier} />
       </div>
 
-      {/* Foto chips */}
-      <div style={{ padding: "0 16px 10px", display: "flex", gap: 6 }}>
-        {["selfie", "ktp", "sim"].map(slot => (
-          <span key={slot} style={{ fontSize: 10, padding: "2px 7px", borderRadius: 8, background: drv[`foto_${slot}`] ? "#1a4a2a" : "#21262d", color: drv[`foto_${slot}`] ? "#56d364" : "#484f58", border: `1px solid ${drv[`foto_${slot}`] ? "#2ea043" : "#30363d"}` }}>
-            {slot === "selfie" ? "📸 Foto" : slot === "ktp" ? "🪪 KTP" : "🚗 SIM"} {drv[`foto_${slot}`] ? "✓" : "—"}
-          </span>
+      {/* Detail performa */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "6px 20px", flex: "1 1 200px", minWidth: 180 }}>
+        {statItems.map((it) => (
+          <div key={it.label}>
+            <div style={{ fontSize: 14, fontWeight: 800, color: "#e6edf3" }}>{it.val}</div>
+            <div style={{ fontSize: 9.5, color: "#6b7688" }}>{it.label}</div>
+          </div>
         ))}
       </div>
 
-      {/* Actions */}
-      <div style={{ padding: "10px 16px", borderTop: "1px solid #21262d", display: "flex", gap: 6, flexWrap: "wrap" }}>
-        <button style={{ ...S.btn("#EF9F27", "#000"), fontSize: 11, padding: "5px 10px" }} onClick={onDetail}><IcoCamera /> Foto & Detail</button>
-        <button style={{ ...S.btn("none", "#8b949e"), border: "1px solid #30363d", fontSize: 11, padding: "5px 10px" }} onClick={onEdit}><IcoPencil /> Edit</button>
-        <button style={{ ...S.btn("none", "#8b949e"), border: "1px solid #30363d", fontSize: 11, padding: "5px 10px" }} onClick={onPrint}><IcoPrint /> Surat</button>
-        <button style={{ ...S.btn("none", "#f85149"), border: "1px solid #f85149", fontSize: 11, padding: "5px 10px", marginLeft: "auto" }} onClick={onDelete}><IcoTrash /></button>
+      {/* Status kesiapan */}
+      <div style={{ minWidth: 170, flex: "0 0 auto", background: t.bg, border: `1px solid ${t.border}`, borderRadius: 10, padding: "10px 12px" }}>
+        <div style={{ fontSize: 11, fontWeight: 800, color: t.color }}>{t.label}</div>
+        <div style={{ fontSize: 10, color: "#8b949e", marginTop: 4, lineHeight: 1.4 }}>
+          {stats.tier === "siap" && "Profil & rekam jejak lengkap."}
+          {stats.tier === "perlu" && "Lengkapi foto/data profil driver."}
+          {stats.tier === "belum" && "Data profil & foto masih minim."}
+        </div>
       </div>
-    </div>
-  );
-}
 
-function InfoRow({ ico, val, muted }) {
-  return (
-    <div style={{ display: "flex", gap: 6, alignItems: "flex-start", marginBottom: 5, fontSize: 11, color: muted ? "#8b949e" : "#e6edf3" }}>
-      <span style={{ flexShrink: 0 }}>{ico}</span>
-      <span style={{ wordBreak: "break-word" }}>{val}</span>
+      {/* Aksi */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginLeft: "auto", position: "relative" }}>
+        <button style={{ ...S.btn("#EF9F27", "#000"), fontSize: 11, padding: "6px 12px" }} onClick={onDetail}><IcoCamera /> Lihat Detail</button>
+        <button style={{ ...S.btn("none", "#8b949e"), border: "1px solid #30363d", fontSize: 11, padding: "6px 10px" }} onClick={onEdit}><IcoPencil /> Edit</button>
+        <button style={{ ...S.btn("none", "#8b949e"), border: "1px solid #30363d", fontSize: 11, padding: "6px 10px" }} onClick={onPrint}><IcoPrint /> Surat</button>
+        <button onClick={() => setMenuOpen((v) => !v)} style={{ ...S.btn("none", "#8b949e"), border: "1px solid #30363d", fontSize: 13, padding: "6px 10px" }}>⋮</button>
+        {menuOpen && (
+          <div onMouseLeave={() => setMenuOpen(false)} style={{ position: "absolute", top: "110%", right: 0, background: "#161b22", border: "1px solid #30363d", borderRadius: 8, overflow: "hidden", zIndex: 20, minWidth: 130, boxShadow: "0 8px 24px #0008" }}>
+            <button onClick={() => { setMenuOpen(false); onDelete(); }} style={{ width: "100%", padding: "9px 12px", border: "none", background: "none", color: "#f85149", fontSize: 11.5, fontWeight: 700, textAlign: "left", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
+              <IcoTrash /> Hapus Driver
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
