@@ -16,6 +16,7 @@ import CustomerPricePage from "@/CustomerPricePage";
 import SupplierRingkasan from "@/SupplierRingkasan";
 import SelisihRingkasan from "@/SelisihRingkasan";
 import KompensasiRingkasan from "@/KompensasiRingkasan";
+import SupplierQuoteFill from "@/SupplierQuoteFill";
 
 // Resolve path segment: /track/TRIP-XXX -> "TRIP-XXX"
 function pathSegment(pathname, prefix) {
@@ -45,6 +46,7 @@ function App() {
     if (p.startsWith("/supplier-ringkasan/")) return { route: "supplier-ringkasan" };
     if (p.startsWith("/selisih-ringkasan/")) return { route: "selisih-ringkasan" };
     if (p.startsWith("/kompensasi-ringkasan/")) return { route: "kompensasi-ringkasan" };
+    if (p.startsWith("/minta-harga/")) return { route: "minta-harga" };
 
     // ── Legacy query-param redirect to new paths ────────────────────
     if (sp.get("guide") !== null)   return { redirect: "/guide" };
@@ -97,6 +99,7 @@ function App() {
   if (route === "supplier-ringkasan") return <SupplierRingkasan />;
   if (route === "selisih-ringkasan") return <SelisihRingkasan />;
   if (route === "kompensasi-ringkasan") return <KompensasiRingkasan />;
+  if (route === "minta-harga") return <SupplierQuoteFill />;
   return <Homepage />;
 }
 

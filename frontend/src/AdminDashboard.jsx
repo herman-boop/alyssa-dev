@@ -7,6 +7,7 @@ import DriverData from "@/DriverData";
 import SupplierPage from "@/SupplierPage";
 import SelisihPage from "@/SelisihPage";
 import KompensasiPage from "@/KompensasiPage";
+import PermintaanHargaPage from "@/PermintaanHargaPage";
 import "@/App.css";
 import "@/Driver.css";
 import "@/Admin.css";
@@ -365,6 +366,13 @@ function Dashboard({ pin, onLogout }) {
             color: activeTab === "kompensasi" ? "var(--gold)" : "var(--text-3)",
             borderBottom: activeTab === "kompensasi" ? "2px solid var(--gold)" : "2px solid transparent" }}
         >🔄 Kompensasi</button>
+        <button
+          onClick={() => setActiveTab("minta-harga")}
+          style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: "8px 8px 0 0", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 700,
+            background: activeTab === "minta-harga" ? "var(--bg-card)" : "transparent",
+            color: activeTab === "minta-harga" ? "var(--gold)" : "var(--text-3)",
+            borderBottom: activeTab === "minta-harga" ? "2px solid var(--gold)" : "2px solid transparent" }}
+        >📩 Minta Harga</button>
       </div>
 
       {activeTab === "kalkulator" && (
@@ -405,6 +413,10 @@ function Dashboard({ pin, onLogout }) {
 
       {activeTab === "kompensasi" && (
         <KompensasiPage />
+      )}
+
+      {activeTab === "minta-harga" && (
+        <PermintaanHargaPage />
       )}
 
       {activeTab === "pesanan" && <>

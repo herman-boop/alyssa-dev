@@ -2639,6 +2639,135 @@ async def public_pelanggan_harga(token: str):
     return {"nama_pt": doc["nama_pt"], "harga_history": safe_history}
 
 
+# ── Permintaan Harga Supplier ──────────────────────────────────────────
+# Admin bikin daftar rute yang butuh harga dari perwakilan supplier di
+# daerah (Sulawesi/Kalimantan dll). Link token dikirim ke perwakilan --
+# mereka tinggal isi kolom harga per rute tanpa perlu login/PIN.
+
+def _gen_permintaan_id() -> str:
+    return uuid.uuid4().hex[:8]
+
+
+class PermintaanHargaRowBody(BaseModel):
+    asal: str
+    tujuan: str
+    tipe_kendaraan: str
+
+
+class PermintaanHargaCreateBody(BaseModel):
+    nama_supplier: str
+    catatan: str = ""
+    rows: List[PermintaanHargaRowBody]
+
+
+@api_router.post("/admin/permintaan-harga", dependencies=[Depends(require_admin_pin)])
+async def create_permintaan_harga(body: PermintaanHargaCreateBody):
+    nama_supplier = body.nama_supplier.strip()
+    if not nama_supplier:
+        raise HTTPException(400, "Nama supplier tidak boleh kosong")
+    rows_in = [r for r in body.rows if r.asal.strip() and r.tujuan.strip() and r.tipe_kendaraan.strip()]
+    if not rows_in:
+        raise HTTPException(400, "Minimal 1 rute (asal, tujuan, tipe kendaraan) harus diisi")
+    now = datetime.utcnow().isoformat()
+    doc = {
+        "id": _gen_permintaan_id(),
+        "nama_supplier": nama_supplier,
+        "catatan": body.catatan.strip(),
+        "token": _gen_token(12),
+        "created_at": now,
+        "status": "pending",
+        "submitted_at": None,
+        "rows": [
+            {
+                "id": uuid.uuid4().hex[:8],
+                "asal": r.asal.strip(),
+                "tujuan": r.tujuan.strip(),
+                "tipe_kendaraan": r.tipe_kendaraan.strip(),
+                "harga": None,
+                "filled_at": None,
+            }
+            for r in rows_in
+        ],
+    }
+    await db.permintaan_harga.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.get("/admin/permintaan-harga", dependencies=[Depends(require_admin_pin)])
+async def list_permintaan_harga():
+    items = await db.permintaan_harga.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return {"items": items}
+
+
+@api_router.get("/admin/permintaan-harga/{pid}", dependencies=[Depends(require_admin_pin)])
+async def get_permintaan_harga(pid: str):
+    doc = await db.permintaan_harga.find_one({"id": pid}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Permintaan tidak ditemukan")
+    return doc
+
+
+@api_router.delete("/admin/permintaan-harga/{pid}", dependencies=[Depends(require_admin_pin)])
+async def delete_permintaan_harga(pid: str):
+    result = await db.permintaan_harga.delete_one({"id": pid})
+    if result.deleted_count == 0:
+        raise HTTPException(404, "Permintaan tidak ditemukan")
+    return {"ok": True}
+
+
+@api_router.get("/minta-harga/{token}")
+async def public_get_permintaan_harga(token: str):
+    """Public endpoint (no PIN) -- dibuka perwakilan supplier lewat link."""
+    doc = await db.permintaan_harga.find_one({"token": token}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Link tidak valid")
+    return {
+        "nama_supplier": doc["nama_supplier"],
+        "catatan": doc.get("catatan", ""),
+        "status": doc.get("status", "pending"),
+        "rows": [
+            {"id": r["id"], "asal": r["asal"], "tujuan": r["tujuan"], "tipe_kendaraan": r["tipe_kendaraan"], "harga": r.get("harga")}
+            for r in doc.get("rows", [])
+        ],
+    }
+
+
+class PermintaanHargaSubmitRow(BaseModel):
+    id: str
+    harga: int
+
+
+class PermintaanHargaSubmitBody(BaseModel):
+    rows: List[PermintaanHargaSubmitRow]
+
+
+@api_router.post("/minta-harga/{token}/submit")
+async def public_submit_permintaan_harga(token: str, body: PermintaanHargaSubmitBody):
+    """Public endpoint (no PIN) -- perwakilan supplier submit harga yang udah diisi."""
+    doc = await db.permintaan_harga.find_one({"token": token})
+    if not doc:
+        raise HTTPException(404, "Link tidak valid")
+    rows = doc.get("rows", [])
+    by_id = {r["id"]: r for r in rows}
+    now = datetime.utcnow().isoformat()
+    updated_any = False
+    for item in body.rows:
+        if item.id in by_id and item.harga and item.harga > 0:
+            by_id[item.id]["harga"] = item.harga
+            by_id[item.id]["filled_at"] = now
+            updated_any = True
+    if not updated_any:
+        raise HTTPException(400, "Tidak ada harga yang diisi")
+    all_filled = all(r.get("harga") for r in rows)
+    new_status = "submitted" if all_filled else "partial"
+    await db.permintaan_harga.update_one(
+        {"token": token},
+        {"$set": {"rows": rows, "status": new_status, "submitted_at": now}},
+    )
+    return {"ok": True, "status": new_status}
+
+
 # ══════════════════════════════════════════════════════
 # SUPPLIER PAYMENT SYSTEM (jasa supir/SDM per unit — DP bertahap,
 # bukti transfer, sisa otomatis kehitung). Struktur & pola endpoint-nya
