@@ -555,7 +555,7 @@ function Dashboard({ pin, onLogout }) {
         />
       )}
       {legsModal && (
-        <LegsModal
+        <TripDetailModal
           tripId={legsModal.tripId}
           order={legsModal.order}
           onClose={() => setLegsModal(null)}
@@ -1119,7 +1119,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
         )}
         {order.trip_id && (
           <button className="adm-btn adm-btn-ghost adm-btn-sm" onClick={onOpenLegs} data-testid={`adm-legs-${order.order_id}`}>
-            <IcoRoute /> Rute Leg
+            <IcoRoute /> Detail Pengiriman
           </button>
         )}
         {order.trip_id && (
@@ -1534,19 +1534,78 @@ function DriverAutocomplete({ value, hp, onChange, onSelect, headers }) {
   );
 }
 
-/* ════════════════════════════════════════
-   LEGS MODAL
-════════════════════════════════════════ */
 const LEG_TIPE = ["Self Drive", "Kapal RoRo", "Kapal Kontainer", "Car Carrier", "Towing", "Self Loader", "Lainnya"];
 const LEG_STATUS = ["Menunggu", "Berlangsung", "Selesai"];
+const TIPE_ICON = { "Self Drive": "🚗", "Kapal RoRo": "🚢", "Kapal Kontainer": "🚢", "Car Carrier": "🚛", "Towing": "🔗", "Self Loader": "🏗", "Lainnya": "📦" };
 
-function LegsModal({ tripId, order, onClose, onSave, headers }) {
+const DETAIL_TABS = [
+  { key: "rute", label: "Rute Leg", icon: "🧭" },
+  { key: "foto", label: "Foto", icon: "📸" },
+  { key: "checkpoint", label: "Checkpoint", icon: "📍" },
+  { key: "dokumen", label: "Dokumen", icon: "📄" },
+  { key: "ringkasan", label: "Ringkasan", icon: "📊" },
+];
+
+const LEG_STATUS_COLOR = {
+  "Menunggu":    { bg: "#2d2410", color: "#EF9F27", border: "#7a5c14" },
+  "Berlangsung": { bg: "#0d2340", color: "#60a5fa", border: "#1f6feb" },
+  "Selesai":     { bg: "#0d2a10", color: "#3fb950", border: "#238636" },
+};
+
+const ICON_BTN = { background: "none", border: "1px solid #30363d", color: "#8b949e", borderRadius: 5, padding: "3px 7px", cursor: "pointer", fontSize: 11 };
+const MINI_LABEL = { fontSize: 10, color: "#8b949e", fontWeight: 600, display: "block" };
+const MINI_INPUT = { background: "#0d1117", border: "1px solid #30363d", borderRadius: 6, padding: "6px 9px", color: "#e6edf3", fontSize: 12, outline: "none", width: "100%", marginTop: 3, boxSizing: "border-box", fontFamily: "inherit" };
+const SOLID_BTN_BLUE = { padding: "8px", borderRadius: 7, border: "none", background: "#1f6feb", color: "#fff", cursor: "pointer", fontSize: 11, fontWeight: 700 };
+const GHOST_BTN_BLUE = { padding: "8px", borderRadius: 7, border: "1px solid #1f6feb", background: "transparent", color: "#60a5fa", cursor: "pointer", fontSize: 11, fontWeight: 700 };
+
+function resolveTripUrl(url) {
+  if (!url) return "";
+  if (/^https?:\/\//.test(url)) return url;
+  return `${BACKEND_URL}${url}`;
+}
+
+function fmtTs(s) {
+  if (!s) return "—";
+  try {
+    const d = new Date(s);
+    return d.toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) + " WIB";
+  } catch { return "—"; }
+}
+
+function Checklist({ items }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 5, margin: "10px 0" }}>
+      {items.map((it, i) => (
+        <div key={i} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11, color: it.done ? "#3fb950" : "#8b949e" }}>
+          <span style={{ width: 15, height: 15, borderRadius: "50%", background: it.done ? "#0d2a10" : "#0d1117", border: `1px solid ${it.done ? "#238636" : "#30363d"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, flexShrink: 0 }}>{it.done ? "✓" : ""}</span>
+          {it.label}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TabSkeleton() {
+  return <div style={{ textAlign: "center", padding: 40, color: "#8b949e", fontSize: 12 }}>Memuat data...</div>;
+}
+function TabEmpty({ text }) {
+  return <div style={{ textAlign: "center", padding: 40, color: "#484f58", fontSize: 12 }}>{text}</div>;
+}
+
+/* ════════════════════════════════════════
+   TRIP DETAIL MODAL — Route Leg workflow, redesigned
+   Setiap leg jadi Workflow Card (header+status, rute, checklist,
+   galeri mini, link ke actor, catatan). Tab Foto/Checkpoint/Dokumen/
+   Ringkasan baca data read-only dari GET /public/trips/{id} (endpoint
+   yang sama dipakai halaman tracking customer) -- tanpa endpoint baru.
+════════════════════════════════════════ */
+function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
   const [legs, setLegs] = useState(() => {
     if (Array.isArray(order?.legs) && order.legs.length > 0) return order.legs;
     return [
-      { tipe: "Self Drive", asal: order?.asal_kota || "", tujuan: "", kapal: "", eta: "", status: "Menunggu", driver: "", driver_hp: "", kord_bayangan: "", kord_bayangan_hp: "" },
-      { tipe: "Kapal RoRo",  asal: "", tujuan: "", kapal: "", eta: "", status: "Menunggu", driver: "", driver_hp: "", kord_kapal: "", kord_kapal_hp: "" },
-      { tipe: "Self Drive", asal: "", tujuan: order?.tujuan_kota || "", kapal: "", eta: "", status: "Menunggu", driver: "", driver_hp: "", kord_bayangan: "", kord_bayangan_hp: "" },
+      { tipe: "Self Drive", asal: order?.asal_kota || "", tujuan: "", kapal: "", eta: "", status: "Menunggu", driver: "", driver_hp: "", kord_bayangan: "", kord_bayangan_hp: "", catatan: "" },
+      { tipe: "Kapal RoRo",  asal: "", tujuan: "", kapal: "", eta: "", status: "Menunggu", driver: "", driver_hp: "", kord_kapal: "", kord_kapal_hp: "", catatan: "" },
+      { tipe: "Self Drive", asal: "", tujuan: order?.tujuan_kota || "", kapal: "", eta: "", status: "Menunggu", driver: "", driver_hp: "", kord_bayangan: "", kord_bayangan_hp: "", catatan: "" },
     ];
   });
   const [saving, setSaving] = useState(false);
@@ -1554,6 +1613,21 @@ function LegsModal({ tripId, order, onClose, onSave, headers }) {
   const [multiUnitModal, setMultiUnitModal] = useState(null); // { leg, selectedOrders: [] }
   const [multiUnitSearch, setMultiUnitSearch] = useState("");
   const [allOrders, setAllOrders] = useState([]);
+  const [activeTab, setActiveTab] = useState("rute");
+  const [detail, setDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(true);
+  const [lightbox, setLightbox] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    if (!tripId) { setDetailLoading(false); return undefined; }
+    setDetailLoading(true);
+    axios.get(`${API}/public/trips/${tripId}`)
+      .then(r => { if (alive) setDetail(r.data); })
+      .catch(() => {})
+      .finally(() => { if (alive) setDetailLoading(false); });
+    return () => { alive = false; };
+  }, [tripId]);
 
   // Load semua orders untuk pilih multi-unit
   const openMultiUnit = async (leg) => {
@@ -1686,18 +1760,18 @@ function LegsModal({ tripId, order, onClose, onSave, headers }) {
     if (order?.no_rangka) p.set("rangka", order.no_rangka);
     const link = `${base}/trip/${tripId}?${p.toString()}`;
     const isKapal = leg.tipe && leg.tipe.startsWith("Kapal");
-    const namaDriver = leg.driver || `Driver Leg ${i + 1}`;
+    const namaDriver = leg.driver || (isKapal ? "Petugas Pelabuhan" : `Driver Leg ${i + 1}`);
     const rute = `${leg.asal || "—"} → ${leg.tujuan || "—"}`;
     const nopol = order?.nopol || order?.vehicle_type || "";
 
     let panduan;
     if (isKapal) {
-      panduan = `1. Foto kendaraan 5 sisi sebelum berangkat\n2. Foto mobil di dalam pelabuhan`;
+      panduan = `1. Foto kendaraan saat masuk kapal\n2. Foto kendaraan di dalam kapal\n3. Foto kendaraan saat bongkar kapal`;
     } else {
       panduan = `1. Foto kendaraan 5 sisi sebelum berangkat\n2. Foto checkpoint tiap hari jam 06.00–18.00 WIB`;
     }
 
-    const teks = `Halo Pak ${namaDriver} 👋\n\nPengiriman: ${rute}\nKendaraan: ${nopol}\n\n🔗 ${link}\n\nPanduan:\n${panduan}\n\nInfo: PT Alyssa Auto Logistik · 0818 631 135`;
+    const teks = `Halo Pak/Bu ${namaDriver} 👋\n\nPengiriman: ${rute}\nKendaraan: ${nopol}\n\n🔗 ${link}\n\nPanduan:\n${panduan}\n\nInfo: PT Alyssa Auto Logistik · 0818 631 135`;
 
     navigator.clipboard.writeText(teks);
     setCopiedLeg(i);
@@ -1705,7 +1779,7 @@ function LegsModal({ tripId, order, onClose, onSave, headers }) {
   };
 
   const setLeg = (i, patch) => setLegs(ls => ls.map((l, idx) => idx === i ? { ...l, ...patch } : l));
-  const addLeg = () => setLegs(ls => [...ls, { tipe: "Self Drive", asal: "", tujuan: "", kapal: "", eta: "", status: "Menunggu" }]);
+  const addLeg = () => setLegs(ls => [...ls, { tipe: "Self Drive", asal: "", tujuan: "", kapal: "", eta: "", status: "Menunggu", catatan: "" }]);
   const delLeg = (i) => setLegs(ls => ls.filter((_, idx) => idx !== i));
   const moveLeg = (i, dir) => {
     const j = i + dir;
@@ -1715,125 +1789,76 @@ function LegsModal({ tripId, order, onClose, onSave, headers }) {
 
   const submit = async () => { setSaving(true); await onSave(legs); setSaving(false); };
 
-  const IL = { background: "#0d1117", border: "1px solid #30363d", borderRadius: 5, padding: "5px 8px", color: "#e6edf3", fontSize: 11, outline: "none", width: "100%" };
-  const TIPE_ICON = { "Self Drive": "🚗", "Kapal RoRo": "🚢", "Kapal Kontainer": "🚢", "Car Carrier": "🚛", "Towing": "🔗", "Self Loader": "🏗", "Lainnya": "📦" };
+  const routeStops = legs.length ? [
+    { label: legs[0].asal || order?.asal_kota || "—", icon: "📍" },
+    ...legs.map((l, i) => ({ label: l.tujuan || "—", icon: i === legs.length - 1 ? "🏁" : (TIPE_ICON[legs[i + 1]?.tipe] || "📍") })),
+  ] : [];
 
   return (
     <>
     <div className="adm-modal-bg" onClick={onClose}>
-      <div className="adm-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 620, maxHeight: "90vh", overflowY: "auto" }}>
-        <div className="adm-modal-head">
+      <div className="adm-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 780, maxHeight: "92vh", overflowY: "auto", padding: 0 }}>
+
+        {/* Header */}
+        <div style={{ padding: "16px 22px", borderBottom: "1px solid #21262d", display: "flex", justifyContent: "space-between", alignItems: "flex-start", position: "sticky", top: 0, background: "#161b22", zIndex: 5 }}>
           <div>
-            <div className="adm-modal-title"><IcoRoute /> Atur Rute Leg</div>
-            <div className="adm-modal-sub">{tripId} · {order?.asal_kota} → {order?.tujuan_kota}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 15, fontWeight: 800, color: "#e6edf3" }}>Detail Pengiriman</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#60a5fa", background: "#0d2340", border: "1px solid #1f6feb", borderRadius: 10, padding: "2px 8px" }}>#{order?.order_id}</span>
+            </div>
+            <div style={{ fontSize: 11, color: "#8b949e", marginTop: 4 }}>{order?.asal_kota} → {order?.tujuan_kota} · {legs.length} Leg</div>
           </div>
           <button className="adm-modal-close" onClick={onClose}><IcoX /></button>
         </div>
-        <div className="adm-modal-body">
-          {legs.map((leg, i) => (
-            <div key={i} style={{ background: "#0d1117", border: "1px solid #21262d", borderRadius: 8, padding: 10, marginBottom: 8 }}>
-              <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 8 }}>
-                <span style={{ fontSize: 16 }}>{TIPE_ICON[leg.tipe] || "📦"}</span>
-                <span style={{ fontSize: 11, fontWeight: 700, color: "#EF9F27" }}>Leg {i + 1}</span>
-                <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
-                  <button onClick={() => moveLeg(i, -1)} disabled={i === 0} style={{ background: "none", border: "1px solid #30363d", color: "#8b949e", borderRadius: 4, padding: "2px 6px", cursor: "pointer", fontSize: 11 }}>↑</button>
-                  <button onClick={() => moveLeg(i, 1)} disabled={i === legs.length - 1} style={{ background: "none", border: "1px solid #30363d", color: "#8b949e", borderRadius: 4, padding: "2px 6px", cursor: "pointer", fontSize: 11 }}>↓</button>
-                  <button onClick={() => delLeg(i)} style={{ background: "none", border: "1px solid #f85149", color: "#f85149", borderRadius: 4, padding: "2px 6px", cursor: "pointer", fontSize: 11 }}>Hapus</button>
+
+        {/* Route Timeline */}
+        <div style={{ padding: "14px 22px", borderBottom: "1px solid #21262d", overflowX: "auto" }}>
+          <div style={{ display: "flex", alignItems: "flex-start", minWidth: "max-content" }}>
+            {routeStops.map((s, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "flex-start" }}>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, width: 70 }}>
+                  <div style={{ width: 32, height: 32, borderRadius: "50%", background: "#0d1117", border: "2px solid #30363d", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, flexShrink: 0 }}>{s.icon}</div>
+                  <div style={{ fontSize: 10, color: "#c9d1d9", fontWeight: 700, textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", width: "100%" }}>{s.label}</div>
                 </div>
+                {i < routeStops.length - 1 && <div style={{ width: 32, height: 2, background: "#30363d", margin: "15px 0 0" }} />}
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 6 }}>
-                <label style={{ fontSize: 10, color: "#8b949e" }}>Tipe
-                  <select style={{ ...IL, marginTop: 2 }} value={leg.tipe} onChange={e => setLeg(i, { tipe: e.target.value })}>
-                    {LEG_TIPE.map(t => <option key={t}>{t}</option>)}
-                  </select>
-                </label>
-                <label style={{ fontSize: 10, color: "#8b949e" }}>Status
-                  <select style={{ ...IL, marginTop: 2 }} value={leg.status} onChange={e => setLeg(i, { status: e.target.value })}>
-                    {LEG_STATUS.map(s => <option key={s}>{s}</option>)}
-                  </select>
-                </label>
-                <label style={{ fontSize: 10, color: "#8b949e" }}>ETA
-                  <input type="date" style={{ ...IL, marginTop: 2 }} value={leg.eta} onChange={e => setLeg(i, { eta: e.target.value })} />
-                </label>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 6 }}>
-                <label style={{ fontSize: 10, color: "#8b949e" }}>Asal
-                  <input style={{ ...IL, marginTop: 2 }} value={leg.asal} onChange={e => setLeg(i, { asal: e.target.value })} placeholder="Pelabuhan / Kota" />
-                </label>
-                <label style={{ fontSize: 10, color: "#8b949e" }}>Tujuan
-                  <input style={{ ...IL, marginTop: 2 }} value={leg.tujuan} onChange={e => setLeg(i, { tujuan: e.target.value })} placeholder="Pelabuhan / Kota" />
-                </label>
-              </div>
-              {(leg.tipe.startsWith("Kapal") || leg.tipe === "Car Carrier" || leg.tipe === "Towing") && (
-                <div style={{ background: "#0d1a2d", border: "1px solid #1f3a5a", borderRadius: 7, padding: "10px 10px 8px", marginBottom: 6 }}>
-                  <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 700, marginBottom: 8 }}>INFO KAPAL / EKSPEDISI</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 6 }}>
-                    <label style={{ fontSize: 10, color: "#8b949e" }}>Nama Kapal
-                      <input style={{ ...IL, marginTop: 2 }} value={leg.kapal || ""} onChange={e => setLeg(i, { kapal: e.target.value })} placeholder="KM Mutiara Persada" />
-                    </label>
-                    <label style={{ fontSize: 10, color: "#8b949e" }}>Marking / Kode Ekspedisi
-                      <input style={{ ...IL, marginTop: 2 }} value={leg.marking || ""} onChange={e => setLeg(i, { marking: e.target.value })} placeholder="AAL-001 / JKT-MKS" />
-                    </label>
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                    <button type="button" onClick={() => printKartuMuat(leg, order)}
-                      style={{ padding: "7px", borderRadius: 6, border: "none", background: "#1f6feb", color: "#fff", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
-                      🖨️ 1 Unit
-                    </button>
-                    <button type="button" onClick={() => openMultiUnit(leg)}
-                      style={{ padding: "7px", borderRadius: 6, border: "1px solid #1f6feb", background: "transparent", color: "#60a5fa", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
-                      📋 Multi Unit
-                    </button>
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 8 }}>
-                    <label style={{ fontSize: 10, color: "#8b949e" }}>Koordinator Kapal
-                      <input style={{ ...IL, marginTop: 2 }} value={leg.kord_kapal || ""} onChange={e => setLeg(i, { kord_kapal: e.target.value })} placeholder="Nama koordinator kapal" />
-                    </label>
-                    <label style={{ fontSize: 10, color: "#8b949e" }}>HP Koordinator Kapal
-                      <input style={{ ...IL, marginTop: 2 }} value={leg.kord_kapal_hp || ""} onChange={e => setLeg(i, { kord_kapal_hp: e.target.value })} placeholder="08xx-xxxx" />
-                    </label>
-                  </div>
-                </div>
-              )}
-              {/* Field driver + link hanya untuk leg yang dikemudikan orang */}
-              {!leg.tipe.startsWith("Kapal") && leg.tipe !== "Kapal RoRo" && (
-                <div style={{ marginTop: 6, padding: "8px 10px", background: "#0a1628", border: "1px solid #1f3a5a", borderRadius: 6 }}>
-                  <label style={{ fontSize: 10, color: "#60a5fa", display: "block", marginBottom: 4, fontWeight: 700 }}>NAMA DRIVER LEG INI</label>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <div style={{ flex: 1 }}>
-                      <DriverAutocomplete
-                        value={leg.driver || ""}
-                        hp={leg.driver_hp || ""}
-                        onChange={(val, prevHp) => setLeg(i, { driver: val })}
-                        onSelect={(nama, hp) => setLeg(i, { driver: nama, driver_hp: hp })}
-                        headers={headers}
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => copyLegLink(leg, i)}
-                      disabled={!tripId}
-                      style={{ padding: "5px 10px", borderRadius: 5, border: "none", background: copiedLeg === i ? "#2ea043" : "#1f6feb", color: "#fff", cursor: "pointer", fontSize: 11, fontWeight: 700, whiteSpace: "nowrap", alignSelf: "flex-start" }}>
-                      {copiedLeg === i ? "✓ Tersalin!" : "Salin Link"}
-                    </button>
-                  </div>
-                  <div style={{ fontSize: 10, color: "#4a6fa5", marginTop: 4 }}>Kirim link ini ke driver yang bertugas di leg {i + 1}</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 8 }}>
-                    <label style={{ fontSize: 10, color: "#8b949e" }}>Koordinator Bayangan
-                      <input style={{ ...IL, marginTop: 2 }} value={leg.kord_bayangan || ""} onChange={e => setLeg(i, { kord_bayangan: e.target.value })} placeholder="Nama · 0812-xxxx (agen/pawang driver)" />
-                    </label>
-                    <label style={{ fontSize: 10, color: "#8b949e" }}>HP Koordinator Bayangan
-                      <input style={{ ...IL, marginTop: 2 }} value={leg.kord_bayangan_hp || ""} onChange={e => setLeg(i, { kord_bayangan_hp: e.target.value })} placeholder="08xx-xxxx" />
-                    </label>
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
-          <button onClick={addLeg} style={{ width: "100%", padding: "8px", border: "1px dashed #30363d", borderRadius: 7, background: "none", color: "#8b949e", cursor: "pointer", fontSize: 12 }}>+ Tambah Leg</button>
+            ))}
+          </div>
         </div>
-        <div className="adm-modal-foot">
-          <button className="adm-btn adm-btn-ghost" onClick={onClose} disabled={saving}>Batal</button>
+
+        {/* Tabs */}
+        <div style={{ display: "flex", gap: 4, padding: "10px 22px 0", borderBottom: "1px solid #21262d", overflowX: "auto" }}>
+          {DETAIL_TABS.map(t => (
+            <button key={t.key} onClick={() => setActiveTab(t.key)}
+              style={{ display: "flex", alignItems: "center", gap: 5, padding: "8px 12px", border: "none", borderRadius: "6px 6px 0 0", cursor: "pointer", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap",
+                background: activeTab === t.key ? "#0d1117" : "transparent",
+                color: activeTab === t.key ? "#EF9F27" : "#8b949e",
+                borderBottom: activeTab === t.key ? "2px solid #EF9F27" : "2px solid transparent" }}>
+              {t.icon} {t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Tab body */}
+        <div style={{ padding: "18px 22px" }}>
+          {activeTab === "rute" && (
+            <RuteLegTab
+              legs={legs} setLeg={setLeg} addLeg={addLeg} delLeg={delLeg} moveLeg={moveLeg}
+              order={order} tripId={tripId} headers={headers}
+              detail={detail}
+              copiedLeg={copiedLeg} copyLegLink={copyLegLink}
+              openMultiUnit={openMultiUnit} printKartuMuat={printKartuMuat}
+            />
+          )}
+          {activeTab === "foto" && <FotoTab detail={detail} loading={detailLoading} onView={setLightbox} />}
+          {activeTab === "checkpoint" && <CheckpointTab detail={detail} loading={detailLoading} onView={setLightbox} />}
+          {activeTab === "dokumen" && <DokumenTab detail={detail} loading={detailLoading} />}
+          {activeTab === "ringkasan" && <RingkasanTab legs={legs} detail={detail} />}
+        </div>
+
+        {/* Footer */}
+        <div className="adm-modal-foot" style={{ position: "sticky", bottom: 0, background: "#161b22" }}>
+          <button className="adm-btn adm-btn-ghost" onClick={onClose} disabled={saving}>Tutup</button>
           <button className="adm-btn adm-btn-gold" onClick={submit} disabled={saving}>
             {saving ? "Menyimpan..." : "Simpan Rute"}
           </button>
@@ -1934,7 +1959,327 @@ function LegsModal({ tripId, order, onClose, onSave, headers }) {
         </div>
       </div>
     )}
+
+    {/* Lightbox foto */}
+    {lightbox && (
+      <div onClick={() => setLightbox(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.9)", zIndex: 10000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, cursor: "zoom-out" }}>
+        <img src={lightbox} alt="" style={{ maxWidth: "100%", maxHeight: "100%", borderRadius: 8 }} />
+      </div>
+    )}
     </>
+  );
+}
+
+/* ── Tab: Rute Leg — kartu workflow per leg ── */
+function RuteLegTab({ legs, setLeg, addLeg, delLeg, moveLeg, order, tripId, headers, detail, copiedLeg, copyLegLink, openMultiUnit, printKartuMuat }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {legs.map((leg, i) => {
+        const isKapal = leg.tipe && leg.tipe.startsWith("Kapal");
+        const statusColor = LEG_STATUS_COLOR[leg.status] || LEG_STATUS_COLOR["Menunggu"];
+        const albumStage = isKapal ? "kapal" : (i === 0 ? "asal" : (i === legs.length - 1 ? "tujuan" : null));
+        const albumPhotos = albumStage ? (detail?.album?.[albumStage] || []) : [];
+
+        return (
+          <div key={i} style={{ background: "#0d1117", border: "1px solid #21262d", borderRadius: 12, overflow: "hidden" }}>
+            {/* 1. Header */}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", background: "#12161c", borderBottom: "1px solid #21262d" }}>
+              <div style={{ width: 34, height: 34, borderRadius: 9, background: "#1c2128", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, flexShrink: 0 }}>{TIPE_ICON[leg.tipe] || "📦"}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: "#e6edf3" }}>Leg {i + 1} · {leg.tipe}</span>
+                  <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 10, background: statusColor.bg, color: statusColor.color, border: `1px solid ${statusColor.border}` }}>{leg.status}</span>
+                </div>
+                {leg.eta && <div style={{ fontSize: 10, color: "#8b949e", marginTop: 2 }}>ETA {new Date(leg.eta).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })}</div>}
+              </div>
+              <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                <button onClick={() => moveLeg(i, -1)} disabled={i === 0} title="Naik" style={ICON_BTN}>↑</button>
+                <button onClick={() => moveLeg(i, 1)} disabled={i === legs.length - 1} title="Turun" style={ICON_BTN}>↓</button>
+                <button onClick={() => delLeg(i)} title="Hapus leg" style={{ ...ICON_BTN, color: "#f85149", borderColor: "#f85149" }}>✕</button>
+              </div>
+            </div>
+
+            <div style={{ padding: 16 }}>
+              {/* 2. Route */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+                <label style={MINI_LABEL}>Asal
+                  <input style={MINI_INPUT} value={leg.asal} onChange={e => setLeg(i, { asal: e.target.value })} placeholder="Pelabuhan / Kota" />
+                </label>
+                <label style={MINI_LABEL}>Tujuan
+                  <input style={MINI_INPUT} value={leg.tujuan} onChange={e => setLeg(i, { tujuan: e.target.value })} placeholder="Pelabuhan / Kota" />
+                </label>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 14 }}>
+                <label style={MINI_LABEL}>Tipe
+                  <select style={MINI_INPUT} value={leg.tipe} onChange={e => setLeg(i, { tipe: e.target.value })}>
+                    {LEG_TIPE.map(t => <option key={t}>{t}</option>)}
+                  </select>
+                </label>
+                <label style={MINI_LABEL}>Status
+                  <select style={MINI_INPUT} value={leg.status} onChange={e => setLeg(i, { status: e.target.value })}>
+                    {LEG_STATUS.map(s => <option key={s}>{s}</option>)}
+                  </select>
+                </label>
+                <label style={MINI_LABEL}>ETA
+                  <input type="date" style={MINI_INPUT} value={leg.eta} onChange={e => setLeg(i, { eta: e.target.value })} />
+                </label>
+              </div>
+
+              {/* 4. Checklist + field khusus tipe */}
+              {isKapal ? (
+                <div style={{ background: "#0d1a2d", border: "1px solid #1f3a5a", borderRadius: 9, padding: 12, marginBottom: 12 }}>
+                  <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 800, marginBottom: 8, letterSpacing: .5 }}>🚢 INFO KAPAL</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+                    <label style={MINI_LABEL}>Nama Kapal
+                      <input style={MINI_INPUT} value={leg.kapal || ""} onChange={e => setLeg(i, { kapal: e.target.value })} placeholder="KM Mutiara Persada" />
+                    </label>
+                    <label style={MINI_LABEL}>Marking / Kode
+                      <input style={MINI_INPUT} value={leg.marking || ""} onChange={e => setLeg(i, { marking: e.target.value })} placeholder="AAL-001" />
+                    </label>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 6 }}>
+                    <label style={MINI_LABEL}>Koordinator Kapal
+                      <input style={MINI_INPUT} value={leg.kord_kapal || ""} onChange={e => setLeg(i, { kord_kapal: e.target.value })} placeholder="Nama" />
+                    </label>
+                    <label style={MINI_LABEL}>HP Koordinator
+                      <input style={MINI_INPUT} value={leg.kord_kapal_hp || ""} onChange={e => setLeg(i, { kord_kapal_hp: e.target.value })} placeholder="08xx-xxxx" />
+                    </label>
+                  </div>
+                  <Checklist items={[
+                    { done: !!leg.kapal, label: "Nama kapal diisi" },
+                    { done: !!leg.marking, label: "Marking / kode ekspedisi diisi" },
+                    { done: albumPhotos.length > 0, label: `Foto di kapal (${albumPhotos.length})` },
+                  ]} />
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 4 }}>
+                    <button type="button" onClick={() => printKartuMuat(leg, order)} style={SOLID_BTN_BLUE}>🖨️ Kartu Muat (1 Unit)</button>
+                    <button type="button" onClick={() => openMultiUnit(leg)} style={GHOST_BTN_BLUE}>📋 Kartu Muat Multi Unit</button>
+                  </div>
+                  {/* 6. Link petugas pelabuhan */}
+                  <div style={{ marginTop: 10, padding: "10px 12px", background: "#0a1628", border: "1px solid #1f3a5a", borderRadius: 7 }}>
+                    <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 700, marginBottom: 6 }}>LINK PETUGAS PELABUHAN</div>
+                    <div style={{ fontSize: 10, color: "#4a6fa5", marginBottom: 8 }}>Kirim ke petugas pelabuhan buat upload foto kendaraan masuk / di dalam / bongkar kapal.</div>
+                    <button type="button" onClick={() => copyLegLink(leg, i)} disabled={!tripId}
+                      style={{ ...SOLID_BTN_BLUE, width: "100%", background: copiedLeg === i ? "#2ea043" : "#1f6feb" }}>
+                      {copiedLeg === i ? "✓ Tersalin!" : "🔗 Salin Link Petugas Pelabuhan"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ background: "#0a1628", border: "1px solid #1f3a5a", borderRadius: 9, padding: 12, marginBottom: 12 }}>
+                  <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 800, marginBottom: 8, letterSpacing: .5 }}>🚗 DRIVER</div>
+                  <DriverAutocomplete
+                    value={leg.driver || ""}
+                    hp={leg.driver_hp || ""}
+                    onChange={(val) => setLeg(i, { driver: val })}
+                    onSelect={(nama, hp) => setLeg(i, { driver: nama, driver_hp: hp })}
+                    headers={headers}
+                  />
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, margin: "10px 0 6px" }}>
+                    <label style={MINI_LABEL}>Koordinator Bayangan
+                      <input style={MINI_INPUT} value={leg.kord_bayangan || ""} onChange={e => setLeg(i, { kord_bayangan: e.target.value })} placeholder="Nama · agen/pawang driver" />
+                    </label>
+                    <label style={MINI_LABEL}>HP Koordinator
+                      <input style={MINI_INPUT} value={leg.kord_bayangan_hp || ""} onChange={e => setLeg(i, { kord_bayangan_hp: e.target.value })} placeholder="08xx-xxxx" />
+                    </label>
+                  </div>
+                  <Checklist items={[
+                    { done: !!leg.driver, label: "Driver ditugaskan" },
+                    { done: (detail?.daily_count || 0) > 0, label: `Checkpoint harian terisi (${detail?.daily_count || 0})` },
+                    { done: albumPhotos.length > 0, label: `Foto ${albumStage === "asal" ? "asal" : "tujuan"} (${albumPhotos.length})` },
+                  ]} />
+                  {/* 6. Link driver */}
+                  <div style={{ marginTop: 6, padding: "10px 12px", background: "#0d1117", border: "1px solid #21262d", borderRadius: 7 }}>
+                    <div style={{ fontSize: 10, color: "#8b949e", fontWeight: 700, marginBottom: 6 }}>LINK DRIVER LEG {i + 1}</div>
+                    <button type="button" onClick={() => copyLegLink(leg, i)} disabled={!tripId}
+                      style={{ ...SOLID_BTN_BLUE, width: "100%", background: copiedLeg === i ? "#2ea043" : "#1f6feb" }}>
+                      {copiedLeg === i ? "✓ Tersalin!" : "🔗 Salin Link Driver"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* 5. Galeri mini leg ini */}
+              {albumStage && (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 10, color: "#8b949e", fontWeight: 700, marginBottom: 6, letterSpacing: .5 }}>GALERI ({albumPhotos.length})</div>
+                  {albumPhotos.length === 0 ? (
+                    <div style={{ fontSize: 11, color: "#484f58", padding: "4px 0" }}>Belum ada foto.</div>
+                  ) : (
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {albumPhotos.slice(0, 4).map((p, pi) => (
+                        <img key={pi} src={resolveTripUrl(p.url)} alt="" style={{ width: 56, height: 56, borderRadius: 7, objectFit: "cover", border: "1px solid #21262d" }} />
+                      ))}
+                      {albumPhotos.length > 4 && (
+                        <div style={{ width: 56, height: 56, borderRadius: 7, background: "#0d1117", border: "1px solid #21262d", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "#8b949e", fontWeight: 700 }}>
+                          +{albumPhotos.length - 4}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 7. Catatan Leg */}
+              <label style={MINI_LABEL}>Catatan Leg
+                <textarea style={{ ...MINI_INPUT, minHeight: 50, resize: "vertical", fontFamily: "inherit" }} value={leg.catatan || ""} onChange={e => setLeg(i, { catatan: e.target.value })} placeholder="Catatan tambahan buat leg ini (opsional)" />
+              </label>
+            </div>
+          </div>
+        );
+      })}
+      <button onClick={addLeg} style={{ width: "100%", padding: "10px", border: "1px dashed #30363d", borderRadius: 9, background: "none", color: "#8b949e", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>+ Tambah Leg</button>
+    </div>
+  );
+}
+
+/* ── Tab: Foto — galeri per stage (asal/kapal/tujuan/dokumen) ── */
+function FotoTab({ detail, loading, onView }) {
+  if (loading) return <TabSkeleton />;
+  if (!detail) return <TabEmpty text="Data foto belum tersedia." />;
+  const album = detail.album || {};
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      {ALBUM_STAGES.map(stage => {
+        const photos = album[stage.key] || [];
+        return (
+          <div key={stage.key}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: "#e6edf3", marginBottom: 8 }}>{stage.icon} {stage.label} <span style={{ color: "#8b949e", fontWeight: 600 }}>({photos.length})</span></div>
+            {photos.length === 0 ? (
+              <div style={{ fontSize: 11, color: "#484f58" }}>Belum ada foto.</div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))", gap: 8 }}>
+                {photos.map((p, i) => (
+                  <div key={i} onClick={() => onView(resolveTripUrl(p.url))} style={{ cursor: "pointer" }}>
+                    <img src={resolveTripUrl(p.url)} alt="" style={{ width: "100%", aspectRatio: "1", borderRadius: 8, objectFit: "cover", border: "1px solid #21262d" }} />
+                    {p.catatan && <div style={{ fontSize: 9, color: "#8b949e", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.catatan}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ── Tab: Checkpoint — timeline checkpoint harian ── */
+function CheckpointTab({ detail, loading, onView }) {
+  if (loading) return <TabSkeleton />;
+  if (!detail) return <TabEmpty text="Data checkpoint belum tersedia." />;
+  const cps = [...(detail.daily_checkpoints || [])].reverse();
+  if (cps.length === 0) return <TabEmpty text="Belum ada checkpoint harian." />;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {cps.map((cp, i) => (
+        <div key={cp.id || i} style={{ display: "flex", gap: 12, background: "#0d1117", border: "1px solid #21262d", borderRadius: 10, padding: 12 }}>
+          {cp.url ? (
+            <img onClick={() => onView(resolveTripUrl(cp.url))} src={resolveTripUrl(cp.url)} alt="" style={{ width: 56, height: 56, borderRadius: 8, objectFit: "cover", flexShrink: 0, cursor: "pointer" }} />
+          ) : (
+            <div style={{ width: 56, height: 56, borderRadius: 8, background: "#161b22", flexShrink: 0 }} />
+          )}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              {cp.status && <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 10, background: "#0d2340", color: "#60a5fa", border: "1px solid #1f6feb" }}>{cp.status}</span>}
+              <span style={{ fontSize: 11, color: "#8b949e" }}>{fmtTs(cp.ts || cp.timestamp || cp.created_at)}</span>
+            </div>
+            {cp.catatan && <div style={{ fontSize: 11, color: "#c9d1d9", marginTop: 5 }}>{cp.catatan}</div>}
+            {cp.lat != null && cp.lng != null && (
+              <a href={`https://www.google.com/maps?q=${cp.lat},${cp.lng}`} target="_blank" rel="noreferrer" style={{ fontSize: 10, color: "#60a5fa", marginTop: 5, display: "inline-block" }}>
+                📍 {parseFloat(cp.lat).toFixed(4)}, {parseFloat(cp.lng).toFixed(4)} · Buka Maps
+              </a>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ── Tab: Dokumen — BASTK + Resi ── */
+function DokumenTab({ detail, loading }) {
+  if (loading) return <TabSkeleton />;
+  if (!detail) return <TabEmpty text="Data dokumen belum tersedia." />;
+  const bastk = detail.handover?.bastk || [];
+  const resi = detail.handover?.resi;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      <div>
+        <div style={{ fontSize: 12, fontWeight: 800, color: "#e6edf3", marginBottom: 8 }}>📄 BASTK <span style={{ color: "#8b949e", fontWeight: 600 }}>({bastk.length})</span></div>
+        {bastk.length === 0 ? <div style={{ fontSize: 11, color: "#484f58" }}>Belum ada dokumen BASTK.</div> : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))", gap: 8 }}>
+            {bastk.map((b, i) => {
+              const isPdf = /\.pdf$/i.test(b.url || "");
+              return (
+                <a key={i} href={resolveTripUrl(b.url)} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
+                  {isPdf ? (
+                    <div style={{ width: "100%", aspectRatio: "1", borderRadius: 8, border: "1px solid #21262d", background: "#0d1117", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>📕</div>
+                  ) : (
+                    <img src={resolveTripUrl(b.url)} alt="" style={{ width: "100%", aspectRatio: "1", borderRadius: 8, objectFit: "cover", border: "1px solid #21262d" }} />
+                  )}
+                </a>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      <div>
+        <div style={{ fontSize: 12, fontWeight: 800, color: "#e6edf3", marginBottom: 8 }}>🧾 Resi</div>
+        {!resi?.url ? <div style={{ fontSize: 11, color: "#484f58" }}>Belum ada foto resi.</div> : (
+          <a href={resolveTripUrl(resi.url)} target="_blank" rel="noreferrer" style={{ display: "inline-flex", gap: 10, alignItems: "center", background: "#0d1117", border: "1px solid #21262d", borderRadius: 10, padding: 10, textDecoration: "none" }}>
+            <img src={resolveTripUrl(resi.url)} alt="" style={{ width: 56, height: 56, borderRadius: 8, objectFit: "cover" }} />
+            <div>
+              <div style={{ fontSize: 11, color: "#e6edf3", fontWeight: 700 }}>{resi.no_resi || "No. resi belum diisi"}</div>
+              <div style={{ fontSize: 10, color: "#8b949e", marginTop: 2 }}>Klik buat lihat foto</div>
+            </div>
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Tab: Ringkasan — statistik + status semua leg ── */
+function RingkasanTab({ legs, detail }) {
+  const doneLegs = legs.filter(l => l.status === "Selesai").length;
+  const pct = legs.length ? Math.round((doneLegs / legs.length) * 100) : 0;
+  const stats = [
+    { label: "Total Leg", val: legs.length },
+    { label: "Leg Selesai", val: doneLegs },
+    { label: "Checkpoint Harian", val: detail?.daily_count ?? "—" },
+    { label: "Foto Awal", val: detail ? `${detail.initial_done ?? 0}/5` : "—" },
+  ];
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10, marginBottom: 18 }}>
+        {stats.map(s => (
+          <div key={s.label} style={{ background: "#0d1117", border: "1px solid #21262d", borderRadius: 10, padding: "12px 14px" }}>
+            <div style={{ fontSize: 20, fontWeight: 800, color: "#EF9F27" }}>{s.val}</div>
+            <div style={{ fontSize: 10, color: "#8b949e", marginTop: 2 }}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#8b949e", marginBottom: 6 }}>
+          <span>Progress Keseluruhan</span><span style={{ color: "#EF9F27", fontWeight: 700 }}>{pct}%</span>
+        </div>
+        <div style={{ height: 8, background: "#0d1117", borderRadius: 5, overflow: "hidden", border: "1px solid #21262d" }}>
+          <div style={{ height: "100%", width: `${pct}%`, background: "#EF9F27" }} />
+        </div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {legs.map((l, i) => {
+          const sc = LEG_STATUS_COLOR[l.status] || LEG_STATUS_COLOR["Menunggu"];
+          return (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, background: "#0d1117", border: "1px solid #21262d", borderRadius: 8, padding: "9px 12px" }}>
+              <span style={{ fontSize: 15 }}>{TIPE_ICON[l.tipe] || "📦"}</span>
+              <div style={{ flex: 1, fontSize: 12, color: "#e6edf3", fontWeight: 700 }}>Leg {i + 1} · {l.asal || "—"} → {l.tujuan || "—"}</div>
+              <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 10, background: sc.bg, color: sc.color, border: `1px solid ${sc.border}` }}>{l.status}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
