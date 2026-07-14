@@ -882,7 +882,18 @@ const ALBUM_STAGES = [
 function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLegs, onOpenBonus, headers, kordList = [] }) {
   const [uploadingStage, setUploadingStage] = useState(null); // stage key lagi upload
   const [expanded, setExpanded] = useState(false);
+  const [copiedPo, setCopiedPo] = useState(false);
   const albumFileRefs = useRef({});
+
+  const copyPoText = (e) => {
+    e.stopPropagation();
+    const model = (order.vehicle_type || "").trim().split(/\s+/).slice(1).join(" ") || order.vehicle_type || "—";
+    const rute = `${(order.asal_kota || "").toUpperCase()}-${(order.tujuan_kota || "").toUpperCase()}`;
+    const text = [model, order.nopol || "—", order.no_rangka || "—", rute].join(" ");
+    navigator.clipboard.writeText(text);
+    setCopiedPo(true);
+    setTimeout(() => setCopiedPo(false), 1800);
+  };
 
   const uploadFotoAlbum = async (stage, files) => {
     if (!order.trip_id || !files?.length) return;
@@ -1193,8 +1204,16 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
 
         <ProgressTimeline order={order} />
 
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
           <div style={{ fontSize: 10.5, color: "#495267", textAlign: "right" }}>{fmtDate(order.created_at)}</div>
+          <button
+            onClick={copyPoText}
+            title="Salin buat PO Jurnal Mekari (Model · Nopol · Rangka · Rute)"
+            style={{ padding: "7px 14px", borderRadius: 8, border: `1px solid ${copiedPo ? "#238636" : "#1f2937"}`, background: copiedPo ? "#0d2a10" : "#111826", color: copiedPo ? "#3fb950" : "#9aa4b6", fontSize: 11.5, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}
+            data-testid={`adm-order-copy-po-${order.order_id}`}
+          >
+            {copiedPo ? "✓ Tersalin" : "📋 Copy PO"}
+          </button>
           <button
             onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}
             style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid #1f2937", background: "#111826", color: "#9aa4b6", fontSize: 11.5, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}
