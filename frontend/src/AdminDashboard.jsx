@@ -1114,6 +1114,157 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
     const w = window.open("", "_blank"); w.document.write(html); w.document.close();
   };
 
+  const printInvoice = () => {
+    const priceStr = window.prompt("Harga jasa pengiriman (Rp) — angka saja, tanpa titik/koma:", "");
+    if (priceStr === null) return; // batal
+    const priceNum = parseInt((priceStr || "").replace(/[^0-9]/g, ""), 10) || 0;
+    if (!priceNum) { alert("Harga harus diisi buat bikin invoice."); return; }
+    const withTax = window.confirm("Kenakan PPN Logistik 1.1%?\n\nOK = pakai PPN 1.1%\nBatal = tanpa pajak (fretail)");
+    const ppn = withTax ? Math.round(priceNum * 0.011) : 0;
+    const total = priceNum + ppn;
+    const fRp = (n) => "Rp " + n.toLocaleString("id-ID");
+
+    const tgl = new Date().toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
+    const noInvoice = `INV-${order.order_id?.slice(-6) || "000000"}`;
+    const isiContents = (order.isi_kiriman || "").trim()
+      || `${order.vehicle_type || ""} ${order.nopol ? "· " + order.nopol : ""}`.trim();
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Invoice ${noInvoice}</title>
+    <style>
+      * { margin:0; padding:0; box-sizing:border-box; }
+      body { font-family: Arial, sans-serif; font-size: 11px; color: #000; background: #fff; }
+      .sheet { padding: 12mm; }
+      .outer { border: 2px solid #000; width: 100%; position: relative; }
+      .header { display: flex; border-bottom: 2px solid #000; }
+      .logo-box { width: 220px; border-right: 2px solid #000; padding: 10px 12px; display: flex; flex-direction: column; justify-content: center; }
+      .logo-name { font-size: 15px; font-weight: 900; color: #000; letter-spacing: 1px; line-height: 1.2; }
+      .logo-tagline { font-size: 9px; color: #333; margin-top: 3px; font-style: italic; }
+      .logo-addr { font-size: 9px; color: #333; margin-top: 5px; line-height: 1.5; }
+      .title-box { flex: 1; padding: 10px 14px; }
+      .title-main { font-size: 16px; font-weight: 900; text-align: center; letter-spacing: 2px; }
+      .title-sub { font-size: 10px; text-align: center; color: #333; margin-top: 2px; font-style: italic; }
+      .no-box { border: 1px solid #000; display: inline-block; padding: 3px 12px; margin-top: 8px; font-size: 15px; font-weight: 900; letter-spacing: 2px; }
+      .info-row { display: flex; border-bottom: 1px solid #000; }
+      .info-cell { flex: 1; border-right: 1px solid #000; padding: 6px 10px; }
+      .info-cell:last-child { border-right: none; }
+      .lbl { font-size: 8.5px; font-weight: 700; text-transform: uppercase; color: #555; letter-spacing: .5px; }
+      .val { font-size: 12px; font-weight: 600; margin-top: 2px; min-height: 18px; }
+      table { width: 100%; border-collapse: collapse; }
+      th { background: #e8e8e8; border: 1px solid #000; padding: 6px 8px; font-size: 9.5px; text-align: center; font-weight: 700; text-transform: uppercase; }
+      td { border: 1px solid #000; padding: 8px; font-size: 11.5px; vertical-align: top; }
+      .td-no { text-align: center; width: 30px; }
+      .td-desc { width: 46%; }
+      .td-num { text-align: right; }
+      .totals-wrap { display: flex; border-bottom: 1px solid #000; }
+      .totals-note { flex: 1; padding: 10px 12px; font-size: 9.5px; color: #333; line-height: 1.6; }
+      .totals-box { width: 260px; border-left: 1px solid #000; }
+      .totals-row { display: flex; justify-content: space-between; padding: 6px 12px; border-bottom: 1px solid #ccc; font-size: 11px; }
+      .totals-row.grand { border-top: 2px solid #000; border-bottom: none; font-size: 13px; font-weight: 900; padding: 8px 12px; }
+      .pay-box { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-bottom: 1px solid #000; }
+      .pay-badge { width: 44px; height: 44px; border-radius: 6px; background: #0054a6; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 11px; flex-shrink: 0; }
+      .pay-num { font-size: 15px; font-weight: 900; letter-spacing: 1px; }
+      .pay-name { font-size: 9.5px; color: #333; margin-top: 2px; }
+      .sign-row { display: flex; }
+      .sign-cell { flex: 1; padding: 10px 12px; }
+      .sign-cell:first-child { border-right: 1px solid #000; }
+      .sign-lbl { font-size: 8.5px; font-weight: 700; text-transform: uppercase; color: #555; }
+      .sign-space { height: 46px; }
+      .sign-name { font-size: 9.5px; border-top: 1px solid #555; margin-top: 4px; padding-top: 2px; color: #333; }
+      @media print { @page { margin: 0; size: A4 portrait; } body { padding: 0; } }
+    </style></head><body>
+    <div class="sheet">
+      <div class="outer">
+        <div class="header">
+          <div class="logo-box">
+            <div class="logo-name">PT. ALYSSA<br>AUTO LOGISTIK</div>
+            <div class="logo-tagline">Logistic on going</div>
+            <div class="logo-addr">Jl Enim Raya 2 No 86<br>Jakarta Utara, DKI Jakarta 14330<br>Telp: 0818 631 135</div>
+          </div>
+          <div class="title-box">
+            <div class="title-main">INVOICE</div>
+            <div class="title-sub">Tagihan Jasa Pengiriman Kendaraan</div>
+            <div style="text-align:center;margin-top:8px"><div class="no-box">${noInvoice}</div></div>
+            <div style="text-align:right;font-size:9.5px;margin-top:6px;color:#555">Tanggal: ${tgl}</div>
+          </div>
+        </div>
+
+        <div class="info-row">
+          <div class="info-cell" style="flex:2">
+            <div class="lbl">Ditagihkan Kepada / Bill To</div>
+            <div class="val">${order.customer_nama || "&nbsp;"}</div>
+          </div>
+          <div class="info-cell" style="flex:1">
+            <div class="lbl">Ref. PO / Order ID</div>
+            <div class="val">${order.order_id || "&nbsp;"}</div>
+          </div>
+          <div class="info-cell" style="flex:1">
+            <div class="lbl">Rute</div>
+            <div class="val">${order.asal_kota || "—"} → ${order.tujuan_kota || "—"}</div>
+          </div>
+        </div>
+
+        <table>
+          <thead><tr>
+            <th class="td-no">#</th>
+            <th class="td-desc">Deskripsi</th>
+            <th>Qty</th>
+            <th>Harga Satuan</th>
+            <th>Jumlah</th>
+          </tr></thead>
+          <tbody>
+            <tr>
+              <td class="td-no">1</td>
+              <td class="td-desc">
+                Jasa pengiriman kendaraan — ${isiContents || "&nbsp;"}<br>
+                <span style="font-size:9.5px;color:#666">Rute: ${order.asal_kota || "—"} → ${order.tujuan_kota || "—"}${order.no_rangka ? " · No. Rangka: " + order.no_rangka : ""}</span>
+              </td>
+              <td class="td-num" style="text-align:center">1</td>
+              <td class="td-num">${fRp(priceNum)}</td>
+              <td class="td-num">${fRp(priceNum)}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="totals-wrap">
+          <div class="totals-note">
+            <b>CATATAN / NOTES:</b><br>
+            Pembayaran mohon dilakukan sesuai total tagihan di atas.<br>
+            Invoice ini sah tanpa tanda tangan basah bila dicetak dari sistem.
+          </div>
+          <div class="totals-box">
+            <div class="totals-row"><span>Subtotal</span><span>${fRp(priceNum)}</span></div>
+            <div class="totals-row"><span>PPN Logistik (1.1%)</span><span>${withTax ? fRp(ppn) : "—"}</span></div>
+            <div class="totals-row grand"><span>TOTAL</span><span>${fRp(total)}</span></div>
+          </div>
+        </div>
+
+        <div class="pay-box">
+          <div class="pay-badge">BCA</div>
+          <div>
+            <div class="pay-num">0072-8902-71</div>
+            <div class="pay-name">a.n. PT ALYSSA AUTO LOGISTIK</div>
+          </div>
+        </div>
+
+        <div class="sign-row">
+          <div class="sign-cell">
+            <div class="sign-lbl">Hormat Kami</div>
+            <div class="sign-space"></div>
+            <div class="sign-name">PT. Alyssa Auto Logistik</div>
+          </div>
+          <div class="sign-cell">
+            <div class="sign-lbl">Disetujui / Diterima Oleh</div>
+            <div class="sign-space"></div>
+            <div class="sign-name">${order.customer_nama || "_____________"}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script>window.onload=()=>window.print()<\/script>
+    </body></html>`;
+    const w = window.open("", "_blank"); w.document.write(html); w.document.close();
+  };
+
   const [editDriver, setEditDriver] = useState(false);
   const [driverDraft, setDriverDraft] = useState(order.driver_id || "");
   const [editNama, setEditNama] = useState(false);
@@ -1500,6 +1651,10 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
         <button className="adm-btn adm-btn-sm" onClick={() => printSuratJalan()}
           style={{ background: "#1a2e1a", border: "1px solid #3fb950", color: "#3fb950" }}>
           📄 Surat Jalan
+        </button>
+        <button className="adm-btn adm-btn-sm" onClick={() => printInvoice()} data-testid={`adm-invoice-${order.order_id}`}
+          style={{ background: "#1a2e3a", border: "1px solid #58a6ff", color: "#58a6ff" }}>
+          🧾 Invoice
         </button>
         {order.trip_id && (
           <button className="adm-btn adm-btn-purple adm-btn-sm" onClick={() => onOdoo(order.order_id)} data-testid={`adm-odoo-${order.order_id}`}>
