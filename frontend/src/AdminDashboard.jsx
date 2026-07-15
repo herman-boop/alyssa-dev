@@ -890,6 +890,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
   const [uploadingStage, setUploadingStage] = useState(null); // stage key lagi upload
   const [expanded, setExpanded] = useState(false);
   const [copiedPo, setCopiedPo] = useState(false);
+  const [showInvoice, setShowInvoice] = useState(false);
   const albumFileRefs = useRef({});
 
   const copyPoText = (e) => {
@@ -1114,12 +1115,8 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
     const w = window.open("", "_blank"); w.document.write(html); w.document.close();
   };
 
-  const printInvoice = () => {
-    const priceStr = window.prompt("Harga jasa pengiriman (Rp) — angka saja, tanpa titik/koma:", "");
-    if (priceStr === null) return; // batal
-    const priceNum = parseInt((priceStr || "").replace(/[^0-9]/g, ""), 10) || 0;
-    if (!priceNum) { alert("Harga harus diisi buat bikin invoice."); return; }
-    const withTax = window.confirm("Kenakan PPN Logistik 1.1%?\n\nOK = pakai PPN 1.1%\nBatal = tanpa pajak (fretail)");
+  const printInvoice = (priceNum, withTax) => {
+    if (!priceNum) return;
     const ppn = withTax ? Math.round(priceNum * 0.011) : 0;
     const total = priceNum + ppn;
     const fRp = (n) => "Rp " + n.toLocaleString("id-ID");
@@ -1652,10 +1649,17 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
           style={{ background: "#1a2e1a", border: "1px solid #3fb950", color: "#3fb950" }}>
           📄 Surat Jalan
         </button>
-        <button className="adm-btn adm-btn-sm" onClick={() => printInvoice()} data-testid={`adm-invoice-${order.order_id}`}
+        <button className="adm-btn adm-btn-sm" onClick={(e) => { e.stopPropagation(); setShowInvoice(true); }} data-testid={`adm-invoice-${order.order_id}`}
           style={{ background: "#1a2e3a", border: "1px solid #58a6ff", color: "#58a6ff" }}>
           🧾 Invoice
         </button>
+        {showInvoice && (
+          <InvoiceModal
+            order={order}
+            onClose={() => setShowInvoice(false)}
+            onPrint={(priceNum, withTax) => { printInvoice(priceNum, withTax); setShowInvoice(false); }}
+          />
+        )}
         {order.trip_id && (
           <button className="adm-btn adm-btn-purple adm-btn-sm" onClick={() => onOdoo(order.order_id)} data-testid={`adm-odoo-${order.order_id}`}>
             <IcoOdoo /> Odoo
@@ -1813,6 +1817,80 @@ function BonusModal({ tripId, order, headers, onClose, onSave }) {
           <button className="adm-btn adm-btn-ghost" onClick={onClose} disabled={submitting}>Batal</button>
           <button className="adm-btn adm-btn-gold" onClick={submit} disabled={submitting || loading} data-testid="adm-bonus-submit">
             {submitting ? "Menyimpan..." : "Simpan"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════
+   INVOICE MODAL
+════════════════════════════════════════ */
+function InvoiceModal({ order, onClose, onPrint }) {
+  const [price, setPrice] = useState("");
+  const [withTax, setWithTax] = useState(true);
+
+  const priceNum = parseInt((price || "").replace(/[^0-9]/g, ""), 10) || 0;
+  const priceFmt = priceNum ? priceNum.toLocaleString("id-ID") : "";
+  const ppn = withTax ? Math.round(priceNum * 0.011) : 0;
+  const total = priceNum + ppn;
+  const fRp = (n) => "Rp " + n.toLocaleString("id-ID");
+
+  const submit = () => {
+    if (!priceNum) return;
+    onPrint(priceNum, withTax);
+  };
+
+  return (
+    <div className="adm-modal-bg" onClick={onClose} data-testid="adm-invoice-modal">
+      <div className="adm-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
+        <div className="adm-modal-head">
+          <div>
+            <div className="adm-modal-title">🧾 Buat Invoice</div>
+            <div className="adm-modal-sub">{order.order_id} &middot; {order.customer_nama || "—"}</div>
+          </div>
+          <button className="adm-modal-close" onClick={onClose} aria-label="Tutup">✕</button>
+        </div>
+        <div className="adm-modal-body">
+          <div className="adm-modal-info" style={{ marginBottom: 14 }}>
+            <strong>{order.vehicle_type || order.isi_kiriman || "Kiriman"}</strong> · {order.asal_kota || "—"} &rarr; {order.tujuan_kota || "—"}
+          </div>
+          <label style={{ display: "block", marginBottom: 14 }}>
+            <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", marginBottom: 5, fontWeight: 700 }}>Harga Jasa Pengiriman (Rp)</span>
+            <input
+              type="text"
+              inputMode="numeric"
+              className="adm-input"
+              autoFocus
+              value={priceFmt}
+              onChange={(e) => setPrice(e.target.value)}
+              placeholder="contoh: 15.000.000"
+              data-testid="adm-invoice-price"
+            />
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={withTax}
+              onChange={(e) => setWithTax(e.target.checked)}
+              style={{ accentColor: "#58a6ff", width: 16, height: 16 }}
+              data-testid="adm-invoice-tax"
+            />
+            <span>Kenakan PPN Logistik (1.1%)</span>
+          </label>
+          {priceNum > 0 && (
+            <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px", fontSize: 13 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>Subtotal</span><span>{fRp(priceNum)}</span></div>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>PPN 1.1%</span><span>{withTax ? fRp(ppn) : "—"}</span></div>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0 0", marginTop: 4, borderTop: "1px solid var(--border)", fontWeight: 800 }}><span>Total</span><span>{fRp(total)}</span></div>
+            </div>
+          )}
+        </div>
+        <div className="adm-modal-foot">
+          <button className="adm-btn adm-btn-ghost" onClick={onClose}>Batal</button>
+          <button className="adm-btn adm-btn-blue" onClick={submit} disabled={!priceNum} data-testid="adm-invoice-submit">
+            Cetak Invoice
           </button>
         </div>
       </div>
