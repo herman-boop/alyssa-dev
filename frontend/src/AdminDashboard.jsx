@@ -414,6 +414,13 @@ function Dashboard({ pin, onLogout }) {
         link={`${window.location.origin}/order`}
       />
 
+      {/* ── Link Panduan Pelanggan (compact card) ── */}
+      <LinkCardMini
+        title="Link Panduan Pelanggan"
+        sub="Kirim ke pelanggan yang lagi kirim kendaraan — panduan tahap demi tahap"
+        link={`${window.location.origin}/panduan-kirim`}
+      />
+
       {/* ── Filters (satu baris) ── */}
       <section className="adm-filterbar-v2" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 18 }}>
         <div className="adm-search-wrap" style={{ flex: "1 1 240px", minWidth: 200 }}>

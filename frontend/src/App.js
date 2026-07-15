@@ -17,6 +17,7 @@ import SupplierRingkasan from "@/SupplierRingkasan";
 import SelisihRingkasan from "@/SelisihRingkasan";
 import KompensasiRingkasan from "@/KompensasiRingkasan";
 import SupplierQuoteFill from "@/SupplierQuoteFill";
+import CustomerGuidePage from "@/CustomerGuidePage";
 
 // Resolve path segment: /track/TRIP-XXX -> "TRIP-XXX"
 function pathSegment(pathname, prefix) {
@@ -38,6 +39,7 @@ function App() {
     if (p === "/daftar-driver")     return { route: "daftar-driver" };
     if (p === "/guide")             return { route: "guide" };
     if (p === "/koordinator")       return { route: "koordinator" };
+    if (p === "/panduan-kirim")     return { route: "panduan-kirim" };
     if (p.startsWith("/harga/"))     return { route: "harga" };
     if (p.startsWith("/track/"))    return { route: "track" };
     if (p.startsWith("/trip/"))     return { route: "driver" };
@@ -100,6 +102,7 @@ function App() {
   if (route === "selisih-ringkasan") return <SelisihRingkasan />;
   if (route === "kompensasi-ringkasan") return <KompensasiRingkasan />;
   if (route === "minta-harga") return <SupplierQuoteFill />;
+  if (route === "panduan-kirim") return <CustomerGuidePage />;
   return <Homepage />;
 }
 
