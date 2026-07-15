@@ -161,6 +161,7 @@ function Dashboard({ pin, onLogout }) {
   const [dateTo, setDateTo] = useState("");
   const [driverFilter, setDriverFilter] = useState("");
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [convertModal, setConvertModal] = useState(null);
   const [odooModal, setOdooModal] = useState(null);
   const [legsModal, setLegsModal] = useState(null);
@@ -302,10 +303,11 @@ function Dashboard({ pin, onLogout }) {
   const section = SECTION_META[activeTab] || SECTION_META.pesanan;
 
   return (
-    <div data-testid="adm-dashboard" style={{ display: "flex", minHeight: "100vh", background: "#0a0e14" }}>
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
+    <div className="adm-shell" data-testid="adm-dashboard" style={{ display: "flex", minHeight: "100vh", background: "#0a0e14" }}>
+      <div className={`adm-sidebar-backdrop${sidebarOpen ? " open" : ""}`} onClick={() => setSidebarOpen(false)} />
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} open={sidebarOpen} onNavigate={() => setSidebarOpen(false)} />
 
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+      <div className="adm-main" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
         <TopHeader
           title={section.title}
           sub={section.sub}
@@ -316,9 +318,10 @@ function Dashboard({ pin, onLogout }) {
           profileMenuOpen={profileMenuOpen}
           setProfileMenuOpen={setProfileMenuOpen}
           onLogout={onLogout}
+          onOpenSidebar={() => setSidebarOpen(true)}
         />
 
-        <div style={{ padding: "22px 28px 40px", maxWidth: 1180, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+        <div className="adm-content-wrap" style={{ padding: "22px 28px 40px", maxWidth: 1180, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
 
       {activeTab === "kalkulator" && (
         <div style={{ maxWidth: 900, margin: "0 auto" }}>
@@ -331,7 +334,7 @@ function Dashboard({ pin, onLogout }) {
           <div style={{ maxWidth: 900, margin: "12px auto 0", padding: "0 16px" }}>
             <div style={{ background: "#1a4a2a", border: "1px solid #2ea043", borderRadius: 10, padding: "10px 16px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
               <span style={{ fontSize: 13, color: "#56d364", fontWeight: 700 }}>🔗 Link Daftar Driver:</span>
-              <code style={{ flex: 1, fontSize: 13, color: "#e6edf3", background: "#0d1117", padding: "5px 10px", borderRadius: 6, border: "1px solid #30363d", wordBreak: "break-all" }}>
+              <code style={{ flex: "1 1 100%", minWidth: 0, fontSize: 13, color: "#e6edf3", background: "#0d1117", padding: "5px 10px", borderRadius: 6, border: "1px solid #30363d", wordBreak: "break-all", boxSizing: "border-box" }}>
                 {window.location.origin}/daftar-driver
               </code>
               <button onClick={() => navigator.clipboard.writeText(`${window.location.origin}/daftar-driver`)}
@@ -388,7 +391,7 @@ function Dashboard({ pin, onLogout }) {
 
       {/* ── Metric row ── */}
       {stats && (
-        <section style={{ display: "flex", gap: 12, marginBottom: 18, overflowX: "auto", paddingBottom: 2 }} data-testid="adm-stats">
+        <section className="adm-metric-row" style={{ display: "flex", gap: 12, marginBottom: 18, overflowX: "auto", paddingBottom: 2 }} data-testid="adm-stats">
           <MetricCard label="Total Pesanan" value={stats.total} icon="📋" />
           {STATUS_LIST.map((s) => (
             <MetricCard
@@ -412,7 +415,7 @@ function Dashboard({ pin, onLogout }) {
       />
 
       {/* ── Filters (satu baris) ── */}
-      <section style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 18 }}>
+      <section className="adm-filterbar-v2" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 18 }}>
         <div className="adm-search-wrap" style={{ flex: "1 1 240px", minWidth: 200 }}>
           <span className="adm-search-ico"><IcoSearch /></span>
           <input
@@ -576,11 +579,11 @@ const SIDEBAR_TOOLS = [
   { key: "minta-harga", label: "Minta Harga" },
 ];
 
-function Sidebar({ activeTab, setActiveTab }) {
+function Sidebar({ activeTab, setActiveTab, open, onNavigate }) {
   const NavItem = ({ item, i }) => (
     <button
       key={`${item.key}-${i}`}
-      onClick={() => setActiveTab(item.key)}
+      onClick={() => { setActiveTab(item.key); if (onNavigate) onNavigate(); }}
       style={{
         display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "9px 14px", marginBottom: 2,
         border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600, textAlign: "left",
@@ -597,7 +600,7 @@ function Sidebar({ activeTab, setActiveTab }) {
   );
 
   return (
-    <aside style={{ width: 232, flexShrink: 0, background: "#0b0f17", borderRight: "1px solid #1a2130", display: "flex", flexDirection: "column", padding: "18px 12px", position: "sticky", top: 0, height: "100vh", overflowY: "auto" }}>
+    <aside className={`adm-sidebar${open ? " open" : ""}`} style={{ width: 232, flexShrink: 0, background: "#0b0f17", borderRight: "1px solid #1a2130", display: "flex", flexDirection: "column", padding: "18px 12px", position: "sticky", top: 0, height: "100vh", overflowY: "auto" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "4px 8px 20px" }}>
         <Logo size={30} />
         <div>
@@ -627,23 +630,27 @@ function Sidebar({ activeTab, setActiveTab }) {
 /* ════════════════════════════════════════
    TOP HEADER
 ════════════════════════════════════════ */
-function TopHeader({ title, sub, search, onSearch, onExport, onRefresh, profileMenuOpen, setProfileMenuOpen, onLogout }) {
+function TopHeader({ title, sub, search, onSearch, onExport, onRefresh, profileMenuOpen, setProfileMenuOpen, onLogout, onOpenSidebar }) {
   const iconBtn = { width: 34, height: 34, borderRadius: 8, border: "1px solid #1f2937", background: "#111826", color: "#9aa4b6", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: 14, flexShrink: 0 };
   return (
-    <header style={{ padding: "18px 28px", borderBottom: "1px solid #171e2c", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap", background: "#0a0e14" }}>
-      <div>
-        <div style={{ fontSize: 19, fontWeight: 800, color: "#f2f5fa" }}>{title}</div>
-        <div style={{ fontSize: 12, color: "#6b7688", marginTop: 2 }}>{sub}</div>
+    <header className="adm-topheader-v2" style={{ padding: "18px 28px", borderBottom: "1px solid #171e2c", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap", background: "#0a0e14" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+        <button className="adm-hamburger" onClick={onOpenSidebar} style={{ ...iconBtn, display: "none" }} aria-label="Buka menu" data-testid="adm-hamburger">☰</button>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 19, fontWeight: 800, color: "#f2f5fa", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{title}</div>
+          <div style={{ fontSize: 12, color: "#6b7688", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sub}</div>
+        </div>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         {onSearch && (
-          <div style={{ position: "relative" }}>
+          <div className="adm-input-fluid" style={{ position: "relative" }}>
             <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#5b6577", fontSize: 12 }}>⌕</span>
             <input
               value={search}
               onChange={(e) => onSearch(e.target.value)}
               placeholder="Cari pesanan..."
-              style={{ width: 200, padding: "8px 12px 8px 28px", borderRadius: 8, border: "1px solid #1f2937", background: "#111826", color: "#e6edf3", fontSize: 12.5, outline: "none" }}
+              className="adm-input-fluid"
+              style={{ width: 200, padding: "8px 12px 8px 28px", borderRadius: 8, border: "1px solid #1f2937", background: "#111826", color: "#e6edf3", fontSize: 12.5, outline: "none", boxSizing: "border-box" }}
             />
           </div>
         )}
@@ -713,13 +720,13 @@ function MetricCard({ label, value, icon, tone, onClick, active, testid }) {
 function LinkCardMini({ title, sub, link }) {
   const [copied, setCopied] = useState(false);
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px", borderRadius: 12, background: "#0e1420", border: "1px solid #1a2130", marginBottom: 18 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px", borderRadius: 12, background: "#0e1420", border: "1px solid #1a2130", marginBottom: 18, flexWrap: "wrap" }}>
       <div style={{ width: 34, height: 34, borderRadius: 9, background: "#0d2340", color: "#60a5fa", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, flexShrink: 0 }}>🔗</div>
-      <div style={{ minWidth: 160 }}>
+      <div style={{ minWidth: 0, flex: "0 1 auto" }}>
         <div style={{ fontSize: 12.5, fontWeight: 700, color: "#e6edf3" }}>{title}</div>
         <div style={{ fontSize: 10.5, color: "#6b7688", marginTop: 1 }}>{sub}</div>
       </div>
-      <code style={{ flex: 1, fontSize: 12, color: "#9aa4b6", background: "#0a0e14", padding: "7px 12px", borderRadius: 7, border: "1px solid #1a2130", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{link}</code>
+      <code style={{ flex: "1 1 200px", minWidth: 0, fontSize: 12, color: "#9aa4b6", background: "#0a0e14", padding: "7px 12px", borderRadius: 7, border: "1px solid #1a2130", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", boxSizing: "border-box" }}>{link}</code>
       <button
         onClick={() => { navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 1800); }}
         style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: copied ? "#238636" : "#1f6feb", color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap", flexShrink: 0 }}
@@ -801,7 +808,7 @@ function LaporanPage({ stats, onExportCsv }) {
   if (!stats) return <div style={{ color: "#6b7688", fontSize: 13, padding: 40, textAlign: "center" }}>Memuat data...</div>;
   return (
     <div>
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20 }}>
+      <div className="adm-metric-row" style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20 }}>
         <MetricCard label="Total Pesanan" value={stats.total} icon="📋" />
         {STATUS_LIST.map((s) => (
           <MetricCard key={s} label={STATUS_LABEL[s].txt} value={stats.by_status?.[s] || 0} tone={STATUS_TONE[s]} />
@@ -1171,6 +1178,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
       {/* Compact summary row — always visible */}
       <div
         onClick={() => setExpanded((v) => !v)}
+        className="adm-order-summary"
         style={{ display: "flex", alignItems: "center", gap: 20, padding: "14px 18px", cursor: "pointer", flexWrap: "wrap" }}
         data-testid={`adm-order-summary-${order.order_id}`}
       >

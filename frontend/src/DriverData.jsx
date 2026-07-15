@@ -336,7 +336,7 @@ export default function DriverData({ embedded = false }) {
       </div>
 
       {/* Metric row */}
-      <div style={{ display: "flex", gap: 10, padding: "14px 20px", flexWrap: "wrap" }}>
+      <div className="adm-metric-row" style={{ display: "flex", gap: 10, padding: "14px 20px", flexWrap: "wrap" }}>
         {[
           { label: "Total Driver", val: drivers.length, icon: "👤", color: "#e6edf3" },
           { label: "Aktif", val: drivers.filter(d => d.status === "aktif").length, icon: "🟢", color: "#56d364" },
@@ -357,7 +357,7 @@ export default function DriverData({ embedded = false }) {
       </div>
 
       {/* Filter bar */}
-      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "0 20px 16px" }}>
+      <div className="adm-filterbar-v2" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "0 20px 16px" }}>
         <div style={{ position: "relative", flex: "1 1 220px", minWidth: 200 }}>
           <span style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "#8b949e" }}><IcoSearch /></span>
           <input style={{ ...S.input, paddingLeft: 30 }} placeholder="Cari nama, ID driver, nomor HP..." value={search} onChange={e => setSearch(e.target.value)} />
@@ -445,7 +445,7 @@ function DriverCard({ drv, stats, onEdit, onDelete, onDetail, onPrint }) {
   ];
 
   return (
-    <div style={{ background: "#161b22", border: "1px solid #21262d", borderLeft: `3px solid ${t.color}`, borderRadius: 12, padding: "16px 18px", display: "flex", alignItems: "center", gap: 22, flexWrap: "wrap" }}>
+    <div className="adm-driver-card" style={{ background: "#161b22", border: "1px solid #21262d", borderLeft: `3px solid ${t.color}`, borderRadius: 12, padding: "16px 18px", display: "flex", alignItems: "center", gap: 22, flexWrap: "wrap" }}>
 
       {/* Identitas */}
       <div style={{ display: "flex", gap: 12, alignItems: "center", minWidth: 220, flex: "1 1 220px" }}>

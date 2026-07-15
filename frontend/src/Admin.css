@@ -848,3 +848,86 @@
   .adm-list { padding: 10px 12px; }
   .adm-filters { gap: 8px; }
 }
+
+/* ════════════════════════════════════════
+   RESPONSIVE SHELL — Sidebar drawer + mobile/tablet/desktop
+   Breakpoints: <768px mobile · 768-1023px tablet · >=1024px desktop
+════════════════════════════════════════ */
+.adm-shell { overflow-x: hidden; max-width: 100vw; }
+
+.adm-sidebar {
+  transition: transform .22s ease;
+  box-sizing: border-box;
+}
+.adm-sidebar-backdrop { display: none; }
+
+@media (max-width: 1023px) {
+  .adm-sidebar {
+    position: fixed !important;
+    inset: 0 auto 0 0 !important;
+    top: 0 !important;
+    height: 100vh !important;
+    transform: translateX(-100%);
+    z-index: 60;
+  }
+  .adm-sidebar.open { transform: translateX(0); box-shadow: 0 0 48px rgba(0,0,0,.55); }
+  .adm-sidebar-backdrop.open {
+    display: block; position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 55;
+  }
+  .adm-hamburger { display: inline-flex !important; }
+}
+@media (min-width: 1024px) {
+  .adm-hamburger { display: none !important; }
+  .adm-sidebar-backdrop { display: none !important; }
+}
+
+.adm-main { min-width: 0; box-sizing: border-box; max-width: 100%; }
+
+.adm-content-wrap { box-sizing: border-box; width: 100%; }
+@media (max-width: 767px) {
+  .adm-topheader-v2 { padding: 12px 14px !important; }
+  .adm-content-wrap { padding: 14px 14px 28px !important; }
+}
+@media (min-width: 768px) and (max-width: 1023px) {
+  .adm-topheader-v2 { padding: 16px 20px !important; }
+  .adm-content-wrap { padding: 18px 20px 32px !important; }
+}
+
+/* Metric row: 6 -> 3 (tablet) -> 2 (mobile) columns */
+.adm-metric-row { box-sizing: border-box; }
+@media (max-width: 1023px) {
+  .adm-metric-row { display: grid !important; grid-template-columns: repeat(3, 1fr) !important; gap: 10px !important; overflow: visible !important; }
+  .adm-metric-row > * { min-width: 0 !important; flex: none !important; width: 100% !important; box-sizing: border-box; }
+}
+@media (max-width: 767px) {
+  .adm-metric-row { grid-template-columns: repeat(2, 1fr) !important; gap: 8px !important; }
+}
+
+/* Filter bar: stack full-width on mobile */
+.adm-filterbar-v2 { box-sizing: border-box; }
+@media (max-width: 767px) {
+  .adm-filterbar-v2 { flex-direction: column !important; align-items: stretch !important; }
+  .adm-filterbar-v2 > * { width: 100% !important; min-width: 0 !important; flex: none !important; box-sizing: border-box; }
+}
+
+/* Order/driver card summary row: stack on tablet+mobile */
+.adm-order-summary, .adm-driver-card { box-sizing: border-box; }
+@media (max-width: 1023px) {
+  .adm-order-summary, .adm-driver-card {
+    flex-direction: column !important; align-items: stretch !important;
+  }
+  .adm-order-summary > *, .adm-driver-card > * {
+    width: 100% !important; min-width: 0 !important; max-width: 100% !important; flex: none !important; box-sizing: border-box;
+  }
+}
+
+/* Generic: any input/select carrying this class goes full-width under 768px */
+@media (max-width: 767px) {
+  .adm-input-fluid { width: 100% !important; box-sizing: border-box; }
+}
+
+/* Prevent any residual overflow from wide inline content (tables, code blocks, etc.) */
+@media (max-width: 767px) {
+  .adm-content-wrap img, .adm-content-wrap svg { max-width: 100%; }
+  .adm-content-wrap pre, .adm-content-wrap code { max-width: 100%; overflow-x: auto; }
+}
