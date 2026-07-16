@@ -132,6 +132,44 @@ export default function KompensasiPage() {
     } catch { flash("Gagal hapus rincian"); }
   };
 
+  // ── Form catat pembayaran (transfer nyata yang mengurangi sisa) ──
+  const blankPayForm = { arah: "kita_bayar_mereka", jumlah: "", tanggal: todayStr(), catatan: "" };
+  const [payForm, setPayForm] = useState(blankPayForm);
+  const [payFile, setPayFile] = useState(null);
+  const [paySaving, setPaySaving] = useState(false);
+  const payFileRef = useRef();
+
+  const addPayment = async () => {
+    if (!selected) return;
+    const jumlah = pNum(payForm.jumlah);
+    if (jumlah <= 0) { flash("Jumlah bayar wajib diisi"); return; }
+    setPaySaving(true);
+    try {
+      const fd = new FormData();
+      fd.append("arah", payForm.arah);
+      fd.append("jumlah", jumlah);
+      fd.append("tanggal", payForm.tanggal || todayStr());
+      fd.append("catatan", payForm.catatan.trim());
+      if (payFile) fd.append("bukti", payFile);
+      const r = await axios.post(`${API}/admin/kompensasi/${selected.id}/payments`, fd, { headers });
+      setSelected(r.data);
+      setPayForm({ ...blankPayForm, arah: payForm.arah });
+      setPayFile(null);
+      setListRefreshTick((t) => t + 1);
+      flash("Pembayaran tercatat, sisa otomatis dikurangi");
+    } catch (e) { flash(e?.response?.data?.detail || "Gagal simpan pembayaran"); }
+    finally { setPaySaving(false); }
+  };
+
+  const deletePayment = async (paymentId) => {
+    if (!window.confirm("Hapus catatan pembayaran ini?")) return;
+    try {
+      const r = await axios.delete(`${API}/admin/kompensasi/${selected.id}/payments/${paymentId}`, { headers });
+      setSelected(r.data);
+      setListRefreshTick((t) => t + 1);
+    } catch { flash("Gagal hapus pembayaran"); }
+  };
+
   const resolveUrl = (u) => {
     if (!u) return "";
     if (u.startsWith("http://") || u.startsWith("https://")) return u;
@@ -231,14 +269,16 @@ export default function KompensasiPage() {
                 </button>
               </div>
             </div>
-            <div style={{ display: "flex", gap: 16, textAlign: "right" }}>
+            <div style={{ display: "flex", gap: 16, textAlign: "right", flexWrap: "wrap" }}>
               <div>
                 <div style={{ fontSize: 10, color: "#8b949e" }}>Kewajiban Alyssa Logistik</div>
                 <div style={{ fontWeight: 800, fontSize: 14 }}>{fRp(selected.total_kita)}</div>
+                {selected.dibayar_kita > 0 && <div style={{ fontSize: 9, color: "#3fb950" }}>dibayar {fRp(selected.dibayar_kita)}</div>}
               </div>
               <div>
                 <div style={{ fontSize: 10, color: "#8b949e" }}>Kewajiban Supplier</div>
                 <div style={{ fontWeight: 800, fontSize: 14 }}>{fRp(selected.total_mereka)}</div>
+                {selected.dibayar_mereka > 0 && <div style={{ fontSize: 9, color: "#3fb950" }}>dibayar {fRp(selected.dibayar_mereka)}</div>}
               </div>
               <div>
                 <div style={{ fontSize: 10, color: "#8b949e" }}>Sisa Kewajiban</div>
@@ -248,6 +288,65 @@ export default function KompensasiPage() {
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Form catat pembayaran */}
+          <div style={{ background: "#0d1117", border: "1px solid #21262d", borderRadius: 10, padding: 14, marginBottom: 16 }}>
+            <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 10, color: "#3fb950" }}>💰 Catat Pembayaran (transfer nyata, mengurangi sisa)</div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              <button type="button" onClick={() => setPayForm((f) => ({ ...f, arah: "kita_bayar_mereka" }))}
+                style={{ flex: 1, padding: "8px", borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: "pointer",
+                  border: payForm.arah === "kita_bayar_mereka" ? "2px solid #EF9F27" : "1px solid #30363d",
+                  background: payForm.arah === "kita_bayar_mereka" ? "#2a1f0d" : "none", color: payForm.arah === "kita_bayar_mereka" ? "#EF9F27" : "#8b949e" }}
+                data-testid="komp-pay-arah-kita">
+                💸 Kita Bayar ke {selected.nama}
+              </button>
+              <button type="button" onClick={() => setPayForm((f) => ({ ...f, arah: "mereka_bayar_kita" }))}
+                style={{ flex: 1, padding: "8px", borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: "pointer",
+                  border: payForm.arah === "mereka_bayar_kita" ? "2px solid #58a6ff" : "1px solid #30363d",
+                  background: payForm.arah === "mereka_bayar_kita" ? "#0d1b2a" : "none", color: payForm.arah === "mereka_bayar_kita" ? "#58a6ff" : "#8b949e" }}
+                data-testid="komp-pay-arah-mereka">
+                💰 {selected.nama} Bayar ke Kita
+              </button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+              <input style={I} inputMode="numeric" placeholder="Jumlah bayar (Rp)" value={payForm.jumlah} onChange={(e) => setPayForm((f) => ({ ...f, jumlah: e.target.value }))} data-testid="komp-pay-jumlah" />
+              <input type="date" style={I} value={payForm.tanggal} onChange={(e) => setPayForm((f) => ({ ...f, tanggal: e.target.value }))} />
+              <input style={{ ...I, gridColumn: "1 / span 2" }} placeholder="Catatan (opsional, misal no. referensi transfer)" value={payForm.catatan} onChange={(e) => setPayForm((f) => ({ ...f, catatan: e.target.value }))} />
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <input ref={payFileRef} type="file" accept="image/*,application/pdf" style={{ display: "none" }} onChange={(e) => setPayFile(e.target.files?.[0] || null)} />
+              <button style={BTN_GHOST} onClick={() => payFileRef.current?.click()}>
+                {payFile ? `📎 ${payFile.name.slice(0, 20)}` : "📎 Upload Bukti Transfer"}
+              </button>
+              <button style={{ ...BTN, background: "#3fb950", color: "#04240d" }} onClick={addPayment} disabled={paySaving} data-testid="komp-pay-save">
+                {paySaving ? "Menyimpan..." : "Simpan Pembayaran"}
+              </button>
+            </div>
+
+            {(selected.payments || []).length > 0 && (
+              <div style={{ marginTop: 14, borderTop: "1px solid #21262d", paddingTop: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#8b949e", marginBottom: 6, textTransform: "uppercase" }}>Riwayat Pembayaran</div>
+                {[...(selected.payments || [])].reverse().map((p) => (
+                  <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, fontSize: 12, padding: "7px 0", borderTop: "1px solid #21262d" }} data-testid={`komp-payment-${p.id}`}>
+                    <div>
+                      <div style={{ color: "#e6edf3", fontWeight: 700 }}>
+                        {p.arah === "kita_bayar_mereka" ? `💸 Kita → ${selected.nama}` : `💰 ${selected.nama} → Kita`}
+                      </div>
+                      <div style={{ color: "#8b949e", fontSize: 11, marginTop: 2 }}>
+                        {fDate(p.tanggal)}
+                        {p.catatan && ` · ${p.catatan}`}
+                        {p.bukti_url && <a href={resolveUrl(p.bukti_url)} target="_blank" rel="noreferrer" style={{ marginLeft: 6, color: "#58a6ff" }}>📎 bukti</a>}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                      <div style={{ fontWeight: 800, color: "#3fb950" }}>{fRp(p.jumlah)}</div>
+                      <button onClick={() => deletePayment(p.id)} style={{ background: "none", border: "none", color: "#f85149", cursor: "pointer", fontSize: 11, marginTop: 2 }}>Hapus</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Form tambah rincian kompensasi */}

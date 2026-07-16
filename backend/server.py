@@ -3568,15 +3568,25 @@ def _gen_kompensasi_id() -> str:
 
 def _kompensasi_totals(doc: dict) -> dict:
     """Hitung total_kita (kewajiban kita ke rekanan), total_mereka (kewajiban
-    rekanan ke kita), & sisa (net, positif = rekanan masih berkewajiban ke
-    kita) -- dihitung ulang tiap read, nggak disimpan."""
+    rekanan ke kita), dikurangi pembayaran yang udah tercatat di masing-masing
+    arah, lalu sisa (net, positif = rekanan masih berkewajiban ke kita) --
+    dihitung ulang tiap read, nggak disimpan."""
     doc = dict(doc)
     items = doc.get("items") or []
+    payments = doc.get("payments") or []
     total_kita = sum((i.get("nilai") or 0) for i in items if i.get("arah") == "kita_ke_mereka")
     total_mereka = sum((i.get("nilai") or 0) for i in items if i.get("arah") == "mereka_ke_kita")
+    dibayar_kita = sum((p.get("jumlah") or 0) for p in payments if p.get("arah") == "kita_bayar_mereka")
+    dibayar_mereka = sum((p.get("jumlah") or 0) for p in payments if p.get("arah") == "mereka_bayar_kita")
+    outstanding_kita = total_kita - dibayar_kita
+    outstanding_mereka = total_mereka - dibayar_mereka
     doc["total_kita"] = total_kita
     doc["total_mereka"] = total_mereka
-    doc["sisa"] = total_mereka - total_kita
+    doc["dibayar_kita"] = dibayar_kita
+    doc["dibayar_mereka"] = dibayar_mereka
+    doc["outstanding_kita"] = outstanding_kita
+    doc["outstanding_mereka"] = outstanding_mereka
+    doc["sisa"] = outstanding_mereka - outstanding_kita
     return doc
 
 
@@ -3720,6 +3730,59 @@ async def delete_kompensasi_item(pihak_id: str, item_id: str):
     )
     if result.modified_count == 0:
         raise HTTPException(404, "Item tidak ditemukan")
+    updated = await db.kompensasi_profiles.find_one({"id": pihak_id}, {"_id": 0})
+    return _kompensasi_totals(updated)
+
+
+@api_router.post("/admin/kompensasi/{pihak_id}/payments", dependencies=[Depends(require_admin_pin)])
+async def add_kompensasi_payment(
+    pihak_id: str,
+    arah: str = Form(...),   # "kita_bayar_mereka" | "mereka_bayar_kita"
+    jumlah: int = Form(...),
+    tanggal: Optional[str] = Form(None),
+    catatan: str = Form(""),
+    bukti: Optional[UploadFile] = File(None),
+):
+    """Catat pembayaran nyata (transfer) yang melunasi sebagian/semua sisa
+    kewajiban di satu arah -- beda sama 'items' (yang mencatat rincian
+    kewajiban/invoice), payment ini mengurangi outstanding di arah tsb."""
+    if arah not in ("kita_bayar_mereka", "mereka_bayar_kita"):
+        raise HTTPException(400, "arah harus 'kita_bayar_mereka' atau 'mereka_bayar_kita'")
+    if jumlah <= 0:
+        raise HTTPException(400, "jumlah harus lebih dari 0")
+    doc = await db.kompensasi_profiles.find_one({"id": pihak_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Rekanan tidak ditemukan")
+
+    bukti_url = None
+    if bukti is not None and bukti.filename:
+        bukti_url = _save_upload(pihak_id, "kompensasi-payment", bukti, ALLOWED_IMG | ALLOWED_DOC)
+
+    tgl = (tanggal or "").strip()
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", tgl):
+        tgl = today_wib()
+
+    payment = {
+        "id": _gen_kompensasi_id(),
+        "arah": arah,
+        "jumlah": jumlah,
+        "tanggal": tgl,
+        "catatan": catatan.strip(),
+        "bukti_url": bukti_url,
+        "created_at": datetime.utcnow().isoformat(),
+    }
+    await db.kompensasi_profiles.update_one({"id": pihak_id}, {"$push": {"payments": payment}})
+    updated = await db.kompensasi_profiles.find_one({"id": pihak_id}, {"_id": 0})
+    return _kompensasi_totals(updated)
+
+
+@api_router.delete("/admin/kompensasi/{pihak_id}/payments/{payment_id}", dependencies=[Depends(require_admin_pin)])
+async def delete_kompensasi_payment(pihak_id: str, payment_id: str):
+    result = await db.kompensasi_profiles.update_one(
+        {"id": pihak_id}, {"$pull": {"payments": {"id": payment_id}}}
+    )
+    if result.modified_count == 0:
+        raise HTTPException(404, "Pembayaran tidak ditemukan")
     updated = await db.kompensasi_profiles.find_one({"id": pihak_id}, {"_id": 0})
     return _kompensasi_totals(updated)
 

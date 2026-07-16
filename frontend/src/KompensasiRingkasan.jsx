@@ -94,9 +94,14 @@ export default function KompensasiRingkasan() {
   const items = data.items || [];
   const itemsKita = items.filter((i) => i.arah === "kita_ke_mereka").sort((a, b) => String(a.tanggal || "").localeCompare(String(b.tanggal || "")));
   const itemsMereka = items.filter((i) => i.arah === "mereka_ke_kita").sort((a, b) => String(a.tanggal || "").localeCompare(String(b.tanggal || "")));
+  const payments = (data.payments || []).slice().sort((a, b) => String(a.tanggal || "").localeCompare(String(b.tanggal || "")));
 
   const totalKita = data.total_kita || 0;
   const totalMereka = data.total_mereka || 0;
+  const dibayarKita = data.dibayar_kita || 0;
+  const dibayarMereka = data.dibayar_mereka || 0;
+  const outstandingKita = data.outstanding_kita ?? totalKita;
+  const outstandingMereka = data.outstanding_mereka ?? totalMereka;
   const sisa = data.sisa || 0;
   const rekananNama = data.nama || "Supplier";
   const todayFmt = new Date().toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
@@ -135,17 +140,58 @@ export default function KompensasiRingkasan() {
           <span>{fRp(totalMereka)}</span>
         </div>
 
-        {/* Section 3: Posisi Akhir / Netting */}
-        <SectionHeader num="3" title="POSISI AKHIR (SISA KEWAJIBAN)" />
+        {/* Section 3: Riwayat Pembayaran */}
+        {payments.length > 0 && (
+          <>
+            <SectionHeader num="3" title="RIWAYAT PEMBAYARAN" />
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+              <thead>
+                <tr style={{ background: "#f8fafc" }}>
+                  <th style={{ textAlign: "left", padding: "6px 8px", color: gray, fontWeight: 700, borderBottom: `1px solid ${border}` }}>Tanggal</th>
+                  <th style={{ textAlign: "left", padding: "6px 8px", color: gray, fontWeight: 700, borderBottom: `1px solid ${border}` }}>Arah</th>
+                  <th style={{ textAlign: "left", padding: "6px 8px", color: gray, fontWeight: 700, borderBottom: `1px solid ${border}` }}>Catatan</th>
+                  <th style={{ textAlign: "right", padding: "6px 8px", color: gray, fontWeight: 700, borderBottom: `1px solid ${border}` }}>Jumlah</th>
+                </tr>
+              </thead>
+              <tbody>
+                {payments.map((p) => (
+                  <tr key={p.id}>
+                    <td style={{ padding: "6px 8px", borderBottom: `1px solid ${border}` }}>{fDate(p.tanggal)}</td>
+                    <td style={{ padding: "6px 8px", borderBottom: `1px solid ${border}` }}>
+                      {p.arah === "kita_bayar_mereka" ? `Alyssa Logistik → ${rekananNama}` : `${rekananNama} → Alyssa Logistik`}
+                    </td>
+                    <td style={{ padding: "6px 8px", borderBottom: `1px solid ${border}` }}>{p.catatan || "—"}</td>
+                    <td style={{ padding: "6px 8px", borderBottom: `1px solid ${border}`, textAlign: "right", fontWeight: 700, color: "#059669" }}>{fRp(p.jumlah)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
+
+        {/* Section 4: Posisi Akhir / Netting */}
+        <SectionHeader num={payments.length > 0 ? "4" : "3"} title="POSISI AKHIR (SISA KEWAJIBAN)" />
         <div style={{ border: `1px solid ${border}`, borderRadius: 10, padding: 14, fontSize: 13 }}>
           <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0" }}>
             <span style={{ color: gray }}>Kewajiban Alyssa Logistik Terhadap {rekananNama}</span>
             <span style={{ fontWeight: 700 }}>{fRp(totalKita)}</span>
           </div>
+          {dibayarKita > 0 && (
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0" }}>
+              <span style={{ color: "#059669" }}>Sudah Dibayar Alyssa Logistik</span>
+              <span style={{ fontWeight: 700, color: "#059669" }}>- {fRp(dibayarKita)}</span>
+            </div>
+          )}
           <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px solid ${border}` }}>
             <span style={{ color: gray }}>Kewajiban {rekananNama} Terhadap Alyssa Logistik</span>
             <span style={{ fontWeight: 700 }}>{fRp(totalMereka)}</span>
           </div>
+          {dibayarMereka > 0 && (
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px solid ${border}` }}>
+              <span style={{ color: "#059669" }}>Sudah Dibayar {rekananNama}</span>
+              <span style={{ fontWeight: 700, color: "#059669" }}>- {fRp(dibayarMereka)}</span>
+            </div>
+          )}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, background: sisa >= 0 ? "#ecfdf5" : "#fef2f2", borderRadius: 8, padding: "12px 14px" }}>
             <span style={{ fontWeight: 800, fontSize: 12, color: sisa >= 0 ? "#065f46" : "#991b1b" }}>
               💳 SISA KEWAJIBAN {sisa >= 0 ? `${rekananNama.toUpperCase()} KEPADA ALYSSA LOGISTIK` : `ALYSSA LOGISTIK KEPADA ${rekananNama.toUpperCase()}`}
