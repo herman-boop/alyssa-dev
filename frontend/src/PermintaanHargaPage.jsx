@@ -9,11 +9,19 @@ function tryExecCommandCopy(text) {
   try {
     const ta = document.createElement("textarea");
     ta.value = text;
+    ta.setAttribute("readonly", "");
     ta.style.position = "fixed";
-    ta.style.left = "-9999px";
+    ta.style.top = "0";
+    ta.style.left = "0";
+    ta.style.width = "1px";
+    ta.style.height = "1px";
+    ta.style.padding = "0";
+    ta.style.border = "none";
+    ta.style.opacity = "0";
     document.body.appendChild(ta);
     ta.focus();
     ta.select();
+    ta.setSelectionRange(0, text.length); // iOS Safari needs this explicitly
     const ok = document.execCommand("copy");
     document.body.removeChild(ta);
     return ok;
@@ -23,13 +31,13 @@ function tryExecCommandCopy(text) {
 }
 
 async function copyToClipboard(text) {
-  if (tryExecCommandCopy(text)) return true;
   try {
     if (navigator.clipboard && window.isSecureContext) {
       await navigator.clipboard.writeText(text);
       return true;
     }
   } catch {}
+  if (tryExecCommandCopy(text)) return true;
   window.prompt("Nggak bisa auto-copy di browser ini. Salin manual teks di bawah:", text);
   return false;
 }
