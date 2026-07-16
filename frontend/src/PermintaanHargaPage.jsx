@@ -5,6 +5,35 @@ import { VEHICLE_TYPE_LIST } from "@/VehicleSketches";
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "";
 const API = `${BACKEND_URL}/api`;
 
+function tryExecCommandCopy(text) {
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+async function copyToClipboard(text) {
+  if (tryExecCommandCopy(text)) return true;
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {}
+  window.prompt("Nggak bisa auto-copy di browser ini. Salin manual teks di bawah:", text);
+  return false;
+}
+
 function fRp(n) {
   n = Number(n) || 0;
   return "Rp " + n.toLocaleString("id-ID");
@@ -88,10 +117,10 @@ export default function PermintaanHargaPage() {
     } catch { flash("Gagal hapus"); }
   };
 
-  const copyLink = (token) => {
+  const copyLink = async (token) => {
     const link = `${window.location.origin}/minta-harga/${token}`;
-    navigator.clipboard.writeText(link);
-    flash("Link disalin!");
+    const ok = await copyToClipboard(link);
+    if (ok) flash("Link disalin!");
   };
 
   return (
@@ -144,7 +173,7 @@ export default function PermintaanHargaPage() {
           <div style={{ marginTop: 14, background: "#1a4a2a", border: "1px solid #2ea043", borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <span style={{ fontSize: 13, color: "#56d364", fontWeight: 700 }}>✅ Link siap:</span>
             <code style={{ flex: 1, fontSize: 12, color: "#e6edf3", background: "#0d1117", padding: "5px 10px", borderRadius: 6, border: "1px solid #30363d", wordBreak: "break-all", minWidth: 200 }}>{lastLink}</code>
-            <button onClick={() => { navigator.clipboard.writeText(lastLink); flash("Link disalin!"); }} style={{ padding: "6px 14px", borderRadius: 7, border: "1px solid #2ea043", background: "none", color: "#56d364", cursor: "pointer", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>📋 Salin</button>
+            <button onClick={async () => { const ok = await copyToClipboard(lastLink); if (ok) flash("Link disalin!"); }} style={{ padding: "6px 14px", borderRadius: 7, border: "1px solid #2ea043", background: "none", color: "#56d364", cursor: "pointer", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>📋 Salin</button>
             <a href={`https://wa.me/?text=${encodeURIComponent("Mohon isi harga rute berikut ya: " + lastLink)}`} target="_blank" rel="noreferrer"
               style={{ padding: "6px 14px", borderRadius: 7, border: "1px solid #2ea043", background: "none", color: "#56d364", textDecoration: "none", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>
               💬 Kirim via WA

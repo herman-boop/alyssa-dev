@@ -16,6 +16,43 @@ const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 const PIN_KEY = "aal_admin_pin";
 
+// navigator.clipboard.writeText() silently rejects on some mobile browsers /
+// in-app webviews (no permission prompt, no error shown) -- callers that
+// don't await it end up showing "✓ Copied" even though nothing was copied.
+// Fix tries the synchronous execCommand("copy") fallback FIRST -- it needs a
+// live user-gesture, which an `await` on the async Clipboard API consumes
+// before we'd get a chance to fall back to it -- then the modern Clipboard
+// API, then as a last resort a prompt with the text pre-selected so the user
+// can copy manually. Returns true only when a copy actually happened.
+function tryExecCommandCopy(text) {
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+async function copyToClipboard(text) {
+  if (tryExecCommandCopy(text)) return true;
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {}
+  window.prompt("Nggak bisa auto-copy di browser ini. Salin manual teks di bawah:", text);
+  return false;
+}
+
 const STATUS_LIST = ["NEW", "DISPATCHED", "ON_TRIP", "DELIVERED", "CANCELLED"];
 const STATUS_LABEL = {
   NEW:        { txt: "Baru",       cls: "adm-chip-new"  },
@@ -337,7 +374,7 @@ function Dashboard({ pin, onLogout }) {
               <code style={{ flex: "1 1 100%", minWidth: 0, fontSize: 13, color: "#e6edf3", background: "#0d1117", padding: "5px 10px", borderRadius: 6, border: "1px solid #30363d", wordBreak: "break-all", boxSizing: "border-box" }}>
                 {window.location.origin}/daftar-driver
               </code>
-              <button onClick={() => navigator.clipboard.writeText(`${window.location.origin}/daftar-driver`)}
+              <button onClick={() => copyToClipboard(`${window.location.origin}/daftar-driver`)}
                 style={{ padding: "6px 14px", borderRadius: 7, border: "1px solid #2ea043", background: "none", color: "#56d364", cursor: "pointer", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>
                 📋 Salin
               </button>
@@ -735,7 +772,7 @@ function LinkCardMini({ title, sub, link }) {
       </div>
       <code style={{ flex: "1 1 200px", minWidth: 0, fontSize: 12, color: "#9aa4b6", background: "#0a0e14", padding: "7px 12px", borderRadius: 7, border: "1px solid #1a2130", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", boxSizing: "border-box" }}>{link}</code>
       <button
-        onClick={() => { navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 1800); }}
+        onClick={async () => { const ok = await copyToClipboard(link); if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1800); } }}
         style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: copied ? "#238636" : "#1f6feb", color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap", flexShrink: 0 }}
       >
         {copied ? "✓ Copied" : "Copy Link"}
@@ -900,14 +937,13 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
   const [showInvoice, setShowInvoice] = useState(false);
   const albumFileRefs = useRef({});
 
-  const copyPoText = (e) => {
+  const copyPoText = async (e) => {
     e.stopPropagation();
     const model = (order.vehicle_type || "").trim().split(/\s+/).slice(1).join(" ") || order.vehicle_type || "—";
     const rute = `${(order.asal_kota || "").toUpperCase()}-${(order.tujuan_kota || "").toUpperCase()}`;
     const text = [model, order.nopol || "—", order.no_rangka || "—", rute].join(" ");
-    navigator.clipboard.writeText(text);
-    setCopiedPo(true);
-    setTimeout(() => setCopiedPo(false), 1800);
+    const ok = await copyToClipboard(text);
+    if (ok) { setCopiedPo(true); setTimeout(() => setCopiedPo(false), 1800); }
   };
 
   const uploadFotoAlbum = async (stage, files) => {
@@ -2340,7 +2376,7 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
     const w = window.open("", "_blank"); w.document.write(html); w.document.close();
   };
 
-  const copyLegLink = (leg, i) => {
+  const copyLegLink = async (leg, i) => {
     const base = window.location.origin;
     const p = new URLSearchParams({
       trip: tripId,
@@ -2365,9 +2401,8 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
 
     const teks = `Halo Pak/Bu ${namaDriver} 👋\n\nPengiriman: ${rute}\nKendaraan: ${nopol}\n\n🔗 ${link}\n\nPanduan:\n${panduan}\n\nInfo: PT Alyssa Auto Logistik · 0818 631 135`;
 
-    navigator.clipboard.writeText(teks);
-    setCopiedLeg(i);
-    setTimeout(() => setCopiedLeg(null), 2000);
+    const ok = await copyToClipboard(teks);
+    if (ok) { setCopiedLeg(i); setTimeout(() => setCopiedLeg(null), 2000); }
   };
 
   const setLeg = (i, patch) => setLegs(ls => ls.map((l, idx) => idx === i ? { ...l, ...patch } : l));
@@ -2956,7 +2991,7 @@ function KordManageTab({ headers }) {
       <div style={{ background: "#1a2d4a", border: "1px solid #1f6feb", borderRadius: 10, padding: "10px 16px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 20 }}>
         <span style={{ fontSize: 13, color: "#60a5fa", fontWeight: 700 }}>🔗 Portal Koordinator:</span>
         <code style={{ flex: 1, fontSize: 13, color: "#e6edf3", background: "#0d1117", padding: "5px 10px", borderRadius: 6, border: "1px solid #30363d", wordBreak: "break-all" }}>{portalUrl}</code>
-        <button onClick={() => { navigator.clipboard.writeText(portalUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+        <button onClick={async () => { const ok = await copyToClipboard(portalUrl); if (ok) { setCopied(true); setTimeout(() => setCopied(false), 2000); } }}
           style={{ padding: "6px 14px", borderRadius: 7, border: "1px solid #1f6feb", background: "none", color: copied ? "#2ea043" : "#60a5fa", cursor: "pointer", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>
           {copied ? "✓ Tersalin" : "📋 Salin"}
         </button>
