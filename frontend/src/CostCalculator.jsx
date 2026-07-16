@@ -1,7 +1,7 @@
 /* eslint-disable */
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import axios from "axios";
-import { VEHICLE_TYPE_LIST } from "@/VehicleSketches";
+import { VEHICLE_TYPE_LIST, useVehicleTypes } from "@/VehicleSketches";
 
 /* Port dari cost-calculator.html (app lama). Logika hitung 1:1:
    HPP + Margin bertingkat + Proteksi Risiko + Bunga Dana Talang. */
@@ -93,6 +93,10 @@ function marginColor(m) {
 }
 
 export default function CostCalculator() {
+  const { types: tipeOptsDynamic, addType: addVehicleType } = useVehicleTypes();
+  const [showNewTipe, setShowNewTipe] = useState(false);
+  const [newTipeName, setNewTipeName] = useState("");
+  const [savingTipe, setSavingTipe] = useState(false);
   const [asal, setAsal] = useState("");
   const [tujuan, setTujuan] = useState("");
   const [tipe, setTipe] = useState(TIPE_OPTS[0]);
@@ -124,6 +128,23 @@ export default function CostCalculator() {
   const debounceRef = useRef(null);
 
   const adminPin = typeof window !== "undefined" ? (localStorage.getItem("aal_admin_pin") || "") : "";
+
+  const saveNewTipe = async () => {
+    const nama = newTipeName.trim();
+    if (!nama) { alert("Nama tipe kendaraan tidak boleh kosong"); return; }
+    setSavingTipe(true);
+    const r = await addVehicleType(nama, { "x-admin-pin": adminPin });
+    setSavingTipe(false);
+    if (r.ok) {
+      setTipe(r.nama);
+      setNewTipeName("");
+      setShowNewTipe(false);
+    } else if (r.reason === "duplicate") {
+      alert(`Tipe kendaraan "${nama}" sudah ada di daftar — pilih dari dropdown aja.`);
+    } else {
+      alert("Gagal simpan tipe kendaraan baru, coba lagi.");
+    }
+  };
 
   useEffect(() => {
     try { const raw = localStorage.getItem("alyssa_margin"); if (raw) setM((m) => ({ ...m, ...JSON.parse(raw) })); } catch (e) {}
@@ -602,7 +623,33 @@ export default function CostCalculator() {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 8 }}>
           <div><label style={LBL}>Kota Asal</label><input style={I} value={asal} onChange={(e) => setAsal(e.target.value)} placeholder="Jakarta" /></div>
           <div><label style={LBL}>Kota Tujuan</label><input style={I} value={tujuan} onChange={(e) => setTujuan(e.target.value)} placeholder="Banjarmasin" /></div>
-          <div><label style={LBL}>Tipe Kendaraan</label><select style={I} value={tipe} onChange={(e) => setTipe(e.target.value)}>{TIPE_OPTS.map((t) => <option key={t}>{t}</option>)}</select></div>
+          <div>
+            <label style={LBL}>Tipe Kendaraan</label>
+            {!showNewTipe ? (
+              <div style={{ display: "flex", gap: 6 }}>
+                <select style={{ ...I, flex: 1 }} value={tipe} onChange={(e) => setTipe(e.target.value)}>{tipeOptsDynamic.map((t) => <option key={t}>{t}</option>)}</select>
+                <button type="button" onClick={() => setShowNewTipe(true)} title="Tambah tipe kendaraan baru"
+                  style={{ padding: "0 10px", borderRadius: 8, border: "1px solid #30363d", background: "none", color: "#EF9F27", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
+                  + Baru
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: "flex", gap: 6 }}>
+                <input style={{ ...I, flex: 1 }} placeholder="Nama tipe kendaraan baru..." value={newTipeName}
+                  onChange={(e) => setNewTipeName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") saveNewTipe(); }}
+                  autoFocus data-testid="calc-new-tipe-input" />
+                <button type="button" onClick={saveNewTipe} disabled={savingTipe} data-testid="calc-new-tipe-save"
+                  style={{ padding: "0 12px", borderRadius: 8, border: "none", background: "#EF9F27", color: "#1a1208", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
+                  {savingTipe ? "..." : "Simpan"}
+                </button>
+                <button type="button" onClick={() => { setShowNewTipe(false); setNewTipeName(""); }}
+                  style={{ padding: "0 10px", borderRadius: 8, border: "1px solid #30363d", background: "none", color: "#8b949e", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+                  Batal
+                </button>
+              </div>
+            )}
+          </div>
         </div>
         <div style={{ marginBottom: 8 }}>
           <label style={LBL}>Moda Pengiriman <span style={{ color: "#6e7681", fontWeight: 400 }}>(otomatis dari komponen biaya, bisa diedit)</span></label>

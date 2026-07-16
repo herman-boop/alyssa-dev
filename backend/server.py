@@ -657,6 +657,49 @@ VALID_VEHICLE_TYPES = _TRUCK_KAROSERI_COMBOS | {
 VALID_DAMAGE_CODES = {"RSK", "B", "P", "PC", "CL", "L"}
 
 
+# Custom vehicle types -- admin bisa nambah tipe kendaraan baru manual dari
+# Kalkulator HPP (dan tempat lain yang pakai list ini), tersimpan permanen di
+# db.custom_vehicle_types, lalu otomatis muncul juga di dropdown form Pesanan.
+# VALID_VEHICLE_TYPES di atas tetap dipertahankan sebagai daftar bawaan yang
+# udah dikenal (biar nggak breaking); _all_valid_vehicle_types() adalah union
+# dari itu + custom types yang disimpan admin.
+async def _all_valid_vehicle_types() -> set:
+    custom = set()
+    async for t in db.custom_vehicle_types.find({}, {"_id": 0, "nama": 1}):
+        if t.get("nama"):
+            custom.add(t["nama"])
+    return VALID_VEHICLE_TYPES | custom
+
+
+class VehicleTypeBody(BaseModel):
+    nama: str
+
+
+@api_router.get("/vehicle-types")
+async def list_custom_vehicle_types():
+    """List tipe kendaraan custom yang udah ditambahkan admin (di luar daftar
+    bawaan VALID_VEHICLE_TYPES), buat digabung ke dropdown di frontend."""
+    items = []
+    async for t in db.custom_vehicle_types.find({}, {"_id": 0}).sort("nama", 1):
+        items.append(t["nama"])
+    return {"items": items}
+
+
+@api_router.post("/vehicle-types", dependencies=[Depends(require_admin_pin)])
+async def add_custom_vehicle_type(body: VehicleTypeBody):
+    """Tambah tipe kendaraan baru manual. Ditolak kalau nama sama (case-
+    insensitive) udah ada -- baik di daftar bawaan maupun custom yang lain."""
+    nama = body.nama.strip()
+    if not nama:
+        raise HTTPException(400, "Nama tipe kendaraan tidak boleh kosong")
+    all_types = await _all_valid_vehicle_types()
+    if nama.lower() in {t.lower() for t in all_types}:
+        raise HTTPException(409, f"Tipe kendaraan '{nama}' sudah ada")
+    doc = {"id": uuid.uuid4().hex[:8], "nama": nama, "created_at": datetime.utcnow().isoformat()}
+    await db.custom_vehicle_types.insert_one(doc)
+    return {"nama": nama}
+
+
 class BASTKBody(BaseModel):
     vehicle_type: Optional[str] = None
     damage_marks: Optional[List[Dict[str, Any]]] = None
@@ -675,8 +718,8 @@ async def upsert_bastk(trip_id: str, payload: BASTKBody):
     update = {"updated_at": datetime.now(timezone.utc).isoformat()}
     if payload.vehicle_type is not None:
         vt = payload.vehicle_type.strip()
-        if vt and vt not in VALID_VEHICLE_TYPES:
-            raise HTTPException(400, f"vehicle_type tidak valid. Pilihan: {sorted(VALID_VEHICLE_TYPES)}")
+        if vt and vt not in await _all_valid_vehicle_types():
+            raise HTTPException(400, f"vehicle_type tidak valid")
         update["vehicle_type"] = vt
     if payload.damage_marks is not None:
         # filter only valid codes; coerce x/y to float; truncate note to 120
@@ -953,8 +996,8 @@ async def create_order(payload: OrderBody):
     Compatibility layer: returns order_id; does NOT auto-create trip yet (admin still triggers via PO).
     """
     vt = (payload.vehicle_type or "").strip()
-    if vt and vt not in VALID_VEHICLE_TYPES:
-        raise HTTPException(400, f"vehicle_type tidak valid. Pilihan: {sorted(VALID_VEHICLE_TYPES)}")
+    if vt and vt not in await _all_valid_vehicle_types():
+        raise HTTPException(400, f"vehicle_type tidak valid")
     if not (payload.asal_kota or "").strip():
         raise HTTPException(400, "asal_kota wajib diisi")
     if not (payload.tujuan_kota or "").strip():
@@ -1881,8 +1924,8 @@ async def admin_patch_order(order_id: str, payload: OrderPatchBody):
         upd["catatan"] = payload.catatan.strip()[:500]
     if payload.vehicle_type is not None:
         vt = payload.vehicle_type.strip()
-        if vt and vt not in VALID_VEHICLE_TYPES:
-            raise HTTPException(400, f"vehicle_type tidak valid. Pilihan: {sorted(VALID_VEHICLE_TYPES)}")
+        if vt and vt not in await _all_valid_vehicle_types():
+            raise HTTPException(400, f"vehicle_type tidak valid")
         upd["vehicle_type"] = vt
     if payload.nopol is not None:
         upd["nopol"] = payload.nopol.strip()[:20]

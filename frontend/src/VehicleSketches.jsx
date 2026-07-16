@@ -1,6 +1,10 @@
 // 20 Vehicle Side-View Sketches — minimal line-art, gold + navy.
 // Each sketch uses viewBox "0 0 400 200" and stroke="currentColor" so it inherits color.
-import React from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
+import axios from "axios";
+
+const VT_BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "";
+const VT_API = `${VT_BACKEND_URL}/api`;
 
 const baseProps = {
   viewBox: "0 0 400 200",
@@ -482,6 +486,52 @@ export const VEHICLE_TYPE_LIST = [
   "Forklift",
   "Dump Crawler",
 ];
+
+// Tipe kendaraan custom yang ditambahkan admin manual (di luar daftar bawaan
+// VEHICLE_TYPE_LIST di atas), disimpan permanen di backend lewat
+// GET/POST /api/vehicle-types. Dipakai bareng VEHICLE_TYPE_LIST supaya tipe
+// baru yang ditambahkan dari Kalkulator HPP otomatis muncul juga di dropdown
+// form Pesanan dan tempat lain yang pakai hook ini.
+export function useVehicleTypes() {
+  const [custom, setCustom] = useState([]);
+
+  const reload = useCallback(() => {
+    axios.get(`${VT_API}/vehicle-types`)
+      .then((r) => setCustom(r.data.items || []))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  const types = useMemo(() => {
+    const seen = new Set(VEHICLE_TYPE_LIST.map((t) => t.toLowerCase()));
+    const merged = [...VEHICLE_TYPE_LIST];
+    for (const c of custom) {
+      if (!seen.has(c.toLowerCase())) { merged.push(c); seen.add(c.toLowerCase()); }
+    }
+    return merged;
+  }, [custom]);
+
+  // Simpan tipe kendaraan baru. Return { ok, reason } -- reason "duplicate"
+  // dipakai buat nampilin notifikasi "sudah ada" di UI pemanggil.
+  const addType = useCallback(async (nama, headers) => {
+    nama = (nama || "").trim();
+    if (!nama) return { ok: false, reason: "empty" };
+    if (types.some((t) => t.toLowerCase() === nama.toLowerCase())) {
+      return { ok: false, reason: "duplicate" };
+    }
+    try {
+      await axios.post(`${VT_API}/vehicle-types`, { nama }, { headers });
+      setCustom((c) => [...c, nama]);
+      return { ok: true, nama };
+    } catch (e) {
+      if (e?.response?.status === 409) return { ok: false, reason: "duplicate" };
+      return { ok: false, reason: "error" };
+    }
+  }, [types]);
+
+  return { types, addType, reload };
+}
 
 const TYPE_TO_FILENAME = {
   /* ── 16 bentuk unit → file di /vehicles/ ── */

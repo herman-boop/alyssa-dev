@@ -1,7 +1,7 @@
 import { useMemo, useState, useCallback } from "react";
 import axios from "axios";
 import "./Order.css";
-import { VEHICLE_TYPE_LIST, VehicleSketch } from "./VehicleSketches";
+import { VEHICLE_TYPE_LIST, VehicleSketch, useVehicleTypes } from "./VehicleSketches";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -115,6 +115,7 @@ function Field({ label, children, required, hint, full }) {
 
 /* ── Main component ── */
 export default function CustomerOrderForm() {
+  const { types: vehicleTypes } = useVehicleTypes();
   const [dark, toggleDark] = useDarkMode();
   const [step, setStep] = useState(0);
   const [shipmentType, setShipmentType] = useState("kendaraan"); // "kendaraan" | "cargo"
@@ -266,7 +267,7 @@ export default function CustomerOrderForm() {
                       onChange={(e) => set("vehicle_type", e.target.value)}
                       data-testid="ord-vehicle-type">
                       <option value="">— Pilih tipe kendaraan —</option>
-                      {VEHICLE_TYPE_LIST.map((v) => <option key={v} value={v}>{v}</option>)}
+                      {vehicleTypes.map((v) => <option key={v} value={v}>{v}</option>)}
                     </select>
                   </Field>
                   {data.vehicle_type && (
