@@ -370,10 +370,10 @@ export default function CustomerOrderForm() {
                     onChange={(e) => set("asal_kota", e.target.value)}
                     placeholder="Jakarta" data-testid="ord-asal-kota" />
                 </Field>
-                <Field label="Alamat Lengkap" full>
-                  <textarea className="of-inp of-textarea" rows={2} value={data.asal_alamat} maxLength={120}
+                <Field label="Nama Jalan & Kecamatan" full hint={`Cukup nama jalan & kecamatan, alamat detail diminta driver di lokasi · ${data.asal_alamat.length}/60`}>
+                  <textarea className="of-inp of-textarea" rows={2} value={data.asal_alamat} maxLength={60}
                     onChange={(e) => set("asal_alamat", e.target.value)}
-                    placeholder="Jl. Sudirman No. 123, Jakarta Selatan"
+                    placeholder="Jl. Sudirman, Kec. Tebet"
                     data-testid="ord-asal-alamat" />
                 </Field>
                 <Field label="Tanggal Pickup">
@@ -416,10 +416,10 @@ export default function CustomerOrderForm() {
                     onChange={(e) => set("tujuan_kota", e.target.value)}
                     placeholder="Surabaya" data-testid="ord-tujuan-kota" />
                 </Field>
-                <Field label="Alamat Lengkap" full>
-                  <textarea className="of-inp of-textarea" rows={2} value={data.tujuan_alamat} maxLength={120}
+                <Field label="Nama Jalan & Kecamatan" full hint={`Cukup nama jalan & kecamatan, alamat detail diminta driver di lokasi · ${data.tujuan_alamat.length}/60`}>
+                  <textarea className="of-inp of-textarea" rows={2} value={data.tujuan_alamat} maxLength={60}
                     onChange={(e) => set("tujuan_alamat", e.target.value)}
-                    placeholder="Jl. Pemuda No. 45, Surabaya"
+                    placeholder="Jl. Pemuda, Kec. Gubeng"
                     data-testid="ord-tujuan-alamat" />
                 </Field>
                 <Field label="PIC Penerima">
