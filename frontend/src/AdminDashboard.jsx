@@ -1,5 +1,6 @@
 /* eslint-disable */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import axios from "axios";
 import { VEHICLE_TYPE_LIST } from "@/VehicleSketches";
 import CostCalculator from "@/CostCalculator";
@@ -77,6 +78,17 @@ const fmtDate = (s) => {
     const d = new Date(s);
     return d.toLocaleString("id-ID", { day:"2-digit", month:"short", year:"numeric", hour:"2-digit", minute:"2-digit" });
   } catch { return s; }
+};
+
+const fmtRp = (n) => {
+  if (n == null || n === "" || isNaN(Number(n))) return "—";
+  return "Rp " + Number(n).toLocaleString("id-ID");
+};
+
+const fmtDateShort = (s) => {
+  if (!s) return "—";
+  try { return new Date(s).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }); }
+  catch { return "—"; }
 };
 
 function toggleTheme() {
@@ -944,6 +956,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
   const [expanded, setExpanded] = useState(false);
   const [copiedPo, setCopiedPo] = useState(false);
   const [showInvoice, setShowInvoice] = useState(false);
+  const [showTrip360, setShowTrip360] = useState(false);
   const albumFileRefs = useRef({});
 
   const copyPoText = async (e) => {
@@ -1641,8 +1654,8 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
           </button>
         )}
         {order.trip_id && (
-          <button className="adm-btn adm-btn-ghost adm-btn-sm" onClick={onOpenLegs} data-testid={`adm-legs-${order.order_id}`}>
-            <IcoRoute /> Detail Pengiriman
+          <button className="adm-btn adm-btn-blue adm-btn-sm" onClick={() => setShowTrip360(true)} data-testid={`adm-trip360-${order.order_id}`}>
+            <IcoRoute /> Trip 360
           </button>
         )}
         {order.trip_id && (
@@ -1683,6 +1696,16 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
             order={order}
             onClose={() => setShowInvoice(false)}
             onPrint={(priceNum, withTax, extra) => { printInvoice(priceNum, withTax, extra); setShowInvoice(false); }}
+          />
+        )}
+        {showTrip360 && (
+          <Trip360Modal
+            order={order}
+            headers={headers}
+            onClose={() => setShowTrip360(false)}
+            onEditLegs={() => { setShowTrip360(false); onOpenLegs(); }}
+            onPrintSuratJalan={() => printSuratJalan()}
+            onOpenInvoice={() => { setShowTrip360(false); setShowInvoice(true); }}
           />
         )}
         {order.trip_id && (
@@ -2221,6 +2244,549 @@ function TabSkeleton() {
 }
 function TabEmpty({ text }) {
   return <div style={{ textAlign: "center", padding: 40, color: "#484f58", fontSize: 12 }}>{text}</div>;
+}
+
+/* ════════════════════════════════════════
+   TRIP 360 — pusat kontrol satu pengiriman
+   Semua data 1 trip dalam 1 halaman: header ringkas + 6 tab
+   (Overview / Route Leg / Keuangan / Dokumen / Aktivitas / Tracking).
+   Baca dari GET /public/trips/{id} (endpoint yang sama dipakai tracking
+   customer) + object order yang udah ada -- TANPA endpoint/back-end baru.
+   Aksi cetak (Surat Jalan/Invoice) & edit leg dilempar via callback ke
+   OrderCard yang udah punya fungsinya, biar nggak duplikasi.
+════════════════════════════════════════ */
+const T360_ICONS = {
+  overview:  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>,
+  routeleg:  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="5" cy="19" r="2.2"/><circle cx="19" cy="5" r="2.2"/><path d="M5 16.8V13a4 4 0 0 1 4-4h1a4 4 0 0 0 4-4V7.2"/></svg>,
+  keuangan:  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v20M17 5.5c0-1.9-2.2-3.5-5-3.5s-5 1.6-5 3.5S9.2 9 12 9s5 1.6 5 3.5-2.2 3.5-5 3.5-5-1.6-5-3.5"/></svg>,
+  dokumen:   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><path d="M14 2v5h5M8 13h8M8 17h5"/></svg>,
+  aktivitas: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>,
+  tracking:  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.4"/></svg>,
+  camera:    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h3l2-2h6l2 2h3v13H4z"/><circle cx="12" cy="13.5" r="3.5"/></svg>,
+  pin:       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 21s-6-5.4-6-9.6A6 6 0 0 1 12 5a6 6 0 0 1 6 6.4C18 15.6 12 21 12 21z"/><circle cx="12" cy="11" r="2"/></svg>,
+  doc:       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4M9 13h6M9 17h4"/></svg>,
+  warn:      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2 1 21h22z"/><path d="M12 9v5M12 17.5v.01"/></svg>,
+  check:     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.2 2.2 4.8-4.8"/></svg>,
+  user:      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="3.5"/><path d="M4.5 20c0-3.6 3.4-6 7.5-6s7.5 2.4 7.5 6"/></svg>,
+  truck:     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="6" width="13" height="10" rx="1"/><path d="M14 9h3.5L21 12.5V16h-7"/><circle cx="5" cy="18" r="1.8"/><circle cx="17" cy="18" r="1.8"/></svg>,
+};
+
+const T360_TIPE_ICON = { "Self Drive": "🚗", "Kapal RoRo": "⚓", "Kapal RO-RO": "⚓", "Container": "📦", "Car Carrier": "🚚", "Towing": "🛻" };
+
+function T360_Empty({ text, sub }) {
+  return (
+    <div className="t360-empty">
+      <div style={{ display: "flex", justifyContent: "center" }}>{T360_ICONS.doc}</div>
+      <div className="t360-empty-t">{text}</div>
+      {sub && <div className="t360-empty-s">{sub}</div>}
+    </div>
+  );
+}
+
+function Trip360Modal({ order, headers, onClose, onEditLegs, onPrintSuratJalan, onOpenInvoice }) {
+  const [detail, setDetail] = useState(null);
+  const [phase, setPhase] = useState("loading"); // loading | ready | error
+  const [tab, setTab] = useState("overview");
+  const [lightbox, setLightbox] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    if (!order?.trip_id) { setPhase("error"); return undefined; }
+    setPhase("loading");
+    axios.get(`${API}/public/trips/${order.trip_id}`)
+      .then((r) => { if (alive) { setDetail(r.data); setPhase("ready"); } })
+      .catch(() => { if (alive) setPhase("error"); });
+    return () => { alive = false; };
+  }, [order?.trip_id]);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const legs = useMemo(() => {
+    if (Array.isArray(detail?.legs) && detail.legs.length) return detail.legs;
+    if (Array.isArray(order?.legs) && order.legs.length) return order.legs;
+    return [];
+  }, [detail, order]);
+
+  const album = detail?.album || {};
+  const albumCount = (album.asal?.length || 0) + (album.kapal?.length || 0) + (album.tujuan?.length || 0) + (album.dokumen?.length || 0);
+  const checkpoints = detail?.daily_checkpoints || [];
+  const bastk = detail?.handover?.bastk || [];
+  const resi = detail?.handover?.resi;
+  const docCount = bastk.length + (resi?.url ? 1 : 0);
+
+  const { done: progDone, currentIdx } = computeProgress({ ...order, legs });
+  const activeLeg = legs.find((l) => l.status && l.status !== "Menunggu" && l.status !== "Selesai") || legs.find((l) => l.status !== "Selesai") || null;
+  const activeLegIdx = activeLeg ? legs.indexOf(activeLeg) : -1;
+  const driverAktif = activeLeg?.driver || order.nama_driver || order.driver_id || "Belum di-assign";
+  const doneLegs = legs.filter((l) => l.status === "Selesai").length;
+
+  const statusMeta = {
+    NEW:        { txt: "Baru", cls: "info" },
+    DISPATCHED: { txt: "Dispatched", cls: "info" },
+    ON_TRIP:    { txt: "On Trip", cls: "info" },
+    DELIVERED:  { txt: "Selesai", cls: "ok" },
+    CANCELLED:  { txt: "Batal", cls: "bad" },
+  }[order.status] || { txt: order.status || "—", cls: "wait" };
+
+  const TABS = [
+    { key: "overview", label: "Overview", icon: "overview" },
+    { key: "routeleg", label: "Route Leg", icon: "routeleg", count: legs.length || undefined },
+    { key: "keuangan", label: "Keuangan", icon: "keuangan" },
+    { key: "dokumen", label: "Dokumen", icon: "dokumen", count: docCount || undefined },
+    { key: "aktivitas", label: "Aktivitas", icon: "aktivitas" },
+    { key: "tracking", label: "Tracking", icon: "tracking", count: checkpoints.length || undefined },
+  ];
+
+  const stop = (e) => e.stopPropagation();
+
+  return createPortal((
+    <div className="adm-vars">
+    <div className="t360-bg" onClick={onClose} data-testid="trip360-modal">
+      <div className="t360-shell" onClick={stop}>
+
+        {/* ── HEADER ── */}
+        <div className="t360-head">
+          <div className="t360-head-top">
+            <div className="t360-id">
+              <span className={`t360-chip ${statusMeta.cls}`}>{statusMeta.txt}{activeLegIdx >= 0 && legs.length > 1 ? ` · Leg ${activeLegIdx + 1}/${legs.length}` : ""}</span>
+              <span className="t360-order">{order.customer_nama || "Tanpa Nama"}</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span className="t360-trip">{order.order_id}</span>
+              <span className="t360-trip">·</span>
+              <span className="t360-trip">{order.trip_id}</span>
+              <button className="t360-close" onClick={onClose} aria-label="Tutup" data-testid="trip360-close">✕</button>
+            </div>
+          </div>
+
+          <div className="t360-facts">
+            <div className="t360-fact">
+              <div className="t360-fact-k">Kendaraan</div>
+              <div className="t360-fact-v" title={order.vehicle_type}>{order.vehicle_type || order.isi_kiriman || "—"}</div>
+              <div className="t360-fact-s">{order.nopol || order.no_rangka || "—"}</div>
+            </div>
+            <div className="t360-fact">
+              <div className="t360-fact-k">Driver Aktif</div>
+              <div className="t360-fact-v" title={driverAktif}>{driverAktif}</div>
+              <div className="t360-fact-s">{activeLeg ? `Leg ${activeLegIdx + 1} · ${activeLeg.tipe}` : "—"}</div>
+            </div>
+            <div className="t360-fact">
+              <div className="t360-fact-k">Koordinator</div>
+              <div className="t360-fact-v">{order.koordinator_nama || order.koordinator_id || "—"}</div>
+              <div className="t360-fact-s">{order.koordinator_hp || ""}</div>
+            </div>
+            <div className="t360-fact">
+              <div className="t360-fact-k">Rute</div>
+              <div className="t360-fact-v" title={`${order.asal_kota} → ${order.tujuan_kota}`}>{order.asal_kota || "—"} → {order.tujuan_kota || "—"}</div>
+              <div className="t360-fact-s">{legs.length} leg</div>
+            </div>
+            <div className="t360-fact">
+              <div className="t360-fact-k">Customer</div>
+              <div className="t360-fact-v" title={order.customer_nama}>{order.customer_nama || "—"}</div>
+              <div className="t360-fact-s">{order.customer_hp || "—"}</div>
+            </div>
+            <div className="t360-fact">
+              <div className="t360-fact-k">Dibuat</div>
+              <div className="t360-fact-v">{fmtDateShort(order.created_at)}</div>
+              <div className="t360-fact-s">oleh Admin</div>
+            </div>
+          </div>
+
+          <div className="t360-prog">
+            <div className="t360-prog-track">
+              {PROGRESS_STEPS.map((s, i) => {
+                const isDone = progDone[s.key] && order.status !== "CANCELLED";
+                const isActive = i === currentIdx && order.status !== "CANCELLED" && order.status !== "DELIVERED";
+                return (
+                  <div key={s.key} className={`t360-pstep ${isDone ? "done" : ""} ${isActive ? "active" : ""}`}>
+                    <div className="t360-pdot">{isDone ? "✓" : ""}</div>
+                    <div className="t360-plbl">{s.label}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="t360-stats">
+            <div className="t360-stat">
+              <div className="t360-stat-k">Leg Selesai</div>
+              <div className="t360-stat-v">{doneLegs}<span style={{ fontSize: 12, color: "var(--text-mute)" }}> / {legs.length || "—"}</span></div>
+              <div className="t360-stat-s">rute pengiriman</div>
+            </div>
+            <div className="t360-stat">
+              <div className="t360-stat-k">Foto Terkumpul</div>
+              <div className="t360-stat-v">{albumCount}</div>
+              <div className="t360-stat-s">album perjalanan</div>
+            </div>
+            <div className="t360-stat">
+              <div className="t360-stat-k">Checkpoint</div>
+              <div className="t360-stat-v">{checkpoints.length}</div>
+              <div className="t360-stat-s">lokasi dilaporkan</div>
+            </div>
+            <div className="t360-stat">
+              <div className="t360-stat-k">Dokumen</div>
+              <div className="t360-stat-v">{docCount}</div>
+              <div className="t360-stat-s">BASTK &amp; resi</div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── TAB BAR ── */}
+        <div className="t360-tabs" role="tablist">
+          {TABS.map((t) => (
+            <button key={t.key} className={`t360-tab ${tab === t.key ? "active" : ""}`} onClick={() => setTab(t.key)} data-testid={`trip360-tab-${t.key}`}>
+              {T360_ICONS[t.icon]}<span>{t.label}</span>{t.count ? <span className="cnt">{t.count}</span> : null}
+            </button>
+          ))}
+        </div>
+
+        {/* ── BODY ── */}
+        <div className="t360-body">
+          {phase === "loading" && <div className="t360-empty"><div className="t360-empty-t">Memuat data trip…</div></div>}
+          {phase === "error" && <T360_Empty text="Gagal memuat data trip" sub="Coba tutup lalu buka lagi. Kalau tetap gagal, cek koneksi internet." />}
+
+          {phase === "ready" && tab === "overview" && (
+            <Trip360Overview order={order} detail={detail} legs={legs} albumCount={albumCount} checkpoints={checkpoints} docCount={docCount} activeLeg={activeLeg} activeLegIdx={activeLegIdx} setTab={setTab} />
+          )}
+          {phase === "ready" && tab === "routeleg" && (
+            <Trip360RouteLeg legs={legs} album={album} checkpoints={checkpoints} bastk={bastk} onEditLegs={onEditLegs} />
+          )}
+          {phase === "ready" && tab === "keuangan" && (
+            <Trip360Keuangan order={order} onOpenInvoice={onOpenInvoice} />
+          )}
+          {phase === "ready" && tab === "dokumen" && (
+            <Trip360Dokumen order={order} detail={detail} bastk={bastk} resi={resi} album={album} albumCount={albumCount} onPrintSuratJalan={onPrintSuratJalan} onOpenInvoice={onOpenInvoice} onView={setLightbox} />
+          )}
+          {phase === "ready" && tab === "aktivitas" && (
+            <Trip360Aktivitas order={order} detail={detail} checkpoints={checkpoints} />
+          )}
+          {phase === "ready" && tab === "tracking" && (
+            <Trip360Tracking checkpoints={checkpoints} onView={setLightbox} />
+          )}
+        </div>
+      </div>
+
+      {lightbox && (
+        <div onClick={() => setLightbox(null)} style={{ position: "fixed", inset: 0, zIndex: 210, background: "rgba(0,0,0,.9)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <img src={lightbox} alt="" style={{ maxWidth: "100%", maxHeight: "100%", borderRadius: 8 }} />
+        </div>
+      )}
+    </div>
+    </div>
+  ), document.body);
+}
+
+/* ── Overview ── */
+function Trip360Overview({ order, detail, legs, albumCount, checkpoints, docCount, activeLeg, activeLegIdx, setTab }) {
+  // deteksi "butuh perhatian" dari data nyata
+  const alerts = [];
+  if (order.status === "ON_TRIP" && activeLeg && (activeLeg.tipe || "").startsWith("Kapal") && checkpoints.length === 0) {
+    alerts.push("Leg kapal sedang berjalan tapi belum ada checkpoint dari lapangan.");
+  }
+  if (!order.driver_id && !order.nama_driver) alerts.push("Driver belum di-assign untuk trip ini.");
+  if (order.status === "DELIVERED" && docCount === 0) alerts.push("Trip sudah selesai tapi belum ada dokumen BASTK/resi yang terunggah.");
+  const recent = buildTrip360Activity(order, detail, checkpoints).slice(0, 3);
+
+  return (
+    <>
+      {alerts.length > 0 && (
+        <div className="t360-callout">
+          {T360_ICONS.warn}
+          <div>
+            <div className="t360-callout-t">Butuh perhatian</div>
+            <div className="t360-callout-s">{alerts.join(" ")}</div>
+          </div>
+        </div>
+      )}
+
+      <div className="t360-grid2" style={{ marginBottom: 14 }}>
+        <div className="t360-card">
+          <div className="t360-card-hd"><span className="t360-card-title">{T360_ICONS.user}Ringkasan Customer</span></div>
+          <div className="t360-kv"><span className="t360-kv-k">Nama</span><span className="t360-kv-v">{order.customer_nama || "—"}</span></div>
+          <div className="t360-kv"><span className="t360-kv-k">No. HP</span><span className="t360-kv-v">{order.customer_hp || "—"}</span></div>
+          {order.customer_email && <div className="t360-kv"><span className="t360-kv-k">Email</span><span className="t360-kv-v">{order.customer_email}</span></div>}
+          <div className="t360-kv"><span className="t360-kv-k">Asal</span><span className="t360-kv-v">{order.asal_kota || "—"}{order.asal_alamat ? ` — ${order.asal_alamat}` : ""}</span></div>
+          <div className="t360-kv"><span className="t360-kv-k">Tujuan</span><span className="t360-kv-v">{order.tujuan_kota || "—"}{order.tujuan_alamat ? ` — ${order.tujuan_alamat}` : ""}</span></div>
+        </div>
+        <div className="t360-card">
+          <div className="t360-card-hd"><span className="t360-card-title">{T360_ICONS.truck}Kendaraan &amp; Tim</span></div>
+          <div className="t360-kv"><span className="t360-kv-k">Kendaraan</span><span className="t360-kv-v">{order.vehicle_type || order.isi_kiriman || "—"}</span></div>
+          <div className="t360-kv"><span className="t360-kv-k">No. Polisi</span><span className="t360-kv-v">{order.nopol || "—"}</span></div>
+          <div className="t360-kv"><span className="t360-kv-k">No. Rangka</span><span className="t360-kv-v">{order.no_rangka || "—"}</span></div>
+          <div className="t360-kv"><span className="t360-kv-k">Driver Aktif</span><span className="t360-kv-v">{activeLeg?.driver || order.nama_driver || "Belum di-assign"}</span></div>
+          <div className="t360-kv"><span className="t360-kv-k">Koordinator</span><span className="t360-kv-v">{order.koordinator_nama || order.koordinator_id || "—"}</span></div>
+        </div>
+      </div>
+
+      <div className="t360-grid2">
+        <div className="t360-card">
+          <div className="t360-card-hd">
+            <span className="t360-card-title">{T360_ICONS.routeleg}Progres Rute</span>
+            <button className="t360-card-link" onClick={() => setTab("routeleg")}>Lihat detail →</button>
+          </div>
+          {legs.length === 0 ? <div style={{ fontSize: 11.5, color: "var(--text-mute)" }}>Belum ada leg.</div> : legs.map((l, i) => (
+            <div key={i} className="t360-kv">
+              <span className="t360-kv-k">{T360_TIPE_ICON[l.tipe] || "📍"} Leg {i + 1} · {l.tipe}</span>
+              <span className={`t360-chip ${l.status === "Selesai" ? "ok" : (l.status && l.status !== "Menunggu") ? "info" : "wait"}`}>{l.status || "Menunggu"}</span>
+            </div>
+          ))}
+        </div>
+        <div className="t360-card">
+          <div className="t360-card-hd">
+            <span className="t360-card-title">{T360_ICONS.aktivitas}Aktivitas Terbaru</span>
+            <button className="t360-card-link" onClick={() => setTab("aktivitas")}>Lihat semua →</button>
+          </div>
+          {recent.length === 0 ? <div style={{ fontSize: 11.5, color: "var(--text-mute)" }}>Belum ada aktivitas tercatat.</div> : recent.map((a, i) => (
+            <div key={i} style={{ padding: "8px 0", borderTop: i ? "1px solid var(--border)" : "none" }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>{a.text}</div>
+              <div style={{ fontSize: 10.5, color: "var(--text-mute)", marginTop: 2 }}>{fmtTs(a.ts)} · {a.actor}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ── Route Leg ── */
+function Trip360RouteLeg({ legs, album, checkpoints, bastk, onEditLegs }) {
+  if (legs.length === 0) return <T360_Empty text="Belum ada rute leg" sub="Rute belum disusun untuk trip ini. Klik 'Kelola Leg' untuk mengaturnya." />;
+  const stageForLeg = (l) => {
+    const t = (l.tipe || "").toLowerCase();
+    if (t.startsWith("kapal")) return "kapal";
+    return "asal";
+  };
+  return (
+    <>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
+        <button className="adm-btn adm-btn-sm adm-btn-blue" onClick={onEditLegs} data-testid="trip360-edit-legs">✎ Kelola Leg</button>
+      </div>
+      <div className="t360-rail">
+        {legs.map((l, i) => {
+          const status = l.status || "Menunggu";
+          const cls = status === "Selesai" ? "done" : (status !== "Menunggu") ? "active" : "";
+          const legAlbum = (album[stageForLeg(l)] || []).length;
+          return (
+            <div key={i} className={`t360-leg ${cls}`}>
+              <div className="t360-leg-num">{T360_TIPE_ICON[l.tipe] || "📍"}</div>
+              <div className="t360-leg-body">
+                <div className="t360-leg-hd">
+                  <span className="t360-leg-route">Leg {i + 1} · {l.tipe} — {l.asal || "?"} → {l.tujuan || "?"}</span>
+                  <span className={`t360-chip ${status === "Selesai" ? "ok" : status !== "Menunggu" ? "info" : "wait"}`}>{status}</span>
+                </div>
+                <div className="t360-leg-meta">
+                  <div><div className="k">Driver / Petugas</div><div className="v">{l.driver || "—"}</div></div>
+                  <div><div className="k">Kapal / Ekspedisi</div><div className="v">{l.kapal || "—"}</div></div>
+                  <div><div className="k">Marking</div><div className="v">{l.marking || "—"}</div></div>
+                  <div><div className="k">ETA</div><div className="v">{l.eta ? fmtDateShort(l.eta) : "—"}</div></div>
+                </div>
+                <div className="t360-leg-counts">
+                  <span className="t360-count">{T360_ICONS.camera} Album ({legAlbum})</span>
+                  <span className="t360-count">{T360_ICONS.pin} Checkpoint ({i === 0 ? checkpoints.length : 0})</span>
+                  <span className="t360-count">{T360_ICONS.doc} Dokumen ({i === legs.length - 1 ? bastk.length : 0})</span>
+                </div>
+                {l.catatan && <div style={{ fontSize: 11, color: "var(--text-mute)", marginTop: 10, fontStyle: "italic" }}>“{l.catatan}”</div>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+/* ── Keuangan (fase 1: jujur — modul finansial per-trip belum aktif) ── */
+function Trip360Keuangan({ order, onOpenInvoice }) {
+  return (
+    <>
+      <div className="t360-grid3" style={{ marginBottom: 16 }}>
+        <div className="t360-card">
+          <div className="t360-money-k">Nilai Invoice</div>
+          <div className="t360-money">Belum diatur</div>
+          <div style={{ marginTop: 8 }}><button className="adm-btn adm-btn-sm adm-btn-blue" onClick={onOpenInvoice} data-testid="trip360-buat-invoice">🧾 Buat / Cetak Invoice</button></div>
+        </div>
+        <div className="t360-card">
+          <div className="t360-money-k">Total HPP (Biaya)</div>
+          <div className="t360-money">—</div>
+          <div style={{ marginTop: 8 }}><span className="t360-chip wait">Menyusul</span></div>
+        </div>
+        <div className="t360-card">
+          <div className="t360-money-k">Profit &amp; Margin</div>
+          <div className="t360-money">—</div>
+          <div style={{ marginTop: 8 }}><span className="t360-chip wait">Menyusul</span></div>
+        </div>
+      </div>
+
+      <div className="t360-card">
+        <div className="t360-callout" style={{ margin: 0 }}>
+          {T360_ICONS.warn}
+          <div>
+            <div className="t360-callout-t">Modul keuangan per-trip belum aktif</div>
+            <div className="t360-callout-s">
+              Untuk sekarang, Invoice bisa dibuat &amp; dicetak lewat tombol di atas (nilai diisi manual saat cetak).
+              Perhitungan otomatis HPP, profit, tagihan vendor, dan cash flow per-trip akan aktif di tahap berikutnya —
+              begitu modul Biaya Supplier &amp; Pembayaran per-trip dibangun, semua angka di tab ini terisi sendiri.
+              Sengaja tidak menampilkan angka contoh supaya tidak menyesatkan pembukuan.
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ── Dokumen ── */
+function Trip360Dokumen({ order, detail, bastk, resi, album, albumCount, onPrintSuratJalan, onOpenInvoice, onView }) {
+  const bastkUrl = bastk[0] ? resolveTripUrl(bastk[0].url) : null;
+  const resiUrl = resi?.url ? resolveTripUrl(resi.url) : null;
+  const cards = [
+    { name: "Surat Jalan", sub: "Consignment note pengiriman", ready: true, action: () => onPrintSuratJalan(), actionLabel: "Cetak", primary: true },
+    { name: "Invoice / Faktur", sub: "Tagihan jasa pengiriman", ready: true, action: () => onOpenInvoice(), actionLabel: "Buat", primary: true },
+    { name: "BASTK", sub: bastk.length ? `${bastk.length} halaman terunggah` : "Belum diunggah driver", ready: bastk.length > 0, action: () => window.open(bastkUrl, "_blank"), actionLabel: "Lihat" },
+    { name: "Resi JNE / J&T", sub: resi?.no_resi || (resiUrl ? "Foto resi terunggah" : "Belum diunggah"), ready: !!resiUrl, action: () => window.open(resiUrl, "_blank"), actionLabel: "Lihat" },
+    { name: "Album Foto", sub: `${albumCount} foto perjalanan`, ready: albumCount > 0, action: null, actionLabel: "Lihat di tab Tracking" },
+    { name: "Surat Tugas Driver", sub: "Menyusul — generator belum dibuat", ready: false, action: null, actionLabel: "Segera" },
+    { name: "Surat Pengantar Driver", sub: "Tersedia di menu Driver", ready: false, action: null, actionLabel: "Menu Driver" },
+    { name: "Proof of Delivery", sub: "Menyusul — generator belum dibuat", ready: false, action: null, actionLabel: "Segera" },
+  ];
+  return (
+    <>
+      <div className="t360-grid4">
+        {cards.map((c, i) => (
+          <div key={i} className="t360-doc">
+            <div className="t360-doc-ico">{T360_ICONS.doc}</div>
+            <div>
+              <div className="t360-doc-name">{c.name}</div>
+              <div className="t360-doc-sub">{c.sub}</div>
+            </div>
+            <div>{c.ready ? <span className="t360-chip ok">Tersedia</span> : <span className="t360-chip wait">Belum Ada</span>}</div>
+            <div className="t360-doc-actions">
+              <button className={`t360-doc-btn ${c.primary ? "primary" : ""}`} disabled={!c.action} onClick={c.action || undefined}>{c.actionLabel}</button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {albumCount > 0 && (
+        <>
+          <div className="t360-seclbl">Album Foto Perjalanan</div>
+          {["asal", "kapal", "tujuan", "dokumen"].map((stage) => {
+            const photos = album[stage] || [];
+            if (!photos.length) return null;
+            const label = { asal: "📍 Asal", kapal: "⚓ Di Kapal", tujuan: "🏁 Tujuan", dokumen: "📄 Dokumen" }[stage];
+            return (
+              <div key={stage} style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text-2)", marginBottom: 8 }}>{label} ({photos.length})</div>
+                <div className="t360-photos">
+                  {photos.map((p, j) => (
+                    <img key={j} src={resolveTripUrl(p.url)} alt="" className="t360-photo" onClick={() => onView(resolveTripUrl(p.url))} />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </>
+      )}
+    </>
+  );
+}
+
+/* ── Aktivitas ── */
+function buildTrip360Activity(order, detail, checkpoints) {
+  const ev = [];
+  if (order.created_at) ev.push({ ts: order.created_at, text: `Trip dibuat dari pesanan ${order.order_id}`, actor: "Admin" });
+  (checkpoints || []).forEach((cp) => {
+    const ts = cp.ts || cp.timestamp || cp.created_at;
+    const note = cp.keterangan || cp.catatan;
+    if (ts) ev.push({ ts, text: `Checkpoint dilaporkan${note ? ` — ${note}` : cp.status ? ` — ${cp.status}` : ""}`, actor: "Driver" });
+  });
+  const album = detail?.album || {};
+  ["asal", "kapal", "tujuan", "dokumen"].forEach((stage) => {
+    (album[stage] || []).forEach((p) => {
+      const ts = p.ts || p.uploaded_at || p.created_at;
+      if (ts) ev.push({ ts, text: `Foto ${stage} diunggah`, actor: p.uploaded_by || "Driver" });
+    });
+  });
+  (detail?.handover?.bastk || []).forEach((b) => {
+    const ts = b.ts || b.uploaded_at || b.created_at;
+    if (ts) ev.push({ ts, text: "Dokumen BASTK diunggah", actor: "Driver" });
+  });
+  const resiTs = detail?.handover?.resi?.ts || detail?.handover?.resi?.uploaded_at;
+  if (resiTs) ev.push({ ts: resiTs, text: "Foto resi pengiriman diunggah", actor: "Driver" });
+  return ev.sort((a, b) => new Date(b.ts) - new Date(a.ts));
+}
+
+function Trip360Aktivitas({ order, detail, checkpoints }) {
+  const events = buildTrip360Activity(order, detail, checkpoints);
+  if (events.length === 0) return <T360_Empty text="Belum ada aktivitas tercatat" sub="Aktivitas muncul otomatis saat driver kirim checkpoint, upload foto, atau dokumen." />;
+  return (
+    <div className="t360-card" style={{ padding: "6px 18px" }}>
+      {events.map((e, i) => (
+        <div key={i} className="t360-log">
+          <div className="t360-log-time">{fmtTs(e.ts)}</div>
+          <div className="t360-log-dot"><span /></div>
+          <div className="t360-log-body">
+            <div className="t360-log-text">{e.text}</div>
+            <div className="t360-log-actor">oleh {e.actor}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ── Tracking ── */
+function Trip360Tracking({ checkpoints, onView }) {
+  const cps = [...(checkpoints || [])].reverse();
+  const withLoc = cps.filter((c) => c.lat != null && c.lng != null);
+  const last = cps[0];
+  if (cps.length === 0) return <T360_Empty text="Belum ada data lokasi" sub="Lokasi muncul saat driver mengirim checkpoint dengan GPS aktif dari aplikasi driver." />;
+  return (
+    <div className="t360-grid2">
+      <div className="t360-card" style={{ height: "fit-content" }}>
+        <div className="t360-card-hd"><span className="t360-card-title">{T360_ICONS.tracking}Lokasi Terakhir</span></div>
+        {last ? (
+          <>
+            <div className="t360-kv"><span className="t360-kv-k">Waktu</span><span className="t360-kv-v">{fmtTs(last.ts || last.timestamp || last.created_at)}</span></div>
+            {last.status && <div className="t360-kv"><span className="t360-kv-k">Status</span><span className="t360-kv-v">{last.status}</span></div>}
+            {(last.keterangan || last.catatan) && <div className="t360-kv"><span className="t360-kv-k">Catatan</span><span className="t360-kv-v">{last.keterangan || last.catatan}</span></div>}
+            {last.lat != null && last.lng != null ? (
+              <div style={{ marginTop: 10 }}>
+                <a className="adm-btn adm-btn-sm adm-btn-blue" href={`https://www.google.com/maps?q=${last.lat},${last.lng}`} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>📍 Buka di Google Maps</a>
+              </div>
+            ) : (
+              <div style={{ fontSize: 11, color: "var(--text-mute)", marginTop: 10 }}>Checkpoint terakhir tanpa data GPS.</div>
+            )}
+          </>
+        ) : <div style={{ fontSize: 11.5, color: "var(--text-mute)" }}>—</div>}
+        {withLoc.length > 0 && <div style={{ fontSize: 10.5, color: "var(--text-mute)", marginTop: 12 }}>{withLoc.length} dari {cps.length} checkpoint punya titik GPS.</div>}
+      </div>
+
+      <div className="t360-card">
+        <div className="t360-card-hd"><span className="t360-card-title">{T360_ICONS.pin}Riwayat Checkpoint</span></div>
+        {cps.map((cp, i) => (
+          <div key={cp.id || i} className="t360-cp">
+            {cp.url ? (
+              <img className="t360-cp-thumb" src={resolveTripUrl(cp.url)} alt="" onClick={() => onView(resolveTripUrl(cp.url))} style={{ cursor: "pointer" }} />
+            ) : (
+              <div className="t360-cp-thumb" />
+            )}
+            <div className="t360-cp-body">
+              <div className="t360-cp-loc">{cp.keterangan || cp.catatan || cp.status || `Checkpoint ${cps.length - i}`}</div>
+              <div className="t360-cp-time">{fmtTs(cp.ts || cp.timestamp || cp.created_at)}</div>
+              {cp.lat != null && cp.lng != null && (
+                <a className="t360-cp-map" href={`https://www.google.com/maps?q=${cp.lat},${cp.lng}`} target="_blank" rel="noreferrer">📍 Buka lokasi</a>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 /* ════════════════════════════════════════
