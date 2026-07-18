@@ -8,6 +8,7 @@ import SupplierPage from "@/SupplierPage";
 import SelisihPage from "@/SelisihPage";
 import KompensasiPage from "@/KompensasiPage";
 import PermintaanHargaPage from "@/PermintaanHargaPage";
+import { DOC_BRAND, DOC_BASE_CSS, docHeader, docFooter, terbilangRupiah } from "@/docTheme";
 import "@/App.css";
 import "@/Driver.css";
 import "@/Admin.css";
@@ -1166,147 +1167,120 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
     const w = window.open("", "_blank"); w.document.write(html); w.document.close();
   };
 
-  const printInvoice = (priceNum, withTax) => {
+  const printInvoice = (priceNum, withTax, extra) => {
     if (!priceNum) return;
+    const { jatuhTempo, metode, pesan } = extra || {};
     const ppn = withTax ? Math.round(priceNum * 0.011) : 0;
     const total = priceNum + ppn;
-    const fRp = (n) => "Rp " + n.toLocaleString("id-ID");
+    const fRp = (n) => n.toLocaleString("id-ID") + ",00";
 
-    const tgl = new Date().toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
-    const noInvoice = `INV-${order.order_id?.slice(-6) || "000000"}`;
+    const fmtTgl = (iso) => {
+      if (!iso) return "—";
+      const [y, m, d] = iso.split("-");
+      return `${d}-${m}-${y}`;
+    };
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const tgl = fmtTgl(todayIso);
+    const noInvoice = `INV/AAL/${order.order_id?.slice(-4) || "0000"}/${new Date().getFullYear()}`;
     const isiContents = (order.isi_kiriman || "").trim()
-      || `${order.vehicle_type || ""} ${order.nopol ? "· " + order.nopol : ""}`.trim();
+      || `${order.vehicle_type || ""} ${order.nopol ? order.nopol : ""}`.trim();
 
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Invoice ${noInvoice}</title>
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${noInvoice}</title>
     <style>
-      * { margin:0; padding:0; box-sizing:border-box; }
-      body { font-family: Arial, sans-serif; font-size: 11px; color: #000; background: #fff; }
-      .sheet { padding: 12mm; }
-      .outer { border: 2px solid #000; width: 100%; position: relative; }
-      .header { display: flex; border-bottom: 2px solid #000; }
-      .logo-box { width: 220px; border-right: 2px solid #000; padding: 10px 12px; display: flex; flex-direction: column; justify-content: center; }
-      .logo-name { font-size: 15px; font-weight: 900; color: #000; letter-spacing: 1px; line-height: 1.2; }
-      .logo-tagline { font-size: 9px; color: #333; margin-top: 3px; font-style: italic; }
-      .logo-addr { font-size: 9px; color: #333; margin-top: 5px; line-height: 1.5; }
-      .title-box { flex: 1; padding: 10px 14px; }
-      .title-main { font-size: 16px; font-weight: 900; text-align: center; letter-spacing: 2px; }
-      .title-sub { font-size: 10px; text-align: center; color: #333; margin-top: 2px; font-style: italic; }
-      .no-box { border: 1px solid #000; display: inline-block; padding: 3px 12px; margin-top: 8px; font-size: 15px; font-weight: 900; letter-spacing: 2px; }
-      .info-row { display: flex; border-bottom: 1px solid #000; }
-      .info-cell { flex: 1; border-right: 1px solid #000; padding: 6px 10px; }
-      .info-cell:last-child { border-right: none; }
-      .lbl { font-size: 8.5px; font-weight: 700; text-transform: uppercase; color: #555; letter-spacing: .5px; }
-      .val { font-size: 12px; font-weight: 600; margin-top: 2px; min-height: 18px; }
-      table { width: 100%; border-collapse: collapse; }
-      th { background: #e8e8e8; border: 1px solid #000; padding: 6px 8px; font-size: 9.5px; text-align: center; font-weight: 700; text-transform: uppercase; }
-      td { border: 1px solid #000; padding: 8px; font-size: 11.5px; vertical-align: top; }
-      .td-no { text-align: center; width: 30px; }
-      .td-desc { width: 46%; }
-      .td-num { text-align: right; }
-      .totals-wrap { display: flex; border-bottom: 1px solid #000; }
-      .totals-note { flex: 1; padding: 10px 12px; font-size: 9.5px; color: #333; line-height: 1.6; }
-      .totals-box { width: 260px; border-left: 1px solid #000; }
-      .totals-row { display: flex; justify-content: space-between; padding: 6px 12px; border-bottom: 1px solid #ccc; font-size: 11px; }
-      .totals-row.grand { border-top: 2px solid #000; border-bottom: none; font-size: 13px; font-weight: 900; padding: 8px 12px; }
-      .pay-box { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-bottom: 1px solid #000; }
-      .pay-badge { width: 44px; height: 44px; border-radius: 6px; background: #0054a6; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 11px; flex-shrink: 0; }
-      .pay-num { font-size: 15px; font-weight: 900; letter-spacing: 1px; }
-      .pay-name { font-size: 9.5px; color: #333; margin-top: 2px; }
-      .sign-row { display: flex; }
-      .sign-cell { flex: 1; padding: 10px 12px; }
-      .sign-cell:first-child { border-right: 1px solid #000; }
-      .sign-lbl { font-size: 8.5px; font-weight: 700; text-transform: uppercase; color: #555; }
-      .sign-space { height: 46px; }
-      .sign-name { font-size: 9.5px; border-top: 1px solid #555; margin-top: 4px; padding-top: 2px; color: #333; }
-      @media print { @page { margin: 0; size: A4 portrait; } body { padding: 0; } }
+      ${DOC_BASE_CSS}
+      .inv-meta-row { display:flex; justify-content:space-between; gap:24px; margin-bottom:16px; }
+      .inv-billto .lbl { font-size:9px; font-weight:700; text-transform:uppercase; color:${DOC_BRAND.muted}; letter-spacing:.5px; margin-bottom:4px; }
+      .inv-billto .val { font-size:14px; font-weight:800; color:${DOC_BRAND.ink}; }
+      .inv-meta-table { border-collapse:collapse; font-size:10.5px; }
+      .inv-meta-table td { padding:2.5px 0; }
+      .inv-meta-table td:first-child { color:${DOC_BRAND.muted}; padding-right:18px; white-space:nowrap; }
+      .inv-meta-table td:last-child { font-weight:700; text-align:right; }
+      .inv-total-bar { display:flex; justify-content:space-between; align-items:center; background:${DOC_BRAND.navyDeep}; color:#fff; padding:10px 16px; border-radius:6px; margin-bottom:18px; }
+      .inv-total-bar span:first-child { font-size:10.5px; font-weight:700; letter-spacing:.6px; text-transform:uppercase; opacity:.85; }
+      .inv-total-bar span:last-child { font-size:15px; font-weight:900; }
+      table.inv-items { width:100%; border-collapse:collapse; margin-bottom:14px; }
+      table.inv-items th { text-align:left; font-size:9px; text-transform:uppercase; letter-spacing:.4px; color:${DOC_BRAND.muted}; font-weight:700; padding:7px 8px; border-bottom:1.5px solid ${DOC_BRAND.navy}; }
+      table.inv-items td { padding:10px 8px; font-size:11px; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; background:${DOC_BRAND.paperMist}; }
+      table.inv-items .num { text-align:right; }
+      .inv-summary { display:flex; justify-content:space-between; gap:24px; margin-bottom:18px; }
+      .inv-note { flex:1; font-size:10px; color:${DOC_BRAND.muted}; line-height:1.7; }
+      .inv-note b { color:${DOC_BRAND.ink}; }
+      .inv-totals-box { width:230px; }
+      .inv-totals-box .row { display:flex; justify-content:space-between; padding:5px 0; font-size:10.5px; color:${DOC_BRAND.muted}; }
+      .inv-totals-box .row.grand { border-top:1.5px solid ${DOC_BRAND.navy}; margin-top:4px; padding-top:8px; font-size:13px; font-weight:900; color:${DOC_BRAND.navy}; }
+      .inv-pay-box { display:flex; align-items:center; gap:12px; padding:12px 16px; background:${DOC_BRAND.paperMist}; border-radius:8px; margin-bottom:20px; }
+      .inv-pay-badge { width:40px; height:40px; border-radius:7px; background:${DOC_BRAND.navy}; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:900; font-size:10px; flex-shrink:0; }
+      .inv-pay-num { font-size:14px; font-weight:900; letter-spacing:.5px; color:${DOC_BRAND.ink}; }
+      .inv-pay-name { font-size:9.5px; color:${DOC_BRAND.muted}; margin-top:1px; }
+      .inv-sign-row { display:flex; justify-content:space-between; margin-top:26px; }
+      .inv-sign-cell { width:220px; text-align:center; }
+      .inv-sign-lbl { font-size:10px; color:${DOC_BRAND.muted}; margin-bottom:46px; }
+      .inv-sign-name { font-size:10.5px; font-weight:700; border-top:1px solid ${DOC_BRAND.line}; padding-top:6px; }
     </style></head><body>
-    <div class="sheet">
-      <div class="outer">
-        <div class="header">
-          <div class="logo-box">
-            <div class="logo-name">PT. ALYSSA<br>AUTO LOGISTIK</div>
-            <div class="logo-tagline">Logistic on going</div>
-            <div class="logo-addr">Jl Enim Raya 2 No 86<br>Jakarta Utara, DKI Jakarta 14330<br>Telp: 0818 631 135</div>
-          </div>
-          <div class="title-box">
-            <div class="title-main">INVOICE</div>
-            <div class="title-sub">Tagihan Jasa Pengiriman Kendaraan</div>
-            <div style="text-align:center;margin-top:8px"><div class="no-box">${noInvoice}</div></div>
-            <div style="text-align:right;font-size:9.5px;margin-top:6px;color:#555">Tanggal: ${tgl}</div>
-          </div>
-        </div>
+    <div class="doc-sheet">
+      ${docHeader({ docTitle: "FAKTUR / INVOICE" })}
 
-        <div class="info-row">
-          <div class="info-cell" style="flex:2">
-            <div class="lbl">Ditagihkan Kepada / Bill To</div>
-            <div class="val">${order.customer_nama || "&nbsp;"}</div>
-          </div>
-          <div class="info-cell" style="flex:1">
-            <div class="lbl">Ref. PO / Order ID</div>
-            <div class="val">${order.order_id || "&nbsp;"}</div>
-          </div>
-          <div class="info-cell" style="flex:1">
-            <div class="lbl">Rute</div>
-            <div class="val">${order.asal_kota || "—"} → ${order.tujuan_kota || "—"}</div>
-          </div>
+      <div class="inv-meta-row">
+        <div class="inv-billto">
+          <div class="lbl">Ditagihkan Kepada</div>
+          <div class="val">${order.customer_nama || "&nbsp;"}</div>
         </div>
-
-        <table>
-          <thead><tr>
-            <th class="td-no">#</th>
-            <th class="td-desc">Deskripsi</th>
-            <th>Qty</th>
-            <th>Harga Satuan</th>
-            <th>Jumlah</th>
-          </tr></thead>
-          <tbody>
-            <tr>
-              <td class="td-no">1</td>
-              <td class="td-desc">
-                Jasa pengiriman kendaraan — ${isiContents || "&nbsp;"}<br>
-                <span style="font-size:9.5px;color:#666">Rute: ${order.asal_kota || "—"} → ${order.tujuan_kota || "—"}${order.no_rangka ? " · No. Rangka: " + order.no_rangka : ""}</span>
-              </td>
-              <td class="td-num" style="text-align:center">1</td>
-              <td class="td-num">${fRp(priceNum)}</td>
-              <td class="td-num">${fRp(priceNum)}</td>
-            </tr>
-          </tbody>
+        <table class="inv-meta-table">
+          <tr><td>Faktur #</td><td>${noInvoice}</td></tr>
+          <tr><td>Tanggal</td><td>${tgl}</td></tr>
+          <tr><td>Jatuh Tempo</td><td>${fmtTgl(jatuhTempo)}</td></tr>
+          <tr><td>Metode Pembayaran</td><td>${metode || "Cash on Delivery"}</td></tr>
+          <tr><td>No. Pesanan</td><td>${order.order_id || "—"}</td></tr>
         </table>
+      </div>
 
-        <div class="totals-wrap">
-          <div class="totals-note">
-            <b>CATATAN / NOTES:</b><br>
-            Pembayaran mohon dilakukan sesuai total tagihan di atas.<br>
-            Invoice ini sah tanpa tanda tangan basah bila dicetak dari sistem.
-          </div>
-          <div class="totals-box">
-            <div class="totals-row"><span>Subtotal</span><span>${fRp(priceNum)}</span></div>
-            <div class="totals-row"><span>PPN Logistik (1.1%)</span><span>${withTax ? fRp(ppn) : "—"}</span></div>
-            <div class="totals-row grand"><span>TOTAL</span><span>${fRp(total)}</span></div>
-          </div>
+      <div class="inv-total-bar"><span>Total Tagihan</span><span>Rp ${fRp(total)}</span></div>
+
+      <table class="inv-items">
+        <thead><tr><th>Nama Barang</th><th>Keterangan</th><th>Qty</th><th>Harga Satuan (Rp)</th><th>Jumlah (Rp)</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Jasa Pengiriman</td>
+            <td>${isiContents || "&nbsp;"} (${order.asal_kota || "—"}–${order.tujuan_kota || "—"})${order.no_rangka ? "<br>No. Rangka: " + order.no_rangka : ""}</td>
+            <td class="num">1</td>
+            <td class="num">${fRp(priceNum)}</td>
+            <td class="num">${fRp(priceNum)}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="inv-summary">
+        <div class="inv-note">
+          ${pesan ? `<b>Pesan:</b> ${pesan}<br>` : ""}
+          <b>Terbilang:</b> <i>${terbilangRupiah(total)}</i>
         </div>
-
-        <div class="pay-box">
-          <div class="pay-badge">BCA</div>
-          <div>
-            <div class="pay-num">0072-8902-71</div>
-            <div class="pay-name">a.n. PT ALYSSA AUTO LOGISTIK</div>
-          </div>
-        </div>
-
-        <div class="sign-row">
-          <div class="sign-cell">
-            <div class="sign-lbl">Hormat Kami</div>
-            <div class="sign-space"></div>
-            <div class="sign-name">PT. Alyssa Auto Logistik</div>
-          </div>
-          <div class="sign-cell">
-            <div class="sign-lbl">Disetujui / Diterima Oleh</div>
-            <div class="sign-space"></div>
-            <div class="sign-name">${order.customer_nama || "_____________"}</div>
-          </div>
+        <div class="inv-totals-box">
+          <div class="row"><span>Subtotal</span><span>Rp ${fRp(priceNum)}</span></div>
+          <div class="row"><span>PPN Logistik (1.1%)</span><span>${withTax ? "Rp " + fRp(ppn) : "—"}</span></div>
+          <div class="row grand"><span>TOTAL</span><span>Rp ${fRp(total)}</span></div>
         </div>
       </div>
+
+      <div class="inv-pay-box">
+        <div class="inv-pay-badge">${DOC_BRAND.bank.name}</div>
+        <div>
+          <div class="inv-pay-num">${DOC_BRAND.bank.norek}</div>
+          <div class="inv-pay-name">Cabang ${DOC_BRAND.bank.cabang} &middot; a.n. ${DOC_BRAND.bank.an}</div>
+        </div>
+      </div>
+
+      <div class="inv-sign-row">
+        <div class="inv-sign-cell">
+          <div class="inv-sign-lbl">Hormat Kami,</div>
+          <div class="inv-sign-name">PT. Alyssa Auto Logistik</div>
+        </div>
+        <div class="inv-sign-cell">
+          <div class="inv-sign-lbl">Disetujui / Diterima Oleh,</div>
+          <div class="inv-sign-name">${order.customer_nama || "&nbsp;"}</div>
+        </div>
+      </div>
+
+      ${docFooter({ docNo: `Faktur ${noInvoice}` })}
     </div>
     <script>window.onload=()=>window.print()<\/script>
     </body></html>`;
@@ -1708,7 +1682,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
           <InvoiceModal
             order={order}
             onClose={() => setShowInvoice(false)}
-            onPrint={(priceNum, withTax) => { printInvoice(priceNum, withTax); setShowInvoice(false); }}
+            onPrint={(priceNum, withTax, extra) => { printInvoice(priceNum, withTax, extra); setShowInvoice(false); }}
           />
         )}
         {order.trip_id && (
@@ -1879,8 +1853,12 @@ function BonusModal({ tripId, order, headers, onClose, onSave }) {
    INVOICE MODAL
 ════════════════════════════════════════ */
 function InvoiceModal({ order, onClose, onPrint }) {
+  const todayIso = new Date().toISOString().slice(0, 10);
   const [price, setPrice] = useState("");
   const [withTax, setWithTax] = useState(true);
+  const [jatuhTempo, setJatuhTempo] = useState(todayIso);
+  const [metode, setMetode] = useState("Cash on Delivery");
+  const [pesan, setPesan] = useState("");
 
   const priceNum = parseInt((price || "").replace(/[^0-9]/g, ""), 10) || 0;
   const priceFmt = priceNum ? priceNum.toLocaleString("id-ID") : "";
@@ -1890,12 +1868,12 @@ function InvoiceModal({ order, onClose, onPrint }) {
 
   const submit = () => {
     if (!priceNum) return;
-    onPrint(priceNum, withTax);
+    onPrint(priceNum, withTax, { jatuhTempo, metode, pesan });
   };
 
   return (
     <div className="adm-modal-bg" onClick={onClose} data-testid="adm-invoice-modal">
-      <div className="adm-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
+      <div className="adm-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 460 }}>
         <div className="adm-modal-head">
           <div>
             <div className="adm-modal-title">🧾 Buat Invoice</div>
@@ -1919,6 +1897,23 @@ function InvoiceModal({ order, onClose, onPrint }) {
               placeholder="contoh: 15.000.000"
               data-testid="adm-invoice-price"
             />
+          </label>
+          <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+            <label style={{ flex: 1 }}>
+              <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", marginBottom: 5, fontWeight: 700 }}>Jatuh Tempo</span>
+              <input type="date" className="adm-input" value={jatuhTempo} onChange={(e) => setJatuhTempo(e.target.value)} data-testid="adm-invoice-tempo" />
+            </label>
+            <label style={{ flex: 1 }}>
+              <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", marginBottom: 5, fontWeight: 700 }}>Metode Pembayaran</span>
+              <select className="adm-input" value={metode} onChange={(e) => setMetode(e.target.value)} data-testid="adm-invoice-metode">
+                <option>Cash on Delivery</option>
+                <option>Transfer Bank</option>
+              </select>
+            </label>
+          </div>
+          <label style={{ display: "block", marginBottom: 14 }}>
+            <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", marginBottom: 5, fontWeight: 700 }}>Pesan / Catatan (opsional)</span>
+            <input type="text" className="adm-input" value={pesan} onChange={(e) => setPesan(e.target.value)} placeholder="contoh: Door to door" data-testid="adm-invoice-pesan" />
           </label>
           <label style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, cursor: "pointer" }}>
             <input

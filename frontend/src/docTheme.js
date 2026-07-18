@@ -1,0 +1,112 @@
+/* eslint-disable */
+/* ============================================================
+   PT Alyssa Auto Logistik — shared print-document design system.
+   Used by every printed/PDF document generator (Invoice, BASTK, Surat
+   Jalan, Surat Pengantar Driver, ...) so they all share one identity:
+   same logo, colors, fonts, header, and footer, instead of each
+   document inventing its own look. Inspired by the clean/premium
+   layout of the Mekari invoice the company already uses for billing —
+   not a copy, but the same instinct: lots of white space, one accent
+   color, a confident dark "total" bar, clear typographic hierarchy.
+   ============================================================ */
+
+export const DOC_BRAND = {
+  name: "PT. ALYSSA AUTO LOGISTIK",
+  tagline: "Spesialis Pengiriman Kendaraan",
+  address: "Jl Enim Raya 2 No 86, Jakarta Utara, DKI Jakarta 14330",
+  phone: "0818 631 135",
+  npwp: "26.981.990.0-042.000",
+  bank: { name: "BCA", cabang: "Tanjung Priok", norek: "0072-8902-71", an: "PT ALYSSA AUTO LOGISTIK" },
+  navy: "#0f2a5c",
+  navyDeep: "#0a1e42",
+  gold: "#c9973a",
+  ink: "#1f2430",
+  muted: "#6b7280",
+  line: "#e3e6ec",
+  paperMist: "#f7f8fa",
+};
+
+export const DOC_BASE_CSS = `
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: ${DOC_BRAND.ink}; background: #fff; }
+  .doc-sheet { padding: 14mm 14mm 10mm; max-width: 210mm; margin: 0 auto; }
+  .doc-header { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; padding-bottom:14px; border-bottom:2.5px solid ${DOC_BRAND.navy}; margin-bottom:16px; }
+  .doc-brand { display:flex; align-items:center; gap:12px; }
+  .doc-brand img { width:46px; height:46px; object-fit:contain; flex-shrink:0; }
+  .doc-brand-name { font-size:15px; font-weight:900; color:${DOC_BRAND.navy}; letter-spacing:.3px; }
+  .doc-brand-tag { font-size:9px; color:${DOC_BRAND.gold}; font-weight:700; text-transform:uppercase; letter-spacing:.6px; margin-top:1px; }
+  .doc-addr { text-align:right; font-size:9.5px; color:${DOC_BRAND.muted}; line-height:1.6; }
+  .doc-title { font-size:20px; font-weight:900; color:${DOC_BRAND.navy}; letter-spacing:.5px; text-align:right; margin-bottom:2px; }
+  .doc-footer { display:flex; justify-content:space-between; align-items:center; padding-top:10px; margin-top:20px; border-top:1px solid ${DOC_BRAND.line}; font-size:8.5px; color:${DOC_BRAND.muted}; }
+  @media print { @page { margin:0; size:A4 portrait; } body { padding:0; } }
+`;
+
+/* Header block: logo + nama perusahaan di kiri, alamat + judul dokumen di kanan. */
+export function docHeader({ logoUrl = "/logo.png", docTitle, docSub }) {
+  return `
+    <div class="doc-header">
+      <div class="doc-brand">
+        <img src="${logoUrl}" alt="Logo" />
+        <div>
+          <div class="doc-brand-name">${DOC_BRAND.name}</div>
+          <div class="doc-brand-tag">${docSub || DOC_BRAND.tagline}</div>
+        </div>
+      </div>
+      <div>
+        <div class="doc-title">${docTitle}</div>
+        <div class="doc-addr">
+          ${DOC_BRAND.address}<br/>
+          Telp: ${DOC_BRAND.phone}<br/>
+          NPWP: ${DOC_BRAND.npwp}
+        </div>
+      </div>
+    </div>`;
+}
+
+export function docFooter({ docNo = "", centerText = DOC_BRAND.tagline }) {
+  return `
+    <div class="doc-footer">
+      <span>${docNo}</span>
+      <span>${centerText}</span>
+      <span>PT Alyssa Auto Logistik</span>
+    </div>`;
+}
+
+/* ── Terbilang: angka Rupiah -> teks bahasa Indonesia (buat baris "Terbilang" di invoice/kwitansi) ── */
+const _SATUAN = ["", "Satu", "Dua", "Tiga", "Empat", "Lima", "Enam", "Tujuh", "Delapan", "Sembilan",
+  "Sepuluh", "Sebelas", "Dua Belas", "Tiga Belas", "Empat Belas", "Lima Belas", "Enam Belas",
+  "Tujuh Belas", "Delapan Belas", "Sembilan Belas"];
+
+function _terbilangGroup(n) {
+  if (n === 0) return "";
+  if (n < 20) return _SATUAN[n];
+  if (n < 100) {
+    const puluh = Math.floor(n / 10), sisa = n % 10;
+    return (puluh === 1 ? "Sepuluh" : `${_SATUAN[puluh]} Puluh`) + (sisa ? ` ${_SATUAN[sisa]}` : "");
+  }
+  if (n < 1000) {
+    const ratus = Math.floor(n / 100), sisa = n % 100;
+    return (ratus === 1 ? "Seratus" : `${_SATUAN[ratus]} Ratus`) + (sisa ? ` ${_terbilangGroup(sisa)}` : "");
+  }
+  return "";
+}
+
+export function terbilangRupiah(nominal) {
+  let n = Math.floor(Math.abs(Number(nominal) || 0));
+  if (n === 0) return "Nol Rupiah";
+  const groups = [];
+  const scales = ["", "Ribu", "Juta", "Miliar", "Triliun"];
+  let scaleIdx = 0;
+  while (n > 0) {
+    const g = n % 1000;
+    if (g > 0) {
+      let text = _terbilangGroup(g);
+      if (scaleIdx === 1 && g === 1) text = "Seribu";
+      else if (scales[scaleIdx]) text = `${text} ${scales[scaleIdx]}`;
+      groups.unshift(text);
+    }
+    n = Math.floor(n / 1000);
+    scaleIdx++;
+  }
+  return `${groups.join(" ")} Rupiah`.replace(/\s+/g, " ").trim();
+}
