@@ -1291,3 +1291,15 @@
   .adm-invu{ flex-wrap:wrap; }
   .adm-invu-harga{ width:100%; }
 }
+
+/* ── Jadwal Pengiriman modal ── */
+.jm-list{ display:flex; flex-direction:column; gap:10px; }
+.jm-unit{ border:1px solid var(--border); border-radius:9px; padding:10px 12px; background:var(--bg-2); }
+.jm-unit-hd{ font-size:12.5px; font-weight:700; color:var(--text); margin-bottom:8px; }
+.jm-nopol{ font-family:var(--mono); font-size:11px; color:var(--text-mute); margin-left:6px; }
+.jm-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+.jm-grid label{ font-size:10px; font-weight:700; color:var(--text-mute); text-transform:uppercase; letter-spacing:.02em; display:flex; flex-direction:column; gap:4px; }
+.jm-grid .adm-input{ font-size:12.5px; padding:6px 8px; }
+.jm-eta{ font-size:10px; font-weight:700; color:var(--text-mute); text-transform:uppercase; display:flex; flex-direction:column; gap:4px; justify-content:center; background:var(--bg-3); border-radius:7px; padding:4px 9px; }
+.jm-eta b{ font-family:var(--mono); font-size:13px; color:var(--green); }
+@media (max-width:620px){ .jm-grid{ grid-template-columns:1fr 1fr; } }

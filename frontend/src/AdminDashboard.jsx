@@ -956,6 +956,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
   const [expanded, setExpanded] = useState(false);
   const [copiedPo, setCopiedPo] = useState(false);
   const [showInvoice, setShowInvoice] = useState(false);
+  const [showJadwal, setShowJadwal] = useState(false);
   const [showTrip360, setShowTrip360] = useState(false);
   const [selUnits, setSelUnits] = useState([]); // F1 — unit_id terpilih (struktur buat F2)
   const albumFileRefs = useRef({});
@@ -1312,6 +1313,92 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
       </div>
 
       ${docFooter({ docNo: `Faktur ${noInvoice}` })}
+    </div>
+    <script>window.onload=()=>window.print()<\/script>
+    </body></html>`;
+    const w = window.open("", "_blank"); w.document.write(html); w.document.close();
+  };
+
+  // ── Cetak "Jadwal Pengiriman" A4 (multi-unit, teks kecil, header berulang) ──
+  const printJadwal = (meta, units) => {
+    const rows = (units || []).filter(Boolean);
+    if (!rows.length) return;
+    const fmtTgl = (iso) => { if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return "—"; const [y, m, d] = iso.split("-"); return `${d}-${m}-${y}`; };
+    const addDays = (iso, n) => {
+      if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso) || !n) return "";
+      const dt = new Date(iso + "T00:00:00"); dt.setDate(dt.getDate() + Number(n));
+      return dt.toISOString().slice(0, 10);
+    };
+    const noDoc = `JP/AAL/${order.order_id?.slice(-4) || "0000"}/${new Date().getFullYear()}`;
+    const asal = meta.pelabuhan_asal || order.asal_kota || "—";
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Jadwal Pengiriman ${order.order_id || ""}</title>
+    <style>
+      ${DOC_BASE_CSS}
+      .jp-meta { display:flex; justify-content:space-between; gap:24px; margin-bottom:12px; font-size:10.5px; }
+      .jp-meta .lbl { font-size:8.5px; font-weight:700; text-transform:uppercase; color:${DOC_BRAND.muted}; letter-spacing:.4px; }
+      .jp-meta .val { font-size:12px; font-weight:800; color:${DOC_BRAND.ink}; }
+      .jp-meta table td { padding:2px 0; }
+      .jp-meta table td:first-child { color:${DOC_BRAND.muted}; padding-right:14px; white-space:nowrap; }
+      .jp-meta table td:last-child { font-weight:700; text-align:right; }
+      table.jp { width:100%; border-collapse:collapse; margin-bottom:10px; }
+      table.jp thead { display:table-header-group; }
+      table.jp tr { break-inside:avoid; page-break-inside:avoid; }
+      table.jp th { text-align:left; font-size:7.5px; text-transform:uppercase; letter-spacing:.2px; color:#fff; background:${DOC_BRAND.navy}; font-weight:700; padding:5px 5px; }
+      table.jp td { padding:4.5px 5px; font-size:8.5px; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; }
+      table.jp tbody tr:nth-child(even) td { background:${DOC_BRAND.paperMist}; }
+      table.jp .c { text-align:center; }
+      table.jp .mono { font-family:${DOC_BRAND.mono || "monospace"}; }
+      .jp-note { border:1px solid ${DOC_BRAND.gold || "#d4a847"}; background:#fdf6e6; border-radius:6px; padding:8px 12px; font-size:9px; color:${DOC_BRAND.ink}; margin-top:6px; line-height:1.6; }
+      .jp-note b { color:#8a6d10; }
+      @page { size:A4; margin:12mm; }
+    </style></head><body>
+    <div class="doc-sheet">
+      ${docHeader({ docTitle: "JADWAL PENGIRIMAN" })}
+      <div class="jp-meta">
+        <div>
+          <div class="lbl">Pelanggan</div>
+          <div class="val">${order.customer_nama || "&nbsp;"}</div>
+          <div style="font-size:10px;color:${DOC_BRAND.muted};margin-top:3px">Pelabuhan Asal: <b style="color:${DOC_BRAND.ink}">${asal}</b> &middot; ${rows.length} unit</div>
+        </div>
+        <table>
+          <tr><td>No. Dokumen</td><td>${noDoc}</td></tr>
+          <tr><td>No. Pesanan</td><td>${order.order_id || "—"}</td></tr>
+          <tr><td>Tanggal Siap Unit</td><td>${fmtTgl(meta.tanggal_siap)}</td></tr>
+          <tr><td>Dicetak</td><td>${fmtTgl(new Date().toISOString().slice(0, 10))}</td></tr>
+        </table>
+      </div>
+
+      <table class="jp">
+        <thead><tr>
+          <th class="c" style="width:22px">No</th><th>Unit / Tipe</th><th>No. Polisi</th><th>No. Rangka</th><th>No. Mesin</th>
+          <th>Tujuan</th><th>Nama Kapal</th><th>Kapal Berangkat</th><th>Estimasi Tiba</th>
+        </tr></thead>
+        <tbody>
+          ${rows.map((u, i) => {
+            const eta = addDays(u.etd, u.transit_hari);
+            const tj = u.tujuan || order.tujuan_kota || "—";
+            const veh = `${u.vehicle_type || ""}${u.tipe_model ? " " + u.tipe_model : ""}`.trim() || "—";
+            return `<tr>
+              <td class="c">${i + 1}</td>
+              <td>${veh}</td>
+              <td class="mono">${u.nopol || "—"}</td>
+              <td class="mono">${u.no_rangka || "—"}</td>
+              <td class="mono">${u.no_mesin || "—"}</td>
+              <td>${tj}</td>
+              <td>${u.nama_kapal || "—"}</td>
+              <td>${fmtTgl(u.etd)}</td>
+              <td><b>${eta ? fmtTgl(eta) : "—"}</b>${u.transit_hari ? ` <span style="color:${DOC_BRAND.muted};font-size:7.5px">(${u.transit_hari} hr)</span>` : ""}</td>
+            </tr>`;
+          }).join("")}
+        </tbody>
+      </table>
+
+      <div class="jp-note">
+        <b>Catatan penting:</b> Estimasi perjalanan laut dihitung sejak <b>KAPAL BERANGKAT</b>, bukan dari pengambilan/serah terima unit di pelabuhan. Estimasi Tiba = Tanggal Kapal Berangkat + lama pelayaran. Jadwal dapat berubah mengikuti kondisi cuaca &amp; operasional pelayaran.
+        ${meta.catatan_jadwal ? `<br><br><b>Catatan tambahan:</b> ${meta.catatan_jadwal}` : ""}
+      </div>
+
+      ${docFooter({ docNo: `Jadwal ${noDoc}` })}
     </div>
     <script>window.onload=()=>window.print()<\/script>
     </body></html>`;
@@ -1750,6 +1837,18 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
           style={{ background: "#1a2e3a", border: "1px solid #58a6ff", color: "#58a6ff" }}>
           🧾 Invoice
         </button>
+        <button className="adm-btn adm-btn-sm" onClick={(e) => { e.stopPropagation(); setShowJadwal(true); }} data-testid={`adm-jadwal-${order.order_id}`}
+          style={{ background: "#2a2410", border: "1px solid #d4a847", color: "#e6b450" }}>
+          🚢 Jadwal Pengiriman
+        </button>
+        {showJadwal && (
+          <JadwalModal
+            order={order}
+            headers={headers}
+            onClose={() => setShowJadwal(false)}
+            onPrint={(meta, units) => printJadwal(meta, units)}
+          />
+        )}
         {showInvoice && (
           <InvoiceModal
             order={order}
@@ -2100,6 +2199,152 @@ function InvoiceModal({ order, headers, onClose, onPrint }) {
           <button className="adm-btn adm-btn-blue" onClick={submit} disabled={checkedCount === 0 || busy} data-testid="adm-invoice-submit">
             {busy ? "Memproses…" : `Cetak Invoice${checkedCount > 1 ? ` (${checkedCount} unit)` : ""}`}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════
+   JADWAL PENGIRIMAN MODAL — tarik unit dari PO, isi kapal/ETD, cetak A4
+════════════════════════════════════════ */
+function jpAddDays(iso, n) {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso) || !n) return "";
+  const dt = new Date(iso + "T00:00:00"); dt.setDate(dt.getDate() + Number(n));
+  return dt.toISOString().slice(0, 10);
+}
+function jpFmt(iso) { if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return "—"; const [y, m, d] = iso.split("-"); return `${d}-${m}-${y}`; }
+
+function JadwalModal({ order, headers, onClose, onPrint }) {
+  const units = (Array.isArray(order.units) && order.units.length) ? order.units : [];
+  const [pelabuhanAsal, setPelabuhanAsal] = useState(order.pelabuhan_asal || order.asal_kota || "");
+  const [tanggalSiap, setTanggalSiap] = useState(order.tanggal_siap || order.pickup_date || "");
+  const [catatan, setCatatan] = useState(order.catatan_jadwal || "");
+  const [rows, setRows] = useState(() => units.map((u) => ({
+    unit_id: u.unit_id, tujuan: u.tujuan || "", no_mesin: u.no_mesin || "",
+    nama_kapal: u.nama_kapal || "", etd: u.etd || "", transit_hari: u.transit_hari || "",
+  })));
+  const [bulk, setBulk] = useState({ nama_kapal: "", etd: "", transit_hari: "" });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+
+  const setRow = (i, patch) => setRows((rs) => rs.map((r, x) => x === i ? { ...r, ...patch } : r));
+  const applyBulk = () => setRows((rs) => rs.map((r) => ({
+    ...r,
+    nama_kapal: bulk.nama_kapal || r.nama_kapal,
+    etd: bulk.etd || r.etd,
+    transit_hari: bulk.transit_hari !== "" ? bulk.transit_hari : r.transit_hari,
+  })));
+
+  const payload = () => ({
+    tanggal_siap: tanggalSiap || "", catatan_jadwal: catatan || "", pelabuhan_asal: pelabuhanAsal || "",
+    units: rows.map((r) => ({ unit_id: r.unit_id, tujuan: r.tujuan, no_mesin: r.no_mesin, nama_kapal: r.nama_kapal, etd: r.etd, transit_hari: parseInt(r.transit_hari, 10) || 0 })),
+  });
+
+  const save = async () => {
+    setSaving(true); setErr("");
+    try { await axios.patch(`${API}/admin/orders/${order.order_id}/jadwal`, payload(), { headers }); }
+    catch (e) { setErr(e?.response?.data?.detail || "Gagal menyimpan jadwal."); setSaving(false); return false; }
+    setSaving(false); return true;
+  };
+
+  const printRows = () => units.map((u, i) => ({
+    ...u,
+    tujuan: rows[i]?.tujuan || u.tujuan,
+    no_mesin: rows[i]?.no_mesin || u.no_mesin,
+    nama_kapal: rows[i]?.nama_kapal || "",
+    etd: rows[i]?.etd || "",
+    transit_hari: parseInt(rows[i]?.transit_hari, 10) || 0,
+  }));
+
+  const doPrint = async () => {
+    const ok = await save();
+    if (ok === false) return;
+    onPrint({ tanggal_siap: tanggalSiap, catatan_jadwal: catatan, pelabuhan_asal: pelabuhanAsal }, printRows());
+    onClose();
+  };
+
+  if (!units.length) {
+    return (
+      <div className="adm-modal-bg" onClick={onClose}>
+        <div className="adm-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420 }}>
+          <div className="adm-modal-head"><div className="adm-modal-title">🚢 Jadwal Pengiriman</div><button className="adm-modal-close" onClick={onClose}>✕</button></div>
+          <div className="adm-modal-body"><div style={{ fontSize: 13, color: "var(--text-mute)" }}>PO ini belum punya unit. Tidak ada yang bisa dijadwalkan.</div></div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="adm-modal-bg" onClick={onClose} data-testid="adm-jadwal-modal">
+      <div className="adm-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 720 }}>
+        <div className="adm-modal-head">
+          <div>
+            <div className="adm-modal-title">🚢 Jadwal Pengiriman</div>
+            <div className="adm-modal-sub">{order.order_id} · {order.customer_nama || "—"} · {units.length} unit</div>
+          </div>
+          <button className="adm-modal-close" onClick={onClose} aria-label="Tutup">✕</button>
+        </div>
+        <div className="adm-modal-body">
+          {err && <div className="t360-fin-err" style={{ marginBottom: 12 }}>{err}</div>}
+
+          <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+            <label style={{ flex: 1, minWidth: 150 }}>
+              <span style={{ display: "block", fontSize: 11, color: "var(--text-mute)", marginBottom: 5, fontWeight: 700 }}>Pelabuhan Asal</span>
+              <input className="adm-input" value={pelabuhanAsal} onChange={(e) => setPelabuhanAsal(e.target.value)} placeholder="Pelabuhan Surabaya" data-testid="adm-jadwal-asal" />
+            </label>
+            <label style={{ flex: 1, minWidth: 150 }}>
+              <span style={{ display: "block", fontSize: 11, color: "var(--text-mute)", marginBottom: 5, fontWeight: 700 }}>Tanggal Siap Unit</span>
+              <input type="date" className="adm-input" value={tanggalSiap} onChange={(e) => setTanggalSiap(e.target.value)} data-testid="adm-jadwal-siap" />
+            </label>
+          </div>
+
+          {/* isi cepat kapal */}
+          <div style={{ border: "1px dashed var(--border-2)", borderRadius: 9, padding: "10px 12px", marginBottom: 14, background: "var(--bg-2)" }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: "var(--text-2)", marginBottom: 8 }}>Isi cepat kapal → semua unit</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <label style={{ flex: 2, minWidth: 130 }}><span style={{ display: "block", fontSize: 10, color: "var(--text-mute)", marginBottom: 4 }}>Nama Kapal</span>
+                <input className="adm-input" value={bulk.nama_kapal} onChange={(e) => setBulk((b) => ({ ...b, nama_kapal: e.target.value }))} placeholder="Serasi V" data-testid="adm-jadwal-bulk-kapal" /></label>
+              <label style={{ flex: 1, minWidth: 120 }}><span style={{ display: "block", fontSize: 10, color: "var(--text-mute)", marginBottom: 4 }}>Kapal Berangkat</span>
+                <input type="date" className="adm-input" value={bulk.etd} onChange={(e) => setBulk((b) => ({ ...b, etd: e.target.value }))} data-testid="adm-jadwal-bulk-etd" /></label>
+              <label style={{ width: 90 }}><span style={{ display: "block", fontSize: 10, color: "var(--text-mute)", marginBottom: 4 }}>Transit (hr)</span>
+                <input inputMode="numeric" className="adm-input" value={bulk.transit_hari} onChange={(e) => setBulk((b) => ({ ...b, transit_hari: e.target.value.replace(/\D/g, "") }))} placeholder="4" data-testid="adm-jadwal-bulk-transit" /></label>
+              <button className="adm-btn adm-btn-sm adm-btn-gold" onClick={applyBulk} data-testid="adm-jadwal-bulk-apply">Terapkan</button>
+            </div>
+          </div>
+
+          <div className="jm-list">
+            {rows.map((r, i) => {
+              const u = units[i];
+              const eta = jpAddDays(r.etd, parseInt(r.transit_hari, 10) || 0);
+              return (
+                <div key={r.unit_id} className="jm-unit" data-testid={`adm-jadwal-unit-${i}`}>
+                  <div className="jm-unit-hd">{i + 1}. {u.vehicle_type || "—"}{u.tipe_model ? ` · ${u.tipe_model}` : ""} <span className="jm-nopol">{u.nopol || "nopol —"}</span></div>
+                  <div className="jm-grid">
+                    <label>Tujuan<input className="adm-input" value={r.tujuan} onChange={(e) => setRow(i, { tujuan: e.target.value.toUpperCase() })} placeholder={order.tujuan_kota || "kota tujuan"} data-testid={`adm-jadwal-tujuan-${i}`} /></label>
+                    <label>No. Mesin<input className="adm-input" value={r.no_mesin} onChange={(e) => setRow(i, { no_mesin: e.target.value.toUpperCase() })} placeholder="2GDXXXX" data-testid={`adm-jadwal-mesin-${i}`} /></label>
+                    <label>Nama Kapal<input className="adm-input" value={r.nama_kapal} onChange={(e) => setRow(i, { nama_kapal: e.target.value })} placeholder="Serasi V" /></label>
+                    <label>Kapal Berangkat<input type="date" className="adm-input" value={r.etd} onChange={(e) => setRow(i, { etd: e.target.value })} /></label>
+                    <label>Transit (hr)<input inputMode="numeric" className="adm-input" value={r.transit_hari} onChange={(e) => setRow(i, { transit_hari: e.target.value.replace(/\D/g, "") })} placeholder="4" /></label>
+                    <div className="jm-eta">Estimasi Tiba<b>{eta ? jpFmt(eta) : "—"}</b></div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <label style={{ display: "block", marginTop: 12 }}>
+            <span style={{ display: "block", fontSize: 11, color: "var(--text-mute)", marginBottom: 5, fontWeight: 700 }}>Catatan Jadwal (opsional)</span>
+            <input className="adm-input" value={catatan} onChange={(e) => setCatatan(e.target.value)} placeholder="mis. muat di gudang Tanjung Perak" data-testid="adm-jadwal-catatan" />
+          </label>
+          <div style={{ fontSize: 10.5, color: "var(--text-mute)", marginTop: 8, lineHeight: 1.5 }}>
+            ⚓ Estimasi Tiba dihitung <b>sejak kapal berangkat</b> (ETD + transit), bukan dari serah terima di pelabuhan. Catatan ini tercetak di dokumen.
+          </div>
+        </div>
+        <div className="adm-modal-foot">
+          <button className="adm-btn adm-btn-ghost" onClick={onClose}>Tutup</button>
+          <button className="adm-btn" onClick={save} disabled={saving} data-testid="adm-jadwal-save">{saving ? "…" : "Simpan"}</button>
+          <button className="adm-btn adm-btn-gold" onClick={doPrint} disabled={saving} data-testid="adm-jadwal-print">🖨️ Simpan &amp; Cetak</button>
         </div>
       </div>
     </div>

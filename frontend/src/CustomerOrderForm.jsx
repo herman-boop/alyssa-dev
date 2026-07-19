@@ -17,7 +17,7 @@ const KONDISI_OPTIONS = ["Bekas", "Baru"];
 
 // F1 — Unit Master (multi-unit per PO)
 const MAX_UNITS = 10;
-const emptyUnit = () => ({ vehicle_type: "", tipe_model: "", nopol: "", no_rangka: "", warna: "", tahun: "", catatan: "" });
+const emptyUnit = () => ({ vehicle_type: "", tipe_model: "", nopol: "", no_rangka: "", no_mesin: "", warna: "", tahun: "", tujuan: "", catatan: "" });
 
 /* ── Dark mode ── */
 function useDarkMode() {
@@ -339,6 +339,11 @@ export default function CustomerOrderForm() {
                                   onChange={(e) => setUnit(i, "no_rangka", e.target.value.toUpperCase())}
                                   placeholder="MHFE1CD1XXXXX" data-testid={`ord-rangka-${i}`} />
                               </Field>
+                              <Field label="No. Mesin">
+                                <input type="text" className="of-inp" value={u.no_mesin}
+                                  onChange={(e) => setUnit(i, "no_mesin", e.target.value.toUpperCase())}
+                                  placeholder="2GDXXXXXXX" data-testid={`ord-mesin-${i}`} />
+                              </Field>
                               <Field label="Warna">
                                 <input type="text" className="of-inp" value={u.warna}
                                   onChange={(e) => setUnit(i, "warna", e.target.value)}
@@ -348,6 +353,11 @@ export default function CustomerOrderForm() {
                                 <input type="text" className="of-inp" value={u.tahun} maxLength={4}
                                   onChange={(e) => setUnit(i, "tahun", e.target.value.replace(/\D/g, ""))}
                                   placeholder="2024" data-testid={`ord-tahun-${i}`} />
+                              </Field>
+                              <Field label="Tujuan Unit" hint="Isi kalau tujuan unit ini beda dari tujuan utama — mis. banyak kota tujuan dalam 1 pesanan.">
+                                <input type="text" className="of-inp" value={u.tujuan}
+                                  onChange={(e) => setUnit(i, "tujuan", e.target.value)}
+                                  placeholder="Kosongkan jika sama" data-testid={`ord-tujuan-unit-${i}`} />
                               </Field>
                               <Field label="Catatan Unit" full hint="Opsional — kondisi khusus / kelengkapan unit ini.">
                                 <input type="text" className="of-inp" value={u.catatan}

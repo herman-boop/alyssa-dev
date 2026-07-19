@@ -958,8 +958,10 @@ class UnitBody(BaseModel):
     tipe_model: str = ""
     nopol: str = ""
     no_rangka: str = ""
+    no_mesin: str = ""
     warna: str = ""
     tahun: str = ""
+    tujuan: str = ""     # tujuan per unit (1 PO bisa banyak tujuan)
     catatan: str = ""
 
 
@@ -1023,11 +1025,17 @@ def _new_unit(src: dict, now: str) -> dict:
         "tipe_model": (src.get("tipe_model") or "").strip()[:120],
         "nopol": (src.get("nopol") or "").strip().upper()[:20],
         "no_rangka": (src.get("no_rangka") or "").strip().upper()[:40],
+        "no_mesin": (src.get("no_mesin") or "").strip().upper()[:40],
         "warna": (src.get("warna") or "").strip()[:40],
         "tahun": (src.get("tahun") or "").strip()[:6],
+        "tujuan": (src.get("tujuan") or "").strip()[:80],
         "catatan": (src.get("catatan") or "").strip()[:300],
         "status_perjalanan": UNIT_STATUS_PERJALANAN_DEFAULT,
         "status_invoice": UNIT_STATUS_INVOICE_DEFAULT,
+        # ── jadwal pengiriman (diisi admin di PO) ──
+        "nama_kapal": "",
+        "etd": "",            # tanggal kapal berangkat (YYYY-MM-DD)
+        "transit_hari": 0,    # lama pelayaran; ETA = etd + transit_hari
         "created_at": now,
         "updated_at": now,
     }
@@ -1268,6 +1276,61 @@ async def mark_units_invoiced(order_id: str, body: MarkInvoicedBody):
             changed += 1
     await db.orders.update_one({"order_id": order_id}, {"$set": {"units": units, "updated_at": now}})
     return {"ok": True, "changed": changed, "unit_summary": _order_unit_summary(order)}
+
+
+class JadwalUnitBody(BaseModel):
+    unit_id: str
+    tujuan: Optional[str] = None
+    no_mesin: Optional[str] = None
+    nama_kapal: Optional[str] = None
+    etd: Optional[str] = None          # YYYY-MM-DD
+    transit_hari: Optional[int] = None
+
+
+class JadwalBody(BaseModel):
+    tanggal_siap: Optional[str] = None       # tanggal unit siap kirim
+    catatan_jadwal: Optional[str] = None
+    pelabuhan_asal: Optional[str] = None
+    units: List[JadwalUnitBody] = []
+
+
+@api_router.patch("/admin/orders/{order_id}/jadwal", dependencies=[Depends(require_admin_pin)])
+async def set_order_jadwal(order_id: str, body: JadwalBody):
+    """Simpan jadwal pengiriman: field per-unit (tujuan, no_mesin, nama kapal,
+    ETD, lama transit) + info PO (tanggal siap, pelabuhan asal, catatan).
+    Master (tujuan/no_mesin) & operasional (kapal/etd/transit) di satu tempat."""
+    order = await db.orders.find_one({"order_id": order_id})
+    if not order:
+        raise HTTPException(404, "Order not found")
+    order = await _ensure_order_units(order)
+    now = datetime.now(timezone.utc).isoformat()
+    patch_by_id = {u.unit_id: u for u in body.units}
+    units = order.get("units") or []
+    for u in units:
+        p = patch_by_id.get(u.get("unit_id"))
+        if not p:
+            continue
+        if p.tujuan is not None:       u["tujuan"] = p.tujuan.strip()[:80]
+        if p.no_mesin is not None:     u["no_mesin"] = p.no_mesin.strip().upper()[:40]
+        if p.nama_kapal is not None:   u["nama_kapal"] = p.nama_kapal.strip()[:80]
+        if p.etd is not None:
+            etd = p.etd.strip()
+            u["etd"] = etd if re.match(r"^\d{4}-\d{2}-\d{2}$", etd) else ""
+        if p.transit_hari is not None: u["transit_hari"] = max(0, int(p.transit_hari))
+        u["updated_at"] = now
+    upd = {"units": units, "updated_at": now}
+    if body.tanggal_siap is not None:
+        ts = body.tanggal_siap.strip()
+        upd["tanggal_siap"] = ts if re.match(r"^\d{4}-\d{2}-\d{2}$", ts) else ""
+    if body.catatan_jadwal is not None:
+        upd["catatan_jadwal"] = body.catatan_jadwal.strip()[:500]
+    if body.pelabuhan_asal is not None:
+        upd["pelabuhan_asal"] = body.pelabuhan_asal.strip()[:120]
+    await db.orders.update_one({"order_id": order_id}, {"$set": upd})
+    doc = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+    doc = await _ensure_order_units(doc)
+    doc["unit_summary"] = _order_unit_summary(doc)
+    return doc
 
 
 class OrderConvertBody(BaseModel):
