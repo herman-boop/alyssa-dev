@@ -2041,12 +2041,13 @@ async def admin_patch_trip_bonus(trip_id: str, body: BonusBody):
 
 
 # ══════════════════════════════════════════════════════
-# FINANCIAL COMMAND CENTER — Sprint 1
-# Master Biaya/Vendor per Trip -> HPP otomatis -> Profit otomatis.
-# Semua disimpan DI trip (trip.finance), jadi satu sumber data.
-# Angka HPP = biaya vendor (diinput per-trip) + biaya driver (uj+t1+t2+t3,
-# udah ada di trip). Bonus TIDAK diikutkan otomatis (harian butuh jumlah
-# hari, kerajinan kondisional) supaya profit nggak menyesatkan.
+# FINANCIAL COMMAND CENTER — Trip = single source of truth
+# D1: Supplier (supplier_profiles.jobs[]) = SATU-SATUNYA sumber biaya vendor.
+#     Trip 360 hanya MENULIS job ke supplier (di-tag trip_id) & MEMBACA balik
+#     by trip_id — tidak ada biaya vendor tersimpan di dua tempat.
+# D3: tiap komponen biaya/pendapatan punya `klasifikasi` supaya profit dihitung
+#     tanpa double counting (Vendor Cost, Driver Cost, ... Pendapatan).
+# Alur: Trip -> Supplier Job -> HPP Trip -> Profit -> Dashboard.
 # ══════════════════════════════════════════════════════
 
 VENDOR_KATEGORI = [
@@ -2060,53 +2061,207 @@ class TripInvoiceBody(BaseModel):
 
 
 class TripVendorCostBody(BaseModel):
-    vendor_name: str
+    vendor_name: Optional[str] = None      # nama supplier; dibuat kalau belum ada
+    supplier_id: Optional[str] = None      # kalau sudah tahu supplier-nya
     kategori: Optional[str] = "Lainnya"
-    jumlah: int
+    jumlah: int = 0
     tanggal: Optional[str] = None
     jatuh_tempo: Optional[str] = None
+    no_invoice_vendor: Optional[str] = None
     catatan: Optional[str] = ""
-    supplier_id: Optional[str] = None
 
 
-def _trip_finance_summary(trip: dict) -> dict:
-    """Hitung ringkasan keuangan 1 trip dari data yang udah ada + biaya vendor
-    yang diinput. Tidak menyimpan angka turunan — selalu dihitung ulang."""
+def _route_split(trip: dict):
+    parts = [p.strip() for p in (trip.get("route") or "").split("-")]
+    asal = parts[0] if len(parts) >= 1 else ""
+    tujuan = parts[-1] if len(parts) >= 2 else ""
+    return asal, tujuan
+
+
+async def _find_or_create_supplier(nama: str) -> dict:
+    """Cari supplier by nama (case-insensitive), atau bikin baru. Dipakai saat
+    Trip 360 menambah biaya vendor tanpa harus buka halaman Supplier dulu."""
+    import re as _re
+    nama = (nama or "").strip()
+    if not nama:
+        raise HTTPException(400, "Nama supplier/vendor wajib diisi")
+    existing = await db.supplier_profiles.find_one(
+        {"nama": _re.compile(r"^\s*" + _re.escape(nama) + r"\s*$", _re.IGNORECASE)}, {"_id": 0}
+    )
+    if existing:
+        return existing
+    doc = {
+        "id": _gen_supplier_id(), "nama": nama, "jenis": "", "no_hp": "",
+        "catatan": "", "created_at": datetime.utcnow().isoformat(), "jobs": [],
+    }
+    await db.supplier_profiles.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+async def _trip_auto_context(trip: dict) -> dict:
+    """Data yang diisi OTOMATIS ke job supplier dari Trip/Order — tidak diketik
+    ulang admin. Order (kalau ada) lebih lengkap soal kota & customer."""
+    order = await db.orders.find_one({"trip_id": trip.get("trip_id")}, {"_id": 0})
+    asal, tujuan = _route_split(trip)
+    return {
+        "trip_id": trip.get("trip_id"),
+        "order_id": (order or {}).get("order_id") or trip.get("order_id"),
+        "vehicle_type": (order or {}).get("vehicle_type") or trip.get("tipe_kendaraan") or trip.get("vehicle_type") or "",
+        "nopol": ((order or {}).get("nopol") or trip.get("nopol") or "").upper(),
+        "no_rangka": ((order or {}).get("no_rangka") or trip.get("no_rangka") or "").upper(),
+        "asal_kota": (order or {}).get("asal_kota") or asal,
+        "tujuan_kota": (order or {}).get("tujuan_kota") or tujuan,
+        "customer_id": (order or {}).get("customer_id"),
+        "customer_nama": (order or {}).get("customer_nama") or (trip.get("customer_data") or {}).get("nama") or "",
+    }
+
+
+async def _add_trip_supplier_job(trip: dict, *, vendor_name=None, supplier_id=None,
+                                 kategori="Lainnya", jumlah=0, tanggal=None,
+                                 jatuh_tempo=None, no_invoice_vendor=None, catatan="",
+                                 route_leg_id=None) -> dict:
+    """Tulis 1 biaya vendor sebagai supplier job, di-tag ke trip. Kendaraan/
+    rute/customer diisi otomatis dari trip — bukan input ulang."""
+    if supplier_id:
+        sup = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+        if not sup:
+            raise HTTPException(404, "Supplier tidak ditemukan")
+    else:
+        sup = await _find_or_create_supplier(vendor_name or "")
+    sup = await _ensure_supplier_projects(sup)
+    project_id, projects = _get_or_create_active_project(sup)
+
+    tgl = (tanggal or "").strip()
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", tgl):
+        tgl = today_wib()
+    jt = (jatuh_tempo or "").strip()
+    if jt and not re.match(r"^\d{4}-\d{2}-\d{2}$", jt):
+        jt = ""
+
+    ctx = await _trip_auto_context(trip)
+    job = {
+        "id": _gen_supplier_id(),
+        "project_id": project_id,
+        # auto dari trip/order (D-prinsip: jangan ketik ulang)
+        "vehicle_type": ctx["vehicle_type"],
+        "nopol": ctx["nopol"],
+        "no_rangka": ctx["no_rangka"],
+        "asal_kota": ctx["asal_kota"],
+        "tujuan_kota": ctx["tujuan_kota"],
+        "total_harga": int(jumlah),
+        "catatan": (catatan or "").strip(),
+        "tanggal": tgl,
+        "payments": [],
+        # relasi Trip (D1) + klasifikasi (D3)
+        "trip_id": ctx["trip_id"],
+        "order_id": ctx["order_id"],
+        "customer_id": ctx["customer_id"],
+        "customer_nama": ctx["customer_nama"],
+        "route_leg_id": route_leg_id,
+        "kategori": (kategori or "Lainnya").strip()[:40] or "Lainnya",
+        "jatuh_tempo": jt or None,
+        "no_invoice_vendor": (no_invoice_vendor or "").strip()[:60] or None,
+        "klasifikasi": "Vendor Cost",
+        "source": "trip360",
+    }
+    upd = {"jobs": (sup.get("jobs") or []) + [job]}
+    if projects != (sup.get("projects") or []):
+        upd["projects"] = projects
+    await db.supplier_profiles.update_one({"id": sup["id"]}, {"$set": upd})
+    return {"supplier_id": sup["id"], "supplier_nama": sup["nama"], "job": job}
+
+
+async def _migrate_trip_vendor_costs(trip: dict):
+    """Data Sprint 1 lama (trip.finance.vendor_costs) dipindah jadi supplier job
+    (D1) sekali jalan, lalu field-nya dihapus supaya tidak jadi sumber kedua."""
     fin = trip.get("finance") or {}
-    costs = fin.get("vendor_costs") or []
+    old = fin.get("vendor_costs") or []
+    if not old:
+        return
+    for c in old:
+        try:
+            await _add_trip_supplier_job(
+                trip, vendor_name=c.get("vendor_name") or "Vendor",
+                kategori=c.get("kategori") or "Lainnya", jumlah=int(c.get("jumlah") or 0),
+                tanggal=c.get("tanggal"), jatuh_tempo=c.get("jatuh_tempo"),
+                catatan=c.get("catatan") or "",
+            )
+        except Exception as e:
+            logger.warning(f"[finance:migrate] gagal migrasi biaya trip {trip.get('trip_id')}: {e}")
+    await db.trips.update_one({"trip_id": trip.get("trip_id")}, {"$unset": {"finance.vendor_costs": ""}})
+    if isinstance(trip.get("finance"), dict):
+        trip["finance"].pop("vendor_costs", None)
+
+
+async def _trip_vendor_costs(trip_id: str) -> list:
+    """Semua biaya vendor 1 trip = supplier job yang di-tag trip_id (D1)."""
+    out = []
+    async for s in db.supplier_profiles.find({}, {"_id": 0}):
+        for j in (s.get("jobs") or []):
+            if j.get("trip_id") != trip_id:
+                continue
+            terbayar = sum(int(p.get("amount") or 0) for p in (j.get("payments") or []))
+            total = int(j.get("total_harga") or 0)
+            out.append({
+                "id": j.get("id"),
+                "supplier_id": s.get("id"),
+                "supplier_nama": s.get("nama"),
+                "vendor_name": s.get("nama"),
+                "kategori": j.get("kategori") or "Lainnya",
+                "klasifikasi": j.get("klasifikasi") or "Vendor Cost",
+                "jumlah": total,
+                "terbayar": terbayar,
+                "sisa": total - terbayar,
+                "tanggal": j.get("tanggal"),
+                "jatuh_tempo": j.get("jatuh_tempo"),
+                "no_invoice_vendor": j.get("no_invoice_vendor"),
+                "catatan": j.get("catatan") or "",
+                "source": j.get("source") or "supplier",
+            })
+    return out
+
+
+async def _trip_finance_summary(trip: dict) -> dict:
+    """Ringkasan keuangan 1 trip — dihitung ulang tiap baca, dari data canonical
+    (invoice di trip, biaya vendor di Supplier by trip_id, biaya driver di trip)."""
+    await _migrate_trip_vendor_costs(trip)
+    trip_id = trip.get("trip_id")
+    fin = trip.get("finance") or {}
     invoice_total = int(fin.get("invoice_total") or 0)
 
-    uj = int(trip.get("uj") or 0)
-    t1 = int(trip.get("t1") or 0)
-    t2 = int(trip.get("t2") or 0)
-    t3 = int(trip.get("t3") or 0)
+    uj = int(trip.get("uj") or 0); t1 = int(trip.get("t1") or 0)
+    t2 = int(trip.get("t2") or 0); t3 = int(trip.get("t3") or 0)
     driver_total = uj + t1 + t2 + t3
 
-    vendor_total = sum(int(c.get("jumlah") or 0) for c in costs)
-    hpp_total = driver_total + vendor_total
+    vendor_costs = await _trip_vendor_costs(trip_id)
+    vendor_total = sum(c["jumlah"] for c in vendor_costs)
+    vendor_terbayar = sum(c["terbayar"] for c in vendor_costs)
+    hpp_total = driver_total + vendor_total  # klasifikasi cost: Vendor Cost + Driver Cost
 
     has_invoice = invoice_total > 0
     profit = (invoice_total - hpp_total) if has_invoice else None
     margin_pct = round(profit / invoice_total * 100, 1) if (has_invoice and invoice_total > 0) else None
 
-    # Kelengkapan HPP dari data operasional: tiap leg yang punya kapal/ekspedisi
-    # idealnya punya biaya vendor. entered >= expected -> dianggap lengkap.
     legs = trip.get("legs") or []
     expected_vendor = sum(1 for l in legs if (l.get("kapal") or "").strip())
-    entered_vendor = len(costs)
+    entered_vendor = len(vendor_costs)
     hpp_complete = entered_vendor >= expected_vendor
 
     return {
-        "trip_id": trip.get("trip_id"),
+        "trip_id": trip_id,
         "invoice_total": invoice_total,
         "has_invoice": has_invoice,
         "driver_cost": {
             "uj": uj, "t1": t1, "t2": t2, "t3": t3, "total": driver_total,
+            "klasifikasi": "Driver Cost",
             "bonus_daily": int(trip.get("bonus_daily") or 0),
             "bonus_kerajinan": int(trip.get("bonus_kerajinan") or 0),
         },
-        "vendor_costs": costs,
+        "vendor_costs": vendor_costs,
         "vendor_total": vendor_total,
+        "vendor_terbayar": vendor_terbayar,
+        "vendor_sisa": vendor_total - vendor_terbayar,
         "hpp_total": hpp_total,
         "profit": profit,
         "margin_pct": margin_pct,
@@ -2121,12 +2276,13 @@ async def get_trip_finance(trip_id: str):
     trip = await db.trips.find_one({"trip_id": trip_id}, {"_id": 0})
     if not trip:
         raise HTTPException(404, "Trip not found")
-    return _trip_finance_summary(trip)
+    return await _trip_finance_summary(trip)
 
 
 @api_router.patch("/admin/trips/{trip_id}/finance/invoice", dependencies=[Depends(require_admin_pin)])
 async def set_trip_invoice(trip_id: str, body: TripInvoiceBody):
-    """Simpan nilai invoice (jasa) trip -> begitu ada, profit otomatis muncul."""
+    """Simpan nilai invoice (jasa) trip -> begitu ada, profit otomatis muncul.
+    Nilai ini dibaca live oleh Selisih Harga (D4), tidak pernah dicopy."""
     if body.invoice_total < 0:
         raise HTTPException(400, "invoice_total tidak boleh negatif")
     trip = await db.trips.find_one({"trip_id": trip_id})
@@ -2138,62 +2294,48 @@ async def set_trip_invoice(trip_id: str, body: TripInvoiceBody):
                   "updated_at": datetime.now(timezone.utc).isoformat()}},
     )
     doc = await db.trips.find_one({"trip_id": trip_id}, {"_id": 0})
-    return _trip_finance_summary(doc)
+    return await _trip_finance_summary(doc)
 
 
 @api_router.post("/admin/trips/{trip_id}/finance/costs", dependencies=[Depends(require_admin_pin)])
 async def add_trip_vendor_cost(trip_id: str, body: TripVendorCostBody):
-    """Tambah 1 biaya vendor ke trip -> langsung membentuk HPP."""
-    vendor_name = (body.vendor_name or "").strip()
-    if not vendor_name:
-        raise HTTPException(400, "Nama vendor wajib diisi")
+    """Tambah biaya vendor dari Trip 360 -> ditulis sebagai Supplier job (D1),
+    di-tag trip_id, kendaraan/rute/customer auto dari trip. HPP & hutang vendor
+    otomatis terbentuk; datanya langsung muncul di halaman Supplier."""
+    if not (body.vendor_name or body.supplier_id):
+        raise HTTPException(400, "Pilih supplier atau isi nama vendor")
     if body.jumlah <= 0:
         raise HTTPException(400, "Jumlah biaya harus lebih dari 0")
-    trip = await db.trips.find_one({"trip_id": trip_id})
+    trip = await db.trips.find_one({"trip_id": trip_id}, {"_id": 0})
     if not trip:
         raise HTTPException(404, "Trip not found")
-    kategori = (body.kategori or "Lainnya").strip() or "Lainnya"
-    tgl = (body.tanggal or "").strip()
-    if not re.match(r"^\d{4}-\d{2}-\d{2}$", tgl):
-        tgl = today_wib()
-    jt = (body.jatuh_tempo or "").strip()
-    if jt and not re.match(r"^\d{4}-\d{2}-\d{2}$", jt):
-        jt = ""
-    cost = {
-        "id": uuid.uuid4().hex[:8],
-        "vendor_name": vendor_name[:120],
-        "kategori": kategori[:40],
-        "jumlah": int(body.jumlah),
-        "tanggal": tgl,
-        "jatuh_tempo": jt or None,
-        "catatan": (body.catatan or "").strip()[:300],
-        "supplier_id": (body.supplier_id or "").strip() or None,
-        "payments": [],  # diisi di Sprint 3 (pembayaran vendor)
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    await db.trips.update_one(
-        {"trip_id": trip_id},
-        {"$push": {"finance.vendor_costs": cost},
-         "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}},
+    await _add_trip_supplier_job(
+        trip, vendor_name=body.vendor_name, supplier_id=body.supplier_id,
+        kategori=body.kategori or "Lainnya", jumlah=int(body.jumlah),
+        tanggal=body.tanggal, jatuh_tempo=body.jatuh_tempo,
+        no_invoice_vendor=body.no_invoice_vendor, catatan=body.catatan or "",
     )
     doc = await db.trips.find_one({"trip_id": trip_id}, {"_id": 0})
-    return _trip_finance_summary(doc)
+    return await _trip_finance_summary(doc)
 
 
-@api_router.delete("/admin/trips/{trip_id}/finance/costs/{cost_id}", dependencies=[Depends(require_admin_pin)])
-async def delete_trip_vendor_cost(trip_id: str, cost_id: str):
-    trip = await db.trips.find_one({"trip_id": trip_id})
-    if not trip:
-        raise HTTPException(404, "Trip not found")
-    res = await db.trips.update_one(
-        {"trip_id": trip_id},
-        {"$pull": {"finance.vendor_costs": {"id": cost_id}},
-         "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}},
-    )
-    if res.modified_count == 0:
-        raise HTTPException(404, "Biaya vendor tidak ditemukan")
+@api_router.delete("/admin/trips/{trip_id}/finance/costs/{job_id}", dependencies=[Depends(require_admin_pin)])
+async def delete_trip_vendor_cost(trip_id: str, job_id: str):
+    """Hapus biaya vendor = hapus supplier job-nya (yang di-tag trip ini)."""
+    target = None
+    async for s in db.supplier_profiles.find({}, {"_id": 0}):
+        for j in (s.get("jobs") or []):
+            if j.get("id") == job_id and j.get("trip_id") == trip_id:
+                target = s
+                break
+        if target:
+            break
+    if not target:
+        raise HTTPException(404, "Biaya vendor tidak ditemukan untuk trip ini")
+    new_jobs = [j for j in (target.get("jobs") or []) if j.get("id") != job_id]
+    await db.supplier_profiles.update_one({"id": target["id"]}, {"$set": {"jobs": new_jobs}})
     doc = await db.trips.find_one({"trip_id": trip_id}, {"_id": 0})
-    return _trip_finance_summary(doc)
+    return await _trip_finance_summary(doc)
 
 
 @api_router.get("/admin/finance/vendor-kategori", dependencies=[Depends(require_admin_pin)])

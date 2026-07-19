@@ -2685,12 +2685,20 @@ function Trip360Keuangan({ order, legs, headers, finance, onFinance, onOpenInvoi
   const [invVal, setInvVal] = useState("");
   const [savingInv, setSavingInv] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
-  const [form, setForm] = useState({ vendor_name: "", kategori: "Kapal / RoRo", jumlah: "", jatuh_tempo: "", catatan: "" });
+  const [form, setForm] = useState({ vendor_name: "", kategori: "Kapal / RoRo", jumlah: "", jatuh_tempo: "", no_invoice_vendor: "", catatan: "" });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
   const [busyId, setBusyId] = useState(null);
+  const [suppliers, setSuppliers] = useState([]);
 
   const apply = useCallback((data) => { onFinance?.(data); setPhase("ready"); }, [onFinance]);
+
+  // daftar supplier existing buat saran (D1: Trip nulis ke Supplier yang sama)
+  useEffect(() => {
+    axios.get(`${API}/admin/suppliers`, { headers })
+      .then((r) => setSuppliers((r.data?.items || []).map((s) => s.nama).filter(Boolean)))
+      .catch(() => {});
+  }, [headers]);
 
   useEffect(() => {
     if (finance) { setPhase("ready"); return; }
@@ -2720,10 +2728,11 @@ function Trip360Keuangan({ order, legs, headers, finance, onFinance, onOpenInvoi
     try {
       const r = await axios.post(`${API}/admin/trips/${tripId}/finance/costs`, {
         vendor_name: form.vendor_name.trim(), kategori: form.kategori, jumlah,
-        jatuh_tempo: form.jatuh_tempo || null, catatan: form.catatan.trim(),
+        jatuh_tempo: form.jatuh_tempo || null, no_invoice_vendor: form.no_invoice_vendor.trim() || null,
+        catatan: form.catatan.trim(),
       }, { headers });
       apply(r.data);
-      setShowAdd(false); setForm({ vendor_name: "", kategori: "Kapal / RoRo", jumlah: "", jatuh_tempo: "", catatan: "" });
+      setShowAdd(false); setForm({ vendor_name: "", kategori: "Kapal / RoRo", jumlah: "", jatuh_tempo: "", no_invoice_vendor: "", catatan: "" });
     } catch (e) { setErr(e?.response?.data?.detail || "Gagal menyimpan biaya vendor."); }
     setSaving(false);
   };
@@ -2807,11 +2816,11 @@ function Trip360Keuangan({ order, legs, headers, finance, onFinance, onOpenInvoi
         {showAdd && (
           <div className="t360-fin-form" data-testid="t360-cost-form">
             <div className="t360-fin-row">
-              <label>Nama vendor
-                <input value={form.vendor_name} placeholder="mis. PT Pelayaran Nusantara"
+              <label>Supplier / Vendor
+                <input value={form.vendor_name} placeholder="pilih / ketik — dibuat kalau belum ada"
                   list="t360-vendor-hint"
                   onChange={(e) => setForm((f) => ({ ...f, vendor_name: e.target.value }))} data-testid="t360-cost-vendor" />
-                {legVendors.length > 0 && <datalist id="t360-vendor-hint">{legVendors.map((v, i) => <option key={i} value={v} />)}</datalist>}
+                <datalist id="t360-vendor-hint">{Array.from(new Set([...suppliers, ...legVendors])).map((v, i) => <option key={i} value={v} />)}</datalist>
               </label>
               <label style={{ maxWidth: 150 }}>Kategori
                 <select value={form.kategori} onChange={(e) => setForm((f) => ({ ...f, kategori: e.target.value }))}>
@@ -2827,9 +2836,15 @@ function Trip360Keuangan({ order, legs, headers, finance, onFinance, onOpenInvoi
                 <input type="date" value={form.jatuh_tempo} onChange={(e) => setForm((f) => ({ ...f, jatuh_tempo: e.target.value }))} />
               </label>
             </div>
-            <label>Catatan <span style={{ color: "var(--text-mute)", fontWeight: 400 }}>(opsional)</span>
-              <input value={form.catatan} placeholder="mis. tarif kapal Priok–Bitung" onChange={(e) => setForm((f) => ({ ...f, catatan: e.target.value }))} />
-            </label>
+            <div className="t360-fin-row">
+              <label>No. invoice vendor <span style={{ color: "var(--text-mute)", fontWeight: 400 }}>(opsional)</span>
+                <input value={form.no_invoice_vendor} placeholder="mis. INV-PN/07/221" onChange={(e) => setForm((f) => ({ ...f, no_invoice_vendor: e.target.value }))} />
+              </label>
+              <label>Catatan <span style={{ color: "var(--text-mute)", fontWeight: 400 }}>(opsional)</span>
+                <input value={form.catatan} placeholder="mis. tarif kapal Priok–Bitung" onChange={(e) => setForm((f) => ({ ...f, catatan: e.target.value }))} />
+              </label>
+            </div>
+            <div style={{ fontSize: 10.5, color: "var(--text-mute)" }}>Kendaraan, nopol, rangka, rute &amp; customer terisi otomatis dari trip. Biaya ini tersimpan di modul <b>Supplier</b> (di-tag trip ini) — muncul juga di halaman Supplier, tanpa input ulang.</div>
             <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
               <button className="t360-qabtn primary" style={{ padding: "8px 14px" }} disabled={saving} onClick={addCost} data-testid="t360-cost-save">{saving ? "Menyimpan…" : "Simpan Biaya"}</button>
             </div>
@@ -2846,8 +2861,8 @@ function Trip360Keuangan({ order, legs, headers, finance, onFinance, onOpenInvoi
               <div key={c.id} className="t360-fin-item" data-testid="t360-cost-item">
                 <div className="t360-fin-ic">{T360_KAT_ICON[c.kategori] || "•"}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="t360-fin-nm">{c.vendor_name}</div>
-                  <div className="t360-fin-meta">{c.kategori}{c.jatuh_tempo ? ` · tempo ${fmtDateShort(c.jatuh_tempo)}` : ""}{c.catatan ? ` · ${c.catatan}` : ""}</div>
+                  <div className="t360-fin-nm">{c.vendor_name} <span className="t360-src" style={{ marginLeft: 4 }}>Supplier</span></div>
+                  <div className="t360-fin-meta">{c.kategori}{c.no_invoice_vendor ? ` · ${c.no_invoice_vendor}` : ""}{c.jatuh_tempo ? ` · tempo ${fmtDateShort(c.jatuh_tempo)}` : ""}{c.catatan ? ` · ${c.catatan}` : ""}</div>
                 </div>
                 <div className="t360-fin-amt">{fmtRp(c.jumlah)}</div>
                 <button className="t360-fin-del" disabled={busyId === c.id} onClick={() => delCost(c.id)} title="Hapus biaya" aria-label="Hapus">✕</button>
@@ -2888,12 +2903,13 @@ function Trip360Keuangan({ order, legs, headers, finance, onFinance, onOpenInvoi
         <div className="t360-note" style={{ margin: 0 }}>
           {T360_ICONS.check}
           <div>
-            <div className="t">HPP &amp; profit dihitung dari data trip ini</div>
+            <div className="t">Satu sumber data — tidak ada input ganda</div>
             <div className="s">
-              HPP = Biaya Vendor (diinput di trip) + Biaya Driver (uang jalan &amp; termin, sudah ada di trip). Profit = Nilai Invoice − HPP,
-              muncul otomatis begitu nilai invoice diisi. Tidak ada input angka ganda. Pencatatan pembayaran customer (piutang) &amp; vendor (hutang),
-              lalu cash flow &amp; “Saldo Aman Digunakan”, menyusul di Sprint berikutnya — memakai biaya yang kamu input di sini. Mekari Jurnal tetap
-              jadi pembukuan resmi &amp; pajak; FleetLocation sumber data operasionalnya.
+              Biaya vendor yang kamu input di sini <b>tersimpan di modul Supplier</b> (di-tag trip ini), jadi satu-satunya sumber biaya vendor —
+              otomatis muncul di halaman Supplier sebagai kewajiban, tanpa diketik ulang. HPP = Biaya Vendor + Biaya Driver (uang jalan &amp; termin,
+              sudah ada di trip). Profit = Nilai Invoice − HPP, muncul otomatis begitu invoice diisi. Pembayaran vendor (hutang), pembayaran customer
+              (piutang), Kompensasi, Selisih Harga, cash flow &amp; “Saldo Aman Digunakan” menyusul di Sprint berikutnya — semuanya terhubung ke trip ini.
+              Mekari Jurnal tetap pembukuan resmi &amp; pajak; FleetLocation sumber data operasionalnya.
             </div>
           </div>
         </div>
