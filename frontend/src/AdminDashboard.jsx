@@ -957,7 +957,14 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
   const [copiedPo, setCopiedPo] = useState(false);
   const [showInvoice, setShowInvoice] = useState(false);
   const [showTrip360, setShowTrip360] = useState(false);
+  const [selUnits, setSelUnits] = useState([]); // F1 — unit_id terpilih (struktur buat F2)
   const albumFileRefs = useRef({});
+
+  const units = Array.isArray(order.units) ? order.units : [];
+  const uSum = order.unit_summary || null;
+  const toggleUnit = (id) => setSelUnits((s) => s.includes(id) ? s.filter((x) => x !== id) : [...s, id]);
+  const allUnitsSelected = units.length > 0 && selUnits.length === units.length;
+  const toggleAllUnits = () => setSelUnits(allUnitsSelected ? [] : units.map((u) => u.unit_id));
 
   const copyPoText = async (e) => {
     e.stopPropagation();
@@ -1495,6 +1502,47 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
             )}
           </div>
         </div>
+
+        {/* ── F1: Daftar Unit (Unit Master) ── */}
+        {units.length > 0 && (
+          <div className="adm-units" style={{ gridColumn: "1 / -1" }} data-testid={`adm-units-${order.order_id}`}>
+            <div className="adm-units-hd">
+              <span className="adm-units-title">Unit dalam PO ini ({units.length})</span>
+              {uSum && (
+                <div className="adm-units-sum">
+                  <span className="adm-usum">Belum trip <b>{uSum.belum_trip}</b></span>
+                  <span className="adm-usum">Berjalan <b>{uSum.berjalan}</b></span>
+                  <span className="adm-usum">Selesai <b>{uSum.selesai}</b></span>
+                  <span className="adm-usum">Belum invoice <b>{uSum.belum_invoice}</b></span>
+                  <span className="adm-usum">Sudah invoice <b>{uSum.sudah_invoice}</b></span>
+                </div>
+              )}
+            </div>
+            {units.length > 1 && (
+              <label className="adm-unit-all">
+                <input type="checkbox" checked={allUnitsSelected} onChange={toggleAllUnits} data-testid={`adm-units-all-${order.order_id}`} />
+                Pilih semua {selUnits.length > 0 ? `· ${selUnits.length} terpilih` : ""}
+              </label>
+            )}
+            <div className="adm-unit-list">
+              {units.map((u, i) => (
+                <label key={u.unit_id} className={`adm-unit-item${selUnits.includes(u.unit_id) ? " sel" : ""}`} data-testid={`adm-unit-item-${order.order_id}-${i}`}>
+                  <input type="checkbox" checked={selUnits.includes(u.unit_id)} onChange={() => toggleUnit(u.unit_id)} />
+                  <span className="adm-unit-no">{i + 1}</span>
+                  <span className="adm-unit-main">
+                    <span className="adm-unit-veh">{u.vehicle_type || "—"}{u.tipe_model ? ` · ${u.tipe_model}` : ""}</span>
+                    <span className="adm-unit-sub">{u.nopol || "nopol —"}{u.no_rangka ? ` · ${u.no_rangka}` : ""}{u.warna || u.tahun ? ` · ${u.warna || "—"}/${u.tahun || "—"}` : ""}</span>
+                  </span>
+                  <span className="adm-unit-tags">
+                    <span className="adm-utag trip">{u.status_perjalanan || "Belum Dijadwalkan"}</span>
+                    <span className="adm-utag inv">{u.status_invoice || "Belum Ditagih"}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="adm-field-row">
           <div className="adm-field-key">Jumlah Colly</div>
           <div className="adm-field-val">

@@ -547,3 +547,77 @@
   .of-step-label { display: none; }
   .of-step-num { width: 30px; height: 30px; font-size: 13px; }
 }
+
+/* ── F1: Unit cards (multi-unit customer form) ── */
+.of-unit-card {
+  border: 1px solid var(--of-border, #e5e7eb);
+  border-radius: 14px;
+  background: #fff;
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+[data-theme="dark"] .of-unit-card { background: #141416; border-color: #26262b; }
+.of-unit-hd {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 14px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+.of-unit-badge {
+  font-size: 11px;
+  font-weight: 800;
+  color: #b45309;
+  background: #fef3c7;
+  padding: 4px 9px;
+  border-radius: 100px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+[data-theme="dark"] .of-unit-badge { color: #fcd34d; background: #3a2f0a; }
+.of-unit-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+[data-theme="dark"] .of-unit-label { color: #d4d4d8; }
+.of-unit-del {
+  width: 26px; height: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 7px;
+  background: #fef2f2; color: #dc2626;
+  font-size: 13px; font-weight: 700;
+  cursor: pointer; flex-shrink: 0;
+}
+[data-theme="dark"] .of-unit-del { background: #3a1414; color: #f87171; }
+.of-unit-chev { font-size: 10px; color: #9ca3af; flex-shrink: 0; }
+.of-unit-body {
+  padding: 4px 14px 16px;
+  border-top: 1px solid var(--of-border, #eef0f2);
+}
+[data-theme="dark"] .of-unit-body { border-color: #26262b; }
+.of-add-unit {
+  width: 100%;
+  padding: 12px;
+  border: 1.5px dashed var(--of-border, #d1d5db);
+  border-radius: 12px;
+  background: none;
+  color: #b45309;
+  font-weight: 700;
+  font-size: 13.5px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.of-add-unit:hover:not(:disabled) { border-color: #d4a847; background: #fdf6e6; }
+.of-add-unit:disabled { opacity: .5; cursor: not-allowed; }
+[data-theme="dark"] .of-add-unit { color: #fcd34d; }
+[data-theme="dark"] .of-add-unit:hover:not(:disabled) { background: #2a2205; border-color: #d4a847; }

@@ -952,15 +952,30 @@ async def odoo_ping():
 
 
 # ---------- Customer Order Form (v2.6b) ----------
+class UnitBody(BaseModel):
+    """1 kendaraan/unit di dalam sebuah PO (F1 — Unit Master)."""
+    vehicle_type: str = ""
+    tipe_model: str = ""
+    nopol: str = ""
+    no_rangka: str = ""
+    warna: str = ""
+    tahun: str = ""
+    catatan: str = ""
+
+
 class OrderBody(BaseModel):
-    # Kendaraan
-    vehicle_type: str
+    # Kendaraan (legacy single-unit — tetap didukung; dipakai jadi units[0] kalau
+    # `units` tidak dikirim, untuk backward-compatibility form lama)
+    vehicle_type: str = ""
     nopol: str = ""
     no_rangka: str = ""
     warna: str = ""
     tahun: str = ""
     km: str = ""
     kondisi: str = "Bekas"
+    # F1 — Unit Master: daftar unit (multi-unit). Kalau kosong, dibentuk dari
+    # field kendaraan legacy di atas.
+    units: Optional[List[UnitBody]] = None
     # Dimensi kargo (cm) — dipakai buat hitung M3 otomatis di Surat Jalan
     panjang: str = ""
     lebar: str = ""
@@ -990,14 +1005,110 @@ class OrderBody(BaseModel):
     catatan: str = ""
 
 
+# ── F1: Unit Master (units[] embedded di order) ──
+UNIT_MAX_PER_ORDER = 10
+UNIT_STATUS_PERJALANAN_DEFAULT = "Belum Dijadwalkan"  # → Berjalan → Selesai
+UNIT_STATUS_INVOICE_DEFAULT = "Belum Ditagih"          # → Sudah Diinvoice → Dibayar Sebagian → Lunas
+
+
+def _gen_unit_id() -> str:
+    return "UNIT-" + uuid.uuid4().hex[:10].upper()
+
+
+def _new_unit(src: dict, now: str) -> dict:
+    """Bentuk 1 record unit dari data mentah (payload unit atau field legacy)."""
+    return {
+        "unit_id": _gen_unit_id(),
+        "vehicle_type": (src.get("vehicle_type") or "").strip()[:80],
+        "tipe_model": (src.get("tipe_model") or "").strip()[:120],
+        "nopol": (src.get("nopol") or "").strip().upper()[:20],
+        "no_rangka": (src.get("no_rangka") or "").strip().upper()[:40],
+        "warna": (src.get("warna") or "").strip()[:40],
+        "tahun": (src.get("tahun") or "").strip()[:6],
+        "catatan": (src.get("catatan") or "").strip()[:300],
+        "status_perjalanan": UNIT_STATUS_PERJALANAN_DEFAULT,
+        "status_invoice": UNIT_STATUS_INVOICE_DEFAULT,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def _legacy_unit_src(order: dict) -> dict:
+    """Ambil field kendaraan legacy dari order jadi 1 unit (units[0])."""
+    return {
+        "vehicle_type": order.get("vehicle_type") or "",
+        "tipe_model": order.get("tipe_model") or "",
+        "nopol": order.get("nopol") or "",
+        "no_rangka": order.get("no_rangka") or "",
+        "warna": order.get("warna") or "",
+        "tahun": order.get("tahun") or "",
+        "catatan": "",
+    }
+
+
+async def _ensure_order_units(order: dict) -> dict:
+    """Lazy-migrate order lama: kalau belum punya units[], bentuk units[0] dari
+    field legacy lalu simpan. Idempotent (order yang sudah punya units dilewati),
+    dan aman per-order (error 1 order tidak menggagalkan yang lain)."""
+    if not isinstance(order, dict):
+        return order
+    units = order.get("units")
+    if isinstance(units, list) and len(units) > 0:
+        return order
+    try:
+        now = order.get("created_at") or datetime.now(timezone.utc).isoformat()
+        unit0 = _new_unit(_legacy_unit_src(order), now)
+        order["units"] = [unit0]
+        if order.get("order_id"):
+            await db.orders.update_one(
+                {"order_id": order["order_id"], "$or": [{"units": {"$exists": False}}, {"units": {"$size": 0}}]},
+                {"$set": {"units": [unit0], "jumlah_unit": 1}},
+            )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[units:migrate] gagal untuk order {order.get('order_id')}: {e}")
+    return order
+
+
+def _order_unit_summary(order: dict) -> dict:
+    """Ringkasan status unit untuk kartu PO admin."""
+    units = order.get("units") or []
+    total = len(units)
+    berjalan = sum(1 for u in units if u.get("status_perjalanan") == "Berjalan")
+    selesai = sum(1 for u in units if u.get("status_perjalanan") == "Selesai")
+    belum_trip = sum(1 for u in units if (u.get("status_perjalanan") or UNIT_STATUS_PERJALANAN_DEFAULT) == UNIT_STATUS_PERJALANAN_DEFAULT)
+    sudah_invoice = sum(1 for u in units if (u.get("status_invoice") or "") not in ("", UNIT_STATUS_INVOICE_DEFAULT))
+    belum_invoice = total - sudah_invoice
+    return {
+        "total": total, "belum_trip": belum_trip, "berjalan": berjalan,
+        "selesai": selesai, "belum_invoice": belum_invoice, "sudah_invoice": sudah_invoice,
+    }
+
+
 @api_router.post("/orders")
 async def create_order(payload: OrderBody):
     """Create a customer order (v2.6b). Validates + persists + fires Odoo webhook.
     Compatibility layer: returns order_id; does NOT auto-create trip yet (admin still triggers via PO).
+    F1: mendukung units[] (multi-unit). Kalau `units` kosong, dibentuk 1 unit dari field kendaraan legacy.
     """
-    vt = (payload.vehicle_type or "").strip()
-    if vt and vt not in await _all_valid_vehicle_types():
-        raise HTTPException(400, f"vehicle_type tidak valid")
+    now = datetime.now(timezone.utc).isoformat()
+    # Bentuk daftar unit — dari payload.units, atau dari field kendaraan legacy
+    raw_units = [u.dict() for u in payload.units] if payload.units else []
+    raw_units = [u for u in raw_units if any((u.get(k) or "").strip() for k in ("vehicle_type", "nopol", "no_rangka", "tipe_model"))]
+    if not raw_units:
+        raw_units = [_legacy_unit_src({
+            "vehicle_type": payload.vehicle_type, "nopol": payload.nopol, "no_rangka": payload.no_rangka,
+            "warna": payload.warna, "tahun": payload.tahun,
+        })]
+    if len(raw_units) > UNIT_MAX_PER_ORDER:
+        raise HTTPException(400, f"Maksimal {UNIT_MAX_PER_ORDER} unit per PO via form. Lebih dari itu hubungi admin.")
+
+    valid_types = await _all_valid_vehicle_types()
+    for u in raw_units:
+        vt_u = (u.get("vehicle_type") or "").strip()
+        if vt_u and vt_u not in valid_types:
+            raise HTTPException(400, f"vehicle_type tidak valid: {vt_u}")
+    units = [_new_unit(u, now) for u in raw_units]
+
     if not (payload.asal_kota or "").strip():
         raise HTTPException(400, "asal_kota wajib diisi")
     if not (payload.tujuan_kota or "").strip():
@@ -1007,16 +1118,22 @@ async def create_order(payload: OrderBody):
     if not (payload.customer_hp or "").strip():
         raise HTTPException(400, "customer_hp wajib diisi")
 
+    # Mirror unit pertama ke field kendaraan legacy (back-compat: Surat Jalan,
+    # trip convert, invoice single-unit lama tetap kebaca).
+    u0 = units[0]
+    vt = u0["vehicle_type"]
     order_id = f"ORD-{uuid.uuid4().hex[:10].upper()}"
-    now = datetime.now(timezone.utc).isoformat()
     doc = {
         "order_id": order_id,
         "status": "NEW",                # NEW → CONFIRMED → DISPATCHED → COMPLETED → CANCELLED
+        "units": units,                 # F1 — Unit Master (sumber utama unit)
+        "jumlah_unit": len(units),
+        # ── mirror unit[0] ke field legacy (back-compat) ──
         "vehicle_type": vt,
-        "nopol": (payload.nopol or "").strip()[:20],
-        "no_rangka": (payload.no_rangka or "").strip()[:40],
-        "warna": (payload.warna or "").strip()[:40],
-        "tahun": (payload.tahun or "").strip()[:6],
+        "nopol": u0["nopol"],
+        "no_rangka": u0["no_rangka"],
+        "warna": u0["warna"],
+        "tahun": u0["tahun"],
         "km": (payload.km or "").strip()[:12],
         "kondisi": (payload.kondisi or "Bekas").strip()[:20],
         "panjang": (payload.panjang or "").strip()[:12],
@@ -1082,6 +1199,8 @@ async def get_order(order_id: str):
     if not doc:
         raise HTTPException(404, "Order not found")
     doc.pop("_id", None)
+    doc = await _ensure_order_units(doc)
+    doc["unit_summary"] = _order_unit_summary(doc)
     return doc
 
 
@@ -1095,8 +1214,33 @@ async def list_orders(limit: int = 50, status: Optional[str] = None):
     items = []
     async for d in cur:
         d.pop("_id", None)
+        d = await _ensure_order_units(d)
+        d["unit_summary"] = _order_unit_summary(d)
         items.append(d)
     return {"count": len(items), "items": items}
+
+
+@api_router.post("/admin/orders/migrate-units", dependencies=[Depends(require_admin_pin)])
+async def migrate_orders_units():
+    """Migrasi one-off semua order lama → units[0] (idempotent, per-order aman).
+    Field legacy TIDAK dihapus (jadi cadangan). Aman dijalankan berulang."""
+    migrated, skipped, errors = 0, 0, 0
+    sample = None
+    async for d in db.orders.find({}):
+        d.pop("_id", None)
+        units = d.get("units")
+        if isinstance(units, list) and len(units) > 0:
+            skipped += 1
+            continue
+        try:
+            await _ensure_order_units(d)
+            migrated += 1
+            if sample is None:
+                sample = {"order_id": d.get("order_id"), "units": d.get("units")}
+        except Exception as e:  # noqa: BLE001
+            errors += 1
+            logger.warning(f"[units:migrate-endpoint] {d.get('order_id')}: {e}")
+    return {"migrated": migrated, "skipped": skipped, "errors": errors, "sample": sample}
 
 
 class OrderConvertBody(BaseModel):
@@ -1764,6 +1908,8 @@ async def admin_list_orders(
     items = []
     async for d in cur:
         d.pop("_id", None)
+        d = await _ensure_order_units(d)
+        d["unit_summary"] = _order_unit_summary(d)
         items.append(d)
     return {"count": len(items), "items": items}
 

@@ -15,6 +15,10 @@ const STEPS = [
 
 const KONDISI_OPTIONS = ["Bekas", "Baru"];
 
+// F1 — Unit Master (multi-unit per PO)
+const MAX_UNITS = 10;
+const emptyUnit = () => ({ vehicle_type: "", tipe_model: "", nopol: "", no_rangka: "", warna: "", tahun: "", catatan: "" });
+
 /* ── Dark mode ── */
 function useDarkMode() {
   const [dark, setDark] = useState(
@@ -125,17 +129,33 @@ export default function CustomerOrderForm() {
     asal_kota: "", asal_alamat: "", pickup_date: "", pickup_time: "", pickup_pic: "", pickup_hp: "",
     tujuan_kota: "", tujuan_alamat: "", delivery_pic: "", delivery_hp: "",
     customer_nama: "", customer_hp: "", customer_email: "", catatan: "",
+    units: [emptyUnit()],   // F1 — multi-unit
   });
+  const [openUnit, setOpenUnit] = useState(0); // index card yang lagi kebuka
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const [files, setFiles] = useState([]);  // berkas scan (PDF/gambar)
 
   const set = (k, v) => setData((d) => ({ ...d, [k]: v }));
+  const setUnit = (i, k, v) => setData((d) => ({ ...d, units: d.units.map((u, x) => x === i ? { ...u, [k]: v } : u) }));
+  const addUnit = () => setData((d) => {
+    if (d.units.length >= MAX_UNITS) return d;
+    setOpenUnit(d.units.length);
+    return { ...d, units: [...d.units, emptyUnit()] };
+  });
+  const removeUnit = (i) => setData((d) => {
+    if (d.units.length <= 1) return d;
+    const units = d.units.filter((_, x) => x !== i);
+    setOpenUnit((o) => Math.max(0, Math.min(o, units.length - 1)));
+    return { ...d, units };
+  });
 
   const stepValid = useMemo(() => {
     if (step === 0) {
-      return shipmentType === "kendaraan" ? !!data.vehicle_type : !!data.isi_kiriman.trim();
+      return shipmentType === "kendaraan"
+        ? (data.units.length > 0 && data.units.every((u) => !!u.vehicle_type))
+        : !!data.isi_kiriman.trim();
     }
     if (step === 1) return !!data.asal_kota.trim();
     if (step === 2) return !!data.tujuan_kota.trim();
@@ -149,7 +169,8 @@ export default function CustomerOrderForm() {
   const submit = async () => {
     setError(""); setSubmitting(true);
     try {
-      const r = await axios.post(`${API}/orders`, data);
+      const payload = { ...data, units: shipmentType === "kendaraan" ? data.units : [] };
+      const r = await axios.post(`${API}/orders`, payload);
       const orderId = r.data?.order_id;
       // Upload berkas scan (kalau ada) — best-effort, order tetap jadi walau upload gagal
       if (orderId && files.length) {
@@ -169,7 +190,8 @@ export default function CustomerOrderForm() {
 
   const addAnother = () => {
     // Reset hanya data kendaraan, sisanya (asal/tujuan/customer) tetap
-    setData(d => ({ ...d, vehicle_type: "", nopol: "", warna: "", tahun: "", km: "", kondisi: "Bekas", no_rangka: "", panjang: "", lebar: "", tinggi: "", isi_kiriman: "", jumlah_colly: "" }));
+    setData(d => ({ ...d, vehicle_type: "", nopol: "", warna: "", tahun: "", km: "", kondisi: "Bekas", no_rangka: "", panjang: "", lebar: "", tinggi: "", isi_kiriman: "", jumlah_colly: "", units: [emptyUnit()] }));
+    setOpenUnit(0);
     setShipmentType("kendaraan");
     setFiles([]);
     setResult(null);
@@ -261,61 +283,87 @@ export default function CustomerOrderForm() {
               </div>
 
               {shipmentType === "kendaraan" && (
-                <div className="of-grid">
-                  <Field label="Tipe Kendaraan" required full>
-                    <select className="of-inp" value={data.vehicle_type}
-                      onChange={(e) => set("vehicle_type", e.target.value)}
-                      data-testid="ord-vehicle-type">
-                      <option value="">— Pilih tipe kendaraan —</option>
-                      {vehicleTypes.map((v) => <option key={v} value={v}>{v}</option>)}
-                    </select>
-                  </Field>
-                  {data.vehicle_type && (
-                    <div className="of-field--full" style={{ marginTop: 4 }}>
-                      <div style={{
-                        border: "1px solid var(--of-border, #e5e7eb)", borderRadius: 12,
-                        background: "#fff", padding: 12, display: "flex", flexDirection: "column",
-                        alignItems: "center", gap: 6,
-                      }}>
-                        <VehicleSketch type={data.vehicle_type} style={{ width: "100%", height: 200 }} />
-                        <div style={{ fontSize: 12, color: "#6b7280", fontWeight: 600 }}>
-                          Sketsa referensi — {data.vehicle_type}
-                        </div>
+                <div data-testid="ord-units">
+                  {data.units.map((u, i) => {
+                    const open = openUnit === i;
+                    const label = u.vehicle_type ? `${u.vehicle_type}${u.tipe_model ? ` · ${u.tipe_model}` : ""}${u.nopol ? ` · ${u.nopol}` : ""}` : "Belum dipilih";
+                    return (
+                      <div key={i} className="of-unit-card" data-testid={`ord-unit-${i}`}>
+                        <button type="button" className="of-unit-hd" onClick={() => setOpenUnit(open ? -1 : i)} data-testid={`ord-unit-toggle-${i}`}>
+                          <span className="of-unit-badge">Unit {i + 1}</span>
+                          <span className="of-unit-label">{label}</span>
+                          <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+                            {data.units.length > 1 && (
+                              <span role="button" tabIndex={0} className="of-unit-del"
+                                onClick={(e) => { e.stopPropagation(); removeUnit(i); }}
+                                onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); removeUnit(i); } }}
+                                data-testid={`ord-unit-remove-${i}`} title="Hapus unit">✕</span>
+                            )}
+                            <span className="of-unit-chev">{open ? "▲" : "▼"}</span>
+                          </span>
+                        </button>
+                        {open && (
+                          <div className="of-unit-body">
+                            <div className="of-grid">
+                              <Field label="Tipe Kendaraan" required full>
+                                <select className="of-inp" value={u.vehicle_type}
+                                  onChange={(e) => setUnit(i, "vehicle_type", e.target.value)}
+                                  data-testid={`ord-vehicle-type-${i}`}>
+                                  <option value="">— Pilih tipe kendaraan —</option>
+                                  {vehicleTypes.map((v) => <option key={v} value={v}>{v}</option>)}
+                                </select>
+                              </Field>
+                              {u.vehicle_type && (
+                                <div className="of-field--full" style={{ marginTop: 4 }}>
+                                  <div style={{ border: "1px solid var(--of-border, #e5e7eb)", borderRadius: 12, background: "#fff", padding: 12, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                                    <VehicleSketch type={u.vehicle_type} style={{ width: "100%", height: 180 }} />
+                                    <div style={{ fontSize: 12, color: "#6b7280", fontWeight: 600 }}>Sketsa referensi — {u.vehicle_type}</div>
+                                  </div>
+                                </div>
+                              )}
+                              <Field label="Tipe / Model">
+                                <input type="text" className="of-inp" value={u.tipe_model}
+                                  onChange={(e) => setUnit(i, "tipe_model", e.target.value)}
+                                  placeholder="Cth: Dozer D6R XL" data-testid={`ord-tipe-model-${i}`} />
+                              </Field>
+                              <Field label="No. Polisi">
+                                <input type="text" className="of-inp" value={u.nopol}
+                                  onChange={(e) => setUnit(i, "nopol", e.target.value.toUpperCase())}
+                                  placeholder="B 1234 ABC" data-testid={`ord-nopol-${i}`} />
+                              </Field>
+                              <Field label="No. Rangka">
+                                <input type="text" className="of-inp" value={u.no_rangka}
+                                  onChange={(e) => setUnit(i, "no_rangka", e.target.value.toUpperCase())}
+                                  placeholder="MHFE1CD1XXXXX" data-testid={`ord-rangka-${i}`} />
+                              </Field>
+                              <Field label="Warna">
+                                <input type="text" className="of-inp" value={u.warna}
+                                  onChange={(e) => setUnit(i, "warna", e.target.value)}
+                                  placeholder="Hitam" data-testid={`ord-warna-${i}`} />
+                              </Field>
+                              <Field label="Tahun">
+                                <input type="text" className="of-inp" value={u.tahun} maxLength={4}
+                                  onChange={(e) => setUnit(i, "tahun", e.target.value.replace(/\D/g, ""))}
+                                  placeholder="2024" data-testid={`ord-tahun-${i}`} />
+                              </Field>
+                              <Field label="Catatan Unit" full hint="Opsional — kondisi khusus / kelengkapan unit ini.">
+                                <input type="text" className="of-inp" value={u.catatan}
+                                  onChange={(e) => setUnit(i, "catatan", e.target.value)}
+                                  placeholder="Cth: kunci ada di dalam kabin" data-testid={`ord-unit-catatan-${i}`} />
+                              </Field>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    </div>
+                    );
+                  })}
+                  <button type="button" className="of-add-unit" onClick={addUnit}
+                    disabled={data.units.length >= MAX_UNITS} data-testid="ord-add-unit">
+                    + Tambah Unit {data.units.length >= MAX_UNITS ? `(maks ${MAX_UNITS})` : ""}
+                  </button>
+                  {data.units.length >= MAX_UNITS && (
+                    <div style={{ fontSize: 11.5, color: "#8a6d3b", marginTop: 8 }}>Maksimal {MAX_UNITS} unit lewat form. Lebih dari itu, hubungi admin PT Alyssa.</div>
                   )}
-                  <Field label="No. Polisi">
-                    <input type="text" className="of-inp" value={data.nopol}
-                      onChange={(e) => set("nopol", e.target.value.toUpperCase())}
-                      placeholder="B 1234 ABC" data-testid="ord-nopol" />
-                  </Field>
-                  <Field label="No. Rangka">
-                    <input type="text" className="of-inp" value={data.no_rangka}
-                      onChange={(e) => set("no_rangka", e.target.value)}
-                      placeholder="MHFE1CD1XXXXX" data-testid="ord-rangka" />
-                  </Field>
-                  <Field label="Warna">
-                    <input type="text" className="of-inp" value={data.warna}
-                      onChange={(e) => set("warna", e.target.value)}
-                      placeholder="Hitam" data-testid="ord-warna" />
-                  </Field>
-                  <Field label="Tahun">
-                    <input type="text" className="of-inp" value={data.tahun} maxLength={4}
-                      onChange={(e) => set("tahun", e.target.value.replace(/\D/g, ""))}
-                      placeholder="2024" data-testid="ord-tahun" />
-                  </Field>
-                  <Field label="Kilometer">
-                    <input type="text" className="of-inp" value={data.km}
-                      onChange={(e) => set("km", e.target.value)}
-                      placeholder="15000" data-testid="ord-km" />
-                  </Field>
-                  <Field label="Kondisi">
-                    <select className="of-inp" value={data.kondisi}
-                      onChange={(e) => set("kondisi", e.target.value)}
-                      data-testid="ord-kondisi">
-                      {KONDISI_OPTIONS.map((o) => <option key={o}>{o}</option>)}
-                    </select>
-                  </Field>
                 </div>
               )}
 
@@ -492,8 +540,10 @@ export default function CustomerOrderForm() {
                   <SRow k="Pemesan"      v={`${data.customer_nama || "—"} ${data.customer_hp ? `· ${data.customer_hp}` : ""}`.trim()} />
                   {shipmentType === "kendaraan" ? (
                     <>
-                      <SRow k="Kendaraan"    v={`${data.vehicle_type || "—"} ${data.nopol ? `· ${data.nopol}` : ""}`} />
-                      <SRow k="Warna / Tahun" v={`${data.warna || "—"} / ${data.tahun || "—"}`} />
+                      <SRow k="Jumlah Unit" v={<b>{data.units.length} unit</b>} />
+                      {data.units.map((u, i) => (
+                        <SRow key={i} k={`Unit ${i + 1}`} v={`${u.vehicle_type || "—"}${u.tipe_model ? ` · ${u.tipe_model}` : ""}${u.nopol ? ` · ${u.nopol}` : ""}${u.warna || u.tahun ? ` · ${u.warna || "—"}/${u.tahun || "—"}` : ""}`} />
+                      ))}
                     </>
                   ) : (
                     <SRow k="Barang / Cargo" v={data.isi_kiriman || "—"} />
