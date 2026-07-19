@@ -2041,6 +2041,167 @@ async def admin_patch_trip_bonus(trip_id: str, body: BonusBody):
 
 
 # ══════════════════════════════════════════════════════
+# FINANCIAL COMMAND CENTER — Sprint 1
+# Master Biaya/Vendor per Trip -> HPP otomatis -> Profit otomatis.
+# Semua disimpan DI trip (trip.finance), jadi satu sumber data.
+# Angka HPP = biaya vendor (diinput per-trip) + biaya driver (uj+t1+t2+t3,
+# udah ada di trip). Bonus TIDAK diikutkan otomatis (harian butuh jumlah
+# hari, kerajinan kondisional) supaya profit nggak menyesatkan.
+# ══════════════════════════════════════════════════════
+
+VENDOR_KATEGORI = [
+    "Kapal / RoRo", "Towing / Trucking", "Ekspedisi", "Bongkar / Muat",
+    "Karoseri", "BBM / Tol", "Lainnya",
+]
+
+
+class TripInvoiceBody(BaseModel):
+    invoice_total: int = 0
+
+
+class TripVendorCostBody(BaseModel):
+    vendor_name: str
+    kategori: Optional[str] = "Lainnya"
+    jumlah: int
+    tanggal: Optional[str] = None
+    jatuh_tempo: Optional[str] = None
+    catatan: Optional[str] = ""
+    supplier_id: Optional[str] = None
+
+
+def _trip_finance_summary(trip: dict) -> dict:
+    """Hitung ringkasan keuangan 1 trip dari data yang udah ada + biaya vendor
+    yang diinput. Tidak menyimpan angka turunan — selalu dihitung ulang."""
+    fin = trip.get("finance") or {}
+    costs = fin.get("vendor_costs") or []
+    invoice_total = int(fin.get("invoice_total") or 0)
+
+    uj = int(trip.get("uj") or 0)
+    t1 = int(trip.get("t1") or 0)
+    t2 = int(trip.get("t2") or 0)
+    t3 = int(trip.get("t3") or 0)
+    driver_total = uj + t1 + t2 + t3
+
+    vendor_total = sum(int(c.get("jumlah") or 0) for c in costs)
+    hpp_total = driver_total + vendor_total
+
+    has_invoice = invoice_total > 0
+    profit = (invoice_total - hpp_total) if has_invoice else None
+    margin_pct = round(profit / invoice_total * 100, 1) if (has_invoice and invoice_total > 0) else None
+
+    # Kelengkapan HPP dari data operasional: tiap leg yang punya kapal/ekspedisi
+    # idealnya punya biaya vendor. entered >= expected -> dianggap lengkap.
+    legs = trip.get("legs") or []
+    expected_vendor = sum(1 for l in legs if (l.get("kapal") or "").strip())
+    entered_vendor = len(costs)
+    hpp_complete = entered_vendor >= expected_vendor
+
+    return {
+        "trip_id": trip.get("trip_id"),
+        "invoice_total": invoice_total,
+        "has_invoice": has_invoice,
+        "driver_cost": {
+            "uj": uj, "t1": t1, "t2": t2, "t3": t3, "total": driver_total,
+            "bonus_daily": int(trip.get("bonus_daily") or 0),
+            "bonus_kerajinan": int(trip.get("bonus_kerajinan") or 0),
+        },
+        "vendor_costs": costs,
+        "vendor_total": vendor_total,
+        "hpp_total": hpp_total,
+        "profit": profit,
+        "margin_pct": margin_pct,
+        "hpp_complete": hpp_complete,
+        "expected_vendor": expected_vendor,
+        "entered_vendor": entered_vendor,
+    }
+
+
+@api_router.get("/admin/trips/{trip_id}/finance", dependencies=[Depends(require_admin_pin)])
+async def get_trip_finance(trip_id: str):
+    trip = await db.trips.find_one({"trip_id": trip_id}, {"_id": 0})
+    if not trip:
+        raise HTTPException(404, "Trip not found")
+    return _trip_finance_summary(trip)
+
+
+@api_router.patch("/admin/trips/{trip_id}/finance/invoice", dependencies=[Depends(require_admin_pin)])
+async def set_trip_invoice(trip_id: str, body: TripInvoiceBody):
+    """Simpan nilai invoice (jasa) trip -> begitu ada, profit otomatis muncul."""
+    if body.invoice_total < 0:
+        raise HTTPException(400, "invoice_total tidak boleh negatif")
+    trip = await db.trips.find_one({"trip_id": trip_id})
+    if not trip:
+        raise HTTPException(404, "Trip not found")
+    await db.trips.update_one(
+        {"trip_id": trip_id},
+        {"$set": {"finance.invoice_total": int(body.invoice_total),
+                  "updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    doc = await db.trips.find_one({"trip_id": trip_id}, {"_id": 0})
+    return _trip_finance_summary(doc)
+
+
+@api_router.post("/admin/trips/{trip_id}/finance/costs", dependencies=[Depends(require_admin_pin)])
+async def add_trip_vendor_cost(trip_id: str, body: TripVendorCostBody):
+    """Tambah 1 biaya vendor ke trip -> langsung membentuk HPP."""
+    vendor_name = (body.vendor_name or "").strip()
+    if not vendor_name:
+        raise HTTPException(400, "Nama vendor wajib diisi")
+    if body.jumlah <= 0:
+        raise HTTPException(400, "Jumlah biaya harus lebih dari 0")
+    trip = await db.trips.find_one({"trip_id": trip_id})
+    if not trip:
+        raise HTTPException(404, "Trip not found")
+    kategori = (body.kategori or "Lainnya").strip() or "Lainnya"
+    tgl = (body.tanggal or "").strip()
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", tgl):
+        tgl = today_wib()
+    jt = (body.jatuh_tempo or "").strip()
+    if jt and not re.match(r"^\d{4}-\d{2}-\d{2}$", jt):
+        jt = ""
+    cost = {
+        "id": uuid.uuid4().hex[:8],
+        "vendor_name": vendor_name[:120],
+        "kategori": kategori[:40],
+        "jumlah": int(body.jumlah),
+        "tanggal": tgl,
+        "jatuh_tempo": jt or None,
+        "catatan": (body.catatan or "").strip()[:300],
+        "supplier_id": (body.supplier_id or "").strip() or None,
+        "payments": [],  # diisi di Sprint 3 (pembayaran vendor)
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.trips.update_one(
+        {"trip_id": trip_id},
+        {"$push": {"finance.vendor_costs": cost},
+         "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    doc = await db.trips.find_one({"trip_id": trip_id}, {"_id": 0})
+    return _trip_finance_summary(doc)
+
+
+@api_router.delete("/admin/trips/{trip_id}/finance/costs/{cost_id}", dependencies=[Depends(require_admin_pin)])
+async def delete_trip_vendor_cost(trip_id: str, cost_id: str):
+    trip = await db.trips.find_one({"trip_id": trip_id})
+    if not trip:
+        raise HTTPException(404, "Trip not found")
+    res = await db.trips.update_one(
+        {"trip_id": trip_id},
+        {"$pull": {"finance.vendor_costs": {"id": cost_id}},
+         "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    if res.modified_count == 0:
+        raise HTTPException(404, "Biaya vendor tidak ditemukan")
+    doc = await db.trips.find_one({"trip_id": trip_id}, {"_id": 0})
+    return _trip_finance_summary(doc)
+
+
+@api_router.get("/admin/finance/vendor-kategori", dependencies=[Depends(require_admin_pin)])
+async def list_vendor_kategori():
+    return {"items": VENDOR_KATEGORI}
+
+
+# ══════════════════════════════════════════════════════
 # KOORDINATOR ACCOUNT SYSTEM
 # ══════════════════════════════════════════════════════
 

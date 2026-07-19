@@ -2303,6 +2303,7 @@ function Trip360Modal({ order, headers, onClose, onEditLegs, onPrintSuratJalan, 
   const [lightbox, setLightbox] = useState(null);
   const [toast, setToast] = useState("");
   const [busy, setBusy] = useState(false);
+  const [finance, setFinance] = useState(null); // ringkasan keuangan trip (Sprint Finance 1)
   const cpInputRef = useRef(null);
   const docInputRef = useRef(null);
 
@@ -2321,6 +2322,16 @@ function Trip360Modal({ order, headers, onClose, onEditLegs, onPrintSuratJalan, 
   }, [order?.trip_id]);
 
   useEffect(() => { let alive = true; if (alive) fetchDetail(); return () => { alive = false; }; }, [fetchDetail]);
+
+  // Keuangan trip — satu sumber, dipakai Overview & tab Keuangan bareng.
+  const fetchFinance = useCallback(() => {
+    if (!order?.trip_id) return;
+    axios.get(`${API}/admin/trips/${order.trip_id}/finance`, { headers })
+      .then((r) => setFinance(r.data))
+      .catch(() => { /* diam — tab Keuangan tetap punya fallback */ });
+  }, [order?.trip_id, headers]);
+
+  useEffect(() => { fetchFinance(); }, [fetchFinance]);
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
@@ -2459,13 +2470,13 @@ function Trip360Modal({ order, headers, onClose, onEditLegs, onPrintSuratJalan, 
           {phase === "error" && <T360_Empty text="Gagal memuat data trip" sub="Coba tutup lalu buka lagi. Kalau tetap gagal, cek koneksi internet." />}
 
           {phase === "ready" && tab === "overview" && (
-            <Trip360Overview order={order} detail={detail} legs={legs} albumCount={albumCount} checkpoints={checkpoints} docReady={docReady} activeLeg={activeLeg} activeLegIdx={activeLegIdx} holder={holder} holderRole={holderRole} setTab={setTab} onEditLegs={onEditLegs} onOpenInvoice={onOpenInvoice} />
+            <Trip360Overview order={order} detail={detail} legs={legs} albumCount={albumCount} checkpoints={checkpoints} docReady={docReady} activeLeg={activeLeg} activeLegIdx={activeLegIdx} holder={holder} holderRole={holderRole} finance={finance} setTab={setTab} onEditLegs={onEditLegs} onOpenInvoice={onOpenInvoice} />
           )}
           {phase === "ready" && tab === "routeleg" && (
             <Trip360RouteLeg legs={legs} album={album} checkpoints={checkpoints} bastk={bastk} activeLegIdx={activeLegIdx} onEditLegs={onEditLegs} />
           )}
           {phase === "ready" && tab === "keuangan" && (
-            <Trip360Keuangan order={order} legs={legs} onOpenInvoice={onOpenInvoice} />
+            <Trip360Keuangan order={order} legs={legs} headers={headers} finance={finance} onFinance={setFinance} onOpenInvoice={onOpenInvoice} />
           )}
           {phase === "ready" && tab === "dokumen" && (
             <Trip360Dokumen order={order} detail={detail} bastk={bastk} resi={resi} album={album} albumCount={albumCount} docReady={docReady} onPrintSuratJalan={onPrintSuratJalan} onOpenInvoice={onOpenInvoice} onUploadResi={qaDokumen} onView={setLightbox} />
@@ -2492,7 +2503,7 @@ function Trip360Modal({ order, headers, onClose, onEditLegs, onPrintSuratJalan, 
 }
 
 /* ── Overview = Command Center ── */
-function Trip360Overview({ order, detail, legs, albumCount, checkpoints, docReady, activeLeg, activeLegIdx, holder, holderRole, setTab, onEditLegs, onOpenInvoice }) {
+function Trip360Overview({ order, detail, legs, albumCount, checkpoints, docReady, activeLeg, activeLegIdx, holder, holderRole, finance, setTab, onEditLegs, onOpenInvoice }) {
   // PRIORITAS — hanya dari data operasional nyata (angka keuangan menyusul di Financial CC)
   const prio = [];
   const noDriver = !order.driver_id && !order.nama_driver && !(activeLeg && activeLeg.driver);
@@ -2541,19 +2552,23 @@ function Trip360Overview({ order, detail, legs, albumCount, checkpoints, docRead
       <div className="t360-sec">Keuangan Trip</div>
       <div className="t360-grid2">
         <div className="t360-card">
-          <div className="t360-card-hd"><span className="t360-card-title">{T360_ICONS.keuangan}Status Pembayaran</span></div>
-          <div style={{ fontFamily: "var(--mono)", fontSize: 20, fontWeight: 800, color: "var(--text)" }}>Belum diatur</div>
-          <div style={{ fontSize: 11.5, color: "var(--text-mute)", margin: "6px 0 12px" }}>Nilai invoice diisi saat kamu buat/cetak invoice. Setelah itu total, terbayar & sisa tagihan muncul otomatis di sini.</div>
+          <div className="t360-card-hd"><span className="t360-card-title">{T360_ICONS.keuangan}Nilai Invoice</span><button className="t360-card-link" onClick={() => setTab("keuangan")}>Kelola →</button></div>
+          <div style={{ fontFamily: "var(--mono)", fontSize: 22, fontWeight: 800, color: finance?.has_invoice ? "var(--text)" : "var(--text-mute)" }}>{finance?.has_invoice ? fmtRp(finance.invoice_total) : "Belum diatur"}</div>
+          <div style={{ fontSize: 11.5, color: "var(--text-mute)", margin: "6px 0 12px" }}>{finance?.has_invoice ? "Pencatatan pembayaran customer (piutang) & status lunas menyusul di Sprint berikutnya." : "Isi nilai invoice di tab Keuangan supaya profit terhitung otomatis."}</div>
           <button className="t360-qabtn gold" onClick={onOpenInvoice} style={{ padding: "7px 12px" }} data-testid="t360-ov-invoice">{T360_ICONS.bill}Buat / Tagih Invoice</button>
         </div>
         <div className="t360-card">
-          <div className="t360-card-hd"><span className="t360-card-title">{T360_ICONS.keuangan}HPP &amp; Profit</span></div>
-          <div className="t360-pay-row"><span className="k">Biaya Vendor Terinput</span><span className="v" style={{ color: "var(--text-mute)" }}>—</span></div>
-          <div className="t360-pay-row"><span className="k">Estimasi Profit</span><span className="v" style={{ color: "var(--text-mute)" }}>menyusul</span></div>
-          <div className="t360-note" style={{ marginTop: 10 }}>
-            {T360_ICONS.warn}
-            <div><div className="t">Modul biaya vendor per-trip belum aktif</div><div className="s">Supaya tidak menyesatkan pembukuan, profit tidak ditampilkan sebagai angka sebelum semua biaya vendor terinput. Aktif di Financial Command Center.</div></div>
-          </div>
+          <div className="t360-card-hd"><span className="t360-card-title">{T360_ICONS.keuangan}HPP &amp; Profit</span><button className="t360-card-link" onClick={() => setTab("keuangan")}>Rincian →</button></div>
+          <div className="t360-pay-row"><span className="k">Biaya Vendor ({finance?.entered_vendor || 0})</span><span className="v">{fmtRp(finance?.vendor_total)}</span></div>
+          <div className="t360-pay-row"><span className="k">Biaya Driver</span><span className="v">{fmtRp(finance?.driver_cost?.total)}</span></div>
+          <div className="t360-pay-row" style={{ borderTop: "1px solid var(--border)", paddingTop: 8, marginTop: 2 }}><span className="k" style={{ fontWeight: 800, color: "var(--text)" }}>Total HPP</span><span className="v">{fmtRp(finance?.hpp_total)}</span></div>
+          <div className="t360-pay-row"><span className="k" style={{ fontWeight: 800, color: "var(--text)" }}>Profit</span><span className="v" style={{ color: finance?.profit == null ? "var(--text-mute)" : finance.profit >= 0 ? "var(--green)" : "var(--red)" }}>{finance?.has_invoice ? fmtRp(finance.profit) : "isi invoice dulu"}</span></div>
+          {finance?.expected_vendor > 0 && !finance?.hpp_complete && (
+            <div className="t360-note" style={{ marginTop: 10 }}>
+              {T360_ICONS.warn}
+              <div><div className="t">HPP belum lengkap — {finance.entered_vendor} dari {finance.expected_vendor} biaya vendor</div><div className="s">Profit masih estimasi sampai semua biaya vendor (dari leg) terinput. Lengkapi di tab Keuangan.</div></div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -2657,60 +2672,228 @@ function Trip360RouteLeg({ legs, album, checkpoints, bastk, activeLegIdx, onEdit
 }
 
 /* ── Keuangan (fase 1: jujur — modul finansial per-trip belum aktif) ── */
-function Trip360Keuangan({ order, legs, onOpenInvoice }) {
-  const vendors = legs.map((l) => l.kapal).filter(Boolean);
+const T360_KATEGORI = ["Kapal / RoRo", "Towing / Trucking", "Ekspedisi", "Bongkar / Muat", "Karoseri", "BBM / Tol", "Lainnya"];
+const T360_KAT_ICON = { "Kapal / RoRo": "⚓", "Towing / Trucking": "🚚", "Ekspedisi": "📦", "Bongkar / Muat": "🏗️", "Karoseri": "🔧", "BBM / Tol": "⛽", "Lainnya": "•" };
+const t360Digits = (s) => String(s == null ? "" : s).replace(/\D/g, "");
+const t360FmtInput = (s) => { const d = t360Digits(s); return d ? Number(d).toLocaleString("id-ID") : ""; };
+
+/* ── Keuangan (Sprint Finance 1: Biaya Vendor → HPP → Profit, semua dari data trip) ── */
+function Trip360Keuangan({ order, legs, headers, finance, onFinance, onOpenInvoice }) {
+  const tripId = order.trip_id;
+  const [phase, setPhase] = useState(finance ? "ready" : "loading"); // loading|ready|error
+  const [invEdit, setInvEdit] = useState(false);
+  const [invVal, setInvVal] = useState("");
+  const [savingInv, setSavingInv] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [form, setForm] = useState({ vendor_name: "", kategori: "Kapal / RoRo", jumlah: "", jatuh_tempo: "", catatan: "" });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+  const [busyId, setBusyId] = useState(null);
+
+  const apply = useCallback((data) => { onFinance?.(data); setPhase("ready"); }, [onFinance]);
+
+  useEffect(() => {
+    if (finance) { setPhase("ready"); return; }
+    if (!tripId) { setPhase("error"); return; }
+    axios.get(`${API}/admin/trips/${tripId}/finance`, { headers })
+      .then((r) => apply(r.data))
+      .catch(() => setPhase("error"));
+  }, [tripId, headers, finance, apply]);
+
+  const fin = finance;
+
+  const saveInvoice = async () => {
+    const n = parseInt(t360Digits(invVal), 10) || 0;
+    setSavingInv(true); setErr("");
+    try {
+      const r = await axios.patch(`${API}/admin/trips/${tripId}/finance/invoice`, { invoice_total: n }, { headers });
+      apply(r.data); setInvEdit(false);
+    } catch { setErr("Gagal menyimpan nilai invoice."); }
+    setSavingInv(false);
+  };
+
+  const addCost = async () => {
+    const jumlah = parseInt(t360Digits(form.jumlah), 10) || 0;
+    if (!form.vendor_name.trim()) { setErr("Nama vendor wajib diisi."); return; }
+    if (jumlah <= 0) { setErr("Jumlah biaya harus lebih dari 0."); return; }
+    setSaving(true); setErr("");
+    try {
+      const r = await axios.post(`${API}/admin/trips/${tripId}/finance/costs`, {
+        vendor_name: form.vendor_name.trim(), kategori: form.kategori, jumlah,
+        jatuh_tempo: form.jatuh_tempo || null, catatan: form.catatan.trim(),
+      }, { headers });
+      apply(r.data);
+      setShowAdd(false); setForm({ vendor_name: "", kategori: "Kapal / RoRo", jumlah: "", jatuh_tempo: "", catatan: "" });
+    } catch (e) { setErr(e?.response?.data?.detail || "Gagal menyimpan biaya vendor."); }
+    setSaving(false);
+  };
+
+  const delCost = async (id) => {
+    if (!window.confirm("Hapus biaya vendor ini dari trip?")) return;
+    setBusyId(id);
+    try { const r = await axios.delete(`${API}/admin/trips/${tripId}/finance/costs/${id}`, { headers }); apply(r.data); }
+    catch { setErr("Gagal menghapus biaya."); }
+    setBusyId(null);
+  };
+
+  if (phase === "loading") return <div className="t360-empty"><div className="t360-empty-t">Memuat keuangan trip…</div></div>;
+  if (phase === "error" || !fin) return <T360_Empty text="Gagal memuat keuangan trip" sub="Coba buka lagi tab ini. Pastikan PIN admin masih aktif." />;
+
+  const dc = fin.driver_cost || {};
+  const hasInvoice = fin.has_invoice;
+  const profit = fin.profit;
+  const profitColor = profit == null ? "var(--text-mute)" : profit >= 0 ? "var(--green)" : "var(--red)";
+  const legVendors = legs.map((l) => (l.kapal || "").trim()).filter(Boolean);
+
   return (
     <>
+      {/* ── Ringkasan: Invoice · HPP · Profit ── */}
       <div className="t360-grid3" style={{ marginBottom: 14 }}>
         <div className="t360-card">
-          <div className="t360-money-k">Total Invoice</div>
-          <div className="t360-money">Belum diatur</div>
-          <div style={{ marginTop: 10 }}><button className="adm-btn adm-btn-sm adm-btn-blue" onClick={onOpenInvoice} data-testid="trip360-buat-invoice">🧾 Buat / Cetak Invoice</button></div>
+          <div className="t360-money-k">Nilai Invoice (Jasa)</div>
+          {invEdit ? (
+            <div style={{ marginTop: 8 }}>
+              <div className="t360-fin-inp">
+                <span>Rp</span>
+                <input autoFocus inputMode="numeric" value={invVal} placeholder="0"
+                  onChange={(e) => setInvVal(t360FmtInput(e.target.value))}
+                  onKeyDown={(e) => { if (e.key === "Enter") saveInvoice(); }} data-testid="t360-inv-input" />
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <button className="t360-qabtn primary" style={{ padding: "7px 12px" }} disabled={savingInv} onClick={saveInvoice} data-testid="t360-inv-save">{savingInv ? "Menyimpan…" : "Simpan"}</button>
+                <button className="t360-qabtn" style={{ padding: "7px 12px" }} onClick={() => setInvEdit(false)}>Batal</button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="t360-money" style={{ color: hasInvoice ? "var(--text)" : "var(--text-mute)" }} data-testid="t360-inv-value">{hasInvoice ? fmtRp(fin.invoice_total) : "Belum diatur"}</div>
+              <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                <button className="t360-qabtn" style={{ padding: "6px 11px" }} onClick={() => { setInvVal(fin.invoice_total ? t360FmtInput(fin.invoice_total) : ""); setInvEdit(true); }} data-testid="t360-inv-edit">{hasInvoice ? "✎ Ubah" : "+ Isi nilai"}</button>
+                <button className="t360-qabtn gold" style={{ padding: "6px 11px" }} onClick={onOpenInvoice}>🧾 Cetak</button>
+              </div>
+            </>
+          )}
         </div>
         <div className="t360-card">
-          <div className="t360-money-k">Sudah Diterima</div>
-          <div className="t360-money">—</div>
-          <div style={{ marginTop: 10 }}><span className="t360-chip wait">Menyusul</span></div>
-        </div>
-        <div className="t360-card">
-          <div className="t360-money-k">Sisa Tagihan</div>
-          <div className="t360-money">—</div>
-          <div style={{ marginTop: 10 }}><span className="t360-chip wait">Menyusul</span></div>
-        </div>
-      </div>
-
-      <div className="t360-grid2" style={{ marginBottom: 14 }}>
-        <div className="t360-card">
-          <div className="t360-card-hd"><span className="t360-card-title">{T360_ICONS.wallet}Biaya Vendor (HPP)</span></div>
-          {vendors.length === 0 ? (
-            <div style={{ fontSize: 11.5, color: "var(--text-mute)" }}>Belum ada vendor/ekspedisi tercatat di leg trip ini.</div>
-          ) : vendors.map((v, i) => (
-            <div key={i} className="t360-kv"><span className="t360-kv-k">{v}</span><span className="t360-kv-v" style={{ color: "var(--text-mute)" }}>biaya belum diinput</span></div>
-          ))}
-          <div className="t360-note" style={{ marginTop: 12 }}>
-            {T360_ICONS.warn}
-            <div><div className="t">HPP belum lengkap</div><div className="s">Nama vendor terbaca dari leg, tapi nominal biaya per-vendor belum bisa diinput sebelum modul Biaya Supplier per-trip aktif.</div></div>
+          <div className="t360-money-k">HPP / Total Biaya</div>
+          <div className="t360-money">{fmtRp(fin.hpp_total)}</div>
+          <div style={{ marginTop: 10 }}>
+            {fin.expected_vendor > 0 && (
+              <span className={`t360-chip ${fin.hpp_complete ? "ok" : "warn"}`}>{fin.hpp_complete ? "HPP lengkap" : `HPP ${fin.entered_vendor}/${fin.expected_vendor} vendor`}</span>
+            )}
+            {fin.expected_vendor === 0 && <span className="t360-chip wait">{fin.entered_vendor} biaya vendor</span>}
           </div>
         </div>
         <div className="t360-card">
-          <div className="t360-card-hd"><span className="t360-card-title">{T360_ICONS.keuangan}Cash Flow Trip Ini</span></div>
-          <div className="t360-kv"><span className="t360-kv-k">Diterima dari customer</span><span className="t360-kv-v" style={{ color: "var(--text-mute)" }}>—</span></div>
-          <div className="t360-kv"><span className="t360-kv-k">Dibayar ke vendor</span><span className="t360-kv-v" style={{ color: "var(--text-mute)" }}>—</span></div>
-          <div className="t360-kv"><span className="t360-kv-k">Sisa harus diterima</span><span className="t360-kv-v" style={{ color: "var(--text-mute)" }}>—</span></div>
-          <div className="t360-kv"><span className="t360-kv-k">Sisa harus dibayar</span><span className="t360-kv-v" style={{ color: "var(--text-mute)" }}>—</span></div>
+          <div className="t360-money-k">Profit (Invoice − HPP)</div>
+          <div className="t360-money" style={{ color: profitColor }} data-testid="t360-profit">{hasInvoice ? fmtRp(profit) : "—"}</div>
+          <div style={{ marginTop: 10 }}>
+            {!hasInvoice ? <span className="t360-chip wait">Isi nilai invoice dulu</span>
+              : !fin.hpp_complete ? <span className="t360-chip warn">Estimasi · margin {fin.margin_pct}%</span>
+              : <span className="t360-chip ok">Final · margin {fin.margin_pct}%</span>}
+          </div>
         </div>
       </div>
 
+      {err && <div className="t360-fin-err">{err}</div>}
+
+      {/* ── Rincian Biaya (HPP) ── */}
+      <div className="t360-card" style={{ marginBottom: 14 }}>
+        <div className="t360-card-hd">
+          <span className="t360-card-title">{T360_ICONS.wallet}Biaya Vendor</span>
+          <button className="t360-qabtn primary" style={{ padding: "6px 11px" }} onClick={() => { setShowAdd((v) => !v); setErr(""); }} data-testid="t360-add-cost">{showAdd ? "Tutup" : "+ Tambah Biaya"}</button>
+        </div>
+
+        {showAdd && (
+          <div className="t360-fin-form" data-testid="t360-cost-form">
+            <div className="t360-fin-row">
+              <label>Nama vendor
+                <input value={form.vendor_name} placeholder="mis. PT Pelayaran Nusantara"
+                  list="t360-vendor-hint"
+                  onChange={(e) => setForm((f) => ({ ...f, vendor_name: e.target.value }))} data-testid="t360-cost-vendor" />
+                {legVendors.length > 0 && <datalist id="t360-vendor-hint">{legVendors.map((v, i) => <option key={i} value={v} />)}</datalist>}
+              </label>
+              <label style={{ maxWidth: 150 }}>Kategori
+                <select value={form.kategori} onChange={(e) => setForm((f) => ({ ...f, kategori: e.target.value }))}>
+                  {T360_KATEGORI.map((k) => <option key={k} value={k}>{k}</option>)}
+                </select>
+              </label>
+            </div>
+            <div className="t360-fin-row">
+              <label>Jumlah (Rp)
+                <div className="t360-fin-inp"><span>Rp</span><input inputMode="numeric" value={form.jumlah} placeholder="0" onChange={(e) => setForm((f) => ({ ...f, jumlah: t360FmtInput(e.target.value) }))} data-testid="t360-cost-jumlah" /></div>
+              </label>
+              <label style={{ maxWidth: 170 }}>Jatuh tempo <span style={{ color: "var(--text-mute)", fontWeight: 400 }}>(opsional)</span>
+                <input type="date" value={form.jatuh_tempo} onChange={(e) => setForm((f) => ({ ...f, jatuh_tempo: e.target.value }))} />
+              </label>
+            </div>
+            <label>Catatan <span style={{ color: "var(--text-mute)", fontWeight: 400 }}>(opsional)</span>
+              <input value={form.catatan} placeholder="mis. tarif kapal Priok–Bitung" onChange={(e) => setForm((f) => ({ ...f, catatan: e.target.value }))} />
+            </label>
+            <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+              <button className="t360-qabtn primary" style={{ padding: "8px 14px" }} disabled={saving} onClick={addCost} data-testid="t360-cost-save">{saving ? "Menyimpan…" : "Simpan Biaya"}</button>
+            </div>
+          </div>
+        )}
+
+        {fin.vendor_costs.length === 0 ? (
+          <div style={{ fontSize: 11.5, color: "var(--text-mute)", padding: "6px 0" }}>
+            Belum ada biaya vendor. {legVendors.length > 0 ? `Dari leg terbaca: ${legVendors.join(", ")} — tambahkan biayanya supaya HPP & profit terhitung.` : "Tambahkan biaya kapal/towing/ekspedisi untuk membentuk HPP."}
+          </div>
+        ) : (
+          <div className="t360-fin-list">
+            {fin.vendor_costs.map((c) => (
+              <div key={c.id} className="t360-fin-item" data-testid="t360-cost-item">
+                <div className="t360-fin-ic">{T360_KAT_ICON[c.kategori] || "•"}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="t360-fin-nm">{c.vendor_name}</div>
+                  <div className="t360-fin-meta">{c.kategori}{c.jatuh_tempo ? ` · tempo ${fmtDateShort(c.jatuh_tempo)}` : ""}{c.catatan ? ` · ${c.catatan}` : ""}</div>
+                </div>
+                <div className="t360-fin-amt">{fmtRp(c.jumlah)}</div>
+                <button className="t360-fin-del" disabled={busyId === c.id} onClick={() => delCost(c.id)} title="Hapus biaya" aria-label="Hapus">✕</button>
+              </div>
+            ))}
+            <div className="t360-fin-item t360-fin-sub">
+              <div className="t360-fin-ic" style={{ background: "transparent" }} />
+              <div style={{ flex: 1 }}><div className="t360-fin-nm">Subtotal Biaya Vendor</div></div>
+              <div className="t360-fin-amt">{fmtRp(fin.vendor_total)}</div>
+              <div style={{ width: 26 }} />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Biaya Driver (otomatis dari data trip) ── */}
+      <div className="t360-card" style={{ marginBottom: 14 }}>
+        <div className="t360-card-hd">
+          <span className="t360-card-title">{T360_ICONS.truck}Biaya Driver <span className="t360-src">otomatis dari data trip</span></span>
+          <span className="t360-fin-amt" style={{ fontSize: 14 }}>{fmtRp(dc.total)}</span>
+        </div>
+        <div className="t360-fin-drv">
+          <div><span>Uang Jalan</span><b>{fmtRp(dc.uj)}</b></div>
+          <div><span>Termin 1</span><b>{fmtRp(dc.t1)}</b></div>
+          <div><span>Termin 2</span><b>{fmtRp(dc.t2)}</b></div>
+          <div><span>Termin 3</span><b>{fmtRp(dc.t3)}</b></div>
+        </div>
+        {(dc.bonus_daily > 0 || dc.bonus_kerajinan > 0) && (
+          <div className="t360-note" style={{ marginTop: 12 }}>
+            {T360_ICONS.warn}
+            <div><div className="t">Bonus tidak dihitung otomatis ke HPP</div><div className="s">Bonus harian ({fmtRp(dc.bonus_daily)}/hari) &amp; kerajinan ({fmtRp(dc.bonus_kerajinan)}) tergantung jumlah hari &amp; performa driver saat pencairan. Kalau nilainya sudah pasti, tambahkan sebagai satu baris di Biaya Vendor (kategori Lainnya) supaya ikut HPP.</div></div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Catatan cara kerja ── */}
       <div className="t360-card">
         <div className="t360-note" style={{ margin: 0 }}>
-          {T360_ICONS.warn}
+          {T360_ICONS.check}
           <div>
-            <div className="t">Kenapa angka masih kosong</div>
+            <div className="t">HPP &amp; profit dihitung dari data trip ini</div>
             <div className="s">
-              Invoice sudah bisa dibuat &amp; dicetak lewat tombol di atas (nilai diisi manual saat cetak).
-              Perhitungan otomatis HPP, profit, tagihan vendor, cash flow, dan konsep “Saldo Aman Digunakan” akan aktif
-              di tahap berikutnya (Financial Command Center) — begitu modul Biaya Supplier &amp; Pembayaran per-trip dibangun,
-              semua angka di tab ini terisi sendiri dari data trip. Sengaja tidak menampilkan angka contoh supaya tidak menyesatkan pembukuan.
+              HPP = Biaya Vendor (diinput di trip) + Biaya Driver (uang jalan &amp; termin, sudah ada di trip). Profit = Nilai Invoice − HPP,
+              muncul otomatis begitu nilai invoice diisi. Tidak ada input angka ganda. Pencatatan pembayaran customer (piutang) &amp; vendor (hutang),
+              lalu cash flow &amp; “Saldo Aman Digunakan”, menyusul di Sprint berikutnya — memakai biaya yang kamu input di sini. Mekari Jurnal tetap
+              jadi pembukuan resmi &amp; pajak; FleetLocation sumber data operasionalnya.
             </div>
           </div>
         </div>

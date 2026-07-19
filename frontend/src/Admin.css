@@ -1212,6 +1212,41 @@
 /* toast */
 .t360-toast{ position:fixed; bottom:22px; left:50%; transform:translateX(-50%); z-index:230; background:var(--bg-3); border:1px solid var(--blue); color:var(--text); padding:10px 18px; border-radius:9px; font-size:12.5px; font-weight:700; box-shadow:0 8px 30px rgba(0,0,0,.4); }
 
+/* ── Keuangan editor (Sprint Finance 1) ── */
+.t360-src{ font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:var(--text-mute); background:var(--bg-3); padding:2px 7px; border-radius:5px; margin-left:2px; }
+.t360-fin-err{ background:var(--red-bg); border:1px solid var(--red); color:var(--red); font-size:11.5px; font-weight:700; padding:9px 13px; border-radius:9px; margin-bottom:12px; }
+.t360-fin-inp{ display:flex; align-items:center; gap:6px; border:1px solid var(--border-2); background:var(--bg); border-radius:9px; padding:8px 11px; }
+.t360-fin-inp span{ font-size:12px; font-weight:700; color:var(--text-mute); }
+.t360-fin-inp input{ flex:1; min-width:0; border:none; background:none; color:var(--text); font-family:var(--mono); font-size:15px; font-weight:800; outline:none; }
+.t360-fin-form{ background:var(--bg-2); border:1px solid var(--border-2); border-radius:11px; padding:14px; margin:6px 0 14px; display:flex; flex-direction:column; gap:11px; }
+.t360-fin-row{ display:flex; gap:11px; flex-wrap:wrap; }
+.t360-fin-form label{ flex:1; min-width:130px; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:var(--text-mute); display:flex; flex-direction:column; gap:5px; }
+.t360-fin-form input, .t360-fin-form select{ border:1px solid var(--border-2); background:var(--bg); color:var(--text); border-radius:8px; padding:8px 10px; font-size:13px; font-weight:600; font-family:inherit; outline:none; }
+.t360-fin-form input:focus, .t360-fin-form select:focus, .t360-fin-inp:focus-within{ border-color:var(--blue); }
+.t360-fin-form input[type=date]{ color-scheme:dark; }
+[data-theme="light"] .t360-fin-form input[type=date]{ color-scheme:light; }
+.t360-fin-list{ display:flex; flex-direction:column; margin-top:4px; }
+.t360-fin-item{ display:flex; align-items:center; gap:11px; padding:10px 0; border-top:1px solid var(--border); }
+.t360-fin-item:first-child{ border-top:none; }
+.t360-fin-ic{ width:30px; height:30px; border-radius:8px; background:var(--bg-3); display:flex; align-items:center; justify-content:center; font-size:14px; flex-shrink:0; }
+.t360-fin-nm{ font-size:12.5px; font-weight:700; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.t360-fin-meta{ font-size:10.5px; color:var(--text-mute); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.t360-fin-amt{ font-family:var(--mono); font-size:13px; font-weight:800; color:var(--text); white-space:nowrap; text-align:right; }
+.t360-fin-sub{ border-top:2px solid var(--border-2); }
+.t360-fin-sub .t360-fin-nm{ color:var(--text-mute); text-transform:uppercase; font-size:10.5px; letter-spacing:.03em; }
+.t360-fin-del{ width:26px; height:26px; border-radius:7px; border:1px solid var(--border); background:var(--bg-3); color:var(--text-mute); font-size:12px; cursor:pointer; flex-shrink:0; }
+.t360-fin-del:hover:not(:disabled){ border-color:var(--red); color:var(--red); }
+.t360-fin-del:disabled{ opacity:.5; cursor:wait; }
+.t360-fin-drv{ display:grid; grid-template-columns:repeat(4,1fr); gap:9px; margin-top:4px; }
+.t360-fin-drv > div{ background:var(--bg-2); border:1px solid var(--border); border-radius:9px; padding:9px 11px; }
+.t360-fin-drv span{ display:block; font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:var(--text-mute); }
+.t360-fin-drv b{ display:block; font-family:var(--mono); font-size:13px; font-weight:800; color:var(--text); margin-top:3px; }
+@media (max-width:760px){
+  .t360-fin-drv{ grid-template-columns:1fr 1fr; }
+  .t360-fin-row{ flex-direction:column; gap:11px; }
+  .t360-fin-row label{ max-width:none !important; }
+}
+
 @media (max-width:760px){
   .t360-facts-c{ display:grid; grid-template-columns:1fr 1fr; overflow:visible; }
   .t360-facts-c .thf{ border-bottom:1px solid var(--border); white-space:normal; }
