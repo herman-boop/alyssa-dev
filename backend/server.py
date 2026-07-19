@@ -2248,6 +2248,21 @@ async def _trip_finance_summary(trip: dict) -> dict:
     entered_vendor = len(vendor_costs)
     hpp_complete = entered_vendor >= expected_vendor
 
+    # ── Pembayaran customer (Sprint Finance 2) — piutang & status invoice ──
+    customer_payments = fin.get("customer_payments") or []
+    customer_payments = sorted(customer_payments, key=lambda p: (p.get("tanggal") or "", p.get("created_at") or ""))
+    total_diterima = sum(int(p.get("amount") or 0) for p in customer_payments)
+    sisa_piutang = (invoice_total - total_diterima) if has_invoice else 0
+    pay_pct = round(min(total_diterima / invoice_total, 1) * 100, 1) if (has_invoice and invoice_total > 0) else 0
+    if not has_invoice:
+        invoice_status = "Belum Ada Invoice"
+    elif total_diterima <= 0:
+        invoice_status = "Belum Bayar"
+    elif total_diterima < invoice_total:
+        invoice_status = "Sebagian"
+    else:
+        invoice_status = "Lunas"
+
     return {
         "trip_id": trip_id,
         "invoice_total": invoice_total,
@@ -2268,6 +2283,16 @@ async def _trip_finance_summary(trip: dict) -> dict:
         "hpp_complete": hpp_complete,
         "expected_vendor": expected_vendor,
         "entered_vendor": entered_vendor,
+        # ── customer money flow ──
+        "customer_payments": customer_payments,
+        "total_diterima": total_diterima,      # klasifikasi: Pendapatan (uang masuk)
+        "sisa_piutang": sisa_piutang,
+        "pay_pct": pay_pct,
+        "invoice_status": invoice_status,
+        # cash flow per-trip (uang masuk − uang keluar ke vendor)
+        "cash_in": total_diterima,
+        "cash_out": vendor_terbayar,
+        "cash_net": total_diterima - vendor_terbayar,
     }
 
 
@@ -2341,6 +2366,77 @@ async def delete_trip_vendor_cost(trip_id: str, job_id: str):
 @api_router.get("/admin/finance/vendor-kategori", dependencies=[Depends(require_admin_pin)])
 async def list_vendor_kategori():
     return {"items": VENDOR_KATEGORI}
+
+
+# ── Sprint Finance 2: Pembayaran Customer (piutang, status invoice, cash-in) ──
+PAYMENT_METODE = ["Transfer BCA", "Transfer Bank Lain", "Tunai", "Giro / Cek", "QRIS", "Lainnya"]
+
+
+@api_router.get("/admin/finance/metode-pembayaran", dependencies=[Depends(require_admin_pin)])
+async def list_metode_pembayaran():
+    return {"items": PAYMENT_METODE}
+
+
+@api_router.post("/admin/trips/{trip_id}/finance/payments", dependencies=[Depends(require_admin_pin)])
+async def add_customer_payment(
+    trip_id: str,
+    amount: int = Form(...),
+    tanggal: Optional[str] = Form(None),
+    metode: str = Form("Transfer BCA"),
+    catatan: str = Form(""),
+    bukti: Optional[UploadFile] = File(None),
+):
+    """Catat 1 pembayaran customer (uang masuk) untuk trip -> piutang otomatis
+    berkurang, status invoice & cash-in ikut berubah. Bukti transfer opsional.
+    Klasifikasi: Pendapatan. Terhubung ke trip_id."""
+    if amount <= 0:
+        raise HTTPException(400, "Jumlah pembayaran harus lebih dari 0")
+    trip = await db.trips.find_one({"trip_id": trip_id})
+    if not trip:
+        raise HTTPException(404, "Trip not found")
+
+    bukti_url = None
+    if bukti is not None and bukti.filename:
+        bukti_url = _save_upload(trip_id, "customer-payment", bukti, ALLOWED_IMG | ALLOWED_DOC)
+
+    tgl = (tanggal or "").strip()
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", tgl):
+        tgl = today_wib()
+    metode = metode.strip() or "Transfer BCA"
+
+    payment = {
+        "id": uuid.uuid4().hex[:8],
+        "amount": int(amount),
+        "tanggal": tgl,
+        "metode": metode[:40],
+        "catatan": (catatan or "").strip()[:300],
+        "bukti_url": bukti_url,
+        "klasifikasi": "Pendapatan",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.trips.update_one(
+        {"trip_id": trip_id},
+        {"$push": {"finance.customer_payments": payment},
+         "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    doc = await db.trips.find_one({"trip_id": trip_id}, {"_id": 0})
+    return await _trip_finance_summary(doc)
+
+
+@api_router.delete("/admin/trips/{trip_id}/finance/payments/{payment_id}", dependencies=[Depends(require_admin_pin)])
+async def delete_customer_payment(trip_id: str, payment_id: str):
+    trip = await db.trips.find_one({"trip_id": trip_id})
+    if not trip:
+        raise HTTPException(404, "Trip not found")
+    res = await db.trips.update_one(
+        {"trip_id": trip_id},
+        {"$pull": {"finance.customer_payments": {"id": payment_id}},
+         "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    if res.modified_count == 0:
+        raise HTTPException(404, "Pembayaran tidak ditemukan")
+    doc = await db.trips.find_one({"trip_id": trip_id}, {"_id": 0})
+    return await _trip_finance_summary(doc)
 
 
 # ══════════════════════════════════════════════════════

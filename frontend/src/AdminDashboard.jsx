@@ -2552,10 +2552,21 @@ function Trip360Overview({ order, detail, legs, albumCount, checkpoints, docRead
       <div className="t360-sec">Keuangan Trip</div>
       <div className="t360-grid2">
         <div className="t360-card">
-          <div className="t360-card-hd"><span className="t360-card-title">{T360_ICONS.keuangan}Nilai Invoice</span><button className="t360-card-link" onClick={() => setTab("keuangan")}>Kelola →</button></div>
+          <div className="t360-card-hd"><span className="t360-card-title">{T360_ICONS.keuangan}Invoice &amp; Piutang</span>{finance?.has_invoice && <span className={`t360-chip ${T360_STATUS_CLS[finance.invoice_status] || "wait"}`}>{finance.invoice_status}</span>}</div>
           <div style={{ fontFamily: "var(--mono)", fontSize: 22, fontWeight: 800, color: finance?.has_invoice ? "var(--text)" : "var(--text-mute)" }}>{finance?.has_invoice ? fmtRp(finance.invoice_total) : "Belum diatur"}</div>
-          <div style={{ fontSize: 11.5, color: "var(--text-mute)", margin: "6px 0 12px" }}>{finance?.has_invoice ? "Pencatatan pembayaran customer (piutang) & status lunas menyusul di Sprint berikutnya." : "Isi nilai invoice di tab Keuangan supaya profit terhitung otomatis."}</div>
-          <button className="t360-qabtn gold" onClick={onOpenInvoice} style={{ padding: "7px 12px" }} data-testid="t360-ov-invoice">{T360_ICONS.bill}Buat / Tagih Invoice</button>
+          {finance?.has_invoice ? (
+            <>
+              <div className="t360-bar" style={{ margin: "8px 0 8px" }}><div className="t360-bar-f" style={{ width: `${finance.pay_pct}%` }} /></div>
+              <div className="t360-pay-row"><span className="k">Sudah Diterima</span><span className="v" style={{ color: "var(--green)" }}>{fmtRp(finance.total_diterima)}</span></div>
+              <div className="t360-pay-row"><span className="k">Sisa Piutang</span><span className="v" style={{ color: finance.sisa_piutang > 0 ? "var(--gold-xl)" : "var(--green)" }}>{fmtRp(finance.sisa_piutang)}</span></div>
+              <div style={{ marginTop: 10 }}><button className="t360-qabtn green" onClick={() => setTab("keuangan")} style={{ padding: "7px 12px" }}>{T360_ICONS.wallet}Catat Pembayaran</button></div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 11.5, color: "var(--text-mute)", margin: "6px 0 12px" }}>Isi nilai invoice di tab Keuangan supaya profit &amp; piutang terhitung otomatis.</div>
+              <button className="t360-qabtn gold" onClick={onOpenInvoice} style={{ padding: "7px 12px" }} data-testid="t360-ov-invoice">{T360_ICONS.bill}Buat / Tagih Invoice</button>
+            </>
+          )}
         </div>
         <div className="t360-card">
           <div className="t360-card-hd"><span className="t360-card-title">{T360_ICONS.keuangan}HPP &amp; Profit</span><button className="t360-card-link" onClick={() => setTab("keuangan")}>Rincian →</button></div>
@@ -2673,6 +2684,8 @@ function Trip360RouteLeg({ legs, album, checkpoints, bastk, activeLegIdx, onEdit
 
 /* ── Keuangan (fase 1: jujur — modul finansial per-trip belum aktif) ── */
 const T360_KATEGORI = ["Kapal / RoRo", "Towing / Trucking", "Ekspedisi", "Bongkar / Muat", "Karoseri", "BBM / Tol", "Lainnya"];
+const T360_METODE = ["Transfer BCA", "Transfer Bank Lain", "Tunai", "Giro / Cek", "QRIS", "Lainnya"];
+const T360_STATUS_CLS = { "Lunas": "ok", "Sebagian": "warn", "Belum Bayar": "bad", "Belum Ada Invoice": "wait" };
 const T360_KAT_ICON = { "Kapal / RoRo": "⚓", "Towing / Trucking": "🚚", "Ekspedisi": "📦", "Bongkar / Muat": "🏗️", "Karoseri": "🔧", "BBM / Tol": "⛽", "Lainnya": "•" };
 const t360Digits = (s) => String(s == null ? "" : s).replace(/\D/g, "");
 const t360FmtInput = (s) => { const d = t360Digits(s); return d ? Number(d).toLocaleString("id-ID") : ""; };
@@ -2690,6 +2703,11 @@ function Trip360Keuangan({ order, legs, headers, finance, onFinance, onOpenInvoi
   const [err, setErr] = useState("");
   const [busyId, setBusyId] = useState(null);
   const [suppliers, setSuppliers] = useState([]);
+  const [showPay, setShowPay] = useState(false);
+  const [payForm, setPayForm] = useState({ amount: "", tanggal: "", metode: "Transfer BCA", catatan: "" });
+  const [payFile, setPayFile] = useState(null);
+  const [savingPay, setSavingPay] = useState(false);
+  const payFileRef = useRef(null);
 
   const apply = useCallback((data) => { onFinance?.(data); setPhase("ready"); }, [onFinance]);
 
@@ -2742,6 +2760,33 @@ function Trip360Keuangan({ order, legs, headers, finance, onFinance, onOpenInvoi
     setBusyId(id);
     try { const r = await axios.delete(`${API}/admin/trips/${tripId}/finance/costs/${id}`, { headers }); apply(r.data); }
     catch { setErr("Gagal menghapus biaya."); }
+    setBusyId(null);
+  };
+
+  const addPayment = async () => {
+    const amt = parseInt(t360Digits(payForm.amount), 10) || 0;
+    if (amt <= 0) { setErr("Jumlah pembayaran harus lebih dari 0."); return; }
+    setSavingPay(true); setErr("");
+    try {
+      const fd = new FormData();
+      fd.append("amount", amt);
+      if (payForm.tanggal) fd.append("tanggal", payForm.tanggal);
+      fd.append("metode", payForm.metode);
+      if (payForm.catatan.trim()) fd.append("catatan", payForm.catatan.trim());
+      if (payFile) fd.append("bukti", payFile);
+      const r = await axios.post(`${API}/admin/trips/${tripId}/finance/payments`, fd, { headers: { ...headers, "Content-Type": "multipart/form-data" } });
+      apply(r.data);
+      setShowPay(false); setPayForm({ amount: "", tanggal: "", metode: "Transfer BCA", catatan: "" }); setPayFile(null);
+      if (payFileRef.current) payFileRef.current.value = "";
+    } catch (e) { setErr(e?.response?.data?.detail || "Gagal mencatat pembayaran."); }
+    setSavingPay(false);
+  };
+
+  const delPayment = async (id) => {
+    if (!window.confirm("Hapus pembayaran ini?")) return;
+    setBusyId(id);
+    try { const r = await axios.delete(`${API}/admin/trips/${tripId}/finance/payments/${id}`, { headers }); apply(r.data); }
+    catch { setErr("Gagal menghapus pembayaran."); }
     setBusyId(null);
   };
 
@@ -2805,6 +2850,77 @@ function Trip360Keuangan({ order, legs, headers, finance, onFinance, onOpenInvoi
       </div>
 
       {err && <div className="t360-fin-err">{err}</div>}
+
+      {/* ── Pembayaran Customer / Piutang (Sprint Finance 2) ── */}
+      <div className="t360-card" style={{ marginBottom: 14 }}>
+        <div className="t360-card-hd">
+          <span className="t360-card-title">{T360_ICONS.bill}Pembayaran Customer</span>
+          <span className={`t360-chip ${T360_STATUS_CLS[fin.invoice_status] || "wait"}`} data-testid="t360-inv-status">{fin.invoice_status}</span>
+        </div>
+        {!hasInvoice ? (
+          <div style={{ fontSize: 11.5, color: "var(--text-mute)", padding: "4px 0 8px" }}>Isi <b>Nilai Invoice</b> dulu di atas, baru pembayaran customer &amp; piutang bisa dicatat.</div>
+        ) : (
+          <>
+            <div className="t360-bar"><div className="t360-bar-f" style={{ width: `${fin.pay_pct}%` }} /></div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text-mute)", marginBottom: 10 }}>
+              <span>{fin.pay_pct}% terbayar</span>
+              <span>sisa piutang <b className="mono" style={{ color: fin.sisa_piutang > 0 ? "var(--gold-xl)" : "var(--green)" }}>{fmtRp(fin.sisa_piutang)}</b></span>
+            </div>
+            <div className="t360-pay-row"><span className="k">Total Invoice</span><span className="v">{fmtRp(fin.invoice_total)}</span></div>
+            <div className="t360-pay-row"><span className="k">Sudah Diterima</span><span className="v" style={{ color: "var(--green)" }} data-testid="t360-diterima">{fmtRp(fin.total_diterima)}</span></div>
+            <div className="t360-pay-row"><span className="k">Sisa Piutang</span><span className="v" style={{ color: fin.sisa_piutang > 0 ? "var(--gold-xl)" : "var(--green)" }}>{fmtRp(fin.sisa_piutang)}</span></div>
+          </>
+        )}
+
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <button className="t360-qabtn green" style={{ padding: "7px 12px" }} disabled={!hasInvoice} onClick={() => { setShowPay((v) => !v); setErr(""); }} data-testid="t360-add-payment">{showPay ? "Tutup" : "+ Catat Pembayaran"}</button>
+        </div>
+
+        {showPay && hasInvoice && (
+          <div className="t360-fin-form" data-testid="t360-payment-form">
+            <div className="t360-fin-row">
+              <label>Jumlah diterima (Rp)
+                <div className="t360-fin-inp"><span>Rp</span><input inputMode="numeric" value={payForm.amount} placeholder="0" onChange={(e) => setPayForm((f) => ({ ...f, amount: t360FmtInput(e.target.value) }))} data-testid="t360-pay-amount" /></div>
+              </label>
+              <label style={{ maxWidth: 170 }}>Tanggal <span style={{ color: "var(--text-mute)", fontWeight: 400 }}>(default hari ini)</span>
+                <input type="date" value={payForm.tanggal} onChange={(e) => setPayForm((f) => ({ ...f, tanggal: e.target.value }))} />
+              </label>
+            </div>
+            <div className="t360-fin-row">
+              <label style={{ maxWidth: 190 }}>Metode
+                <select value={payForm.metode} onChange={(e) => setPayForm((f) => ({ ...f, metode: e.target.value }))}>
+                  {T360_METODE.map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </label>
+              <label>Catatan <span style={{ color: "var(--text-mute)", fontWeight: 400 }}>(opsional)</span>
+                <input value={payForm.catatan} placeholder="mis. DP 40% via BCA a.n. Irvan" onChange={(e) => setPayForm((f) => ({ ...f, catatan: e.target.value }))} />
+              </label>
+            </div>
+            <label>Bukti transfer <span style={{ color: "var(--text-mute)", fontWeight: 400 }}>(opsional — foto / PDF)</span>
+              <input ref={payFileRef} type="file" accept="image/*,application/pdf" onChange={(e) => setPayFile(e.target.files?.[0] || null)} data-testid="t360-pay-bukti" />
+            </label>
+            <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+              <button className="t360-qabtn primary" style={{ padding: "8px 14px" }} disabled={savingPay} onClick={addPayment} data-testid="t360-pay-save">{savingPay ? "Menyimpan…" : "Simpan Pembayaran"}</button>
+            </div>
+          </div>
+        )}
+
+        {hasInvoice && (fin.customer_payments || []).length > 0 && (
+          <div className="t360-fin-list" style={{ marginTop: 6 }}>
+            {fin.customer_payments.map((p) => (
+              <div key={p.id} className="t360-fin-item" data-testid="t360-payment-item">
+                <div className="t360-fin-ic" style={{ background: "var(--green-bg)" }}>💵</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="t360-fin-nm">{p.metode}{p.bukti_url ? <button className="t360-src" style={{ marginLeft: 6, cursor: "pointer", border: "none" }} onClick={() => window.open(resolveTripUrl(p.bukti_url), "_blank")}>Lihat bukti</button> : <span className="t360-src" style={{ marginLeft: 6, opacity: .6 }}>tanpa bukti</span>}</div>
+                  <div className="t360-fin-meta">{fmtDateShort(p.tanggal)}{p.catatan ? ` · ${p.catatan}` : ""}</div>
+                </div>
+                <div className="t360-fin-amt" style={{ color: "var(--green)" }}>{fmtRp(p.amount)}</div>
+                <button className="t360-fin-del" disabled={busyId === p.id} onClick={() => delPayment(p.id)} title="Hapus pembayaran" aria-label="Hapus">✕</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* ── Rincian Biaya (HPP) ── */}
       <div className="t360-card" style={{ marginBottom: 14 }}>
