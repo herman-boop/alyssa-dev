@@ -1189,7 +1189,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
 
   const printInvoice = (priceNum, withTax, extra) => {
     if (!priceNum) return;
-    const { jatuhTempo, metode, pesan } = extra || {};
+    const { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel } = extra || {};
     const ppn = withTax ? Math.round(priceNum * 0.011) : 0;
     const total = priceNum + ppn;
     const fRp = (n) => n.toLocaleString("id-ID") + ",00";
@@ -1232,10 +1232,15 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
       .inv-pay-badge { width:40px; height:40px; border-radius:7px; background:${DOC_BRAND.navy}; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:900; font-size:10px; flex-shrink:0; }
       .inv-pay-num { font-size:14px; font-weight:900; letter-spacing:.5px; color:${DOC_BRAND.ink}; }
       .inv-pay-name { font-size:9.5px; color:${DOC_BRAND.muted}; margin-top:1px; }
-      .inv-sign-row { display:flex; justify-content:space-between; margin-top:26px; }
-      .inv-sign-cell { width:220px; text-align:center; }
-      .inv-sign-lbl { font-size:10px; color:${DOC_BRAND.muted}; margin-bottom:46px; }
-      .inv-sign-name { font-size:10.5px; font-weight:700; border-top:1px solid ${DOC_BRAND.line}; padding-top:6px; }
+      .inv-sign-row { display:flex; justify-content:flex-end; margin-top:26px; }
+      .inv-sign-cell { width:260px; text-align:center; position:relative; }
+      .inv-sign-lbl { font-size:10px; color:${DOC_BRAND.muted}; margin-bottom:6px; }
+      .inv-sign-stamp { height:78px; display:flex; align-items:center; justify-content:center; margin-bottom:2px; }
+      .inv-sign-stamp img { max-height:78px; max-width:200px; object-fit:contain; }
+      .inv-sign-stamp.empty { height:56px; }
+      .inv-sign-pt { font-size:11px; font-weight:800; color:${DOC_BRAND.ink}; }
+      .inv-sign-name { font-size:11px; font-weight:800; color:${DOC_BRAND.ink}; margin-top:2px; }
+      .inv-sign-jab { font-size:9.5px; color:${DOC_BRAND.muted}; margin-top:2px; }
     </style></head><body>
     <div class="doc-sheet">
       ${docHeader({ docTitle: "FAKTUR / INVOICE" })}
@@ -1292,11 +1297,10 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
       <div class="inv-sign-row">
         <div class="inv-sign-cell">
           <div class="inv-sign-lbl">Hormat Kami,</div>
-          <div class="inv-sign-name">PT. Alyssa Auto Logistik</div>
-        </div>
-        <div class="inv-sign-cell">
-          <div class="inv-sign-lbl">Disetujui / Diterima Oleh,</div>
-          <div class="inv-sign-name">${order.customer_nama || "&nbsp;"}</div>
+          <div class="inv-sign-stamp ${stempel ? "" : "empty"}">${stempel ? `<img src="${stempel}" alt="stempel">` : ""}</div>
+          <div class="inv-sign-pt">PT. Alyssa Auto Logistik</div>
+          ${ttdNama ? `<div class="inv-sign-name">( ${ttdNama} )</div>` : ""}
+          ${ttdJabatan ? `<div class="inv-sign-jab">${ttdJabatan}</div>` : ""}
         </div>
       </div>
 
@@ -1930,6 +1934,19 @@ function InvoiceModal({ order, onClose, onPrint }) {
   const [jatuhTempo, setJatuhTempo] = useState(todayIso);
   const [metode, setMetode] = useState("Cash on Delivery");
   const [pesan, setPesan] = useState("");
+  const [ttdNama, setTtdNama] = useState("");
+  const [ttdJabatan, setTtdJabatan] = useState("Finance & Accounting Controller");
+  const [stempel, setStempel] = useState(null); // dataURL gambar stempel/ttd digital
+
+  const onStempel = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (!f.type.startsWith("image/")) { alert("Stempel harus berupa gambar (PNG/JPG)."); return; }
+    if (f.size > 3 * 1024 * 1024) { alert("Ukuran gambar maksimal 3MB."); return; }
+    const r = new FileReader();
+    r.onload = () => setStempel(r.result);
+    r.readAsDataURL(f);
+  };
 
   const priceNum = parseInt((price || "").replace(/[^0-9]/g, ""), 10) || 0;
   const priceFmt = priceNum ? priceNum.toLocaleString("id-ID") : "";
@@ -1939,7 +1956,7 @@ function InvoiceModal({ order, onClose, onPrint }) {
 
   const submit = () => {
     if (!priceNum) return;
-    onPrint(priceNum, withTax, { jatuhTempo, metode, pesan });
+    onPrint(priceNum, withTax, { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel });
   };
 
   return (
@@ -1986,6 +2003,31 @@ function InvoiceModal({ order, onClose, onPrint }) {
             <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", marginBottom: 5, fontWeight: 700 }}>Pesan / Catatan (opsional)</span>
             <input type="text" className="adm-input" value={pesan} onChange={(e) => setPesan(e.target.value)} placeholder="contoh: Door to door" data-testid="adm-invoice-pesan" />
           </label>
+
+          {/* ── Penandatangan + stempel digital ── */}
+          <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12, marginBottom: 14 }}>
+            <div style={{ fontSize: 12, color: "var(--text-3)", fontWeight: 700, marginBottom: 8 }}>Penandatangan</div>
+            <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+              <label style={{ flex: 1 }}>
+                <span style={{ display: "block", fontSize: 11, color: "var(--text-mute)", marginBottom: 5, fontWeight: 600 }}>Nama</span>
+                <input type="text" className="adm-input" value={ttdNama} onChange={(e) => setTtdNama(e.target.value)} placeholder="contoh: Ulpah" data-testid="adm-invoice-ttd-nama" />
+              </label>
+              <label style={{ flex: 1 }}>
+                <span style={{ display: "block", fontSize: 11, color: "var(--text-mute)", marginBottom: 5, fontWeight: 600 }}>Jabatan</span>
+                <input type="text" className="adm-input" value={ttdJabatan} onChange={(e) => setTtdJabatan(e.target.value)} placeholder="contoh: Finance & Accounting Controller" data-testid="adm-invoice-ttd-jabatan" />
+              </label>
+            </div>
+            <span style={{ display: "block", fontSize: 11, color: "var(--text-mute)", marginBottom: 5, fontWeight: 600 }}>Stempel / Tanda Tangan Digital (opsional — PNG/JPG)</span>
+            {stempel ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <img src={stempel} alt="stempel" style={{ height: 60, borderRadius: 6, border: "1px solid var(--border)", background: "#fff", padding: 4 }} />
+                <button className="adm-btn adm-btn-sm adm-btn-danger" onClick={() => setStempel(null)} data-testid="adm-invoice-stempel-clear">Hapus stempel</button>
+              </div>
+            ) : (
+              <input type="file" accept="image/*" className="adm-input" onChange={onStempel} data-testid="adm-invoice-stempel" />
+            )}
+            <div style={{ fontSize: 10.5, color: "var(--text-mute)", marginTop: 6 }}>Disarankan gambar latar transparan (PNG). Muncul di atas nama penandatangan pada invoice.</div>
+          </div>
           <label style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, cursor: "pointer" }}>
             <input
               type="checkbox"
