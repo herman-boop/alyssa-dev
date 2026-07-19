@@ -137,8 +137,11 @@ export default function CustomerOrderForm() {
   const [error, setError] = useState("");
   const [files, setFiles] = useState([]);  // berkas scan (PDF/gambar)
 
-  const set = (k, v) => setData((d) => ({ ...d, [k]: v }));
-  const setUnit = (i, k, v) => setData((d) => ({ ...d, units: d.units.map((u, x) => x === i ? { ...u, [k]: v } : u) }));
+  // Semua input teks otomatis KAPITAL biar rapi — kecuali email (case-sensitive)
+  // & vehicle_type (nilai dropdown yang harus persis cocok).
+  const upc = (k, v) => (typeof v === "string" && k !== "customer_email" && k !== "vehicle_type") ? v.toUpperCase() : v;
+  const set = (k, v) => setData((d) => ({ ...d, [k]: upc(k, v) }));
+  const setUnit = (i, k, v) => setData((d) => ({ ...d, units: d.units.map((u, x) => x === i ? { ...u, [k]: upc(k, v) } : u) }));
   const addUnit = () => setData((d) => {
     if (d.units.length >= MAX_UNITS) return d;
     setOpenUnit(d.units.length);

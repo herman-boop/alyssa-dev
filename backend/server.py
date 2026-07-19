@@ -1243,6 +1243,33 @@ async def migrate_orders_units():
     return {"migrated": migrated, "skipped": skipped, "errors": errors, "sample": sample}
 
 
+class MarkInvoicedBody(BaseModel):
+    unit_ids: List[str] = []
+    status: str = "Sudah Diinvoice"   # atau "Belum Ditagih" untuk batal
+
+
+@api_router.post("/admin/orders/{order_id}/units/mark-invoiced", dependencies=[Depends(require_admin_pin)])
+async def mark_units_invoiced(order_id: str, body: MarkInvoicedBody):
+    """Set status_invoice pada unit terpilih (dipakai saat invoice dicetak).
+    Idempotent — set ke nilai yang sama tidak masalah."""
+    order = await db.orders.find_one({"order_id": order_id})
+    if not order:
+        raise HTTPException(404, "Order not found")
+    order = await _ensure_order_units(order)
+    ids = set(body.unit_ids or [])
+    status = (body.status or "Sudah Diinvoice").strip() or "Sudah Diinvoice"
+    now = datetime.now(timezone.utc).isoformat()
+    units = order.get("units") or []
+    changed = 0
+    for u in units:
+        if u.get("unit_id") in ids:
+            u["status_invoice"] = status
+            u["updated_at"] = now
+            changed += 1
+    await db.orders.update_one({"order_id": order_id}, {"$set": {"units": units, "updated_at": now}})
+    return {"ok": True, "changed": changed, "unit_summary": _order_unit_summary(order)}
+
+
 class OrderConvertBody(BaseModel):
     trip_id: Optional[str] = None        # if empty, auto-generate from order_id
     driver_id: Optional[str] = None

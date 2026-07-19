@@ -1187,11 +1187,15 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
     const w = window.open("", "_blank"); w.document.write(html); w.document.close();
   };
 
-  const printInvoice = (priceNum, withTax, extra) => {
-    if (!priceNum) return;
+  const printInvoice = (lines, withTax, extra) => {
+    // Back-compat: kalau dipanggil dengan angka tunggal, bungkus jadi 1 baris.
+    if (typeof lines === "number") lines = [{ nama: "Jasa Pengiriman", ket: "", qty: 1, harga: lines }];
+    lines = (lines || []).filter((l) => (l.harga || 0) > 0);
+    if (!lines.length) return;
     const { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel } = extra || {};
-    const ppn = withTax ? Math.round(priceNum * 0.011) : 0;
-    const total = priceNum + ppn;
+    const subtotal = lines.reduce((s, l) => s + (l.harga || 0) * (l.qty || 1), 0);
+    const ppn = withTax ? Math.round(subtotal * 0.011) : 0;
+    const total = subtotal + ppn;
     const fRp = (n) => n.toLocaleString("id-ID") + ",00";
 
     const fmtTgl = (iso) => {
@@ -1202,8 +1206,6 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
     const todayIso = new Date().toISOString().slice(0, 10);
     const tgl = fmtTgl(todayIso);
     const noInvoice = `INV/AAL/${order.order_id?.slice(-4) || "0000"}/${new Date().getFullYear()}`;
-    const isiContents = (order.isi_kiriman || "").trim()
-      || `${order.vehicle_type || ""} ${order.nopol ? order.nopol : ""}`.trim();
 
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${noInvoice}</title>
     <style>
@@ -1219,6 +1221,8 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
       .inv-total-bar span:first-child { font-size:10.5px; font-weight:700; letter-spacing:.6px; text-transform:uppercase; opacity:.85; }
       .inv-total-bar span:last-child { font-size:15px; font-weight:900; }
       table.inv-items { width:100%; border-collapse:collapse; margin-bottom:14px; }
+      table.inv-items thead { display:table-header-group; }   /* header tabel diulang tiap halaman A4 */
+      table.inv-items tr { break-inside:avoid; page-break-inside:avoid; }
       table.inv-items th { text-align:left; font-size:9px; text-transform:uppercase; letter-spacing:.4px; color:${DOC_BRAND.muted}; font-weight:700; padding:7px 8px; border-bottom:1.5px solid ${DOC_BRAND.navy}; }
       table.inv-items td { padding:10px 8px; font-size:11px; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; background:${DOC_BRAND.paperMist}; }
       table.inv-items .num { text-align:right; }
@@ -1262,25 +1266,28 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
       <div class="inv-total-bar"><span>Total Tagihan</span><span>Rp ${fRp(total)}</span></div>
 
       <table class="inv-items">
-        <thead><tr><th>Nama Barang</th><th>Keterangan</th><th>Qty</th><th>Harga Satuan (Rp)</th><th>Jumlah (Rp)</th></tr></thead>
+        <thead><tr><th style="width:26px">No</th><th>Nama Barang</th><th>Keterangan</th><th>Qty</th><th>Harga Satuan (Rp)</th><th>Jumlah (Rp)</th></tr></thead>
         <tbody>
+          ${lines.map((l, i) => `
           <tr>
-            <td>Jasa Pengiriman</td>
-            <td>${isiContents || "&nbsp;"} (${order.asal_kota || "—"}–${order.tujuan_kota || "—"})${order.no_rangka ? "<br>No. Rangka: " + order.no_rangka : ""}</td>
-            <td class="num">1</td>
-            <td class="num">${fRp(priceNum)}</td>
-            <td class="num">${fRp(priceNum)}</td>
-          </tr>
+            <td class="num">${i + 1}</td>
+            <td>${l.nama || "Jasa Pengiriman"}</td>
+            <td>${l.ket || "&nbsp;"}</td>
+            <td class="num">${l.qty || 1}</td>
+            <td class="num">${fRp(l.harga)}</td>
+            <td class="num">${fRp((l.harga || 0) * (l.qty || 1))}</td>
+          </tr>`).join("")}
         </tbody>
       </table>
 
       <div class="inv-summary">
         <div class="inv-note">
           ${pesan ? `<b>Pesan:</b> ${pesan}<br>` : ""}
+          <b>Jumlah Unit:</b> ${lines.length}<br>
           <b>Terbilang:</b> <i>${terbilangRupiah(total)}</i>
         </div>
         <div class="inv-totals-box">
-          <div class="row"><span>Subtotal</span><span>Rp ${fRp(priceNum)}</span></div>
+          <div class="row"><span>Subtotal</span><span>Rp ${fRp(subtotal)}</span></div>
           <div class="row"><span>PPN Logistik (1.1%)</span><span>${withTax ? "Rp " + fRp(ppn) : "—"}</span></div>
           <div class="row grand"><span>TOTAL</span><span>Rp ${fRp(total)}</span></div>
         </div>
@@ -1746,8 +1753,9 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
         {showInvoice && (
           <InvoiceModal
             order={order}
+            headers={headers}
             onClose={() => setShowInvoice(false)}
-            onPrint={(priceNum, withTax, extra) => { printInvoice(priceNum, withTax, extra); setShowInvoice(false); }}
+            onPrint={(lines, withTax, extra) => { printInvoice(lines, withTax, extra); setShowInvoice(false); }}
           />
         )}
         {showTrip360 && (
@@ -1927,9 +1935,18 @@ function BonusModal({ tripId, order, headers, onClose, onSave }) {
 /* ════════════════════════════════════════
    INVOICE MODAL
 ════════════════════════════════════════ */
-function InvoiceModal({ order, onClose, onPrint }) {
+function InvoiceModal({ order, headers, onClose, onPrint }) {
   const todayIso = new Date().toISOString().slice(0, 10);
-  const [price, setPrice] = useState("");
+  // Unit dari PO (F1). Fallback 1 unit dari field legacy kalau belum ada units[].
+  const orderUnits = (Array.isArray(order.units) && order.units.length)
+    ? order.units
+    : [{ unit_id: "legacy", vehicle_type: order.vehicle_type, tipe_model: order.tipe_model, nopol: order.nopol, no_rangka: order.no_rangka, warna: order.warna, tahun: order.tahun, status_invoice: "Belum Ditagih" }];
+  const [rows, setRows] = useState(() => orderUnits.map((u) => ({
+    unit_id: u.unit_id,
+    // unit yang sudah diinvoice default TIDAK dicentang (cegah dobel)
+    checked: (u.status_invoice || "Belum Ditagih") === "Belum Ditagih",
+    harga: "",
+  })));
   const [withTax, setWithTax] = useState(true);
   const [jatuhTempo, setJatuhTempo] = useState(todayIso);
   const [metode, setMetode] = useState("Cash on Delivery");
@@ -1937,6 +1954,7 @@ function InvoiceModal({ order, onClose, onPrint }) {
   const [ttdNama, setTtdNama] = useState("");
   const [ttdJabatan, setTtdJabatan] = useState("Finance & Accounting Controller");
   const [stempel, setStempel] = useState(null); // dataURL gambar stempel/ttd digital
+  const [busy, setBusy] = useState(false);
 
   const onStempel = (e) => {
     const f = e.target.files?.[0];
@@ -1948,15 +1966,35 @@ function InvoiceModal({ order, onClose, onPrint }) {
     r.readAsDataURL(f);
   };
 
-  const priceNum = parseInt((price || "").replace(/[^0-9]/g, ""), 10) || 0;
-  const priceFmt = priceNum ? priceNum.toLocaleString("id-ID") : "";
-  const ppn = withTax ? Math.round(priceNum * 0.011) : 0;
-  const total = priceNum + ppn;
+  const hargaNum = (s) => parseInt(String(s || "").replace(/[^0-9]/g, ""), 10) || 0;
+  const setRow = (i, patch) => setRows((rs) => rs.map((r, x) => x === i ? { ...r, ...patch } : r));
+  const unitKet = (u) => {
+    const veh = `${u.vehicle_type || ""}${u.tipe_model ? " " + u.tipe_model : ""}`.trim() || "Kendaraan";
+    const rute = `(${order.asal_kota || "—"}–${order.tujuan_kota || "—"})`;
+    const rangka = u.no_rangka ? `<br>No. Rangka: ${u.no_rangka}` : "";
+    return `${veh}${u.nopol ? " " + u.nopol : ""} ${rute}${rangka}`;
+  };
+
+  const subtotal = rows.reduce((s, r) => s + (r.checked ? hargaNum(r.harga) : 0), 0);
+  const ppn = withTax ? Math.round(subtotal * 0.011) : 0;
+  const total = subtotal + ppn;
+  const checkedCount = rows.filter((r) => r.checked && hargaNum(r.harga) > 0).length;
   const fRp = (n) => "Rp " + n.toLocaleString("id-ID");
 
-  const submit = () => {
-    if (!priceNum) return;
-    onPrint(priceNum, withTax, { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel });
+  const submit = async () => {
+    const lines = rows
+      .map((r, i) => ({ r, u: orderUnits[i] }))
+      .filter(({ r }) => r.checked && hargaNum(r.harga) > 0)
+      .map(({ r, u }) => ({ nama: "Jasa Pengiriman", ket: unitKet(u), qty: 1, harga: hargaNum(r.harga) }));
+    if (!lines.length) return;
+    setBusy(true);
+    // Tandai unit terpilih sudah diinvoice (best-effort — cetak tetap jalan walau gagal)
+    const ids = rows.filter((r) => r.checked && hargaNum(r.harga) > 0 && r.unit_id !== "legacy").map((r) => r.unit_id);
+    if (ids.length && headers) {
+      try { await axios.post(`${API}/admin/orders/${order.order_id}/units/mark-invoiced`, { unit_ids: ids }, { headers }); } catch { /* skip */ }
+    }
+    setBusy(false);
+    onPrint(lines, withTax, { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel });
   };
 
   return (
@@ -1971,21 +2009,32 @@ function InvoiceModal({ order, onClose, onPrint }) {
         </div>
         <div className="adm-modal-body">
           <div className="adm-modal-info" style={{ marginBottom: 14 }}>
-            <strong>{order.vehicle_type || order.isi_kiriman || "Kiriman"}</strong> · {order.asal_kota || "—"} &rarr; {order.tujuan_kota || "—"}
+            {order.asal_kota || "—"} &rarr; {order.tujuan_kota || "—"} · <strong>{orderUnits.length} unit</strong> di PO ini
           </div>
-          <label style={{ display: "block", marginBottom: 14 }}>
-            <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", marginBottom: 5, fontWeight: 700 }}>Harga Jasa Pengiriman (Rp)</span>
-            <input
-              type="text"
-              inputMode="numeric"
-              className="adm-input"
-              autoFocus
-              value={priceFmt}
-              onChange={(e) => setPrice(e.target.value)}
-              placeholder="contoh: 15.000.000"
-              data-testid="adm-invoice-price"
-            />
-          </label>
+          <div style={{ fontSize: 12, color: "var(--text-3)", fontWeight: 700, marginBottom: 8 }}>Unit yang Ditagih &amp; Harga (per unit)</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+            {rows.map((r, i) => {
+              const u = orderUnits[i];
+              const invoiced = (u.status_invoice || "Belum Ditagih") !== "Belum Ditagih";
+              return (
+                <div key={u.unit_id} className="adm-invu" data-testid={`adm-invu-${i}`}>
+                  <input type="checkbox" checked={r.checked} onChange={(e) => setRow(i, { checked: e.target.checked })} data-testid={`adm-invu-check-${i}`} style={{ width: 16, height: 16, accentColor: "#58a6ff", flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {i + 1}. {u.vehicle_type || "—"}{u.tipe_model ? ` · ${u.tipe_model}` : ""}
+                      {invoiced && <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 800, color: "var(--gold-xl)", background: "var(--gold-bg)", padding: "1px 6px", borderRadius: 4 }}>SUDAH DIINVOICE</span>}
+                    </div>
+                    <div style={{ fontSize: 10.5, color: "var(--text-mute)", fontFamily: "var(--mono)" }}>{u.nopol || "nopol —"}{u.no_rangka ? ` · ${u.no_rangka}` : ""}</div>
+                  </div>
+                  <div className="adm-invu-harga">
+                    <span>Rp</span>
+                    <input inputMode="numeric" disabled={!r.checked} value={r.harga ? hargaNum(r.harga).toLocaleString("id-ID") : ""} placeholder="0"
+                      onChange={(e) => setRow(i, { harga: e.target.value })} data-testid={`adm-invu-harga-${i}`} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
           <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
             <label style={{ flex: 1 }}>
               <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", marginBottom: 5, fontWeight: 700 }}>Jatuh Tempo</span>
@@ -2038,9 +2087,9 @@ function InvoiceModal({ order, onClose, onPrint }) {
             />
             <span>Kenakan PPN Logistik (1.1%)</span>
           </label>
-          {priceNum > 0 && (
+          {subtotal > 0 && (
             <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px", fontSize: 13 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>Subtotal</span><span>{fRp(priceNum)}</span></div>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>Subtotal ({checkedCount} unit)</span><span>{fRp(subtotal)}</span></div>
               <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>PPN 1.1%</span><span>{withTax ? fRp(ppn) : "—"}</span></div>
               <div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0 0", marginTop: 4, borderTop: "1px solid var(--border)", fontWeight: 800 }}><span>Total</span><span>{fRp(total)}</span></div>
             </div>
@@ -2048,8 +2097,8 @@ function InvoiceModal({ order, onClose, onPrint }) {
         </div>
         <div className="adm-modal-foot">
           <button className="adm-btn adm-btn-ghost" onClick={onClose}>Batal</button>
-          <button className="adm-btn adm-btn-blue" onClick={submit} disabled={!priceNum} data-testid="adm-invoice-submit">
-            Cetak Invoice
+          <button className="adm-btn adm-btn-blue" onClick={submit} disabled={checkedCount === 0 || busy} data-testid="adm-invoice-submit">
+            {busy ? "Memproses…" : `Cetak Invoice${checkedCount > 1 ? ` (${checkedCount} unit)` : ""}`}
           </button>
         </div>
       </div>
