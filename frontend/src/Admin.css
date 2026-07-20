@@ -1303,3 +1303,9 @@
 .jm-eta{ font-size:10px; font-weight:700; color:var(--text-mute); text-transform:uppercase; display:flex; flex-direction:column; gap:4px; justify-content:center; background:var(--bg-3); border-radius:7px; padding:4px 9px; }
 .jm-eta b{ font-family:var(--mono); font-size:13px; color:var(--green); }
 @media (max-width:620px){ .jm-grid{ grid-template-columns:1fr 1fr; } }
+
+/* ── Cartbar: keranjang unit lintas-PO → Jadwal Gabungan ── */
+.adm-cartbar{ position:fixed; bottom:18px; left:50%; transform:translateX(-50%); z-index:120; display:flex; align-items:center; gap:16px; background:var(--bg-3); border:1px solid var(--gold); border-radius:12px; padding:10px 16px; box-shadow:0 10px 34px rgba(0,0,0,.45); max-width:calc(100vw - 24px); }
+.adm-cartbar-info{ font-size:12.5px; color:var(--text); white-space:nowrap; }
+.adm-cartbar-info b{ color:var(--gold-xl); }
+@media (max-width:560px){ .adm-cartbar{ flex-direction:column; gap:10px; width:calc(100vw - 24px); } .adm-cartbar-info{ white-space:normal; text-align:center; } }

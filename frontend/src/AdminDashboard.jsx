@@ -225,6 +225,25 @@ function Dashboard({ pin, onLogout }) {
   const [legsModal, setLegsModal] = useState(null);
   const [bonusModal, setBonusModal] = useState(null);
   const [toast, setToast] = useState("");
+  // Keranjang unit lintas-PO → Jadwal Pengiriman Gabungan
+  const [jadwalCart, setJadwalCart] = useState([]); // [{order_id, customer_nama, asal_kota, tujuan_kota, unit}]
+  const [showJadwalGab, setShowJadwalGab] = useState(false);
+  const cartHas = useCallback((uid) => jadwalCart.some((c) => c.unit?.unit_id === uid), [jadwalCart]);
+  const toggleCartUnit = useCallback((order, unit) => {
+    setJadwalCart((c) => c.some((x) => x.unit?.unit_id === unit.unit_id)
+      ? c.filter((x) => x.unit?.unit_id !== unit.unit_id)
+      : [...c, { order_id: order.order_id, customer_nama: order.customer_nama, asal_kota: order.asal_kota, tujuan_kota: order.tujuan_kota, unit }]);
+  }, []);
+  const cartSetOrderUnits = useCallback((order, add) => {
+    const units = Array.isArray(order.units) ? order.units : [];
+    setJadwalCart((c) => {
+      const others = c.filter((x) => x.order_id !== order.order_id);
+      if (!add) return others;
+      const rows = units.map((unit) => ({ order_id: order.order_id, customer_nama: order.customer_nama, asal_kota: order.asal_kota, tujuan_kota: order.tujuan_kota, unit }));
+      return [...others, ...rows];
+    });
+  }, []);
+  const clearCart = useCallback(() => setJadwalCart([]), []);
   const [kordList, setKordList] = useState([]);
 
   const flash = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2600); };
@@ -559,9 +578,30 @@ function Dashboard({ pin, onLogout }) {
             onOpenBonus={() => setBonusModal({ tripId: o.trip_id, order: o })}
             headers={headers}
             kordList={kordList}
+            cartHas={cartHas}
+            onToggleCartUnit={toggleCartUnit}
+            onCartSetOrderUnits={cartSetOrderUnits}
           />
         ))}
       </section>
+
+      {jadwalCart.length > 0 && (
+        <div className="adm-cartbar" data-testid="adm-cartbar">
+          <div className="adm-cartbar-info">🚢 <b>{jadwalCart.length} unit</b> dipilih untuk jadwal</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="adm-btn adm-btn-sm" onClick={clearCart}>Kosongkan</button>
+            <button className="adm-btn adm-btn-sm adm-btn-gold" onClick={() => setShowJadwalGab(true)} data-testid="adm-cartbar-jadwal">Buat Jadwal Gabungan</button>
+          </div>
+        </div>
+      )}
+      {showJadwalGab && (
+        <JadwalGabunganModal
+          cart={jadwalCart}
+          headers={headers}
+          onClose={() => setShowJadwalGab(false)}
+          onDone={() => { setShowJadwalGab(false); }}
+        />
+      )}
 
       {toast && <div className="adm-toast" data-testid="adm-toast">{toast}</div>}
       {bonusModal && (
@@ -951,21 +991,18 @@ const ALBUM_STAGES = [
   { key: "dokumen", label: "Dokumen", icon: "📄" },
 ];
 
-function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLegs, onOpenBonus, headers, kordList = [] }) {
+function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLegs, onOpenBonus, headers, kordList = [], cartHas = () => false, onToggleCartUnit = () => {}, onCartSetOrderUnits = () => {} }) {
   const [uploadingStage, setUploadingStage] = useState(null); // stage key lagi upload
   const [expanded, setExpanded] = useState(false);
   const [copiedPo, setCopiedPo] = useState(false);
   const [showInvoice, setShowInvoice] = useState(false);
   const [showJadwal, setShowJadwal] = useState(false);
   const [showTrip360, setShowTrip360] = useState(false);
-  const [selUnits, setSelUnits] = useState([]); // F1 — unit_id terpilih (struktur buat F2)
   const albumFileRefs = useRef({});
 
   const units = Array.isArray(order.units) ? order.units : [];
   const uSum = order.unit_summary || null;
-  const toggleUnit = (id) => setSelUnits((s) => s.includes(id) ? s.filter((x) => x !== id) : [...s, id]);
-  const allUnitsSelected = units.length > 0 && selUnits.length === units.length;
-  const toggleAllUnits = () => setSelUnits(allUnitsSelected ? [] : units.map((u) => u.unit_id));
+  const allUnitsSelected = units.length > 0 && units.every((u) => cartHas(u.unit_id));
 
   const copyPoText = async (e) => {
     e.stopPropagation();
@@ -1618,14 +1655,14 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
             </div>
             {units.length > 1 && (
               <label className="adm-unit-all">
-                <input type="checkbox" checked={allUnitsSelected} onChange={toggleAllUnits} data-testid={`adm-units-all-${order.order_id}`} />
-                Pilih semua {selUnits.length > 0 ? `· ${selUnits.length} terpilih` : ""}
+                <input type="checkbox" checked={allUnitsSelected} onChange={() => onCartSetOrderUnits(order, !allUnitsSelected)} data-testid={`adm-units-all-${order.order_id}`} />
+                Pilih semua unit PO ini → keranjang jadwal
               </label>
             )}
             <div className="adm-unit-list">
               {units.map((u, i) => (
-                <label key={u.unit_id} className={`adm-unit-item${selUnits.includes(u.unit_id) ? " sel" : ""}`} data-testid={`adm-unit-item-${order.order_id}-${i}`}>
-                  <input type="checkbox" checked={selUnits.includes(u.unit_id)} onChange={() => toggleUnit(u.unit_id)} />
+                <label key={u.unit_id} className={`adm-unit-item${cartHas(u.unit_id) ? " sel" : ""}`} data-testid={`adm-unit-item-${order.order_id}-${i}`}>
+                  <input type="checkbox" checked={cartHas(u.unit_id)} onChange={() => onToggleCartUnit(order, u)} />
                   <span className="adm-unit-no">{i + 1}</span>
                   <span className="adm-unit-main">
                     <span className="adm-unit-veh">{u.vehicle_type || "—"}{u.tipe_model ? ` · ${u.tipe_model}` : ""}</span>
@@ -2348,6 +2385,197 @@ function JadwalModal({ order, headers, onClose, onPrint }) {
           <button className="adm-btn adm-btn-ghost" onClick={onClose}>Tutup</button>
           <button className="adm-btn" onClick={save} disabled={saving} data-testid="adm-jadwal-save">{saving ? "…" : "Simpan"}</button>
           <button className="adm-btn adm-btn-gold" onClick={doPrint} disabled={saving} data-testid="adm-jadwal-print">🖨️ Simpan &amp; Cetak</button>
+        </div>
+      </div>
+    </div>
+    </div>
+  ), document.body);
+}
+
+/* ════════════════════════════════════════
+   JADWAL PENGIRIMAN GABUNGAN — kumpulin unit lintas-PO ke 1 A4 (gold)
+════════════════════════════════════════ */
+function printJadwalGabungan(meta, units) {
+  const rows = (units || []).filter(Boolean);
+  if (!rows.length) return;
+  const noDoc = `JP/AAL/GAB-${new Date().toISOString().slice(0,10).replace(/-/g,"").slice(2)}/${new Date().getFullYear()}`;
+  const asal = meta.pelabuhan_asal || "—";
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Jadwal Pengiriman Gabungan</title>
+  <style>
+    ${DOC_BASE_CSS}
+    .doc-brand-name { color:${DOC_BRAND.gold} !important; }
+    .doc-title { color:${DOC_BRAND.gold} !important; }
+    .jp-meta { display:flex; justify-content:space-between; gap:24px; margin-bottom:12px; font-size:10.5px; }
+    .jp-meta .lbl { font-size:8.5px; font-weight:700; text-transform:uppercase; color:${DOC_BRAND.muted}; letter-spacing:.4px; }
+    .jp-meta .val { font-size:12px; font-weight:800; color:${DOC_BRAND.ink}; }
+    .jp-meta table td { padding:2px 0; }
+    .jp-meta table td:first-child { color:${DOC_BRAND.muted}; padding-right:14px; white-space:nowrap; }
+    .jp-meta table td:last-child { font-weight:700; text-align:right; }
+    table.jp { width:100%; border-collapse:collapse; margin-bottom:10px; }
+    table.jp thead { display:table-header-group; }
+    table.jp tr { break-inside:avoid; page-break-inside:avoid; }
+    table.jp th { text-align:left; font-size:9px; text-transform:uppercase; letter-spacing:.2px; color:#fff; background:${DOC_BRAND.gold}; font-weight:700; padding:7px 7px; }
+    table.jp td { padding:7px 7px; font-size:10.5px; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; }
+    table.jp tbody tr:nth-child(even) td { background:#fbf6ea; }
+    table.jp .c { text-align:center; }
+    table.jp .mono { font-family:${DOC_BRAND.mono || "monospace"}; }
+    .jp-note { border:1px solid ${DOC_BRAND.gold}; background:#fdf6e6; border-radius:6px; padding:10px 14px; font-size:10.5px; color:${DOC_BRAND.ink}; margin-top:8px; line-height:1.65; }
+    .jp-note b { color:#8a6d10; }
+    @page { size:A4; margin:12mm; }
+  </style></head><body>
+  <div class="doc-sheet">
+    ${docHeader({ docTitle: "JADWAL PENGIRIMAN" })}
+    <div class="jp-meta">
+      <div>
+        <div class="lbl">Pelanggan</div>
+        <div class="val">${meta.customer_nama || "&nbsp;"}</div>
+        <div style="font-size:10px;color:${DOC_BRAND.muted};margin-top:3px">Pelabuhan Asal: <b style="color:${DOC_BRAND.ink}">${asal}</b> &middot; ${rows.length} unit</div>
+      </div>
+      <table>
+        <tr><td>No. Dokumen</td><td>${noDoc}</td></tr>
+        <tr><td>Tanggal Siap Unit</td><td>${jpFmt(meta.tanggal_siap)}</td></tr>
+        <tr><td>Dicetak</td><td>${jpFmt(new Date().toISOString().slice(0,10))}</td></tr>
+      </table>
+    </div>
+    <table class="jp">
+      <thead><tr>
+        <th class="c" style="width:22px">No</th><th>Unit / Tipe</th><th>No. Polisi</th><th>No. Rangka</th><th>No. Mesin</th>
+        <th>Tujuan</th><th>Nama Kapal</th><th>Kapal Berangkat</th><th>Estimasi Tiba</th>
+      </tr></thead>
+      <tbody>
+        ${rows.map((u, i) => {
+          const eta = jpAddDays(u.etd, u.transit_hari);
+          const veh = `${u.vehicle_type || ""}${u.tipe_model ? " " + u.tipe_model : ""}`.trim() || "—";
+          return `<tr>
+            <td class="c">${i + 1}</td>
+            <td>${veh}</td>
+            <td class="mono">${u.nopol || "—"}</td>
+            <td class="mono">${u.no_rangka || "—"}</td>
+            <td class="mono">${u.no_mesin || "—"}</td>
+            <td>${u.tujuan || "—"}</td>
+            <td>${u.nama_kapal || "—"}</td>
+            <td>${jpFmt(u.etd)}</td>
+            <td><b>${eta ? jpFmt(eta) : "—"}</b>${u.transit_hari ? ` <span style="color:${DOC_BRAND.muted};font-size:9px">(${u.transit_hari} hr)</span>` : ""}</td>
+          </tr>`;
+        }).join("")}
+      </tbody>
+    </table>
+    <div class="jp-note">
+      <b>Catatan penting:</b> Estimasi perjalanan laut dihitung sejak <b>KAPAL BERANGKAT</b>, bukan dari pengambilan/serah terima unit di pelabuhan. Estimasi Tiba = Tanggal Kapal Berangkat + lama pelayaran. Jadwal dapat berubah mengikuti kondisi cuaca &amp; operasional pelayaran.
+      ${meta.catatan_jadwal ? `<br><br><b>Catatan tambahan:</b> ${meta.catatan_jadwal}` : ""}
+    </div>
+    ${docFooter({ docNo: `Jadwal ${noDoc}` })}
+  </div>
+  <script>window.onload=()=>window.print()<\/script>
+  </body></html>`;
+  const w = window.open("", "_blank"); w.document.write(html); w.document.close();
+}
+
+function JadwalGabunganModal({ cart, headers, onClose, onDone }) {
+  const customers = Array.from(new Set(cart.map((c) => c.customer_nama).filter(Boolean)));
+  const [pelabuhanAsal, setPelabuhanAsal] = useState(cart[0]?.asal_kota || "");
+  const [tanggalSiap, setTanggalSiap] = useState("");
+  const [catatan, setCatatan] = useState("");
+  const [rows, setRows] = useState(() => cart.map((c) => ({
+    order_id: c.order_id, unit: c.unit,
+    tujuan: c.unit?.tujuan || c.tujuan_kota || "",
+    no_mesin: c.unit?.no_mesin || "",
+    nama_kapal: c.unit?.nama_kapal || "", etd: c.unit?.etd || "", transit_hari: c.unit?.transit_hari || "",
+  })));
+  const [bulk, setBulk] = useState({ nama_kapal: "", etd: "", transit_hari: "" });
+
+  const setRow = (i, patch) => setRows((rs) => rs.map((r, x) => x === i ? { ...r, ...patch } : r));
+  const applyBulk = () => setRows((rs) => rs.map((r) => ({
+    ...r, nama_kapal: bulk.nama_kapal || r.nama_kapal, etd: bulk.etd || r.etd,
+    transit_hari: bulk.transit_hari !== "" ? bulk.transit_hari : r.transit_hari,
+  })));
+
+  const docUnits = () => rows.map((r) => ({
+    vehicle_type: r.unit?.vehicle_type, tipe_model: r.unit?.tipe_model, nopol: r.unit?.nopol,
+    no_rangka: r.unit?.no_rangka, no_mesin: r.no_mesin || r.unit?.no_mesin, tujuan: r.tujuan,
+    nama_kapal: r.nama_kapal, etd: r.etd, transit_hari: parseInt(r.transit_hari, 10) || 0,
+  }));
+
+  const persist = () => {
+    // simpan per-order (kelompokkan baris menurut order_id) — fire-and-forget
+    const byOrder = {};
+    rows.forEach((r) => { (byOrder[r.order_id] = byOrder[r.order_id] || []).push(r); });
+    Object.entries(byOrder).forEach(([oid, rs]) => {
+      axios.patch(`${API}/admin/orders/${oid}/jadwal`, {
+        tanggal_siap: tanggalSiap || "", catatan_jadwal: catatan || "", pelabuhan_asal: pelabuhanAsal || "",
+        units: rs.map((r) => ({ unit_id: r.unit?.unit_id, tujuan: r.tujuan, no_mesin: r.no_mesin, nama_kapal: r.nama_kapal, etd: r.etd, transit_hari: parseInt(r.transit_hari, 10) || 0 })),
+      }, { headers }).catch(() => {});
+    });
+  };
+
+  const doPrint = () => {
+    printJadwalGabungan({ customer_nama: customers.length === 1 ? customers[0] : `${customers.length} customer`, pelabuhan_asal: pelabuhanAsal, tanggal_siap: tanggalSiap, catatan_jadwal: catatan }, docUnits());
+    persist();
+    onDone();
+  };
+
+  return createPortal((
+    <div className="adm-vars">
+    <div className="adm-modal-bg" onClick={onClose} data-testid="adm-jadwalgab-modal">
+      <div className="adm-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 760 }}>
+        <div className="adm-modal-head">
+          <div>
+            <div className="adm-modal-title">🚢 Jadwal Pengiriman Gabungan</div>
+            <div className="adm-modal-sub">{cart.length} unit dari {new Set(cart.map((c) => c.order_id)).size} PO{customers.length === 1 ? ` · ${customers[0]}` : ` · ${customers.length} customer`}</div>
+          </div>
+          <button className="adm-modal-close" onClick={onClose} aria-label="Tutup">✕</button>
+        </div>
+        <div className="adm-modal-body">
+          {customers.length > 1 && <div className="t360-fin-err" style={{ marginBottom: 12, background: "var(--gold-bg)", borderColor: "var(--gold-bd)", color: "var(--gold-xl)" }}>Catatan: unit dari {customers.length} customer berbeda tercampur di 1 dokumen.</div>}
+          <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+            <label style={{ flex: 1, minWidth: 150 }}>
+              <span style={{ display: "block", fontSize: 11, color: "var(--text-mute)", marginBottom: 5, fontWeight: 700 }}>Pelabuhan Asal</span>
+              <input className="adm-input" value={pelabuhanAsal} onChange={(e) => setPelabuhanAsal(e.target.value)} placeholder="Pelabuhan Surabaya" data-testid="adm-jadwalgab-asal" />
+            </label>
+            <label style={{ flex: 1, minWidth: 150 }}>
+              <span style={{ display: "block", fontSize: 11, color: "var(--text-mute)", marginBottom: 5, fontWeight: 700 }}>Tanggal Siap Unit</span>
+              <input type="date" className="adm-input" value={tanggalSiap} onChange={(e) => setTanggalSiap(e.target.value)} />
+            </label>
+          </div>
+          <div style={{ border: "1px dashed var(--border-2)", borderRadius: 9, padding: "10px 12px", marginBottom: 14, background: "var(--bg-2)" }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: "var(--text-2)", marginBottom: 8 }}>Isi cepat kapal → semua unit</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <label style={{ flex: 2, minWidth: 130 }}><span style={{ display: "block", fontSize: 10, color: "var(--text-mute)", marginBottom: 4 }}>Nama Kapal</span>
+                <input className="adm-input" value={bulk.nama_kapal} onChange={(e) => setBulk((b) => ({ ...b, nama_kapal: e.target.value }))} placeholder="KM Serasi V" data-testid="adm-jadwalgab-bulk-kapal" /></label>
+              <label style={{ flex: 1, minWidth: 120 }}><span style={{ display: "block", fontSize: 10, color: "var(--text-mute)", marginBottom: 4 }}>Kapal Berangkat</span>
+                <input type="date" className="adm-input" value={bulk.etd} onChange={(e) => setBulk((b) => ({ ...b, etd: e.target.value }))} data-testid="adm-jadwalgab-bulk-etd" /></label>
+              <label style={{ width: 90 }}><span style={{ display: "block", fontSize: 10, color: "var(--text-mute)", marginBottom: 4 }}>Transit (hr)</span>
+                <input inputMode="numeric" className="adm-input" value={bulk.transit_hari} onChange={(e) => setBulk((b) => ({ ...b, transit_hari: e.target.value.replace(/\D/g, "") }))} placeholder="4" data-testid="adm-jadwalgab-bulk-transit" /></label>
+              <button className="adm-btn adm-btn-sm adm-btn-gold" onClick={applyBulk} data-testid="adm-jadwalgab-bulk-apply">Terapkan</button>
+            </div>
+          </div>
+          <div className="jm-list">
+            {rows.map((r, i) => {
+              const u = r.unit || {};
+              const eta = jpAddDays(r.etd, parseInt(r.transit_hari, 10) || 0);
+              return (
+                <div key={u.unit_id || i} className="jm-unit">
+                  <div className="jm-unit-hd">{i + 1}. {u.vehicle_type || "—"}{u.tipe_model ? ` · ${u.tipe_model}` : ""} <span className="jm-nopol">{u.nopol || "nopol —"} · {r.order_id}</span></div>
+                  <div className="jm-grid">
+                    <label>Tujuan<input className="adm-input" value={r.tujuan} onChange={(e) => setRow(i, { tujuan: e.target.value.toUpperCase() })} placeholder="kota tujuan" /></label>
+                    <label>No. Mesin<input className="adm-input" value={r.no_mesin} onChange={(e) => setRow(i, { no_mesin: e.target.value.toUpperCase() })} placeholder="2GDXXXX" /></label>
+                    <label>Nama Kapal<input className="adm-input" value={r.nama_kapal} onChange={(e) => setRow(i, { nama_kapal: e.target.value })} placeholder="KM Serasi V" /></label>
+                    <label>Kapal Berangkat<input type="date" className="adm-input" value={r.etd} onChange={(e) => setRow(i, { etd: e.target.value })} /></label>
+                    <label>Transit (hr)<input inputMode="numeric" className="adm-input" value={r.transit_hari} onChange={(e) => setRow(i, { transit_hari: e.target.value.replace(/\D/g, "") })} placeholder="4" /></label>
+                    <div className="jm-eta">Estimasi Tiba<b>{eta ? jpFmt(eta) : "—"}</b></div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <label style={{ display: "block", marginTop: 12 }}>
+            <span style={{ display: "block", fontSize: 11, color: "var(--text-mute)", marginBottom: 5, fontWeight: 700 }}>Catatan Jadwal (opsional)</span>
+            <input className="adm-input" value={catatan} onChange={(e) => setCatatan(e.target.value)} placeholder="mis. muat di gudang Tanjung Perak" />
+          </label>
+        </div>
+        <div className="adm-modal-foot">
+          <button className="adm-btn adm-btn-ghost" onClick={onClose}>Tutup</button>
+          <button className="adm-btn adm-btn-gold" onClick={doPrint} data-testid="adm-jadwalgab-print">🖨️ Cetak Jadwal ({rows.length} unit)</button>
         </div>
       </div>
     </div>
