@@ -16,7 +16,7 @@ const STEPS = [
 const KONDISI_OPTIONS = ["Bekas", "Baru"];
 
 // F1 — Unit Master (multi-unit per PO)
-const MAX_UNITS = 10;
+const MAX_UNITS = 20;
 const emptyUnit = () => ({ vehicle_type: "", tipe_model: "", nopol: "", no_rangka: "", no_mesin: "", warna: "", tahun: "", tujuan: "", catatan: "" });
 
 /* ── Dark mode ── */

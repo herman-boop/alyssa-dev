@@ -1008,7 +1008,7 @@ class OrderBody(BaseModel):
 
 
 # ── F1: Unit Master (units[] embedded di order) ──
-UNIT_MAX_PER_ORDER = 10
+UNIT_MAX_PER_ORDER = 20
 UNIT_STATUS_PERJALANAN_DEFAULT = "Belum Dijadwalkan"  # → Berjalan → Selesai
 UNIT_STATUS_INVOICE_DEFAULT = "Belum Ditagih"          # → Sudah Diinvoice → Dibayar Sebagian → Lunas
 
