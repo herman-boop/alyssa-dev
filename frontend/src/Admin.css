@@ -263,7 +263,7 @@
   grid-template-columns: repeat(6, 1fr);
   gap: 12px;
   padding: 20px 20px 0;
-  animation: adm-fade-up .4s ease .05s both;
+  animation: adm-fade-up .4s ease .05s backwards;
 }
 @media (max-width: 900px) { .adm-stats { grid-template-columns: repeat(3,1fr); } }
 @media (max-width: 540px) { .adm-stats { grid-template-columns: repeat(2,1fr); padding: 12px 12px 0; gap: 8px; } }
@@ -433,7 +433,7 @@
   flex-direction: column;
   gap: 12px;
   padding: 20px;
-  animation: adm-fade-up .4s ease .1s both;
+  animation: adm-fade-up .4s ease .1s backwards;
 }
 @media (max-width: 540px) { .adm-list { padding: 12px; gap: 10px; } }
 
@@ -466,7 +466,7 @@
   border-radius: 20px;
   overflow: hidden;
   transition: border-color .18s, box-shadow .2s, transform .15s;
-  animation: adm-slide-in .3s ease both;
+  animation: adm-slide-in .3s ease backwards;
 }
 .adm-card:hover {
   border-color: var(--border-2);
@@ -734,7 +734,7 @@
   max-height: 90vh;
   overflow-y: auto;
   box-shadow: 0 40px 100px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.05);
-  animation: adm-scale-in .25s cubic-bezier(.22,1,.36,1) both;
+  animation: adm-scale-in .25s cubic-bezier(.22,1,.36,1) backwards;
 }
 .adm-modal-head {
   padding: 22px 24px;
