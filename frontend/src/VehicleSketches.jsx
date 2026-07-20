@@ -647,16 +647,64 @@ const FILENAME_TO_RATIO = {
 const MAX_SKETCH_HEIGHT_RATIO = 3.8;
 
 export function getVehicleSketchRatio(type) {
-  const filename = TYPE_TO_FILENAME[type];
+  const rtype = resolveSketchType(type);
+  const filename = TYPE_TO_FILENAME[rtype];
   const native = filename && FILENAME_TO_RATIO[filename];
   return Math.max(native || MAX_SKETCH_HEIGHT_RATIO, MAX_SKETCH_HEIGHT_RATIO);
 }
 
+/* Tebak sketsa yang cocok buat tipe custom (mis. "Hilux Rangga") dengan
+   mencocokkan kata kunci ke salah satu sketsa/bentuk yang SUDAH ADA. Urutan
+   penting: yang spesifik dulu, baru yang umum. */
+const SKETCH_KEYWORDS = [
+  [["dump truck", "dumptruck", "dump hino", "dump tronton"], "Dump Truck"],
+  [["dump crawler", "crawler", "dumper"], "Dump Crawler"],
+  [["dump"], "Dump Truck"],
+  [["excavat", "exca", "beko"], "Excavator"],
+  [["bulldozer", "buldoser", "dozer"], "Dozer"],
+  [["grader"], "Grader"],
+  [["forklift", "forlift"], "Forklift"],
+  [["vibro", "roller", "compactor", "tandem", "baby roller"], "Vibro Roller"],
+  [["tronton"], "Tronton"],
+  [["tangki", "tanki"], "Truck Tangki"],
+  [["wing box", "wingbox", "box besar"], "Box Besar"],
+  [["pemadam", "damkar", "fire"], "Canter Pemadam"],
+  // Pickup / Double Cabin — termasuk Hilux Rangga & sejenisnya
+  [["hilux", "rangga", "triton", "navara", "ranger", "d-max", "dmax", "d max",
+    "strada", "colorado", "bt-50", "bt50", "terra", "tunland", "double cab",
+    "dcab", "d-cab", "kabin", "cabin", "pick up", "pickup", "pick-up"], "Pickup / Double Cabin"],
+  [["motor", "beat", "vario", "nmax", "scoopy", "supra", "cbr", "vespa", "pcx", "aerox"], "Motor"],
+  [["avanza", "xenia", "innova", "rush", "terios", "fortuner", "pajero", "xpander",
+    "ertiga", "calya", "sigra", "mobilio", "br-v", "brv", "hr-v", "hrv", "cr-v", "crv",
+    "x-trail", "xtrail", "livina", "veloz", "raize", "rocky", "confero", "mpv", "suv",
+    "minibus", "carry", "apv", "luxio", "gran max", "granmax", "hiace", "elf", "travello"], "MPV / SUV"],
+  [["sedan", "vios", "civic", "corolla", "camry", "city", "accord", "altis", "mazda"], "Sedan"],
+  // truk umum paling akhir (biar spesifik menang)
+  [["canter", "colt diesel", "cdd", "cde", "engkel", "fuso", "hino", "dutro",
+    "box", "truk", "truck", "bak", "losbak"], "Truck Box"],
+];
+
+export function guessSketchType(name) {
+  const n = (name || "").toLowerCase();
+  if (!n) return null;
+  for (const [kws, type] of SKETCH_KEYWORDS) {
+    if (kws.some((k) => n.includes(k))) return type;
+  }
+  return null;
+}
+
+/* Resolusi tipe → tipe-yang-punya-sketsa: langsung, atau ditebak dari kata kunci. */
+function resolveSketchType(type) {
+  if (TYPE_TO_FILENAME[type] || VEHICLE_SKETCH_MAP[type]) return type;
+  return guessSketchType(type) || type;
+}
+
 export function VehicleSketch({ type, className, style, color = "#D4A847", strokeWidth = 2 }) {
   const [imgOk, setImgOk] = React.useState(true);
-  const filename = TYPE_TO_FILENAME[type];
+  const rtype = resolveSketchType(type);
+  const filename = TYPE_TO_FILENAME[rtype];
   const imgUrl = filename ? `/vehicles/${filename}.jpg` : null;
-  const Comp = VEHICLE_SKETCH_MAP[type];
+  const Comp = VEHICLE_SKETCH_MAP[rtype];
 
   if (imgUrl && imgOk) {
     return (
