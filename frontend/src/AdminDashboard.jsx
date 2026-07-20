@@ -2053,7 +2053,6 @@ function InvoiceModal({ order, headers, onClose, onPrint }) {
   const [ttdNama, setTtdNama] = useState("");
   const [ttdJabatan, setTtdJabatan] = useState("Finance & Accounting Controller");
   const [stempel, setStempel] = useState(null); // dataURL gambar stempel/ttd digital
-  const [busy, setBusy] = useState(false);
 
   const onStempel = (e) => {
     const f = e.target.files?.[0];
@@ -2080,23 +2079,23 @@ function InvoiceModal({ order, headers, onClose, onPrint }) {
   const checkedCount = rows.filter((r) => r.checked && hargaNum(r.harga) > 0).length;
   const fRp = (n) => "Rp " + n.toLocaleString("id-ID");
 
-  const submit = async () => {
+  const submit = () => {
     const lines = rows
       .map((r, i) => ({ r, u: orderUnits[i] }))
       .filter(({ r }) => r.checked && hargaNum(r.harga) > 0)
       .map(({ r, u }) => ({ nama: "Jasa Pengiriman", ket: unitKet(u), qty: 1, harga: hargaNum(r.harga) }));
     if (!lines.length) return;
-    setBusy(true);
-    // Tandai unit terpilih sudah diinvoice (best-effort — cetak tetap jalan walau gagal)
+    // Buka jendela cetak DULU di dalam gesture klik (kalau di-await, mobile blokir popup).
+    onPrint(lines, withTax, { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel });
+    // Tandai unit sudah diinvoice di belakang layar (best-effort).
     const ids = rows.filter((r) => r.checked && hargaNum(r.harga) > 0 && r.unit_id !== "legacy").map((r) => r.unit_id);
     if (ids.length && headers) {
-      try { await axios.post(`${API}/admin/orders/${order.order_id}/units/mark-invoiced`, { unit_ids: ids }, { headers }); } catch { /* skip */ }
+      axios.post(`${API}/admin/orders/${order.order_id}/units/mark-invoiced`, { unit_ids: ids }, { headers }).catch(() => {});
     }
-    setBusy(false);
-    onPrint(lines, withTax, { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel });
   };
 
-  return (
+  return createPortal((
+    <div className="adm-vars">
     <div className="adm-modal-bg" onClick={onClose} data-testid="adm-invoice-modal">
       <div className="adm-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 460 }}>
         <div className="adm-modal-head">
@@ -2196,13 +2195,14 @@ function InvoiceModal({ order, headers, onClose, onPrint }) {
         </div>
         <div className="adm-modal-foot">
           <button className="adm-btn adm-btn-ghost" onClick={onClose}>Batal</button>
-          <button className="adm-btn adm-btn-blue" onClick={submit} disabled={checkedCount === 0 || busy} data-testid="adm-invoice-submit">
-            {busy ? "Memproses…" : `Cetak Invoice${checkedCount > 1 ? ` (${checkedCount} unit)` : ""}`}
+          <button className="adm-btn adm-btn-blue" onClick={submit} disabled={checkedCount === 0} data-testid="adm-invoice-submit">
+            {`Cetak Invoice${checkedCount > 1 ? ` (${checkedCount} unit)` : ""}`}
           </button>
         </div>
       </div>
     </div>
-  );
+    </div>
+  ), document.body);
 }
 
 /* ════════════════════════════════════════
@@ -2257,25 +2257,28 @@ function JadwalModal({ order, headers, onClose, onPrint }) {
     transit_hari: parseInt(rows[i]?.transit_hari, 10) || 0,
   }));
 
-  const doPrint = async () => {
-    const ok = await save();
-    if (ok === false) return;
+  const doPrint = () => {
+    // Cetak dulu di dalam gesture klik (mobile blokir popup kalau nunggu await), simpan di belakang layar.
     onPrint({ tanggal_siap: tanggalSiap, catatan_jadwal: catatan, pelabuhan_asal: pelabuhanAsal }, printRows());
+    save();
     onClose();
   };
 
   if (!units.length) {
-    return (
+    return createPortal((
+      <div className="adm-vars">
       <div className="adm-modal-bg" onClick={onClose}>
         <div className="adm-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420 }}>
           <div className="adm-modal-head"><div className="adm-modal-title">🚢 Jadwal Pengiriman</div><button className="adm-modal-close" onClick={onClose}>✕</button></div>
           <div className="adm-modal-body"><div style={{ fontSize: 13, color: "var(--text-mute)" }}>PO ini belum punya unit. Tidak ada yang bisa dijadwalkan.</div></div>
         </div>
       </div>
-    );
+      </div>
+    ), document.body);
   }
 
-  return (
+  return createPortal((
+    <div className="adm-vars">
     <div className="adm-modal-bg" onClick={onClose} data-testid="adm-jadwal-modal">
       <div className="adm-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 720 }}>
         <div className="adm-modal-head">
@@ -2348,7 +2351,8 @@ function JadwalModal({ order, headers, onClose, onPrint }) {
         </div>
       </div>
     </div>
-  );
+    </div>
+  ), document.body);
 }
 
 /* ════════════════════════════════════════
