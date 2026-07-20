@@ -1343,12 +1343,12 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
       table.jp { width:100%; border-collapse:collapse; margin-bottom:10px; }
       table.jp thead { display:table-header-group; }
       table.jp tr { break-inside:avoid; page-break-inside:avoid; }
-      table.jp th { text-align:left; font-size:7.5px; text-transform:uppercase; letter-spacing:.2px; color:#fff; background:${DOC_BRAND.navy}; font-weight:700; padding:5px 5px; }
-      table.jp td { padding:4.5px 5px; font-size:8.5px; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; }
+      table.jp th { text-align:left; font-size:9px; text-transform:uppercase; letter-spacing:.2px; color:#fff; background:${DOC_BRAND.navy}; font-weight:700; padding:7px 7px; }
+      table.jp td { padding:7px 7px; font-size:10.5px; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; }
       table.jp tbody tr:nth-child(even) td { background:${DOC_BRAND.paperMist}; }
       table.jp .c { text-align:center; }
       table.jp .mono { font-family:${DOC_BRAND.mono || "monospace"}; }
-      .jp-note { border:1px solid ${DOC_BRAND.gold || "#d4a847"}; background:#fdf6e6; border-radius:6px; padding:8px 12px; font-size:9px; color:${DOC_BRAND.ink}; margin-top:6px; line-height:1.6; }
+      .jp-note { border:1px solid ${DOC_BRAND.gold || "#d4a847"}; background:#fdf6e6; border-radius:6px; padding:10px 14px; font-size:10.5px; color:${DOC_BRAND.ink}; margin-top:8px; line-height:1.65; }
       .jp-note b { color:#8a6d10; }
       @page { size:A4; margin:12mm; }
     </style></head><body>
@@ -1387,7 +1387,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
               <td>${tj}</td>
               <td>${u.nama_kapal || "—"}</td>
               <td>${fmtTgl(u.etd)}</td>
-              <td><b>${eta ? fmtTgl(eta) : "—"}</b>${u.transit_hari ? ` <span style="color:${DOC_BRAND.muted};font-size:7.5px">(${u.transit_hari} hr)</span>` : ""}</td>
+              <td><b>${eta ? fmtTgl(eta) : "—"}</b>${u.transit_hari ? ` <span style="color:${DOC_BRAND.muted};font-size:9px">(${u.transit_hari} hr)</span>` : ""}</td>
             </tr>`;
           }).join("")}
         </tbody>
