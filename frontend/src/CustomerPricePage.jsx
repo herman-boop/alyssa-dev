@@ -128,6 +128,8 @@ export default function CustomerPricePage() {
   const [ttdNama, setTtdNama] = useState("");
   const [ttdJabatan, setTtdJabatan] = useState("");
   const [stempel, setStempel] = useState("");
+  const [selIdx, setSelIdx] = useState(() => new Set());
+  const [cetakCari, setCetakCari] = useState("");
 
   useEffect(() => {
     if (!token) { setError("Link tidak valid"); setLoading(false); return; }
@@ -218,7 +220,7 @@ export default function CustomerPricePage() {
 
         {history.length > 0 && (
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-            <button onClick={() => setShowCetak(true)}
+            <button onClick={() => { setSelIdx(new Set(history.map((_, i) => i))); setCetakCari(""); setShowCetak(true); }}
               style={{ padding: "8px 16px", borderRadius: 8, border: `1px solid ${gold}`, background: "#fffbeb", color: "#92610b", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>
               🖨️ Cetak Penawaran Resmi (A4)
             </button>
@@ -233,9 +235,58 @@ export default function CustomerPricePage() {
           <div onClick={() => setShowCetak(false)}
             style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
             <div onClick={(e) => e.stopPropagation()}
-              style={{ width: "100%", maxWidth: 440, background: "#fff", borderRadius: 14, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,0.35)" }}>
+              style={{ width: "100%", maxWidth: 500, maxHeight: "90vh", overflowY: "auto", background: "#fff", borderRadius: 14, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,0.35)" }}>
               <div style={{ fontSize: 16, fontWeight: 900, color: navy, marginBottom: 3 }}>Cetak Penawaran Resmi</div>
-              <div style={{ fontSize: 11.5, color: gray, marginBottom: 16 }}>Isi penanda tangan &amp; stempel (opsional). Format A4, huruf besar — tajam buat di-screenshot / print.</div>
+              <div style={{ fontSize: 11.5, color: gray, marginBottom: 16 }}>Centang rute yang mau dicetak (mis. pisahin yang Kalimantan), isi penanda tangan &amp; stempel. Format A4, huruf besar — tajam buat di-screenshot / print.</div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <label style={{ fontSize: 11, fontWeight: 700, color: gray }}>PILIH RUTE — {selIdx.size} dari {history.length} dipilih</label>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button onClick={() => setSelIdx(new Set(history.map((_, i) => i)))}
+                    style={{ fontSize: 10.5, fontWeight: 700, color: navy, background: "#eff6ff", border: `1px solid ${border}`, borderRadius: 6, padding: "3px 8px", cursor: "pointer" }}>Semua</button>
+                  <button onClick={() => setSelIdx(new Set())}
+                    style={{ fontSize: 10.5, fontWeight: 700, color: gray, background: "#f9fafb", border: `1px solid ${border}`, borderRadius: 6, padding: "3px 8px", cursor: "pointer" }}>Kosongkan</button>
+                </div>
+              </div>
+
+              <input value={cetakCari} onChange={(e) => setCetakCari(e.target.value)} placeholder="🔎 cari rute… (mis. kalimantan)"
+                style={{ width: "100%", boxSizing: "border-box", padding: "8px 12px", borderRadius: 8, border: `1px solid ${border}`, fontSize: 12.5, marginBottom: 6 }} />
+              {cetakCari.trim() && (
+                <button onClick={() => {
+                  const q = cetakCari.trim().toLowerCase();
+                  const match = (e) => `${e.rute || ""} ${e.moda || ""} ${e.tipe_kendaraan || ""} ${e.catatan || ""}`.toLowerCase().includes(q);
+                  setSelIdx(new Set(history.map((e, i) => (match(e) ? i : -1)).filter((i) => i >= 0)));
+                }}
+                  style={{ fontSize: 11, fontWeight: 700, color: "#92610b", background: "#fffbeb", border: `1px solid ${gold}`, borderRadius: 6, padding: "5px 10px", cursor: "pointer", marginBottom: 8 }}>
+                  ✓ Centang cuma yang cocok "{cetakCari.trim()}"
+                </button>
+              )}
+
+              <div style={{ maxHeight: 200, overflowY: "auto", border: `1px solid ${border}`, borderRadius: 8, marginBottom: 16 }}>
+                {history
+                  .map((e, i) => ({ e, i }))
+                  .filter(({ e }) => {
+                    const q = cetakCari.trim().toLowerCase();
+                    if (!q) return true;
+                    return `${e.rute || ""} ${e.moda || ""} ${e.tipe_kendaraan || ""} ${e.catatan || ""}`.toLowerCase().includes(q);
+                  })
+                  .map(({ e, i }) => {
+                    const on = selIdx.has(i);
+                    return (
+                      <label key={i}
+                        style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderBottom: `1px solid #f1f5f9`, cursor: "pointer", background: on ? "#f0fdf4" : "#fff" }}>
+                        <input type="checkbox" checked={on}
+                          onChange={() => setSelIdx((s) => { const n = new Set(s); n.has(i) ? n.delete(i) : n.add(i); return n; })}
+                          style={{ width: 16, height: 16, flexShrink: 0 }} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 700, color: "#1f2937", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.rute || "-"}</div>
+                          <div style={{ fontSize: 10.5, color: gray }}>{e.tipe_kendaraan || "-"} · {fRp(e.harga_deal)}</div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                {history.length === 0 && <div style={{ padding: 14, textAlign: "center", color: gray, fontSize: 12 }}>Belum ada rute</div>}
+              </div>
 
               <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: gray, marginBottom: 4 }}>NAMA PENANDA TANGAN</label>
               <input value={ttdNama} onChange={(e) => setTtdNama(e.target.value)} placeholder="mis. Alyssa Herman"
@@ -265,8 +316,13 @@ export default function CustomerPricePage() {
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
                 <button onClick={() => setShowCetak(false)}
                   style={{ padding: "9px 16px", borderRadius: 8, border: `1px solid ${border}`, background: "#fff", color: gray, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Batal</button>
-                <button onClick={() => { printPenawaran(history, { nama_pt: data.nama_pt, ttdNama, ttdJabatan, stempel }); setShowCetak(false); }}
-                  style={{ padding: "9px 18px", borderRadius: 8, border: "none", background: gold, color: "#fff", fontSize: 12.5, fontWeight: 800, cursor: "pointer" }}>🖨️ Cetak A4</button>
+                <button onClick={() => {
+                  const rows = history.filter((_, i) => selIdx.has(i));
+                  if (!rows.length) { alert("Centang minimal 1 rute dulu bro."); return; }
+                  printPenawaran(rows, { nama_pt: data.nama_pt, ttdNama, ttdJabatan, stempel });
+                  setShowCetak(false);
+                }}
+                  style={{ padding: "9px 18px", borderRadius: 8, border: "none", background: gold, color: "#fff", fontSize: 12.5, fontWeight: 800, cursor: "pointer" }}>🖨️ Cetak A4 ({selIdx.size})</button>
               </div>
             </div>
           </div>
