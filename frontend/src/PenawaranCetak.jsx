@@ -26,7 +26,6 @@ export function printPenawaran(rows, meta) {
     const sudah = e.asuransi && e.asuransi > 0;
     return `<tr>
       <td class="c">${i + 1}</td>
-      <td>${fmtTgl(e.tanggal)}</td>
       <td><b>${esc(e.rute || "-")}</b>${e.catatan ? `<div class="ph-note">${esc(e.catatan)}</div>` : ""}</td>
       <td>${esc(e.moda || "-")}</td>
       <td>${esc(e.tipe_kendaraan || "-")}</td>
@@ -90,8 +89,8 @@ export function printPenawaran(rows, meta) {
     </div>
     <table class="ph">
       <thead><tr>
-        <th class="c" style="width:26px">No</th><th style="width:86px">Tanggal</th><th>Rute</th>
-        <th style="width:88px">Moda</th><th style="width:76px">Tipe Kendaraan</th><th class="r" style="width:120px">Harga</th><th class="c" style="width:70px">Asuransi</th>
+        <th class="c" style="width:28px">No</th><th>Rute</th>
+        <th style="width:110px">Moda</th><th style="width:92px">Tipe Kendaraan</th><th class="r" style="width:130px">Harga</th><th class="c" style="width:78px">Asuransi</th>
       </tr></thead>
       <tbody>${body}</tbody>
     </table>
