@@ -2,6 +2,7 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import axios from "axios";
 import { VEHICLE_TYPE_LIST, useVehicleTypes } from "@/VehicleSketches";
+import { PenawaranCetakButton } from "@/PenawaranCetak";
 
 /* Port dari cost-calculator.html (app lama). Logika hitung 1:1:
    HPP + Margin bertingkat + Proteksi Risiko + Bunga Dana Talang. */
@@ -858,7 +859,10 @@ export default function CostCalculator() {
         <div style={{ ...CARD, marginTop: 0 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
             <div style={TITLE}>📋 Daftar Harga — {selectedPt.nama_pt} ({ptHistory.length} rute)</div>
-            <button onClick={clearAllHarga} style={{ padding: "5px 12px", borderRadius: 7, fontSize: 11, fontWeight: 700, cursor: "pointer", background: "none", border: "1px solid #f85149", color: "#f85149" }}>🗑 Hapus Semua Rute</button>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <PenawaranCetakButton rows={ptHistory} namaPt={selectedPt.nama_pt} />
+              <button onClick={clearAllHarga} style={{ padding: "5px 12px", borderRadius: 7, fontSize: 11, fontWeight: 700, cursor: "pointer", background: "none", border: "1px solid #f85149", color: "#f85149" }}>🗑 Hapus Semua Rute</button>
+            </div>
           </div>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
