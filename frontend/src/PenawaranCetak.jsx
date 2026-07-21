@@ -53,7 +53,8 @@ export function printPenawaran(rows, meta) {
     table.ph th.r { text-align:right; } table.ph th.c { text-align:center; }
     table.ph td { padding:11px 9px; font-size:12.5px; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; }
     table.ph tbody tr:nth-child(even) td { background:${DOC_BRAND.paperMist}; }
-    table.ph td.c { text-align:center; } table.ph td.r { text-align:right; }
+    table.ph td.c { text-align:center; } table.ph td.r { text-align:right; white-space:nowrap; }
+    table.ph td.r b { font-size:13px; }
     table.ph .ph-note { font-size:10.5px; color:${DOC_BRAND.muted}; font-style:italic; margin-top:3px; font-weight:400; }
     .ph-ins { display:inline-block; font-size:10px; font-weight:800; border-radius:12px; padding:3px 9px; white-space:nowrap; }
     .ph-ins.y { background:#d1fae5; color:#065f46; } .ph-ins.n { background:#fef2f2; color:#991b1b; }
@@ -89,8 +90,8 @@ export function printPenawaran(rows, meta) {
     </div>
     <table class="ph">
       <thead><tr>
-        <th class="c" style="width:26px">No</th><th style="width:92px">Tanggal</th><th>Rute</th>
-        <th>Moda</th><th>Tipe Kendaraan</th><th class="r">Harga</th><th class="c">Asuransi</th>
+        <th class="c" style="width:26px">No</th><th style="width:86px">Tanggal</th><th>Rute</th>
+        <th style="width:88px">Moda</th><th style="width:76px">Tipe Kendaraan</th><th class="r" style="width:120px">Harga</th><th class="c" style="width:70px">Asuransi</th>
       </tr></thead>
       <tbody>${body}</tbody>
     </table>
