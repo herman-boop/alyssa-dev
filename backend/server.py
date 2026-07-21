@@ -700,6 +700,74 @@ async def add_custom_vehicle_type(body: VehicleTypeBody):
     return {"nama": nama}
 
 
+# ── Histori Dokumen ─────────────────────────────────────────────────────────
+# Arsip tiap dokumen yang dicetak admin (Invoice, Jadwal per-PO, Jadwal
+# Gabungan). Menyimpan snapshot lengkap (meta + units/lines) supaya bisa
+# dicetak ulang persis, plus tombol hapus. Fire-and-forget dari frontend.
+DOC_JENIS = {"jadwal_gabungan", "jadwal", "invoice"}
+DOC_JENIS_LABEL = {
+    "jadwal_gabungan": "Jadwal Gabungan",
+    "jadwal": "Jadwal Pengiriman",
+    "invoice": "Invoice / Faktur",
+}
+
+
+class DocHistoryBody(BaseModel):
+    jenis: str
+    no_dokumen: Optional[str] = ""
+    judul: Optional[str] = ""
+    customer: Optional[str] = ""
+    meta: Optional[dict] = None
+    units: Optional[list] = None
+    lines: Optional[list] = None
+    order_ids: Optional[list] = None
+
+
+@api_router.get("/admin/doc-history", dependencies=[Depends(require_admin_pin)])
+async def list_doc_history(jenis: Optional[str] = None, limit: int = 300):
+    """List arsip dokumen, terbaru dulu. Bisa difilter per jenis."""
+    filt = {}
+    if jenis and jenis in DOC_JENIS:
+        filt["jenis"] = jenis
+    items = []
+    async for d in db.doc_history.find(filt, {"_id": 0}).sort("created_at", -1).limit(max(1, min(1000, limit))):
+        items.append(d)
+    return {"items": items}
+
+
+@api_router.post("/admin/doc-history", dependencies=[Depends(require_admin_pin)])
+async def add_doc_history(body: DocHistoryBody):
+    """Simpan 1 record arsip dokumen (dipanggil otomatis tiap cetak)."""
+    if body.jenis not in DOC_JENIS:
+        raise HTTPException(400, "Jenis dokumen tidak dikenal")
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "id": "DOC-" + uuid.uuid4().hex[:10],
+        "jenis": body.jenis,
+        "jenis_label": DOC_JENIS_LABEL.get(body.jenis, body.jenis),
+        "no_dokumen": (body.no_dokumen or "").strip()[:80],
+        "judul": (body.judul or "").strip()[:200],
+        "customer": (body.customer or "").strip()[:200],
+        "meta": body.meta or {},
+        "units": body.units or [],
+        "lines": body.lines or [],
+        "order_ids": body.order_ids or [],
+        "created_at": now,
+    }
+    await db.doc_history.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.delete("/admin/doc-history/{doc_id}", dependencies=[Depends(require_admin_pin)])
+async def delete_doc_history(doc_id: str):
+    """Hapus 1 record arsip dokumen."""
+    res = await db.doc_history.delete_one({"id": doc_id})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Dokumen tidak ditemukan")
+    return {"ok": True, "id": doc_id}
+
+
 class BASTKBody(BaseModel):
     vehicle_type: Optional[str] = None
     damage_marks: Optional[List[Dict[str, Any]]] = None

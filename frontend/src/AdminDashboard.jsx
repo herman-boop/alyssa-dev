@@ -376,6 +376,7 @@ function Dashboard({ pin, onLogout }) {
     "route-leg":  { title: "Route Leg", sub: "Rute & leg pengiriman per order" },
     kendaraan:    { title: "Kendaraan", sub: "Daftar kendaraan yang pernah dikirim" },
     dokumen:      { title: "Dokumen", sub: "BASTK, resi, dan dokumen pengiriman" },
+    histori:      { title: "Histori Dokumen", sub: "Arsip Invoice & Jadwal yang pernah dicetak — cetak ulang atau hapus" },
   };
   const section = SECTION_META[activeTab] || SECTION_META.pesanan;
 
@@ -462,6 +463,10 @@ function Dashboard({ pin, onLogout }) {
 
       {activeTab === "dokumen" && (
         <ComingSoon icon="📄" title="Dokumen" note="Dokumen BASTK & resi bisa dilihat lewat tab Dokumen di dalam “Detail Pengiriman” tiap pesanan." />
+      )}
+
+      {activeTab === "histori" && (
+        <HistoriDokumen headers={headers} />
       )}
 
       {activeTab === "pesanan" && <>
@@ -659,7 +664,7 @@ const TONE = {
 const STATUS_TONE = { NEW: "orange", DISPATCHED: "blue", ON_TRIP: "purple", DELIVERED: "green", CANCELLED: "red" };
 const SIDEBAR_ICON = {
   pesanan: "▦", "route-leg": "🧭", drivers: "👤", supplier: "🌿", koordinator: "🧑‍💼",
-  kendaraan: "🚙", dokumen: "📄", laporan: "📑", kalkulator: "🧮", selisih: "📊",
+  kendaraan: "🚙", dokumen: "📄", histori: "🗂️", laporan: "📑", kalkulator: "🧮", selisih: "📊",
   kompensasi: "🔄", "minta-harga": "📩", pengaturan: "⚙️",
 };
 
@@ -675,6 +680,7 @@ const SIDEBAR_PRIMARY = [
   { key: "koordinator", label: "Koordinator" },
   { key: "kendaraan", label: "Kendaraan" },
   { key: "dokumen", label: "Dokumen" },
+  { key: "histori", label: "Histori Dokumen" },
   { key: "laporan", label: "Laporan" },
 ];
 const SIDEBAR_TOOLS = [
@@ -1225,222 +1231,11 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
     const w = window.open("", "_blank"); w.document.write(html); w.document.close();
   };
 
-  const printInvoice = (lines, withTax, extra) => {
-    // Back-compat: kalau dipanggil dengan angka tunggal, bungkus jadi 1 baris.
-    if (typeof lines === "number") lines = [{ nama: "Jasa Pengiriman", ket: "", qty: 1, harga: lines }];
-    lines = (lines || []).filter((l) => (l.harga || 0) > 0);
-    if (!lines.length) return;
-    const { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel } = extra || {};
-    const subtotal = lines.reduce((s, l) => s + (l.harga || 0) * (l.qty || 1), 0);
-    const ppn = withTax ? Math.round(subtotal * 0.011) : 0;
-    const total = subtotal + ppn;
-    const fRp = (n) => n.toLocaleString("id-ID") + ",00";
-
-    const fmtTgl = (iso) => {
-      if (!iso) return "—";
-      const [y, m, d] = iso.split("-");
-      return `${d}-${m}-${y}`;
-    };
-    const todayIso = new Date().toISOString().slice(0, 10);
-    const tgl = fmtTgl(todayIso);
-    const noInvoice = `INV/AAL/${order.order_id?.slice(-4) || "0000"}/${new Date().getFullYear()}`;
-
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${noInvoice}</title>
-    <style>
-      ${DOC_BASE_CSS}
-      .inv-meta-row { display:flex; justify-content:space-between; gap:24px; margin-bottom:16px; }
-      .inv-billto .lbl { font-size:9px; font-weight:700; text-transform:uppercase; color:${DOC_BRAND.muted}; letter-spacing:.5px; margin-bottom:4px; }
-      .inv-billto .val { font-size:14px; font-weight:800; color:${DOC_BRAND.ink}; }
-      .inv-meta-table { border-collapse:collapse; font-size:10.5px; }
-      .inv-meta-table td { padding:2.5px 0; }
-      .inv-meta-table td:first-child { color:${DOC_BRAND.muted}; padding-right:18px; white-space:nowrap; }
-      .inv-meta-table td:last-child { font-weight:700; text-align:right; }
-      .inv-total-bar { display:flex; justify-content:space-between; align-items:center; background:${DOC_BRAND.navyDeep}; color:#fff; padding:10px 16px; border-radius:6px; margin-bottom:18px; }
-      .inv-total-bar span:first-child { font-size:10.5px; font-weight:700; letter-spacing:.6px; text-transform:uppercase; opacity:.85; }
-      .inv-total-bar span:last-child { font-size:15px; font-weight:900; }
-      table.inv-items { width:100%; border-collapse:collapse; margin-bottom:14px; }
-      table.inv-items thead { display:table-header-group; }   /* header tabel diulang tiap halaman A4 */
-      table.inv-items tr { break-inside:avoid; page-break-inside:avoid; }
-      table.inv-items th { text-align:left; font-size:9px; text-transform:uppercase; letter-spacing:.4px; color:${DOC_BRAND.muted}; font-weight:700; padding:7px 8px; border-bottom:1.5px solid ${DOC_BRAND.navy}; }
-      table.inv-items td { padding:10px 8px; font-size:11px; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; background:${DOC_BRAND.paperMist}; }
-      table.inv-items .num { text-align:right; }
-      .inv-summary { display:flex; justify-content:space-between; gap:24px; margin-bottom:18px; }
-      .inv-note { flex:1; font-size:10px; color:${DOC_BRAND.muted}; line-height:1.7; }
-      .inv-note b { color:${DOC_BRAND.ink}; }
-      .inv-totals-box { width:230px; }
-      .inv-totals-box .row { display:flex; justify-content:space-between; padding:5px 0; font-size:10.5px; color:${DOC_BRAND.muted}; }
-      .inv-totals-box .row.grand { border-top:1.5px solid ${DOC_BRAND.navy}; margin-top:4px; padding-top:8px; font-size:13px; font-weight:900; color:${DOC_BRAND.navy}; }
-      .inv-pay-box { display:flex; align-items:center; gap:12px; padding:12px 16px; background:${DOC_BRAND.paperMist}; border-radius:8px; margin-bottom:20px; }
-      .inv-pay-badge { width:40px; height:40px; border-radius:7px; background:${DOC_BRAND.navy}; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:900; font-size:10px; flex-shrink:0; }
-      .inv-pay-num { font-size:14px; font-weight:900; letter-spacing:.5px; color:${DOC_BRAND.ink}; }
-      .inv-pay-name { font-size:9.5px; color:${DOC_BRAND.muted}; margin-top:1px; }
-      .inv-sign-row { display:flex; justify-content:flex-end; margin-top:26px; }
-      .inv-sign-cell { width:260px; text-align:center; position:relative; }
-      .inv-sign-lbl { font-size:10px; color:${DOC_BRAND.muted}; margin-bottom:6px; }
-      .inv-sign-stamp { height:78px; display:flex; align-items:center; justify-content:center; margin-bottom:2px; }
-      .inv-sign-stamp img { max-height:78px; max-width:200px; object-fit:contain; }
-      .inv-sign-stamp.empty { height:56px; }
-      .inv-sign-pt { font-size:11px; font-weight:800; color:${DOC_BRAND.ink}; }
-      .inv-sign-name { font-size:11px; font-weight:800; color:${DOC_BRAND.ink}; margin-top:2px; }
-      .inv-sign-jab { font-size:9.5px; color:${DOC_BRAND.muted}; margin-top:2px; }
-    </style></head><body>
-    <div class="doc-sheet">
-      ${docHeader({ docTitle: "FAKTUR / INVOICE" })}
-
-      <div class="inv-meta-row">
-        <div class="inv-billto">
-          <div class="lbl">Ditagihkan Kepada</div>
-          <div class="val">${order.customer_nama || "&nbsp;"}</div>
-        </div>
-        <table class="inv-meta-table">
-          <tr><td>Faktur #</td><td>${noInvoice}</td></tr>
-          <tr><td>Tanggal</td><td>${tgl}</td></tr>
-          <tr><td>Jatuh Tempo</td><td>${fmtTgl(jatuhTempo)}</td></tr>
-          <tr><td>Metode Pembayaran</td><td>${metode || "Cash on Delivery"}</td></tr>
-          <tr><td>No. Pesanan</td><td>${order.order_id || "—"}</td></tr>
-        </table>
-      </div>
-
-      <div class="inv-total-bar"><span>Total Tagihan</span><span>Rp ${fRp(total)}</span></div>
-
-      <table class="inv-items">
-        <thead><tr><th style="width:26px">No</th><th>Nama Barang</th><th>Keterangan</th><th>Qty</th><th>Harga Satuan (Rp)</th><th>Jumlah (Rp)</th></tr></thead>
-        <tbody>
-          ${lines.map((l, i) => `
-          <tr>
-            <td class="num">${i + 1}</td>
-            <td>${l.nama || "Jasa Pengiriman"}</td>
-            <td>${l.ket || "&nbsp;"}</td>
-            <td class="num">${l.qty || 1}</td>
-            <td class="num">${fRp(l.harga)}</td>
-            <td class="num">${fRp((l.harga || 0) * (l.qty || 1))}</td>
-          </tr>`).join("")}
-        </tbody>
-      </table>
-
-      <div class="inv-summary">
-        <div class="inv-note">
-          ${pesan ? `<b>Pesan:</b> ${pesan}<br>` : ""}
-          <b>Jumlah Unit:</b> ${lines.length}<br>
-          <b>Terbilang:</b> <i>${terbilangRupiah(total)}</i>
-        </div>
-        <div class="inv-totals-box">
-          <div class="row"><span>Subtotal</span><span>Rp ${fRp(subtotal)}</span></div>
-          <div class="row"><span>PPN Logistik (1.1%)</span><span>${withTax ? "Rp " + fRp(ppn) : "—"}</span></div>
-          <div class="row grand"><span>TOTAL</span><span>Rp ${fRp(total)}</span></div>
-        </div>
-      </div>
-
-      <div class="inv-pay-box">
-        <div class="inv-pay-badge">${DOC_BRAND.bank.name}</div>
-        <div>
-          <div class="inv-pay-num">${DOC_BRAND.bank.norek}</div>
-          <div class="inv-pay-name">Cabang ${DOC_BRAND.bank.cabang} &middot; a.n. ${DOC_BRAND.bank.an}</div>
-        </div>
-      </div>
-
-      <div class="inv-sign-row">
-        <div class="inv-sign-cell">
-          <div class="inv-sign-lbl">Hormat Kami,</div>
-          <div class="inv-sign-stamp ${stempel ? "" : "empty"}">${stempel ? `<img src="${stempel}" alt="stempel">` : ""}</div>
-          <div class="inv-sign-pt">PT. Alyssa Auto Logistik</div>
-          ${ttdNama ? `<div class="inv-sign-name">( ${ttdNama} )</div>` : ""}
-          ${ttdJabatan ? `<div class="inv-sign-jab">${ttdJabatan}</div>` : ""}
-        </div>
-      </div>
-
-      ${docFooter({ docNo: `Faktur ${noInvoice}` })}
-    </div>
-    <script>window.onload=()=>window.print()<\/script>
-    </body></html>`;
-    const w = window.open("", "_blank"); w.document.write(html); w.document.close();
-  };
-
-  // ── Cetak "Jadwal Pengiriman" A4 (multi-unit, teks kecil, header berulang) ──
-  const printJadwal = (meta, units) => {
-    const rows = (units || []).filter(Boolean);
-    if (!rows.length) return;
-    const fmtTgl = (iso) => { if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return "—"; const [y, m, d] = iso.split("-"); return `${d}-${m}-${y}`; };
-    const addDays = (iso, n) => {
-      if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso) || !n) return "";
-      const dt = new Date(iso + "T00:00:00"); dt.setDate(dt.getDate() + Number(n));
-      return dt.toISOString().slice(0, 10);
-    };
-    const noDoc = `JP/AAL/${order.order_id?.slice(-4) || "0000"}/${new Date().getFullYear()}`;
-    const asal = meta.pelabuhan_asal || order.asal_kota || "—";
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Jadwal Pengiriman ${order.order_id || ""}</title>
-    <style>
-      ${DOC_BASE_CSS}
-      .jp-meta { display:flex; justify-content:space-between; gap:24px; margin-bottom:12px; font-size:10.5px; }
-      .jp-meta .lbl { font-size:8.5px; font-weight:700; text-transform:uppercase; color:${DOC_BRAND.muted}; letter-spacing:.4px; }
-      .jp-meta .val { font-size:12px; font-weight:800; color:${DOC_BRAND.ink}; }
-      .jp-meta table td { padding:2px 0; }
-      .jp-meta table td:first-child { color:${DOC_BRAND.muted}; padding-right:14px; white-space:nowrap; }
-      .jp-meta table td:last-child { font-weight:700; text-align:right; }
-      table.jp { width:100%; border-collapse:collapse; margin-bottom:10px; }
-      table.jp thead { display:table-header-group; }
-      table.jp tr { break-inside:avoid; page-break-inside:avoid; }
-      table.jp th { text-align:left; font-size:9px; text-transform:uppercase; letter-spacing:.2px; color:#fff; background:${DOC_BRAND.navy}; font-weight:700; padding:7px 7px; }
-      table.jp td { padding:7px 7px; font-size:10.5px; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; }
-      table.jp tbody tr:nth-child(even) td { background:${DOC_BRAND.paperMist}; }
-      table.jp .c { text-align:center; }
-      table.jp .mono { font-family:${DOC_BRAND.mono || "monospace"}; }
-      .jp-note { border:1px solid ${DOC_BRAND.gold || "#d4a847"}; background:#fdf6e6; border-radius:6px; padding:10px 14px; font-size:10.5px; color:${DOC_BRAND.ink}; margin-top:8px; line-height:1.65; }
-      .jp-note b { color:#8a6d10; }
-      @page { size:A4; margin:12mm; }
-    </style></head><body>
-    <div class="doc-sheet">
-      ${docHeader({ docTitle: "JADWAL PENGIRIMAN" })}
-      <div class="jp-meta">
-        <div>
-          <div class="lbl">Pelanggan</div>
-          <div class="val">${order.customer_nama || "&nbsp;"}</div>
-          <div style="font-size:10px;color:${DOC_BRAND.muted};margin-top:3px">Pelabuhan Asal: <b style="color:${DOC_BRAND.ink}">${asal}</b> &middot; ${rows.length} unit</div>
-        </div>
-        <table>
-          <tr><td>No. Dokumen</td><td>${noDoc}</td></tr>
-          <tr><td>No. Pesanan</td><td>${order.order_id || "—"}</td></tr>
-          <tr><td>Tanggal Siap Unit</td><td>${fmtTgl(meta.tanggal_siap)}</td></tr>
-          <tr><td>Dicetak</td><td>${fmtTgl(new Date().toISOString().slice(0, 10))}</td></tr>
-        </table>
-      </div>
-
-      <table class="jp">
-        <thead><tr>
-          <th class="c" style="width:22px">No</th><th>Unit / Tipe</th><th>No. Polisi</th><th>No. Rangka</th><th>No. Mesin</th>
-          <th>Tujuan</th><th>Nama Kapal</th><th>Kapal Berangkat</th><th>Estimasi Tiba</th>
-        </tr></thead>
-        <tbody>
-          ${rows.map((u, i) => {
-            const eta = addDays(u.etd, u.transit_hari);
-            const tj = u.tujuan || order.tujuan_kota || "—";
-            const veh = `${u.vehicle_type || ""}${u.tipe_model ? " " + u.tipe_model : ""}`.trim() || "—";
-            return `<tr>
-              <td class="c">${i + 1}</td>
-              <td>${veh}</td>
-              <td class="mono">${u.nopol || "—"}</td>
-              <td class="mono">${u.no_rangka || "—"}</td>
-              <td class="mono">${u.no_mesin || "—"}</td>
-              <td>${tj}</td>
-              <td>${u.nama_kapal || "—"}</td>
-              <td>${fmtTgl(u.etd)}</td>
-              <td><b>${eta ? fmtTgl(eta) : "—"}</b>${u.transit_hari ? ` <span style="color:${DOC_BRAND.muted};font-size:9px">(${u.transit_hari} hr)</span>` : ""}</td>
-            </tr>`;
-          }).join("")}
-        </tbody>
-      </table>
-
-      <div class="jp-note">
-        <b>Catatan penting:</b> Estimasi perjalanan laut dihitung sejak <b>KAPAL BERANGKAT</b>, bukan dari pengambilan/serah terima unit di pelabuhan. Estimasi Tiba = Tanggal Kapal Berangkat + lama pelayaran. Jadwal dapat berubah mengikuti kondisi cuaca &amp; operasional pelayaran.
-        ${meta.catatan_jadwal ? `<br><br><b>Catatan tambahan:</b> ${meta.catatan_jadwal}` : ""}
-      </div>
-
-      ${docFooter({ docNo: `Jadwal ${noDoc}` })}
-    </div>
-    <script>window.onload=()=>window.print()<\/script>
-    </body></html>`;
-    const w = window.open("", "_blank"); w.document.write(html); w.document.close();
-  };
+  // wrapper tipis: pakai fungsi modul biar bisa dicetak ulang dari Histori
+  const printInvoice = (lines, withTax, extra) =>
+    printInvoiceDoc(lines, withTax, { ...(extra || {}), customer_nama: order.customer_nama, order_id: order.order_id });
+  const printJadwal = (meta, units) =>
+    printJadwalDoc({ ...(meta || {}), customer_nama: order.customer_nama, order_id: order.order_id, asal_kota: order.asal_kota, tujuan_kota: order.tujuan_kota }, units);
 
   const [editDriver, setEditDriver] = useState(false);
   const [driverDraft, setDriverDraft] = useState(order.driver_id || "");
@@ -1883,7 +1678,15 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
             order={order}
             headers={headers}
             onClose={() => setShowJadwal(false)}
-            onPrint={(meta, units) => printJadwal(meta, units)}
+            onPrint={(meta, units) => {
+              const noDoc = printJadwal(meta, units);
+              saveDocHistory({
+                jenis: "jadwal", no_dokumen: noDoc, customer: order.customer_nama || "",
+                judul: `${order.customer_nama || "-"} · ${(units || []).length} unit`,
+                meta: { ...meta, customer_nama: order.customer_nama, order_id: order.order_id, asal_kota: order.asal_kota, tujuan_kota: order.tujuan_kota, no_dokumen: noDoc },
+                units, order_ids: [order.order_id],
+              }, headers);
+            }}
           />
         )}
         {showInvoice && (
@@ -1891,7 +1694,16 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
             order={order}
             headers={headers}
             onClose={() => setShowInvoice(false)}
-            onPrint={(lines, withTax, extra) => { printInvoice(lines, withTax, extra); setShowInvoice(false); }}
+            onPrint={(lines, withTax, extra) => {
+              const noInv = printInvoice(lines, withTax, extra);
+              saveDocHistory({
+                jenis: "invoice", no_dokumen: noInv, customer: order.customer_nama || "",
+                judul: `${order.customer_nama || "-"} · ${(lines || []).length} baris`,
+                meta: { ...(extra || {}), customer_nama: order.customer_nama, order_id: order.order_id, withTax: !!withTax, no_invoice: noInv },
+                lines, order_ids: [order.order_id],
+              }, headers);
+              setShowInvoice(false);
+            }}
           />
         )}
         {showTrip360 && (
@@ -2393,12 +2205,348 @@ function JadwalModal({ order, headers, onClose, onPrint }) {
 }
 
 /* ════════════════════════════════════════
+   HISTORI DOKUMEN — simpan tiap dokumen yang dicetak (fire-and-forget)
+════════════════════════════════════════ */
+function saveDocHistory(rec, headers) {
+  try {
+    axios.post(`${API}/admin/doc-history`, rec, { headers }).catch(() => {});
+  } catch (e) { /* jangan sampai ganggu cetak */ }
+}
+
+const DOC_HIST_FILTERS = [
+  { key: "", label: "Semua" },
+  { key: "invoice", label: "Invoice" },
+  { key: "jadwal", label: "Jadwal Pengiriman" },
+  { key: "jadwal_gabungan", label: "Jadwal Gabungan" },
+];
+const DOC_HIST_BADGE = {
+  invoice: { txt: "Invoice", bg: "rgba(91,141,239,0.18)", fg: "#9dbcff" },
+  jadwal: { txt: "Jadwal", bg: "rgba(51,181,124,0.18)", fg: "#7ee0af" },
+  jadwal_gabungan: { txt: "Jadwal Gabungan", bg: "rgba(201,151,58,0.20)", fg: "#e6c375" },
+};
+
+function HistoriDokumen({ headers }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState("");
+  const [err, setErr] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true); setErr("");
+    try {
+      const q = filter ? `?jenis=${encodeURIComponent(filter)}` : "";
+      const { data } = await axios.get(`${API}/admin/doc-history${q}`, { headers });
+      setItems(data.items || []);
+    } catch (e) {
+      setErr("Gagal memuat histori dokumen.");
+    } finally { setLoading(false); }
+  }, [filter, headers]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const reprint = (rec) => {
+    if (rec.jenis === "invoice") {
+      printInvoiceDoc(rec.lines, rec.meta?.withTax, rec.meta || {});
+    } else if (rec.jenis === "jadwal") {
+      printJadwalDoc(rec.meta || {}, rec.units || []);
+    } else if (rec.jenis === "jadwal_gabungan") {
+      printJadwalGabungan(rec.meta || {}, rec.units || []);
+    }
+  };
+
+  const del = async (rec) => {
+    if (!window.confirm(`Hapus dokumen ini dari histori?\n\n${rec.no_dokumen || rec.jenis_label}\n${rec.customer || ""}`)) return;
+    // optimistic
+    setItems((xs) => xs.filter((x) => x.id !== rec.id));
+    try {
+      await axios.delete(`${API}/admin/doc-history/${rec.id}`, { headers });
+    } catch (e) {
+      alert("Gagal menghapus. Muat ulang halaman.");
+      load();
+    }
+  };
+
+  const fmtWhen = (iso) => {
+    if (!iso) return "—";
+    try {
+      const d = new Date(iso);
+      return d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }) +
+        " · " + d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+    } catch { return iso.slice(0, 16).replace("T", " "); }
+  };
+
+  const countUnits = (rec) =>
+    rec.jenis === "invoice" ? `${(rec.lines || []).length} baris` : `${(rec.units || []).length} unit`;
+
+  return (
+    <div className="adm-dochist" data-testid="adm-dochist">
+      <div className="adm-dochist-filters">
+        {DOC_HIST_FILTERS.map((f) => (
+          <button key={f.key || "all"}
+            className={`adm-dochist-chip${filter === f.key ? " active" : ""}`}
+            onClick={() => setFilter(f.key)} data-testid={`dochist-filter-${f.key || "all"}`}>
+            {f.label}
+          </button>
+        ))}
+        <button className="adm-dochist-chip" onClick={load} title="Muat ulang" style={{ marginLeft: "auto" }}>↻</button>
+      </div>
+
+      {loading ? (
+        <div className="adm-dochist-empty">Memuat…</div>
+      ) : err ? (
+        <div className="adm-dochist-empty" style={{ color: "#e06b6b" }}>{err}</div>
+      ) : items.length === 0 ? (
+        <div className="adm-dochist-empty">
+          <div style={{ fontSize: 30, marginBottom: 8 }}>🗂️</div>
+          Belum ada dokumen tersimpan.<br />
+          <span style={{ fontSize: 12, opacity: 0.75 }}>Setiap kali kamu cetak Invoice atau Jadwal Pengiriman, otomatis muncul di sini.</span>
+        </div>
+      ) : (
+        <div className="adm-dochist-list">
+          {items.map((rec) => {
+            const badge = DOC_HIST_BADGE[rec.jenis] || { txt: rec.jenis_label || rec.jenis, bg: "rgba(255,255,255,0.08)", fg: "#cbd5e1" };
+            return (
+              <div key={rec.id} className="adm-dochist-row" data-testid="dochist-row">
+                <span className="adm-dochist-badge" style={{ background: badge.bg, color: badge.fg }}>{badge.txt}</span>
+                <div className="adm-dochist-main">
+                  <div className="adm-dochist-no">{rec.no_dokumen || "(tanpa nomor)"}</div>
+                  <div className="adm-dochist-sub">
+                    {rec.customer || "—"} · {countUnits(rec)}
+                    {rec.order_ids?.length > 1 ? ` · ${rec.order_ids.length} PO` : ""}
+                  </div>
+                </div>
+                <div className="adm-dochist-when">{fmtWhen(rec.created_at)}</div>
+                <div className="adm-dochist-actions">
+                  <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={() => reprint(rec)} data-testid="dochist-print">🖨️ Cetak ulang</button>
+                  <button className="adm-btn adm-dochist-btn adm-dochist-del" onClick={() => del(rec)} data-testid="dochist-del">🗑️ Hapus</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Cetak Faktur/Invoice (fungsi modul, bisa dicetak ulang dari Histori) ──
+   extra: { customer_nama, order_id, jatuhTempo, metode, pesan, ttdNama,
+            ttdJabatan, stempel, no_invoice? }  → return nomor faktur */
+function printInvoiceDoc(lines, withTax, extra) {
+  extra = extra || {};
+  // Back-compat: kalau dipanggil dengan angka tunggal, bungkus jadi 1 baris.
+  if (typeof lines === "number") lines = [{ nama: "Jasa Pengiriman", ket: "", qty: 1, harga: lines }];
+  lines = (lines || []).filter((l) => (l.harga || 0) > 0);
+  if (!lines.length) return "";
+  const { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel } = extra;
+  const subtotal = lines.reduce((s, l) => s + (l.harga || 0) * (l.qty || 1), 0);
+  const ppn = withTax ? Math.round(subtotal * 0.011) : 0;
+  const total = subtotal + ppn;
+  const fRp = (n) => n.toLocaleString("id-ID") + ",00";
+  const fmtTgl = (iso) => { if (!iso) return "—"; const [y, m, d] = iso.split("-"); return `${d}-${m}-${y}`; };
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const tgl = fmtTgl(todayIso);
+  const noInvoice = extra.no_invoice || `INV/AAL/${(extra.order_id || "").slice(-4) || "0000"}/${new Date().getFullYear()}`;
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${noInvoice}</title>
+  <style>
+    ${DOC_BASE_CSS}
+    .inv-meta-row { display:flex; justify-content:space-between; gap:24px; margin-bottom:16px; }
+    .inv-billto .lbl { font-size:9px; font-weight:700; text-transform:uppercase; color:${DOC_BRAND.muted}; letter-spacing:.5px; margin-bottom:4px; }
+    .inv-billto .val { font-size:14px; font-weight:800; color:${DOC_BRAND.ink}; }
+    .inv-meta-table { border-collapse:collapse; font-size:10.5px; }
+    .inv-meta-table td { padding:2.5px 0; }
+    .inv-meta-table td:first-child { color:${DOC_BRAND.muted}; padding-right:18px; white-space:nowrap; }
+    .inv-meta-table td:last-child { font-weight:700; text-align:right; }
+    .inv-total-bar { display:flex; justify-content:space-between; align-items:center; background:${DOC_BRAND.navyDeep}; color:#fff; padding:10px 16px; border-radius:6px; margin-bottom:18px; }
+    .inv-total-bar span:first-child { font-size:10.5px; font-weight:700; letter-spacing:.6px; text-transform:uppercase; opacity:.85; }
+    .inv-total-bar span:last-child { font-size:15px; font-weight:900; }
+    table.inv-items { width:100%; border-collapse:collapse; margin-bottom:14px; }
+    table.inv-items thead { display:table-header-group; }
+    table.inv-items tr { break-inside:avoid; page-break-inside:avoid; }
+    table.inv-items th { text-align:left; font-size:9px; text-transform:uppercase; letter-spacing:.4px; color:${DOC_BRAND.muted}; font-weight:700; padding:7px 8px; border-bottom:1.5px solid ${DOC_BRAND.navy}; }
+    table.inv-items td { padding:10px 8px; font-size:11px; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; background:${DOC_BRAND.paperMist}; }
+    table.inv-items .num { text-align:right; }
+    .inv-summary { display:flex; justify-content:space-between; gap:24px; margin-bottom:18px; }
+    .inv-note { flex:1; font-size:10px; color:${DOC_BRAND.muted}; line-height:1.7; }
+    .inv-note b { color:${DOC_BRAND.ink}; }
+    .inv-totals-box { width:230px; }
+    .inv-totals-box .row { display:flex; justify-content:space-between; padding:5px 0; font-size:10.5px; color:${DOC_BRAND.muted}; }
+    .inv-totals-box .row.grand { border-top:1.5px solid ${DOC_BRAND.navy}; margin-top:4px; padding-top:8px; font-size:13px; font-weight:900; color:${DOC_BRAND.navy}; }
+    .inv-pay-box { display:flex; align-items:center; gap:12px; padding:12px 16px; background:${DOC_BRAND.paperMist}; border-radius:8px; margin-bottom:20px; }
+    .inv-pay-badge { width:40px; height:40px; border-radius:7px; background:${DOC_BRAND.navy}; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:900; font-size:10px; flex-shrink:0; }
+    .inv-pay-num { font-size:14px; font-weight:900; letter-spacing:.5px; color:${DOC_BRAND.ink}; }
+    .inv-pay-name { font-size:9.5px; color:${DOC_BRAND.muted}; margin-top:1px; }
+    .inv-sign-row { display:flex; justify-content:flex-end; margin-top:26px; }
+    .inv-sign-cell { width:260px; text-align:center; position:relative; }
+    .inv-sign-lbl { font-size:10px; color:${DOC_BRAND.muted}; margin-bottom:6px; }
+    .inv-sign-stamp { height:78px; display:flex; align-items:center; justify-content:center; margin-bottom:2px; }
+    .inv-sign-stamp img { max-height:78px; max-width:200px; object-fit:contain; }
+    .inv-sign-stamp.empty { height:56px; }
+    .inv-sign-pt { font-size:11px; font-weight:800; color:${DOC_BRAND.ink}; }
+    .inv-sign-name { font-size:11px; font-weight:800; color:${DOC_BRAND.ink}; margin-top:2px; }
+    .inv-sign-jab { font-size:9.5px; color:${DOC_BRAND.muted}; margin-top:2px; }
+  </style></head><body>
+  <div class="doc-sheet">
+    ${docHeader({ docTitle: "FAKTUR / INVOICE" })}
+    <div class="inv-meta-row">
+      <div class="inv-billto">
+        <div class="lbl">Ditagihkan Kepada</div>
+        <div class="val">${extra.customer_nama || "&nbsp;"}</div>
+      </div>
+      <table class="inv-meta-table">
+        <tr><td>Faktur #</td><td>${noInvoice}</td></tr>
+        <tr><td>Tanggal</td><td>${tgl}</td></tr>
+        <tr><td>Jatuh Tempo</td><td>${fmtTgl(jatuhTempo)}</td></tr>
+        <tr><td>Metode Pembayaran</td><td>${metode || "Cash on Delivery"}</td></tr>
+        <tr><td>No. Pesanan</td><td>${extra.order_id || "—"}</td></tr>
+      </table>
+    </div>
+    <div class="inv-total-bar"><span>Total Tagihan</span><span>Rp ${fRp(total)}</span></div>
+    <table class="inv-items">
+      <thead><tr><th style="width:26px">No</th><th>Nama Barang</th><th>Keterangan</th><th>Qty</th><th>Harga Satuan (Rp)</th><th>Jumlah (Rp)</th></tr></thead>
+      <tbody>
+        ${lines.map((l, i) => `
+        <tr>
+          <td class="num">${i + 1}</td>
+          <td>${l.nama || "Jasa Pengiriman"}</td>
+          <td>${l.ket || "&nbsp;"}</td>
+          <td class="num">${l.qty || 1}</td>
+          <td class="num">${fRp(l.harga)}</td>
+          <td class="num">${fRp((l.harga || 0) * (l.qty || 1))}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>
+    <div class="inv-summary">
+      <div class="inv-note">
+        ${pesan ? `<b>Pesan:</b> ${pesan}<br>` : ""}
+        <b>Jumlah Unit:</b> ${lines.length}<br>
+        <b>Terbilang:</b> <i>${terbilangRupiah(total)}</i>
+      </div>
+      <div class="inv-totals-box">
+        <div class="row"><span>Subtotal</span><span>Rp ${fRp(subtotal)}</span></div>
+        <div class="row"><span>PPN Logistik (1.1%)</span><span>${withTax ? "Rp " + fRp(ppn) : "—"}</span></div>
+        <div class="row grand"><span>TOTAL</span><span>Rp ${fRp(total)}</span></div>
+      </div>
+    </div>
+    <div class="inv-pay-box">
+      <div class="inv-pay-badge">${DOC_BRAND.bank.name}</div>
+      <div>
+        <div class="inv-pay-num">${DOC_BRAND.bank.norek}</div>
+        <div class="inv-pay-name">Cabang ${DOC_BRAND.bank.cabang} &middot; a.n. ${DOC_BRAND.bank.an}</div>
+      </div>
+    </div>
+    <div class="inv-sign-row">
+      <div class="inv-sign-cell">
+        <div class="inv-sign-lbl">Hormat Kami,</div>
+        <div class="inv-sign-stamp ${stempel ? "" : "empty"}">${stempel ? `<img src="${stempel}" alt="stempel">` : ""}</div>
+        <div class="inv-sign-pt">PT. Alyssa Auto Logistik</div>
+        ${ttdNama ? `<div class="inv-sign-name">( ${ttdNama} )</div>` : ""}
+        ${ttdJabatan ? `<div class="inv-sign-jab">${ttdJabatan}</div>` : ""}
+      </div>
+    </div>
+    ${docFooter({ docNo: `Faktur ${noInvoice}` })}
+  </div>
+  <script>window.onload=()=>window.print()<\/script>
+  </body></html>`;
+  const w = window.open("", "_blank"); w.document.write(html); w.document.close();
+  return noInvoice;
+}
+
+/* ── Cetak Jadwal Pengiriman per-PO (fungsi modul, bisa dicetak ulang) ──
+   meta: { customer_nama, order_id, asal_kota, tujuan_kota, pelabuhan_asal,
+           tanggal_siap, catatan_jadwal, no_dokumen? }  → return no dokumen */
+function printJadwalDoc(meta, units) {
+  meta = meta || {};
+  const rows = (units || []).filter(Boolean);
+  if (!rows.length) return "";
+  const fmtTgl = (iso) => { if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return "—"; const [y, m, d] = iso.split("-"); return `${d}-${m}-${y}`; };
+  const addDays = (iso, n) => {
+    if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso) || !n) return "";
+    const dt = new Date(iso + "T00:00:00"); dt.setDate(dt.getDate() + Number(n));
+    return dt.toISOString().slice(0, 10);
+  };
+  const noDoc = meta.no_dokumen || `JP/AAL/${(meta.order_id || "").slice(-4) || "0000"}/${new Date().getFullYear()}`;
+  const asal = meta.pelabuhan_asal || meta.asal_kota || "—";
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Jadwal Pengiriman ${meta.order_id || ""}</title>
+  <style>
+    ${DOC_BASE_CSS}
+    .jp-meta { display:flex; justify-content:space-between; gap:24px; margin-bottom:12px; font-size:10.5px; }
+    .jp-meta .lbl { font-size:8.5px; font-weight:700; text-transform:uppercase; color:${DOC_BRAND.muted}; letter-spacing:.4px; }
+    .jp-meta .val { font-size:12px; font-weight:800; color:${DOC_BRAND.ink}; }
+    .jp-meta table td { padding:2px 0; }
+    .jp-meta table td:first-child { color:${DOC_BRAND.muted}; padding-right:14px; white-space:nowrap; }
+    .jp-meta table td:last-child { font-weight:700; text-align:right; }
+    table.jp { width:100%; border-collapse:collapse; margin-bottom:10px; }
+    table.jp thead { display:table-header-group; }
+    table.jp tr { break-inside:avoid; page-break-inside:avoid; }
+    table.jp th { text-align:left; font-size:9px; text-transform:uppercase; letter-spacing:.2px; color:#fff; background:${DOC_BRAND.navy}; font-weight:700; padding:7px 7px; }
+    table.jp td { padding:7px 7px; font-size:10.5px; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; }
+    table.jp tbody tr:nth-child(even) td { background:${DOC_BRAND.paperMist}; }
+    table.jp .c { text-align:center; }
+    table.jp .mono { font-family:${DOC_BRAND.mono || "monospace"}; }
+    .jp-note { border:1px solid ${DOC_BRAND.gold || "#d4a847"}; background:#fdf6e6; border-radius:6px; padding:10px 14px; font-size:10.5px; color:${DOC_BRAND.ink}; margin-top:8px; line-height:1.65; }
+    .jp-note b { color:#8a6d10; }
+    @page { size:A4; margin:12mm; }
+  </style></head><body>
+  <div class="doc-sheet">
+    ${docHeader({ docTitle: "JADWAL PENGIRIMAN" })}
+    <div class="jp-meta">
+      <div>
+        <div class="lbl">Pelanggan</div>
+        <div class="val">${meta.customer_nama || "&nbsp;"}</div>
+        <div style="font-size:10px;color:${DOC_BRAND.muted};margin-top:3px">Pelabuhan Asal: <b style="color:${DOC_BRAND.ink}">${asal}</b> &middot; ${rows.length} unit</div>
+      </div>
+      <table>
+        <tr><td>No. Dokumen</td><td>${noDoc}</td></tr>
+        <tr><td>No. Pesanan</td><td>${meta.order_id || "—"}</td></tr>
+        <tr><td>Tanggal Siap Unit</td><td>${fmtTgl(meta.tanggal_siap)}</td></tr>
+        <tr><td>Dicetak</td><td>${fmtTgl(new Date().toISOString().slice(0, 10))}</td></tr>
+      </table>
+    </div>
+    <table class="jp">
+      <thead><tr>
+        <th class="c" style="width:22px">No</th><th>Unit / Tipe</th><th>No. Polisi</th><th>No. Rangka</th><th>No. Mesin</th>
+        <th>Tujuan</th><th>Nama Kapal</th><th>Kapal Berangkat</th><th>Estimasi Tiba</th>
+      </tr></thead>
+      <tbody>
+        ${rows.map((u, i) => {
+          const eta = addDays(u.etd, u.transit_hari);
+          const tj = u.tujuan || meta.tujuan_kota || "—";
+          const veh = `${u.vehicle_type || ""}${u.tipe_model ? " " + u.tipe_model : ""}`.trim() || "—";
+          return `<tr>
+            <td class="c">${i + 1}</td>
+            <td>${veh}</td>
+            <td class="mono">${u.nopol || "—"}</td>
+            <td class="mono">${u.no_rangka || "—"}</td>
+            <td class="mono">${u.no_mesin || "—"}</td>
+            <td>${tj}</td>
+            <td>${u.nama_kapal || "—"}</td>
+            <td>${fmtTgl(u.etd)}</td>
+            <td><b>${eta ? fmtTgl(eta) : "—"}</b>${u.transit_hari ? ` <span style="color:${DOC_BRAND.muted};font-size:9px">(${u.transit_hari} hr)</span>` : ""}</td>
+          </tr>`;
+        }).join("")}
+      </tbody>
+    </table>
+    <div class="jp-note">
+      <b>Catatan penting:</b> Estimasi perjalanan laut dihitung sejak <b>KAPAL BERANGKAT</b>, bukan dari pengambilan/serah terima unit di pelabuhan. Estimasi Tiba = Tanggal Kapal Berangkat + lama pelayaran. Jadwal dapat berubah mengikuti kondisi cuaca &amp; operasional pelayaran.
+      ${meta.catatan_jadwal ? `<br><br><b>Catatan tambahan:</b> ${meta.catatan_jadwal}` : ""}
+    </div>
+    ${docFooter({ docNo: `Jadwal ${noDoc}` })}
+  </div>
+  <script>window.onload=()=>window.print()<\/script>
+  </body></html>`;
+  const w = window.open("", "_blank"); w.document.write(html); w.document.close();
+  return noDoc;
+}
+
+/* ════════════════════════════════════════
    JADWAL PENGIRIMAN GABUNGAN — kumpulin unit lintas-PO ke 1 A4 (gold)
 ════════════════════════════════════════ */
 function printJadwalGabungan(meta, units) {
   const rows = (units || []).filter(Boolean);
-  if (!rows.length) return;
-  const noDoc = `JP/AAL/GAB-${new Date().toISOString().slice(0,10).replace(/-/g,"").slice(2)}/${new Date().getFullYear()}`;
+  if (!rows.length) return "";
+  const noDoc = meta.no_dokumen || `JP/AAL/GAB-${new Date().toISOString().slice(0,10).replace(/-/g,"").slice(2)}/${new Date().getFullYear()}`;
   const asal = meta.pelabuhan_asal || "—";
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Jadwal Pengiriman Gabungan</title>
   <style>
@@ -2469,6 +2617,7 @@ function printJadwalGabungan(meta, units) {
   <script>window.onload=()=>window.print()<\/script>
   </body></html>`;
   const w = window.open("", "_blank"); w.document.write(html); w.document.close();
+  return noDoc;
 }
 
 function JadwalGabunganModal({ cart, headers, onClose, onDone }) {
@@ -2509,7 +2658,15 @@ function JadwalGabunganModal({ cart, headers, onClose, onDone }) {
   };
 
   const doPrint = () => {
-    printJadwalGabungan({ customer_nama: customers.length === 1 ? customers[0] : `${customers.length} customer`, pelabuhan_asal: pelabuhanAsal, tanggal_siap: tanggalSiap, catatan_jadwal: catatan }, docUnits());
+    const gabMeta = { customer_nama: customers.length === 1 ? customers[0] : `${customers.length} customer`, pelabuhan_asal: pelabuhanAsal, tanggal_siap: tanggalSiap, catatan_jadwal: catatan };
+    const units = docUnits();
+    const noDoc = printJadwalGabungan(gabMeta, units);
+    const orderIds = Array.from(new Set(rows.map((r) => r.order_id).filter(Boolean)));
+    saveDocHistory({
+      jenis: "jadwal_gabungan", no_dokumen: noDoc, customer: gabMeta.customer_nama,
+      judul: `${gabMeta.customer_nama} · ${units.length} unit · ${orderIds.length} PO`,
+      meta: { ...gabMeta, no_dokumen: noDoc }, units, order_ids: orderIds,
+    }, headers);
     persist();
     onDone();
   };
