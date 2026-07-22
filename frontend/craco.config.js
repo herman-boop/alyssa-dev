@@ -39,6 +39,11 @@ let webpackConfig = {
     },
     configure: (webpackConfig) => {
 
+      // WAJIB: matikan filesystem cache webpack. Di Railway, node_modules/.cache
+      // di-mount & persist antar deploy -> webpack reuse compile lama, bundle
+      // nggak berubah walau source diubah. cache:false = tiap build fresh.
+      webpackConfig.cache = false;
+
       // Add ignored patterns to reduce watched directories
         webpackConfig.watchOptions = {
           ...webpackConfig.watchOptions,

@@ -24,12 +24,17 @@ export function printPenawaran(rows, meta) {
   const noDoc = `PH/AAL/${String(now.getDate()).padStart(2, "0")}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getFullYear()).slice(2)}/${now.getFullYear()}`;
   const body = (rows || []).map((e, i) => {
     const sudah = e.asuransi && e.asuransi > 0;
+    const qty = parseInt(e.qty || e.jumlah || 1, 10) || 1;
+    const satuan = e.harga_deal || 0;
+    const total = satuan * qty;
     return `<tr>
       <td class="c">${i + 1}</td>
       <td><b>${esc(e.rute || "-")}</b>${e.catatan ? `<div class="ph-note">${esc(e.catatan)}</div>` : ""}</td>
       <td>${esc(e.moda || "-")}</td>
       <td>${esc(e.tipe_kendaraan || "-")}</td>
-      <td class="r"><b>${fRp(e.harga_deal)}</b></td>
+      <td class="c">${qty}</td>
+      <td class="r">${fRp(satuan)}</td>
+      <td class="r"><b>${fRp(total)}</b></td>
       <td class="c"><span class="ph-ins ${sudah ? "y" : "n"}">${sudah ? "Termasuk" : "Belum"}</span></td>
     </tr>`;
   }).join("");
@@ -89,8 +94,8 @@ export function printPenawaran(rows, meta) {
     </div>
     <table class="ph">
       <thead><tr>
-        <th class="c" style="width:28px">No</th><th>Rute</th>
-        <th style="width:110px">Moda</th><th style="width:92px">Tipe Kendaraan</th><th class="r" style="width:130px">Harga</th><th class="c" style="width:78px">Asuransi</th>
+        <th class="c" style="width:26px">No</th><th>Rute</th>
+        <th style="width:90px">Moda</th><th style="width:78px">Tipe Kendaraan</th><th class="c" style="width:32px">Qty</th><th class="r" style="width:108px">Harga Satuan</th><th class="r" style="width:112px">Total</th><th class="c" style="width:64px">Asuransi</th>
       </tr></thead>
       <tbody>${body}</tbody>
     </table>
