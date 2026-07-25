@@ -1975,8 +1975,8 @@ function InvoiceModal({ order, headers, onClose, onPrint }) {
                   </div>
                   <div className="adm-invu-harga">
                     <span>Rp</span>
-                    <input inputMode="numeric" disabled={!r.checked} value={r.harga ? hargaNum(r.harga).toLocaleString("id-ID") : ""} placeholder="0"
-                      onChange={(e) => setRow(i, { harga: e.target.value })} data-testid={`adm-invu-harga-${i}`} />
+                    <input inputMode="numeric" value={r.harga ? hargaNum(r.harga).toLocaleString("id-ID") : ""} placeholder="0"
+                      onChange={(e) => setRow(i, { harga: e.target.value, checked: hargaNum(e.target.value) > 0 ? true : r.checked })} data-testid={`adm-invu-harga-${i}`} />
                   </div>
                 </div>
               );
