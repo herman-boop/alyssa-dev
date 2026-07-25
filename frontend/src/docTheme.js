@@ -28,7 +28,11 @@ export const DOC_BRAND = {
 
 export const DOC_BASE_CSS = `
   * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: ${DOC_BRAND.ink}; background: #fff; }
+  /* Paksa browser mempertahankan warna asli (navy header, badge, zebra) saat
+     dicetak / Save as PDF — tanpa ini latar warna di-strip walau "Background
+     graphics" tidak dicentang, sehingga teks putih di atas navy jadi hilang. */
+  html { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: ${DOC_BRAND.ink}; background: #fff; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   .doc-sheet { padding: 14mm 14mm 10mm; max-width: 210mm; margin: 0 auto; }
   .doc-header { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; padding-bottom:14px; border-bottom:2.5px solid ${DOC_BRAND.navy}; margin-bottom:16px; }
   .doc-brand { display:flex; align-items:center; gap:12px; }
@@ -38,7 +42,11 @@ export const DOC_BASE_CSS = `
   .doc-addr { text-align:right; font-size:9.5px; color:${DOC_BRAND.muted}; line-height:1.6; }
   .doc-title { font-size:20px; font-weight:900; color:${DOC_BRAND.navy}; letter-spacing:.5px; text-align:right; margin-bottom:2px; }
   .doc-footer { display:flex; justify-content:space-between; align-items:center; padding-top:10px; margin-top:20px; border-top:1px solid ${DOC_BRAND.line}; font-size:8.5px; color:${DOC_BRAND.muted}; }
-  @media print { @page { margin:0; size:A4 portrait; } body { padding:0; } }
+  @media print {
+    @page { margin:0; size:A4 portrait; }
+    body { padding:0; }
+    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  }
 `;
 
 /* Header block: logo + nama perusahaan di kiri, alamat + judul dokumen di kanan. */

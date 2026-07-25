@@ -453,6 +453,7 @@ export default function CostCalculator() {
     <title>${cfg.title} - PT Alyssa Auto Logistik</title>
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
       body { font-family: Arial, sans-serif; font-size: 10px; color: #222; background: #fff; padding: 20px 24px; }
       .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #BA7517; padding-bottom: 10px; margin-bottom: 14px; }
       .co-name { font-size: 15px; font-weight: 800; color: #BA7517; letter-spacing: .5px; }
@@ -469,7 +470,7 @@ export default function CostCalculator() {
       .badge { background: #f97316; color: #fff; font-size: 7px; padding: 1px 4px; border-radius: 3px; }
       .no-asu { color: #c05621 !important; font-weight: 600; }
       .footer { border-top: 1px solid #ddd; padding-top: 8px; font-size: 8.5px; color: #999; display: flex; justify-content: space-between; }
-      @media print { body { padding: 10px 14px; } @page { margin: 12mm 10mm; size: A4 landscape; } }
+      @media print { body { padding: 10px 14px; } @page { margin: 12mm 10mm; size: A4 landscape; } * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }
     </style></head><body>
     <div class="header">
       <div><div class="co-name">PT ALYSSA AUTO LOGISTIK</div><div class="co-sub">Solusi Transportasi &amp; Logistik Kendaraan</div></div>
