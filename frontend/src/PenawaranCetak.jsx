@@ -22,19 +22,17 @@ export function printPenawaran(rows, meta) {
   const fmtTgl = (iso) => (iso ? new Date(iso).toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" }) : "-");
   const now = new Date();
   const noDoc = `PH/AAL/${String(now.getDate()).padStart(2, "0")}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getFullYear()).slice(2)}/${now.getFullYear()}`;
+  // Grand total = jumlah seluruh Harga Satuan semua baris (Asuransi TIDAK dijumlahkan).
+  const grandTotal = (rows || []).reduce((s, e) => s + (e.harga_deal || 0), 0);
   const body = (rows || []).map((e, i) => {
     const sudah = e.asuransi && e.asuransi > 0;
-    const qty = parseInt(e.qty || e.jumlah || 1, 10) || 1;
     const satuan = e.harga_deal || 0;
-    const total = satuan * qty;
     return `<tr>
       <td class="c">${i + 1}</td>
       <td><b>${esc(e.rute || "-")}</b>${e.catatan ? `<div class="ph-note">${esc(e.catatan)}</div>` : ""}</td>
       <td>${esc(e.moda || "-")}</td>
       <td>${esc(e.tipe_kendaraan || "-")}</td>
-      <td class="c">${qty}</td>
       <td class="r">${fRp(satuan)}</td>
-      <td class="r"><b>${fRp(total)}</b></td>
       <td class="c"><span class="ph-ins ${sudah ? "y" : "n"}">${sudah ? "Termasuk" : "Belum"}</span></td>
     </tr>`;
   }).join("");
@@ -50,17 +48,20 @@ export function printPenawaran(rows, meta) {
     .ph-meta-table td { padding:3px 0; }
     .ph-meta-table td:first-child { color:${DOC_BRAND.muted}; padding-right:18px; white-space:nowrap; }
     .ph-meta-table td:last-child { font-weight:700; text-align:right; }
-    table.ph { width:100%; border-collapse:collapse; margin-bottom:16px; }
-    table.ph thead { display:table-header-group; }
-    table.ph tr { break-inside:avoid; page-break-inside:avoid; }
-    table.ph th { text-align:left; font-size:10.5px; text-transform:uppercase; letter-spacing:.4px; color:#fff; background:${DOC_BRAND.navy}; font-weight:700; padding:9px 9px; }
+    table.ph { width:100%; border-collapse:collapse; margin-bottom:14px; }
+    table.ph thead { display:table-header-group; }        /* header diulang tiap halaman */
+    table.ph tfoot { display:table-row-group; }            /* baris TOTAL muncul sekali di akhir */
+    table.ph tr { break-inside:avoid; page-break-inside:avoid; }  /* baris tidak pecah 2 halaman */
+    table.ph th { text-align:left; font-size:8.5px; text-transform:uppercase; letter-spacing:.3px; color:#fff; background:${DOC_BRAND.navy}; font-weight:700; padding:5px 7px; white-space:nowrap; }
     table.ph th.r { text-align:right; } table.ph th.c { text-align:center; }
-    table.ph td { padding:11px 9px; font-size:12.5px; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; }
+    table.ph td { padding:4px 7px; font-size:9px; line-height:1.35; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; }
     table.ph tbody tr:nth-child(even) td { background:${DOC_BRAND.paperMist}; }
     table.ph td.c { text-align:center; } table.ph td.r { text-align:right; white-space:nowrap; }
-    table.ph td.r b { font-size:13px; }
-    table.ph .ph-note { font-size:10.5px; color:${DOC_BRAND.muted}; font-style:italic; margin-top:3px; font-weight:400; }
-    .ph-ins { display:inline-block; font-size:10px; font-weight:800; border-radius:12px; padding:3px 9px; white-space:nowrap; }
+    table.ph .ph-note { font-size:8px; color:${DOC_BRAND.muted}; font-style:italic; margin-top:2px; font-weight:400; }
+    table.ph tfoot .ph-total td { border-top:2px solid ${DOC_BRAND.navy}; border-bottom:none; padding:7px 7px; font-size:10px; background:#fff; }
+    table.ph tfoot .ph-total .lbl { text-align:right; font-weight:800; letter-spacing:.3px; color:${DOC_BRAND.ink}; }
+    table.ph tfoot .ph-total .val { text-align:right; font-weight:800; white-space:nowrap; color:${DOC_BRAND.ink}; }
+    .ph-ins { display:inline-block; font-size:8px; font-weight:800; border-radius:10px; padding:2px 7px; white-space:nowrap; }
     .ph-ins.y { background:#d1fae5; color:#065f46; } .ph-ins.n { background:#fef2f2; color:#991b1b; }
     .ph-pay-box { display:flex; align-items:center; gap:14px; padding:14px 18px; background:${DOC_BRAND.paperMist}; border-radius:8px; margin-bottom:14px; }
     .ph-pay-badge { width:46px; height:46px; border-radius:8px; background:#0054a6; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:900; font-size:13px; flex-shrink:0; }
@@ -77,7 +78,9 @@ export function printPenawaran(rows, meta) {
     .ph-sign-pt { font-size:12.5px; font-weight:800; color:${DOC_BRAND.ink}; }
     .ph-sign-name { font-size:12.5px; font-weight:800; color:${DOC_BRAND.ink}; margin-top:2px; }
     .ph-sign-jab { font-size:10.5px; color:${DOC_BRAND.muted}; margin-top:2px; }
-    @page { size:A4; margin:12mm; }
+    .doc-sheet { padding: 0; max-width: 210mm; }
+    @page { size: A4 portrait; margin: 8mm; }
+    @media print { @page { size: A4 portrait; margin: 8mm; } }
   </style></head><body>
   <div class="doc-sheet">
     ${docHeader({ docTitle: "PENAWARAN HARGA" })}
@@ -94,10 +97,17 @@ export function printPenawaran(rows, meta) {
     </div>
     <table class="ph">
       <thead><tr>
-        <th class="c" style="width:26px">No</th><th>Rute</th>
-        <th style="width:90px">Moda</th><th style="width:78px">Tipe Kendaraan</th><th class="c" style="width:32px">Qty</th><th class="r" style="width:108px">Harga Satuan</th><th class="r" style="width:112px">Total</th><th class="c" style="width:64px">Asuransi</th>
+        <th class="c" style="width:24px">No</th><th>Rute</th>
+        <th style="width:96px">Moda</th><th style="width:88px">Tipe Kendaraan</th><th class="r" style="width:118px">Harga Satuan</th><th class="c" style="width:66px">Asuransi</th>
       </tr></thead>
       <tbody>${body}</tbody>
+      <tfoot>
+        <tr class="ph-total">
+          <td class="lbl" colspan="4">TOTAL</td>
+          <td class="val">${fRp(grandTotal)}</td>
+          <td></td>
+        </tr>
+      </tfoot>
     </table>
     <div class="ph-pay-box">
       <div class="ph-pay-badge">${DOC_BRAND.bank.name}</div>
