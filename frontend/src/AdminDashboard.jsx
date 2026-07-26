@@ -228,6 +228,7 @@ function Dashboard({ pin, onLogout }) {
   // Keranjang unit lintas-PO → Jadwal Pengiriman Gabungan
   const [jadwalCart, setJadwalCart] = useState([]); // [{order_id, customer_nama, asal_kota, tujuan_kota, unit}]
   const [showJadwalGab, setShowJadwalGab] = useState(false);
+  const [showInvoiceGab, setShowInvoiceGab] = useState(false);
   const cartHas = useCallback((uid) => jadwalCart.some((c) => c.unit?.unit_id === uid), [jadwalCart]);
   const toggleCartUnit = useCallback((order, unit) => {
     setJadwalCart((c) => c.some((x) => x.unit?.unit_id === unit.unit_id)
@@ -592,9 +593,10 @@ function Dashboard({ pin, onLogout }) {
 
       {jadwalCart.length > 0 && (
         <div className="adm-cartbar" data-testid="adm-cartbar">
-          <div className="adm-cartbar-info">🚢 <b>{jadwalCart.length} unit</b> dipilih untuk jadwal</div>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div className="adm-cartbar-info">✅ <b>{jadwalCart.length} unit</b> dipilih</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button className="adm-btn adm-btn-sm" onClick={clearCart}>Kosongkan</button>
+            <button className="adm-btn adm-btn-sm adm-btn-blue" onClick={() => setShowInvoiceGab(true)} data-testid="adm-cartbar-invoice">Buat Invoice Gabungan</button>
             <button className="adm-btn adm-btn-sm adm-btn-gold" onClick={() => setShowJadwalGab(true)} data-testid="adm-cartbar-jadwal">Buat Jadwal Gabungan</button>
           </div>
         </div>
@@ -605,6 +607,14 @@ function Dashboard({ pin, onLogout }) {
           headers={headers}
           onClose={() => setShowJadwalGab(false)}
           onDone={() => { setShowJadwalGab(false); }}
+        />
+      )}
+      {showInvoiceGab && (
+        <InvoiceGabunganModal
+          cart={jadwalCart}
+          headers={headers}
+          onClose={() => setShowInvoiceGab(false)}
+          onDone={() => { setShowInvoiceGab(false); }}
         />
       )}
 
@@ -2733,6 +2743,172 @@ function JadwalGabunganModal({ cart, headers, onClose, onDone }) {
         <div className="adm-modal-foot">
           <button className="adm-btn adm-btn-ghost" onClick={onClose}>Tutup</button>
           <button className="adm-btn adm-btn-gold" onClick={doPrint} data-testid="adm-jadwalgab-print">🖨️ Cetak Jadwal ({rows.length} unit)</button>
+        </div>
+      </div>
+    </div>
+    </div>
+  ), document.body);
+}
+
+/* ════════════════════════════════════════
+   INVOICE GABUNGAN — tarik unit lintas-PO dari keranjang → 1 invoice
+   (harga per unit, PPN opsional, pesan, penandatangan). Pakai generator
+   printInvoiceDoc yang sama dengan invoice per-PO.
+════════════════════════════════════════ */
+function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const customers = Array.from(new Set(cart.map((c) => c.customer_nama).filter(Boolean)));
+  const [rows, setRows] = useState(() => cart.map((c) => ({
+    order_id: c.order_id, customer_nama: c.customer_nama,
+    asal_kota: c.asal_kota, tujuan_kota: c.tujuan_kota, unit: c.unit, harga: "",
+  })));
+  const [withTax, setWithTax] = useState(true);
+  const [jatuhTempo, setJatuhTempo] = useState(todayIso);
+  const [metode, setMetode] = useState("Cash on Delivery");
+  const [pesan, setPesan] = useState("");
+  const [ttdNama, setTtdNama] = useState("");
+  const [ttdJabatan, setTtdJabatan] = useState("Finance & Accounting Controller");
+  const [stempel, setStempel] = useState(null);
+
+  const onStempel = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (!f.type.startsWith("image/")) { alert("Stempel harus berupa gambar (PNG/JPG)."); return; }
+    if (f.size > 3 * 1024 * 1024) { alert("Ukuran gambar maksimal 3MB."); return; }
+    const r = new FileReader();
+    r.onload = () => setStempel(r.result);
+    r.readAsDataURL(f);
+  };
+
+  const hargaNum = (s) => parseInt(String(s || "").replace(/[^0-9]/g, ""), 10) || 0;
+  const setRow = (i, patch) => setRows((rs) => rs.map((r, x) => x === i ? { ...r, ...patch } : r));
+  const unitKet = (r) => {
+    const u = r.unit || {};
+    const veh = `${u.vehicle_type || ""}${u.tipe_model ? " " + u.tipe_model : ""}`.trim() || "Kendaraan";
+    const rute = `(${r.asal_kota || "—"}–${r.tujuan_kota || "—"})`;
+    const rangka = u.no_rangka ? `<br>No. Rangka: ${u.no_rangka}` : "";
+    return `${veh}${u.nopol ? " " + u.nopol : ""} ${rute}${rangka}`;
+  };
+
+  const subtotal = rows.reduce((s, r) => s + hargaNum(r.harga), 0);
+  const ppn = withTax ? Math.round(subtotal * 0.011) : 0;
+  const total = subtotal + ppn;
+  const okCount = rows.filter((r) => hargaNum(r.harga) > 0).length;
+  const fRp = (n) => "Rp " + n.toLocaleString("id-ID");
+
+  const doPrint = () => {
+    const lines = rows.filter((r) => hargaNum(r.harga) > 0)
+      .map((r) => ({ nama: "Jasa Pengiriman", ket: unitKet(r), qty: 1, harga: hargaNum(r.harga) }));
+    if (!lines.length) { alert("Isi harga minimal 1 unit dulu."); return; }
+    const orderIds = Array.from(new Set(rows.map((r) => r.order_id).filter(Boolean)));
+    const now = new Date();
+    const noInv = `INV/AAL/${String(now.getDate()).padStart(2, "0")}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getFullYear()).slice(2)}/${now.getFullYear()}`;
+    const cust = customers.length === 1 ? customers[0] : `${customers.length} customer`;
+    const extra = { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel, customer_nama: cust, order_id: orderIds.join(", "), no_invoice: noInv };
+    printInvoiceDoc(lines, withTax, extra);
+    saveDocHistory({
+      jenis: "invoice", no_dokumen: noInv, customer: cust,
+      judul: `${cust} · ${lines.length} unit · ${orderIds.length} PO`,
+      meta: { ...extra, withTax: !!withTax }, lines, order_ids: orderIds,
+    }, headers);
+    // tandai unit sudah diinvoice (kelompokkan per order) — best-effort
+    const byOrder = {};
+    rows.filter((r) => hargaNum(r.harga) > 0 && r.unit?.unit_id && r.unit.unit_id !== "legacy")
+      .forEach((r) => { (byOrder[r.order_id] = byOrder[r.order_id] || []).push(r.unit.unit_id); });
+    Object.entries(byOrder).forEach(([oid, ids]) => {
+      if (ids.length) axios.post(`${API}/admin/orders/${oid}/units/mark-invoiced`, { unit_ids: ids }, { headers }).catch(() => {});
+    });
+    onDone();
+  };
+
+  return createPortal((
+    <div className="adm-vars">
+    <div className="adm-modal-bg" onClick={onClose} data-testid="adm-invgab-modal">
+      <div className="adm-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
+        <div className="adm-modal-head">
+          <div>
+            <div className="adm-modal-title">🧾 Invoice Gabungan</div>
+            <div className="adm-modal-sub">{cart.length} unit dari {new Set(cart.map((c) => c.order_id)).size} PO{customers.length === 1 ? ` · ${customers[0]}` : ` · ${customers.length} customer`}</div>
+          </div>
+          <button className="adm-modal-close" onClick={onClose} aria-label="Tutup">✕</button>
+        </div>
+        <div className="adm-modal-body">
+          {customers.length > 1 && <div className="t360-fin-err" style={{ marginBottom: 12, background: "var(--gold-bg)", borderColor: "var(--gold-bd)", color: "var(--gold-xl)" }}>Catatan: unit dari {customers.length} customer berbeda tercampur di 1 invoice.</div>}
+          <div style={{ fontSize: 12, color: "var(--text-3)", fontWeight: 700, marginBottom: 8 }}>Unit yang Ditagih &amp; Harga (per unit)</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+            {rows.map((r, i) => {
+              const u = r.unit || {};
+              return (
+                <div key={u.unit_id || i} className="adm-invu">
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {i + 1}. {u.vehicle_type || "—"}{u.tipe_model ? ` · ${u.tipe_model}` : ""}
+                    </div>
+                    <div style={{ fontSize: 10.5, color: "var(--text-mute)", fontFamily: "var(--mono)" }}>{u.nopol || "nopol —"} · {r.order_id}</div>
+                  </div>
+                  <div className="adm-invu-harga">
+                    <span>Rp</span>
+                    <input inputMode="numeric" value={r.harga ? hargaNum(r.harga).toLocaleString("id-ID") : ""} placeholder="0"
+                      onChange={(e) => setRow(i, { harga: e.target.value })} data-testid={`adm-invgab-harga-${i}`} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+            <label style={{ flex: 1 }}>
+              <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", marginBottom: 5, fontWeight: 700 }}>Jatuh Tempo</span>
+              <input type="date" className="adm-input" value={jatuhTempo} onChange={(e) => setJatuhTempo(e.target.value)} />
+            </label>
+            <label style={{ flex: 1 }}>
+              <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", marginBottom: 5, fontWeight: 700 }}>Metode Pembayaran</span>
+              <select className="adm-input" value={metode} onChange={(e) => setMetode(e.target.value)}>
+                <option>Cash on Delivery</option>
+                <option>Transfer Bank</option>
+              </select>
+            </label>
+          </div>
+          <label style={{ display: "block", marginBottom: 14 }}>
+            <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", marginBottom: 5, fontWeight: 700 }}>Pesan / Catatan (opsional)</span>
+            <input type="text" className="adm-input" value={pesan} onChange={(e) => setPesan(e.target.value)} placeholder="contoh: Door to door" />
+          </label>
+          <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12, marginBottom: 14 }}>
+            <div style={{ fontSize: 12, color: "var(--text-3)", fontWeight: 700, marginBottom: 8 }}>Penandatangan</div>
+            <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+              <label style={{ flex: 1 }}>
+                <span style={{ display: "block", fontSize: 11, color: "var(--text-mute)", marginBottom: 5, fontWeight: 600 }}>Nama</span>
+                <input type="text" className="adm-input" value={ttdNama} onChange={(e) => setTtdNama(e.target.value)} placeholder="contoh: Ulpah" />
+              </label>
+              <label style={{ flex: 1 }}>
+                <span style={{ display: "block", fontSize: 11, color: "var(--text-mute)", marginBottom: 5, fontWeight: 600 }}>Jabatan</span>
+                <input type="text" className="adm-input" value={ttdJabatan} onChange={(e) => setTtdJabatan(e.target.value)} placeholder="contoh: Finance & Accounting Controller" />
+              </label>
+            </div>
+            <span style={{ display: "block", fontSize: 11, color: "var(--text-mute)", marginBottom: 5, fontWeight: 600 }}>Stempel / Tanda Tangan Digital (opsional — PNG/JPG)</span>
+            {stempel ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <img src={stempel} alt="stempel" style={{ height: 60, borderRadius: 6, border: "1px solid var(--border)", background: "#fff", padding: 4 }} />
+                <button className="adm-btn adm-btn-sm adm-btn-danger" onClick={() => setStempel(null)}>Hapus stempel</button>
+              </div>
+            ) : (
+              <input type="file" accept="image/*" className="adm-input" onChange={onStempel} />
+            )}
+          </div>
+          <label style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, cursor: "pointer" }}>
+            <input type="checkbox" checked={withTax} onChange={(e) => setWithTax(e.target.checked)} style={{ accentColor: "#58a6ff", width: 16, height: 16 }} data-testid="adm-invgab-tax" />
+            <span>Kenakan PPN Logistik (1.1%)</span>
+          </label>
+          {subtotal > 0 && (
+            <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px", fontSize: 13 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>Subtotal ({okCount} unit)</span><span>{fRp(subtotal)}</span></div>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>PPN 1.1%</span><span>{withTax ? fRp(ppn) : "—"}</span></div>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0 0", marginTop: 4, borderTop: "1px solid var(--border)", fontWeight: 800 }}><span>Total</span><span>{fRp(total)}</span></div>
+            </div>
+          )}
+        </div>
+        <div className="adm-modal-foot">
+          <button className="adm-btn adm-btn-ghost" onClick={onClose}>Batal</button>
+          <button className="adm-btn adm-btn-blue" onClick={doPrint} disabled={okCount === 0} data-testid="adm-invgab-print">🧾 Cetak Invoice ({okCount} unit)</button>
         </div>
       </div>
     </div>
