@@ -146,6 +146,23 @@ def require_admin_pin(x_admin_pin: Optional[str] = Header(default=None, alias="X
     return True
 
 
+def require_vendor_pin(x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin")) -> bool:
+    """Role khusus 'Catat Bayar Vendor' (mobile). Menerima VENDOR_PIN (akses
+    terbatas: HANYA endpoint /vendor-mobile/*) atau ADMIN_PIN (admin penuh juga
+    boleh). PIN vendor tidak bisa dipakai di endpoint admin lain karena hanya
+    grup /vendor-mobile/* yang memakai dependency ini."""
+    given = (x_admin_pin or "").strip()
+    if not given:
+        raise HTTPException(401, "Missing PIN")
+    admin = (os.environ.get("ADMIN_PIN") or "").strip()
+    vendor = (os.environ.get("VENDOR_PIN") or "").strip()
+    if admin and given == admin:
+        return True
+    if vendor and given == vendor:
+        return True
+    raise HTTPException(401, "Invalid PIN")
+
+
 # WIB timezone helper (UTC+7) for daily checkpoint
 WIB = timezone(timedelta(hours=7))
 def today_wib() -> str:
@@ -2679,6 +2696,175 @@ PAYMENT_METODE = ["Transfer BCA", "Transfer Bank Lain", "Tunai", "Giro / Cek", "
 @api_router.get("/admin/finance/metode-pembayaran", dependencies=[Depends(require_admin_pin)])
 async def list_metode_pembayaran():
     return {"items": PAYMENT_METODE}
+
+
+# ══════════════════════════════════════════════════════
+# MOBILE "CATAT BAYAR VENDOR" — role terbatas (VENDOR_PIN)
+# Semua endpoint di grup ini hanya buat input/lihat pembayaran vendor.
+# ══════════════════════════════════════════════════════
+MOBILE_VENDOR_KATEGORI = ["Driver", "Kapal / Pelayaran", "Tol", "BBM", "Vendor", "Lainnya"]
+MOBILE_VENDOR_METODE = ["Transfer", "Tunai", "Lainnya"]
+
+
+def _rute_str(a: str, b: str) -> str:
+    a = (a or "").strip(); b = (b or "").strip()
+    if a and b: return f"{a} → {b}"
+    return a or b or "-"
+
+
+@api_router.get("/vendor-mobile/bootstrap", dependencies=[Depends(require_vendor_pin)])
+async def vendor_mobile_bootstrap():
+    """Data awal buat form: kategori biaya, metode bayar, & daftar vendor."""
+    vendors = []
+    async for s in db.supplier_profiles.find({}, {"_id": 0, "id": 1, "nama": 1}).sort("nama", 1):
+        if s.get("id"):
+            vendors.append({"id": s["id"], "nama": s.get("nama") or "-"})
+    return {"kategori": MOBILE_VENDOR_KATEGORI, "metode": MOBILE_VENDOR_METODE, "vendors": vendors}
+
+
+@api_router.get("/vendor-mobile/trips", dependencies=[Depends(require_vendor_pin)])
+async def vendor_mobile_trips(q: Optional[str] = None, limit: int = 25):
+    """Cari trip by nopol / trip_id / customer / kota. Ringkas buat picker."""
+    ql = (q or "").strip().lower()
+    out = []
+    async for t in db.trips.find({}, {"_id": 0}).sort("created_at", -1):
+        try:
+            ctx = await _trip_auto_context(t)
+        except Exception:
+            ctx = {}
+        nopol = ctx.get("nopol") or ""
+        cust = ctx.get("customer_nama") or ""
+        asal = ctx.get("asal_kota") or ""; tuj = ctx.get("tujuan_kota") or ""
+        hay = f"{t.get('trip_id','')} {nopol} {cust} {asal} {tuj}".lower()
+        if ql and ql not in hay:
+            continue
+        out.append({
+            "trip_id": t.get("trip_id"), "nopol": nopol,
+            "vehicle": ctx.get("vehicle_type") or "", "customer": cust,
+            "rute": _rute_str(asal, tuj),
+        })
+        if len(out) >= limit:
+            break
+    return {"items": out}
+
+
+@api_router.get("/vendor-mobile/unpaid", dependencies=[Depends(require_vendor_pin)])
+async def vendor_mobile_unpaid(limit: int = 200):
+    """Semua tagihan vendor yang masih ada sisa (belum lunas), lintas vendor."""
+    out = []
+    async for s in db.supplier_profiles.find({}, {"_id": 0}):
+        for j in (s.get("jobs") or []):
+            jt = _supplier_job_totals(j)
+            if (jt.get("sisa") or 0) > 0:
+                out.append({
+                    "supplier_id": s.get("id"), "supplier_nama": s.get("nama") or "-",
+                    "job_id": j.get("id"), "trip_id": j.get("trip_id"),
+                    "nopol": j.get("nopol") or "", "rute": _rute_str(j.get("asal_kota"), j.get("tujuan_kota")),
+                    "kategori": j.get("kategori") or "Lainnya",
+                    "total_harga": jt.get("total_harga") or 0,
+                    "terbayar": jt.get("total_terbayar") or 0, "sisa": jt.get("sisa") or 0,
+                    "tanggal": j.get("tanggal") or "",
+                })
+    out.sort(key=lambda x: x.get("tanggal") or "", reverse=True)
+    return {"items": out[:limit]}
+
+
+@api_router.get("/vendor-mobile/history", dependencies=[Depends(require_vendor_pin)])
+async def vendor_mobile_history(q: Optional[str] = None, limit: int = 200):
+    """Riwayat pembayaran vendor terbaru (semua vendor)."""
+    ql = (q or "").strip().lower()
+    out = []
+    async for s in db.supplier_profiles.find({}, {"_id": 0}):
+        for j in (s.get("jobs") or []):
+            for p in (j.get("payments") or []):
+                row = {
+                    "supplier_id": s.get("id"), "supplier_nama": s.get("nama") or "-",
+                    "job_id": j.get("id"), "payment_id": p.get("id"),
+                    "trip_id": j.get("trip_id"), "nopol": j.get("nopol") or "",
+                    "rute": _rute_str(j.get("asal_kota"), j.get("tujuan_kota")),
+                    "kategori": j.get("kategori") or "Lainnya",
+                    "amount": p.get("amount") or 0, "tanggal": p.get("tanggal") or "",
+                    "metode": p.get("metode") or (p.get("tipe") or "").title() or "-",
+                    "bukti_url": p.get("bukti_url"), "catatan": p.get("catatan") or "",
+                }
+                if ql:
+                    hay = f"{row['supplier_nama']} {row['nopol']} {row['trip_id'] or ''} {row['kategori']}".lower()
+                    if ql not in hay:
+                        continue
+                out.append(row)
+    out.sort(key=lambda x: (x.get("tanggal") or "", x.get("payment_id") or ""), reverse=True)
+    return {"items": out[:limit]}
+
+
+@api_router.post("/vendor-mobile/pay", dependencies=[Depends(require_vendor_pin)])
+async def vendor_mobile_pay(
+    amount: int = Form(...),
+    tanggal: Optional[str] = Form(None),
+    metode: str = Form("Transfer"),
+    catatan: str = Form(""),
+    supplier_id: Optional[str] = Form(None),
+    vendor_name: Optional[str] = Form(None),
+    job_id: Optional[str] = Form(None),
+    trip_id: Optional[str] = Form(None),
+    kategori: str = Form("Lainnya"),
+    bukti: Optional[UploadFile] = File(None),
+):
+    """Catat 1 pembayaran vendor. Dua mode:
+    - Bayar tagihan yang sudah ada  -> kirim supplier_id + job_id.
+    - Catat pembayaran baru          -> kirim trip_id + (supplier_id | vendor_name)
+      + kategori; sistem bikin biaya vendor (supplier job) di trip itu lalu
+      langsung dibayar sejumlah `amount`."""
+    if amount <= 0:
+        raise HTTPException(400, "Nominal harus lebih dari 0")
+
+    if job_id and supplier_id:
+        target_sid, target_jid = supplier_id, job_id
+    else:
+        if not trip_id:
+            raise HTTPException(400, "Pilih trip / nomor polisi dulu")
+        if not (supplier_id or (vendor_name or "").strip()):
+            raise HTTPException(400, "Pilih vendor dulu")
+        trip = await db.trips.find_one({"trip_id": trip_id}, {"_id": 0})
+        if not trip:
+            raise HTTPException(404, "Trip tidak ditemukan")
+        res = await _add_trip_supplier_job(
+            trip, vendor_name=vendor_name, supplier_id=supplier_id,
+            kategori=kategori, jumlah=int(amount), tanggal=tanggal, catatan=catatan,
+        )
+        target_sid, target_jid = res["supplier_id"], res["job"]["id"]
+
+    sup = await db.supplier_profiles.find_one({"id": target_sid}, {"_id": 0})
+    if not sup:
+        raise HTTPException(404, "Vendor tidak ditemukan")
+    jobs = sup.get("jobs") or []
+    idx = next((i for i, j in enumerate(jobs) if j.get("id") == target_jid), None)
+    if idx is None:
+        raise HTTPException(404, "Tagihan vendor tidak ditemukan")
+
+    bukti_url = None
+    if bukti is not None and bukti.filename:
+        bukti_url = _save_upload(target_sid, f"payment/{target_jid}", bukti, ALLOWED_IMG | ALLOWED_DOC)
+
+    tgl = (tanggal or "").strip()
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", tgl):
+        tgl = today_wib()
+
+    payment = {
+        "id": _gen_supplier_id(), "amount": int(amount),
+        "catatan": (catatan or "").strip()[:300], "bukti_url": bukti_url,
+        "tanggal": tgl, "tipe": "transfer",
+        "metode": (metode or "Transfer").strip()[:40], "source": "vendor-mobile",
+    }
+    jobs[idx].setdefault("payments", []).append(payment)
+    await db.supplier_profiles.update_one({"id": target_sid}, {"$set": {"jobs": jobs}})
+    jt = _supplier_job_totals(jobs[idx])
+    return {
+        "ok": True, "supplier_id": target_sid, "supplier_nama": sup.get("nama"),
+        "job_id": target_jid, "payment": payment,
+        "nopol": jobs[idx].get("nopol") or "", "kategori": jobs[idx].get("kategori") or "Lainnya",
+        "total_harga": jt.get("total_harga") or 0, "terbayar": jt.get("total_terbayar") or 0,
+        "sisa": jt.get("sisa") or 0,
+    }
 
 
 @api_router.post("/admin/trips/{trip_id}/finance/payments", dependencies=[Depends(require_admin_pin)])
