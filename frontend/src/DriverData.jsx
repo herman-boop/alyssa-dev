@@ -114,10 +114,12 @@ function PrintSuratSearch({ drivers, onPrint, headers }) {
     return () => document.removeEventListener("mousedown", close);
   }, []);
 
+  const qLower = q.trim().toLowerCase();
+  const qDigits = q.replace(/\D/g, ""); // cocokkan 4 digit KTP HANYA kalau query berisi angka
   const results = q.trim().length >= 2
     ? drivers.filter(d =>
-        d.nama?.toLowerCase().includes(q.toLowerCase()) ||
-        (d.no_ktp || "").slice(-4).includes(q.replace(/\D/g, ""))
+        (d.nama || "").toLowerCase().includes(qLower) ||
+        (qDigits.length > 0 && (d.no_ktp || "").slice(-4).includes(qDigits))
       ).slice(0, 8)
     : [];
 
