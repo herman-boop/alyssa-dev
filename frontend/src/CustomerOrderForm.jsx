@@ -349,11 +349,6 @@ export default function CustomerOrderForm() {
                                   onChange={(e) => setUnit(i, "tahun", e.target.value.replace(/\D/g, ""))}
                                   placeholder="2024" data-testid={`ord-tahun-${i}`} />
                               </Field>
-                              <Field label="Tujuan Unit" hint="Isi kalau tujuan unit ini beda dari tujuan utama — mis. banyak kota tujuan dalam 1 pesanan.">
-                                <input type="text" className="of-inp" value={u.tujuan}
-                                  onChange={(e) => setUnit(i, "tujuan", e.target.value)}
-                                  placeholder="Kosongkan jika sama" data-testid={`ord-tujuan-unit-${i}`} />
-                              </Field>
                               <Field label="Catatan Unit" full hint="Opsional — kondisi khusus / kelengkapan unit ini.">
                                 <input type="text" className="of-inp" value={u.catatan}
                                   onChange={(e) => setUnit(i, "catatan", e.target.value)}
