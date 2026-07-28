@@ -2762,6 +2762,19 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
     order_id: c.order_id, customer_nama: c.customer_nama,
     asal_kota: c.asal_kota, tujuan_kota: c.tujuan_kota, unit: c.unit, harga: "",
   })));
+  // Auto-isi harga dari harga deal PO (cuma PO 1 unit biar akurat) — biar nggak ketik manual
+  useEffect(() => {
+    let alive = true;
+    axios.get(`${API}/admin/deal-prices`, { headers }).then((r) => {
+      if (!alive) return;
+      const dp = r.data?.prices || {};
+      setRows((rs) => rs.map((row) => {
+        const d = dp[row.order_id];
+        return (!row.harga && d && d.units === 1 && d.price > 0) ? { ...row, harga: String(d.price) } : row;
+      }));
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, []); // eslint-disable-line
   const [withTax, setWithTax] = useState(true);
   const [jatuhTempo, setJatuhTempo] = useState(todayIso);
   const [metode, setMetode] = useState("Cash on Delivery");

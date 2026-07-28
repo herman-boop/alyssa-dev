@@ -2089,6 +2089,28 @@ async def admin_list_orders(
     return {"count": len(items), "items": items}
 
 
+@api_router.get("/admin/deal-prices", dependencies=[Depends(require_admin_pin)])
+async def admin_deal_prices():
+    """Peta order_id -> { price, units }. price = harga deal customer yang
+    tersimpan (trip.finance.invoice_total); units = jumlah unit di PO. Dipakai
+    frontend buat auto-isi harga pas 'Tarik dari Order' (Invoice Gabungan &
+    Selisih Harga) tanpa ketik manual — cuma auto buat PO 1 unit biar akurat
+    (PO multi-unit invoice_total-nya total, jadi dibiarkan kosong)."""
+    price_by_order = {}
+    async for t in db.trips.find({}, {"_id": 0, "order_id": 1, "finance": 1}):
+        oid = t.get("order_id")
+        if oid:
+            price_by_order[oid] = int((t.get("finance") or {}).get("invoice_total") or 0)
+    out = {}
+    async for o in db.orders.find({}, {"_id": 0, "order_id": 1, "units": 1}):
+        oid = o.get("order_id")
+        if not oid:
+            continue
+        units = o.get("units") or []
+        out[oid] = {"price": price_by_order.get(oid, 0), "units": (len(units) if units else 1)}
+    return {"prices": out}
+
+
 def _admin_orders_filter(
     status: Optional[str],
     q: Optional[str],

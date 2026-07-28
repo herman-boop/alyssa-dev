@@ -154,30 +154,39 @@ export default function SelisihPage() {
   const [tarikLoading, setTarikLoading] = useState(false);
   const [tarikSel, setTarikSel] = useState({}); // key -> {..., harga_deal, harga_invoice}
   const [tarikSaving, setTarikSaving] = useState(false);
+  const [dealPrices, setDealPrices] = useState({}); // order_id -> { price, units }
 
   const orderUnitsOf = (o) => {
     const arr = (Array.isArray(o.units) && o.units.length) ? o.units
       : [{ unit_id: "legacy", vehicle_type: o.vehicle_type, tipe_model: o.tipe_model, nopol: o.nopol, no_rangka: o.no_rangka }];
+    const dp = dealPrices[o.order_id];
+    // auto-isi Harga Deal cuma buat PO 1 unit (biar akurat; multi-unit total, dibiarin kosong)
+    const suggest = (dp && dp.units === 1 && dp.price > 0) ? String(dp.price) : "";
     return arr.map((u, i) => ({
       key: `${o.order_id}:${u.unit_id || u.nopol || i}`,
       vehicle_type: `${u.vehicle_type || ""}${u.tipe_model ? " " + u.tipe_model : ""}`.trim() || "Kendaraan",
       no_unit: (u.nopol || u.no_rangka || "").toUpperCase(),
       asal_kota: o.asal_kota || "", tujuan_kota: o.tujuan_kota || "", customer: o.customer_nama || "",
+      suggestDeal: suggest,
     }));
   };
 
   const openTarik = async (tagihanId) => {
     setTarikOpen(tagihanId); setTarikSel({}); setTarikQ(""); setTarikLoading(true);
     try {
-      const r = await axios.get(`${API}/admin/orders`, { headers });
-      setTarikOrders(r.data?.items || []);
+      const [ro, rp] = await Promise.all([
+        axios.get(`${API}/admin/orders`, { headers }),
+        axios.get(`${API}/admin/deal-prices`, { headers }).catch(() => ({ data: { prices: {} } })),
+      ]);
+      setTarikOrders(ro.data?.items || []);
+      setDealPrices(rp.data?.prices || {});
     } catch { flash("Gagal memuat order"); setTarikOrders([]); }
     finally { setTarikLoading(false); }
   };
 
   const toggleTarik = (row) => setTarikSel((s) => {
     const n = { ...s };
-    if (n[row.key]) delete n[row.key]; else n[row.key] = { ...row, harga_deal: "", harga_invoice: "" };
+    if (n[row.key]) delete n[row.key]; else n[row.key] = { ...row, harga_deal: row.suggestDeal || "", harga_invoice: "" };
     return n;
   });
   const setTarikField = (key, field, val) => setTarikSel((s) => ({ ...s, [key]: { ...s[key], [field]: val } }));
