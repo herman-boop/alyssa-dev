@@ -17,7 +17,7 @@ const KONDISI_OPTIONS = ["Bekas", "Baru"];
 
 // F1 — Unit Master (multi-unit per PO)
 const MAX_UNITS = 20;
-const emptyUnit = () => ({ vehicle_type: "", tipe_model: "", nopol: "", no_rangka: "", no_mesin: "", warna: "", tahun: "", tujuan: "", catatan: "" });
+const emptyUnit = () => ({ vehicle_type: "", tipe_model: "", nopol: "", no_rangka: "", warna: "", tahun: "", tujuan: "", catatan: "" });
 
 /* ── Dark mode ── */
 function useDarkMode() {
@@ -338,11 +338,6 @@ export default function CustomerOrderForm() {
                                 <input type="text" className="of-inp" value={u.no_rangka}
                                   onChange={(e) => setUnit(i, "no_rangka", e.target.value.toUpperCase())}
                                   placeholder="MHFE1CD1XXXXX" data-testid={`ord-rangka-${i}`} />
-                              </Field>
-                              <Field label="No. Mesin">
-                                <input type="text" className="of-inp" value={u.no_mesin}
-                                  onChange={(e) => setUnit(i, "no_mesin", e.target.value.toUpperCase())}
-                                  placeholder="2GDXXXXXXX" data-testid={`ord-mesin-${i}`} />
                               </Field>
                               <Field label="Warna">
                                 <input type="text" className="of-inp" value={u.warna}
