@@ -147,6 +147,66 @@ export default function SelisihPage() {
     } catch { flash("Gagal hapus unit"); }
   };
 
+  // ── Tarik unit dari Order (kaya Invoice Gabungan): unit/rute auto, tinggal isi harga ──
+  const [tarikOpen, setTarikOpen] = useState(null); // tagihan_id yang lagi buka modal tarik
+  const [tarikOrders, setTarikOrders] = useState([]);
+  const [tarikQ, setTarikQ] = useState("");
+  const [tarikLoading, setTarikLoading] = useState(false);
+  const [tarikSel, setTarikSel] = useState({}); // key -> {..., harga_deal, harga_invoice}
+  const [tarikSaving, setTarikSaving] = useState(false);
+
+  const orderUnitsOf = (o) => {
+    const arr = (Array.isArray(o.units) && o.units.length) ? o.units
+      : [{ unit_id: "legacy", vehicle_type: o.vehicle_type, tipe_model: o.tipe_model, nopol: o.nopol, no_rangka: o.no_rangka }];
+    return arr.map((u, i) => ({
+      key: `${o.order_id}:${u.unit_id || u.nopol || i}`,
+      vehicle_type: `${u.vehicle_type || ""}${u.tipe_model ? " " + u.tipe_model : ""}`.trim() || "Kendaraan",
+      no_unit: (u.nopol || u.no_rangka || "").toUpperCase(),
+      asal_kota: o.asal_kota || "", tujuan_kota: o.tujuan_kota || "", customer: o.customer_nama || "",
+    }));
+  };
+
+  const openTarik = async (tagihanId) => {
+    setTarikOpen(tagihanId); setTarikSel({}); setTarikQ(""); setTarikLoading(true);
+    try {
+      const r = await axios.get(`${API}/admin/orders`, { headers });
+      setTarikOrders(r.data?.items || []);
+    } catch { flash("Gagal memuat order"); setTarikOrders([]); }
+    finally { setTarikLoading(false); }
+  };
+
+  const toggleTarik = (row) => setTarikSel((s) => {
+    const n = { ...s };
+    if (n[row.key]) delete n[row.key]; else n[row.key] = { ...row, harga_deal: "", harga_invoice: "" };
+    return n;
+  });
+  const setTarikField = (key, field, val) => setTarikSel((s) => ({ ...s, [key]: { ...s[key], [field]: val } }));
+
+  const doTarik = async (tagihanId) => {
+    const valid = Object.values(tarikSel).filter((r) => pNum(r.harga_deal) > 0 && pNum(r.harga_invoice) > 0);
+    if (!valid.length) { flash("Centang unit & isi Harga Deal + Harga Invoice dulu"); return; }
+    setTarikSaving(true);
+    try {
+      for (const r of valid) {
+        await axios.post(`${API}/admin/selisih/${selected.id}/tagihan/${tagihanId}/items`, {
+          vehicle_type: r.vehicle_type, no_unit: r.no_unit,
+          asal_kota: r.asal_kota, tujuan_kota: r.tujuan_kota,
+          harga_deal: pNum(r.harga_deal), harga_invoice: pNum(r.harga_invoice),
+        }, { headers });
+      }
+      setTarikOpen(null); setTarikSel({});
+      await reloadSelected(selected.id);
+      flash(`${valid.length} unit ditarik ke tagihan`);
+    } catch (e) { flash(e?.response?.data?.detail || "Gagal tarik unit"); }
+    finally { setTarikSaving(false); }
+  };
+
+  const tarikRows = tarikOrders.flatMap(orderUnitsOf).filter((row) => {
+    const q = tarikQ.trim().toLowerCase();
+    if (!q) return true;
+    return `${row.no_unit} ${row.vehicle_type} ${row.asal_kota} ${row.tujuan_kota} ${row.customer}`.toLowerCase().includes(q);
+  });
+
   // ── Payment form (per tagihan) ──
   const [payOpen, setPayOpen] = useState(null); // tagihan_id lagi buka form bayar
   const [payAmount, setPayAmount] = useState("");
@@ -357,7 +417,10 @@ export default function SelisihPage() {
                   </div>
                 </div>
               ) : (
-                <button style={{ ...BTN_GHOST, fontSize: 12, padding: "6px 12px", marginBottom: 8 }} onClick={() => openItemForm(tg.id)} data-testid={`sel-item-open-${tg.id}`}>+ Tambah Unit</button>
+                <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+                  <button style={{ ...BTN_GHOST, fontSize: 12, padding: "6px 12px" }} onClick={() => openItemForm(tg.id)} data-testid={`sel-item-open-${tg.id}`}>+ Tambah Unit</button>
+                  <button style={{ ...BTN, fontSize: 12, padding: "6px 12px" }} onClick={() => openTarik(tg.id)} data-testid={`sel-tarik-open-${tg.id}`}>📥 Tarik dari Order</button>
+                </div>
               )}
 
               {/* Totals row */}
@@ -407,6 +470,50 @@ export default function SelisihPage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {tarikOpen && (
+        <div onClick={() => setTarikOpen(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 640, maxHeight: "88vh", overflowY: "auto", background: "#0d1117", border: "1px solid #30363d", borderRadius: 12, padding: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <div style={{ fontWeight: 800, fontSize: 15 }}>📥 Tarik Unit dari Order</div>
+              <button onClick={() => setTarikOpen(null)} style={{ background: "none", border: "none", color: "#8b949e", fontSize: 18, cursor: "pointer" }}>✕</button>
+            </div>
+            <div style={{ fontSize: 12, color: "#8b949e", marginBottom: 10 }}>Centang unit, isi Harga Deal &amp; Harga Invoice. Unit &amp; rute otomatis dari order.</div>
+            <input style={I} placeholder="🔎 cari nopol / rute / customer…" value={tarikQ} onChange={(e) => setTarikQ(e.target.value)} />
+            {tarikLoading ? <div style={{ padding: 20, textAlign: "center", color: "#8b949e" }}>Memuat…</div> : (
+              <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6, maxHeight: "46vh", overflowY: "auto" }}>
+                {tarikRows.map((row) => {
+                  const on = !!tarikSel[row.key];
+                  return (
+                    <div key={row.key} style={{ border: `1px solid ${on ? "#EF9F27" : "#21262d"}`, borderRadius: 8, padding: 10, background: on ? "#1a1408" : "#161b22" }}>
+                      <label style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer" }}>
+                        <input type="checkbox" checked={on} onChange={() => toggleTarik(row)} style={{ width: 16, height: 16, marginTop: 2, flexShrink: 0 }} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700 }}>{row.no_unit || "(tanpa nopol)"} · {row.vehicle_type}</div>
+                          <div style={{ fontSize: 11, color: "#8b949e" }}>{row.asal_kota} → {row.tujuan_kota}{row.customer ? ` · ${row.customer}` : ""}</div>
+                        </div>
+                      </label>
+                      {on && (
+                        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                          <input style={{ ...I, flex: 1 }} inputMode="numeric" placeholder="Harga Deal (Rp)" value={tarikSel[row.key].harga_deal} onChange={(e) => setTarikField(row.key, "harga_deal", e.target.value)} />
+                          <input style={{ ...I, flex: 1 }} inputMode="numeric" placeholder="Harga Invoice (Rp)" value={tarikSel[row.key].harga_invoice} onChange={(e) => setTarikField(row.key, "harga_invoice", e.target.value)} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {tarikRows.length === 0 && <div style={{ padding: 16, textAlign: "center", color: "#8b949e", fontSize: 12 }}>Tidak ada order.</div>}
+              </div>
+            )}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+              <button style={BTN_GHOST} onClick={() => setTarikOpen(null)}>Batal</button>
+              <button style={BTN} onClick={() => doTarik(tarikOpen)} disabled={tarikSaving} data-testid="sel-tarik-save">
+                {tarikSaving ? "Menarik…" : `Tarik ${Object.keys(tarikSel).length} Unit`}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
