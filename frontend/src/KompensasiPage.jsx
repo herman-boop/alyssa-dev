@@ -132,6 +132,85 @@ export default function KompensasiPage() {
     } catch { flash("Gagal hapus rincian"); }
   };
 
+  // ── Tarik unit dari Order (kaya Invoice Gabungan / Selisih): unit & rute auto, tinggal isi Nilai ──
+  const [tarikOpen, setTarikOpen] = useState(false);
+  const [tarikOrders, setTarikOrders] = useState([]);
+  const [tarikQ, setTarikQ] = useState("");
+  const [tarikLoading, setTarikLoading] = useState(false);
+  const [tarikSel, setTarikSel] = useState({}); // key -> { ...row, nilai }
+  const [tarikSaving, setTarikSaving] = useState(false);
+  const [dealPrices, setDealPrices] = useState({}); // order_id -> { price, units }
+
+  const orderUnitsOf = (o) => {
+    const arr = (Array.isArray(o.units) && o.units.length) ? o.units
+      : [{ unit_id: "legacy", vehicle_type: o.vehicle_type, tipe_model: o.tipe_model, nopol: o.nopol, no_rangka: o.no_rangka }];
+    const dp = dealPrices[o.order_id];
+    // auto-isi Nilai cuma buat PO 1 unit (biar akurat; multi-unit dibiarin kosong)
+    const suggest = (dp && dp.units === 1 && dp.price > 0) ? String(dp.price) : "";
+    return arr.map((u, i) => ({
+      key: `${o.order_id}:${u.unit_id || u.nopol || i}`,
+      vehicle_type: `${u.vehicle_type || ""}${u.tipe_model ? " " + u.tipe_model : ""}`.trim() || "Kendaraan",
+      no_unit: (u.nopol || u.no_rangka || "").toUpperCase(),
+      asal_kota: o.asal_kota || "", tujuan_kota: o.tujuan_kota || "", customer: o.customer_nama || "",
+      keterangan: o.order_id || "",
+      suggest,
+    }));
+  };
+
+  const openTarik = async () => {
+    if (!selected) return;
+    setTarikOpen(true); setTarikSel({}); setTarikQ(""); setTarikLoading(true);
+    try {
+      const [ro, rp] = await Promise.all([
+        axios.get(`${API}/admin/orders`, { headers }),
+        axios.get(`${API}/admin/deal-prices`, { headers }).catch(() => ({ data: { prices: {} } })),
+      ]);
+      setTarikOrders(ro.data?.items || []);
+      setDealPrices(rp.data?.prices || {});
+    } catch { flash("Gagal memuat order"); setTarikOrders([]); }
+    finally { setTarikLoading(false); }
+  };
+
+  const toggleTarik = (row) => setTarikSel((s) => {
+    const n = { ...s };
+    if (n[row.key]) delete n[row.key]; else n[row.key] = { ...row, nilai: row.suggest || "" };
+    return n;
+  });
+  const setTarikNilai = (key, val) => setTarikSel((s) => ({ ...s, [key]: { ...s[key], nilai: val } }));
+
+  const doTarik = async () => {
+    if (!selected) return;
+    const valid = Object.values(tarikSel).filter((r) => pNum(r.nilai) > 0);
+    if (!valid.length) { flash("Centang unit & isi Nilai (Rp) dulu"); return; }
+    setTarikSaving(true);
+    try {
+      for (const r of valid) {
+        const fd = new FormData();
+        fd.append("arah", itemForm.arah);
+        fd.append("tanggal", todayStr());
+        fd.append("keterangan", r.keterangan || "");
+        fd.append("vehicle_type", r.vehicle_type || "");
+        fd.append("no_unit", r.no_unit || "");
+        fd.append("asal_kota", r.asal_kota || "");
+        fd.append("tujuan_kota", r.tujuan_kota || "");
+        fd.append("nilai", pNum(r.nilai));
+        fd.append("catatan", "");
+        await axios.post(`${API}/admin/kompensasi/${selected.id}/items`, fd, { headers });
+      }
+      setTarikOpen(false); setTarikSel({});
+      await reloadSelected(selected.id);
+      setListRefreshTick((t) => t + 1);
+      flash(`${valid.length} unit ditarik ke rincian`);
+    } catch (e) { flash(e?.response?.data?.detail || "Gagal tarik unit"); }
+    finally { setTarikSaving(false); }
+  };
+
+  const tarikRows = tarikOrders.flatMap(orderUnitsOf).filter((row) => {
+    const q = tarikQ.trim().toLowerCase();
+    if (!q) return true;
+    return `${row.no_unit} ${row.vehicle_type} ${row.asal_kota} ${row.tujuan_kota} ${row.customer} ${row.keterangan}`.toLowerCase().includes(q);
+  });
+
   // ── Form catat pembayaran (transfer nyata yang mengurangi sisa) ──
   const blankPayForm = { arah: "kita_bayar_mereka", jumlah: "", tanggal: todayStr(), catatan: "" };
   const [payForm, setPayForm] = useState(blankPayForm);
@@ -368,6 +447,12 @@ export default function KompensasiPage() {
                 📥 Supplier → Alyssa Logistik
               </button>
             </div>
+            <div style={{ marginBottom: 10 }}>
+              <button type="button" style={{ ...BTN_GHOST, fontSize: 12, borderColor: "#EF9F27", color: "#EF9F27" }} onClick={openTarik} data-testid="komp-tarik-open">
+                📥 Tarik dari Order (isi otomatis dari PO)
+              </button>
+              <span style={{ fontSize: 11, color: "#8b949e", marginLeft: 8 }}>← unit &amp; rute keisi sendiri, tinggal isi Nilai</span>
+            </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
               <input style={I} placeholder="Keterangan / No. Invoice" value={itemForm.keterangan} onChange={(e) => setItemForm((f) => ({ ...f, keterangan: e.target.value }))} data-testid="komp-item-keterangan" />
               <input type="date" style={I} value={itemForm.tanggal} onChange={(e) => setItemForm((f) => ({ ...f, tanggal: e.target.value }))} data-testid="komp-item-tanggal" />
@@ -410,6 +495,58 @@ export default function KompensasiPage() {
                   <span>Total</span><span>{fRp(selected.total_mereka)}</span>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal Tarik dari Order ── */}
+      {tarikOpen && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 1000, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 12px", overflowY: "auto" }} onClick={() => setTarikOpen(false)}>
+          <div style={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 12, width: "100%", maxWidth: 640, padding: 18 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <div style={{ fontWeight: 800, fontSize: 15 }}>📥 Tarik Unit dari Order</div>
+              <button style={{ ...BTN_GHOST, padding: "4px 10px" }} onClick={() => setTarikOpen(false)}>✕</button>
+            </div>
+            <div style={{ fontSize: 11.5, color: "#8b949e", marginBottom: 10 }}>
+              Masuk ke arah: {itemForm.arah === "kita_ke_mereka"
+                ? <b style={{ color: "#EF9F27" }}>📤 Alyssa Logistik → {selected?.nama}</b>
+                : <b style={{ color: "#58a6ff" }}>📥 {selected?.nama} → Alyssa Logistik</b>}
+              {" "}· ganti arah dulu di form kalau salah.
+            </div>
+            <input style={{ ...I, marginBottom: 10 }} placeholder="Cari no unit / tipe / rute / customer…" value={tarikQ} onChange={(e) => setTarikQ(e.target.value)} data-testid="komp-tarik-search" />
+            <div style={{ maxHeight: 340, overflowY: "auto", border: "1px solid #21262d", borderRadius: 8 }}>
+              {tarikLoading && <div style={{ padding: 16, textAlign: "center", color: "#8b949e", fontSize: 12 }}>Memuat order…</div>}
+              {!tarikLoading && tarikRows.map((row) => {
+                const on = !!tarikSel[row.key];
+                return (
+                  <div key={row.key} style={{ padding: "10px 12px", borderBottom: "1px solid #21262d", background: on ? "#12233a" : "none" }} data-testid={`komp-tarik-row-${row.key}`}>
+                    <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
+                      <input type="checkbox" checked={on} onChange={() => toggleTarik(row)} style={{ width: 16, height: 16, marginTop: 2, flexShrink: 0 }} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#e6edf3" }}>
+                          {row.vehicle_type}{row.no_unit && <span style={{ color: "#8b949e", fontWeight: 400 }}> · {row.no_unit}</span>}
+                        </div>
+                        <div style={{ fontSize: 11, color: "#8b949e", marginTop: 2 }}>
+                          {row.asal_kota || "?"} → {row.tujuan_kota || "?"}{row.customer && ` · ${row.customer}`}
+                        </div>
+                      </div>
+                    </label>
+                    {on && (
+                      <div style={{ marginTop: 8, marginLeft: 26 }}>
+                        <input style={{ ...I }} inputMode="numeric" placeholder="Nilai kompensasi (Rp)" value={tarikSel[row.key].nilai} onChange={(e) => setTarikNilai(row.key, e.target.value)} data-testid={`komp-tarik-nilai-${row.key}`} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {!tarikLoading && tarikRows.length === 0 && <div style={{ padding: 16, textAlign: "center", color: "#8b949e", fontSize: 12 }}>Tidak ada order.</div>}
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
+              <button style={BTN_GHOST} onClick={() => setTarikOpen(false)}>Batal</button>
+              <button style={BTN} onClick={doTarik} disabled={tarikSaving} data-testid="komp-tarik-save">
+                {tarikSaving ? "Menarik…" : `Tarik ${Object.keys(tarikSel).length} Unit`}
+              </button>
             </div>
           </div>
         </div>
