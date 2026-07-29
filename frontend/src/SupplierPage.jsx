@@ -106,6 +106,68 @@ export default function SupplierPage() {
     finally { setJobSaving(false); }
   };
 
+  // ── Tarik unit dari Order (kaya Selisih): unit/rute auto, tinggal isi Total Harga ──
+  const [tarikOpen, setTarikOpen] = useState(false);
+  const [tarikOrders, setTarikOrders] = useState([]);
+  const [tarikQ, setTarikQ] = useState("");
+  const [tarikLoading, setTarikLoading] = useState(false);
+  const [tarikSel, setTarikSel] = useState({}); // key -> {..., total_harga}
+  const [tarikSaving, setTarikSaving] = useState(false);
+
+  const orderUnitsOf = (o) => {
+    const arr = (Array.isArray(o.units) && o.units.length) ? o.units
+      : [{ unit_id: "legacy", vehicle_type: o.vehicle_type, tipe_model: o.tipe_model, nopol: o.nopol, no_rangka: o.no_rangka }];
+    return arr.map((u, i) => ({
+      key: `${o.order_id}:${u.unit_id || u.nopol || i}`,
+      vehicle_type: `${u.vehicle_type || ""}${u.tipe_model ? " " + u.tipe_model : ""}`.trim() || "Kendaraan",
+      nopol: (u.nopol || "").toUpperCase(), no_rangka: (u.no_rangka || "").toUpperCase(),
+      asal_kota: o.asal_kota || "", tujuan_kota: o.tujuan_kota || "", customer: o.customer_nama || "",
+    }));
+  };
+
+  const openTarik = async () => {
+    if (!selected) { flash("Pilih supplier dulu"); return; }
+    setTarikOpen(true); setTarikSel({}); setTarikQ(""); setTarikLoading(true);
+    try {
+      const r = await axios.get(`${API}/admin/orders`, { headers });
+      setTarikOrders(r.data?.items || []);
+    } catch { flash("Gagal memuat order"); setTarikOrders([]); }
+    finally { setTarikLoading(false); }
+  };
+
+  const toggleTarik = (row) => setTarikSel((s) => {
+    const n = { ...s };
+    if (n[row.key]) delete n[row.key]; else n[row.key] = { ...row, total_harga: "" };
+    return n;
+  });
+  const setTarikHarga = (key, val) => setTarikSel((s) => ({ ...s, [key]: { ...s[key], total_harga: val } }));
+
+  const doTarik = async () => {
+    const valid = Object.values(tarikSel).filter((r) => pNum(r.total_harga) > 0);
+    if (!valid.length) { flash("Centang unit & isi Total Harga dulu"); return; }
+    setTarikSaving(true);
+    try {
+      for (const r of valid) {
+        await axios.post(`${API}/admin/suppliers/${selected.id}/jobs`, {
+          vehicle_type: r.vehicle_type, nopol: r.nopol, no_rangka: r.no_rangka,
+          asal_kota: r.asal_kota, tujuan_kota: r.tujuan_kota,
+          total_harga: pNum(r.total_harga), catatan: "", tanggal: todayStr(),
+        }, { headers });
+      }
+      setTarikOpen(false); setTarikSel({});
+      await reloadSelected(selected.id);
+      setListRefreshTick((t) => t + 1);
+      flash(`${valid.length} unit ditarik dari order`);
+    } catch (e) { flash(e?.response?.data?.detail || "Gagal tarik unit"); }
+    finally { setTarikSaving(false); }
+  };
+
+  const tarikRows = tarikOrders.flatMap(orderUnitsOf).filter((row) => {
+    const q = tarikQ.trim().toLowerCase();
+    if (!q) return true;
+    return `${row.nopol} ${row.no_rangka} ${row.vehicle_type} ${row.asal_kota} ${row.tujuan_kota} ${row.customer}`.toLowerCase().includes(q);
+  });
+
   const deleteJob = async (jobId) => {
     if (!window.confirm("Hapus unit ini beserta semua riwayat pembayarannya?")) return;
     try {
@@ -319,9 +381,12 @@ export default function SupplierPage() {
               <input type="date" style={I} value={jobForm.tanggal} onChange={(e) => setJobForm((f) => ({ ...f, tanggal: e.target.value }))} data-testid="sup-job-tanggal" />
               <input style={I} placeholder="Catatan (opsional)" value={jobForm.catatan} onChange={(e) => setJobForm((f) => ({ ...f, catatan: e.target.value }))} />
             </div>
-            <button style={BTN} onClick={addJob} disabled={jobSaving} data-testid="sup-job-save">
-              {jobSaving ? "Menyimpan..." : "Simpan Unit"}
-            </button>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button style={BTN} onClick={addJob} disabled={jobSaving} data-testid="sup-job-save">
+                {jobSaving ? "Menyimpan..." : "Simpan Unit"}
+              </button>
+              <button style={BTN_GHOST} onClick={openTarik} data-testid="sup-tarik-open">📥 Tarik dari Order</button>
+            </div>
           </div>
 
           {/* Daftar unit/job, dikelompokkan per Projek */}
@@ -450,6 +515,49 @@ export default function SupplierPage() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {tarikOpen && (
+        <div onClick={() => setTarikOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 640, maxHeight: "88vh", overflowY: "auto", background: "#0d1117", border: "1px solid #30363d", borderRadius: 12, padding: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <div style={{ fontWeight: 800, fontSize: 15 }}>📥 Tarik Unit dari Order</div>
+              <button onClick={() => setTarikOpen(false)} style={{ background: "none", border: "none", color: "#8b949e", fontSize: 18, cursor: "pointer" }}>✕</button>
+            </div>
+            <div style={{ fontSize: 12, color: "#8b949e", marginBottom: 10 }}>Centang unit, isi Total Harga (biaya ke supplier ini). Unit &amp; rute otomatis dari order.</div>
+            <input style={I} placeholder="🔎 cari nopol / rute / customer…" value={tarikQ} onChange={(e) => setTarikQ(e.target.value)} />
+            {tarikLoading ? <div style={{ padding: 20, textAlign: "center", color: "#8b949e" }}>Memuat…</div> : (
+              <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6, maxHeight: "46vh", overflowY: "auto" }}>
+                {tarikRows.map((row) => {
+                  const on = !!tarikSel[row.key];
+                  return (
+                    <div key={row.key} style={{ border: `1px solid ${on ? "#EF9F27" : "#21262d"}`, borderRadius: 8, padding: 10, background: on ? "#1a1408" : "#161b22" }}>
+                      <label style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer" }}>
+                        <input type="checkbox" checked={on} onChange={() => toggleTarik(row)} style={{ width: 16, height: 16, marginTop: 2, flexShrink: 0 }} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700 }}>{row.nopol || row.no_rangka || "(tanpa nopol)"} · {row.vehicle_type}</div>
+                          <div style={{ fontSize: 11, color: "#8b949e" }}>{row.asal_kota} → {row.tujuan_kota}{row.customer ? ` · ${row.customer}` : ""}</div>
+                        </div>
+                      </label>
+                      {on && (
+                        <div style={{ marginTop: 8 }}>
+                          <input style={I} inputMode="numeric" placeholder="Total Harga ke supplier (Rp)" value={tarikSel[row.key].total_harga} onChange={(e) => setTarikHarga(row.key, e.target.value)} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {tarikRows.length === 0 && <div style={{ padding: 16, textAlign: "center", color: "#8b949e", fontSize: 12 }}>Tidak ada order.</div>}
+              </div>
+            )}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+              <button style={BTN_GHOST} onClick={() => setTarikOpen(false)}>Batal</button>
+              <button style={BTN} onClick={doTarik} disabled={tarikSaving} data-testid="sup-tarik-save">
+                {tarikSaving ? "Menarik…" : `Tarik ${Object.keys(tarikSel).length} Unit`}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
