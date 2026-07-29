@@ -9,7 +9,7 @@ import SupplierPage from "@/SupplierPage";
 import SelisihPage from "@/SelisihPage";
 import KompensasiPage from "@/KompensasiPage";
 import PermintaanHargaPage from "@/PermintaanHargaPage";
-import { DOC_BRAND, DOC_BASE_CSS, docHeader, docFooter, terbilangRupiah } from "@/docTheme";
+import { DOC_BRAND, DOC_BASE_CSS, docHeader, docFooter, terbilangRupiah, nextDocNo } from "@/docTheme";
 import "@/App.css";
 import "@/Driver.css";
 import "@/Admin.css";
@@ -1704,8 +1704,8 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
             order={order}
             headers={headers}
             onClose={() => setShowInvoice(false)}
-            onPrint={(lines, withTax, extra) => {
-              const noInv = printInvoice(lines, withTax, extra);
+            onPrint={async (lines, withTax, extra) => {
+              const noInv = await printInvoice(lines, withTax, extra);
               saveDocHistory({
                 jenis: "invoice", no_dokumen: noInv, customer: order.customer_nama || "",
                 judul: `${order.customer_nama || "-"} · ${(lines || []).length} baris`,
@@ -2342,12 +2342,13 @@ function HistoriDokumen({ headers }) {
 /* ── Cetak Faktur/Invoice (fungsi modul, bisa dicetak ulang dari Histori) ──
    extra: { customer_nama, order_id, jatuhTempo, metode, pesan, ttdNama,
             ttdJabatan, stempel, no_invoice? }  → return nomor faktur */
-function printInvoiceDoc(lines, withTax, extra) {
+async function printInvoiceDoc(lines, withTax, extra) {
   extra = extra || {};
   // Back-compat: kalau dipanggil dengan angka tunggal, bungkus jadi 1 baris.
   if (typeof lines === "number") lines = [{ nama: "Jasa Pengiriman", ket: "", qty: 1, harga: lines }];
   lines = (lines || []).filter((l) => (l.harga || 0) > 0);
   if (!lines.length) return "";
+  const w = window.open("", "_blank"); // buka dulu (gesture) biar nggak keblok popup
   const { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel } = extra;
   const subtotal = lines.reduce((s, l) => s + (l.harga || 0) * (l.qty || 1), 0);
   const ppn = withTax ? Math.round(subtotal * 0.011) : 0;
@@ -2356,7 +2357,7 @@ function printInvoiceDoc(lines, withTax, extra) {
   const fmtTgl = (iso) => { if (!iso) return "—"; const [y, m, d] = iso.split("-"); return `${d}-${m}-${y}`; };
   const todayIso = new Date().toISOString().slice(0, 10);
   const tgl = fmtTgl(todayIso);
-  const noInvoice = extra.no_invoice || `INV/AAL/${(extra.order_id || "").slice(-4) || "0000"}/${new Date().getFullYear()}`;
+  const noInvoice = extra.no_invoice || await nextDocNo("invoice", "INV"); // nomor auto-increment
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${noInvoice}</title>
   <style>
@@ -2459,7 +2460,7 @@ function printInvoiceDoc(lines, withTax, extra) {
   </div>
   <script>window.onload=()=>window.print()<\/script>
   </body></html>`;
-  const w = window.open("", "_blank"); w.document.write(html); w.document.close();
+  if (w) { w.document.write(html); w.document.close(); }
   return noInvoice;
 }
 
@@ -2809,20 +2810,18 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
   const okCount = rows.filter((r) => hargaNum(r.harga) > 0).length;
   const fRp = (n) => "Rp " + n.toLocaleString("id-ID");
 
-  const doPrint = () => {
+  const doPrint = async () => {
     const lines = rows.filter((r) => hargaNum(r.harga) > 0)
       .map((r) => ({ nama: "Jasa Pengiriman", ket: unitKet(r), qty: 1, harga: hargaNum(r.harga) }));
     if (!lines.length) { alert("Isi harga minimal 1 unit dulu."); return; }
     const orderIds = Array.from(new Set(rows.map((r) => r.order_id).filter(Boolean)));
-    const now = new Date();
-    const noInv = `INV/AAL/${String(now.getDate()).padStart(2, "0")}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getFullYear()).slice(2)}/${now.getFullYear()}`;
     const cust = customers.length === 1 ? customers[0] : `${customers.length} customer`;
-    const extra = { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel, customer_nama: cust, order_id: orderIds.join(", "), no_invoice: noInv };
-    printInvoiceDoc(lines, withTax, extra);
+    const extra = { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel, customer_nama: cust, order_id: orderIds.join(", ") };
+    const noInv = await printInvoiceDoc(lines, withTax, extra); // nomor auto-increment dari server
     saveDocHistory({
       jenis: "invoice", no_dokumen: noInv, customer: cust,
       judul: `${cust} · ${lines.length} unit · ${orderIds.length} PO`,
-      meta: { ...extra, withTax: !!withTax }, lines, order_ids: orderIds,
+      meta: { ...extra, withTax: !!withTax, no_invoice: noInv }, lines, order_ids: orderIds,
     }, headers);
     // tandai unit sudah diinvoice (kelompokkan per order) — best-effort
     const byOrder = {};

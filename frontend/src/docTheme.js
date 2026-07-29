@@ -99,6 +99,34 @@ function _terbilangGroup(n) {
   return "";
 }
 
+/* ── Nomor dokumen auto-increment (Invoice / Penawaran) ──
+   Ambil nomor urut yang persist dari backend (/api/doc-seq), lalu format:
+   PREFIX + 4-digit urut + _DDMMYYYY_YYYY  (mis. INV0001_29072026_2026).
+   Kalau server nggak kebaca, fallback ke jam:menit:detik biar tetap jalan &
+   nggak pernah bentrok. */
+export async function nextDocNo(type, prefix) {
+  const now = new Date();
+  const dd = String(now.getDate()).padStart(2, "0");
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const yyyy = now.getFullYear();
+  const datePart = `${dd}${mm}${yyyy}`;
+  try {
+    const API = (process.env.REACT_APP_BACKEND_URL || "") + "/api";
+    const r = await fetch(`${API}/doc-seq`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type }),
+    });
+    if (!r.ok) throw new Error("seq");
+    const d = await r.json();
+    const seq = String(d.seq || 1).padStart(4, "0");
+    return `${prefix}${seq}_${datePart}_${yyyy}`;
+  } catch {
+    const t = String(now.getHours()).padStart(2, "0") + String(now.getMinutes()).padStart(2, "0") + String(now.getSeconds()).padStart(2, "0");
+    return `${prefix}${t}_${datePart}_${yyyy}`;
+  }
+}
+
 export function terbilangRupiah(nominal) {
   let n = Math.floor(Math.abs(Number(nominal) || 0));
   if (n === 0) return "Nol Rupiah";

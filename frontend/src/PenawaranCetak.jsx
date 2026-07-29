@@ -4,7 +4,7 @@
 // (CostCalculator). Bisa centang rute (pisahin per wilayah, mis. Kalimantan),
 // isi nama + jabatan + stempel. Output A4 gaya invoice, huruf besar.
 import { useState } from "react";
-import { DOC_BRAND, DOC_BASE_CSS, docHeader, docFooter } from "./docTheme";
+import { DOC_BRAND, DOC_BASE_CSS, docHeader, docFooter, nextDocNo } from "./docTheme";
 
 function fRp(n) {
   if (!n && n !== 0) return "-";
@@ -16,12 +16,13 @@ const gray = "#6b7280";
 const border = "#e5e7eb";
 const gold = "#b8860b";
 
-export function printPenawaran(rows, meta) {
+export async function printPenawaran(rows, meta) {
+  const w = window.open("", "_blank"); // buka dulu (dalam gesture klik) biar nggak keblok popup
   const { nama_pt, ttdNama, ttdJabatan, stempel } = meta || {};
   const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const fmtTgl = (iso) => (iso ? new Date(iso).toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" }) : "-");
   const now = new Date();
-  const noDoc = `PH/AAL/${String(now.getDate()).padStart(2, "0")}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getFullYear()).slice(2)}/${now.getFullYear()}`;
+  const noDoc = await nextDocNo("penawaran", "PH"); // nomor auto-increment
   // Grand total = jumlah seluruh Harga Satuan semua baris (Asuransi TIDAK dijumlahkan).
   const grandTotal = (rows || []).reduce((s, e) => s + (e.harga_deal || 0), 0);
   const body = (rows || []).map((e, i) => {
@@ -132,7 +133,7 @@ export function printPenawaran(rows, meta) {
   </div>
   <script>window.onload=()=>window.print()<\/script>
   </body></html>`;
-  const w = window.open("", "_blank"); w.document.write(html); w.document.close();
+  if (w) { w.document.write(html); w.document.close(); }
 }
 
 // Tombol + modal. `rows` = daftar entri harga (rute, moda, tipe_kendaraan,

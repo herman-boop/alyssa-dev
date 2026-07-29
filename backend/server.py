@@ -2111,6 +2111,21 @@ async def admin_deal_prices():
     return {"prices": out}
 
 
+class DocSeqBody(BaseModel):
+    type: str = "doc"
+
+
+@api_router.post("/doc-seq")
+async def next_doc_seq(body: DocSeqBody):
+    """Nomor urut dokumen (invoice/penawaran) yang auto-naik & tersimpan.
+    Counter per-tipe di db.doc_counters, di-$inc atomik. Tanpa PIN karena
+    cuma mengeluarkan angka urut (bukan data), dipakai dari halaman admin."""
+    t = (body.type or "doc").strip().lower()[:20] or "doc"
+    await db.doc_counters.update_one({"_id": t}, {"$inc": {"seq": 1}}, upsert=True)
+    doc = await db.doc_counters.find_one({"_id": t})
+    return {"type": t, "seq": int((doc or {}).get("seq") or 1)}
+
+
 def _admin_orders_filter(
     status: Optional[str],
     q: Optional[str],
