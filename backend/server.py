@@ -1211,22 +1211,12 @@ async def create_order(payload: OrderBody):
     if not (payload.customer_hp or "").strip():
         raise HTTPException(400, "customer_hp wajib diisi")
 
-    # Mirror unit pertama ke field kendaraan legacy (back-compat: Surat Jalan,
-    # trip convert, invoice single-unit lama tetap kebaca).
-    u0 = units[0]
-    vt = u0["vehicle_type"]
-    order_id = f"ORD-{uuid.uuid4().hex[:10].upper()}"
-    doc = {
-        "order_id": order_id,
-        "status": "NEW",                # NEW → CONFIRMED → DISPATCHED → COMPLETED → CANCELLED
-        "units": units,                 # F1 — Unit Master (sumber utama unit)
-        "jumlah_unit": len(units),
-        # ── mirror unit[0] ke field legacy (back-compat) ──
-        "vehicle_type": vt,
-        "nopol": u0["nopol"],
-        "no_rangka": u0["no_rangka"],
-        "warna": u0["warna"],
-        "tahun": u0["tahun"],
+    # ── 1 unit = 1 PO terpisah ──
+    # Tiap unit yang pelanggan tambah dijadikan order/PO sendiri (kartu terpisah
+    # di admin) biar Surat Jalan & Invoice per-unit dan nggak numpuk di 1 tab.
+    # Kalau perlu digabung, admin tetap bisa lewat Jadwal / Invoice Gabungan.
+    # Field non-unit (asal/tujuan/customer/pickup/colly) di-share ke tiap PO.
+    shared = {
         "km": (payload.km or "").strip()[:12],
         "kondisi": (payload.kondisi or "Bekas").strip()[:20],
         "panjang": (payload.panjang or "").strip()[:12],
@@ -1248,21 +1238,44 @@ async def create_order(payload: OrderBody):
         "customer_hp": payload.customer_hp.strip()[:30],
         "customer_email": (payload.customer_email or "").strip()[:120],
         "catatan": (payload.catatan or "").strip()[:500],
-        "trip_id": None,                 # filled when admin converts order → trip
-        "created_at": now,
-        "updated_at": now,
     }
-    await db.orders.insert_one(doc)
-    # Fire Odoo webhook (no-op when ODOO_WEBHOOK_URL empty — see notify_odoo)
-    await notify_odoo("order.created", {
-        "order_id": order_id,
-        "customer": {"nama": doc["customer_nama"], "hp": doc["customer_hp"], "email": doc["customer_email"]},
-        "vehicle": {"type": doc["vehicle_type"], "nopol": doc["nopol"]},
-        "route": f'{doc["asal_kota"]} → {doc["tujuan_kota"]}',
-        "pickup": {"date": doc["pickup_date"], "time": doc["pickup_time"]},
-    })
-    doc.pop("_id", None)
-    return doc
+    created = []
+    for u in units:
+        order_id = f"ORD-{uuid.uuid4().hex[:10].upper()}"
+        doc = {
+            "order_id": order_id,
+            "status": "NEW",                # NEW → CONFIRMED → DISPATCHED → COMPLETED → CANCELLED
+            "units": [u],                   # F1 — 1 unit per PO
+            "jumlah_unit": 1,
+            # ── mirror unit ke field legacy (back-compat: Surat Jalan, trip convert, invoice) ──
+            "vehicle_type": u["vehicle_type"],
+            "nopol": u["nopol"],
+            "no_rangka": u["no_rangka"],
+            "warna": u["warna"],
+            "tahun": u["tahun"],
+            **shared,
+            "trip_id": None,                 # filled when admin converts order → trip
+            "created_at": now,
+            "updated_at": now,
+        }
+        await db.orders.insert_one(doc)
+        # Fire Odoo webhook (no-op when ODOO_WEBHOOK_URL empty — see notify_odoo)
+        await notify_odoo("order.created", {
+            "order_id": order_id,
+            "customer": {"nama": doc["customer_nama"], "hp": doc["customer_hp"], "email": doc["customer_email"]},
+            "vehicle": {"type": doc["vehicle_type"], "nopol": doc["nopol"]},
+            "route": f'{doc["asal_kota"]} → {doc["tujuan_kota"]}',
+            "pickup": {"date": doc["pickup_date"], "time": doc["pickup_time"]},
+        })
+        doc.pop("_id", None)
+        created.append(doc)
+
+    # Balikin order pertama (buat SuccessScreen) + daftar semua order_id yang
+    # dibuat (frontend pakai buat upload berkas ke tiap PO).
+    resp = dict(created[0])
+    resp["orders_created"] = [d["order_id"] for d in created]
+    resp["jumlah_pesanan"] = len(created)
+    return resp
 
 
 @api_router.post("/orders/{order_id}/attachment")

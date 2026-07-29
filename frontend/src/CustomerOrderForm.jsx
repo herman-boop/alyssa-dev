@@ -174,15 +174,20 @@ export default function CustomerOrderForm() {
     try {
       const payload = { ...data, units: shipmentType === "kendaraan" ? data.units : [] };
       const r = await axios.post(`${API}/orders`, payload);
-      const orderId = r.data?.order_id;
+      // Backend memecah tiap unit jadi PO terpisah → upload berkas ke SEMUA order
+      const orderIds = (r.data?.orders_created && r.data.orders_created.length)
+        ? r.data.orders_created
+        : (r.data?.order_id ? [r.data.order_id] : []);
       // Upload berkas scan (kalau ada) — best-effort, order tetap jadi walau upload gagal
-      if (orderId && files.length) {
-        for (const f of files) {
-          try {
-            const fd = new FormData();
-            fd.append("file", f);
-            await axios.post(`${API}/orders/${orderId}/attachment`, fd);
-          } catch (_) { /* skip file gagal */ }
+      if (orderIds.length && files.length) {
+        for (const orderId of orderIds) {
+          for (const f of files) {
+            try {
+              const fd = new FormData();
+              fd.append("file", f);
+              await axios.post(`${API}/orders/${orderId}/attachment`, fd);
+            } catch (_) { /* skip file gagal */ }
+          }
         }
       }
       setResult(r.data);
@@ -655,7 +660,14 @@ function SuccessScreen({ order, prevData, onAddAnother }) {
         </p>
         <div className="of-success-card">
           <div className="of-success-card-hd">Detail Pesanan</div>
-          <SRow k="ID Pesanan" v={<span className="of-mono" data-testid="ord-success-id">{order.order_id}</span>} />
+          {order.jumlah_pesanan > 1 ? (
+            <>
+              <SRow k="Jumlah PO" v={<b data-testid="ord-success-count">{order.jumlah_pesanan} PO terpisah (1 unit / PO)</b>} />
+              <SRow k="ID Pesanan" v={<span className="of-mono" data-testid="ord-success-id">{(order.orders_created || [order.order_id]).join(", ")}</span>} />
+            </>
+          ) : (
+            <SRow k="ID Pesanan" v={<span className="of-mono" data-testid="ord-success-id">{order.order_id}</span>} />
+          )}
           <SRow k="Status"     v={<span className="of-chip">{order.status}</span>} />
           <SRow k="Rute"       v={`${order.asal_kota} → ${order.tujuan_kota}`} />
           <SRow k="Kontak"     v={`${order.customer_nama} · ${order.customer_hp}`} />
