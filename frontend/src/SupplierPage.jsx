@@ -1,8 +1,91 @@
 import { useState, useEffect, useRef } from "react";
 import axios from "axios";
+import { DOC_BRAND, DOC_BASE_CSS, docHeader, docFooter } from "./docTheme";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "";
 const API = `${BACKEND_URL}/api`;
+
+/* Cetak Ringkasan Supplier sebagai A4 (teks vektor, kaya Penawaran) — tajam
+   walau di-screenshot & kirim WhatsApp, huruf kecil biar muat. */
+function printSupplierA4(sup) {
+  if (!sup) return;
+  const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const rp = (n) => "Rp " + (Number(n) || 0).toLocaleString("id-ID");
+  const now = new Date();
+  const tgl = now.toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
+  const noDoc = `RPS/AAL/${String(now.getDate()).padStart(2, "0")}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getFullYear()).slice(2)}/${now.getFullYear()}`;
+  const jobs = sup.jobs || [];
+  const gHarga = sup.grand_total_harga != null ? sup.grand_total_harga : jobs.reduce((s, j) => s + (j.total_harga || 0), 0);
+  const gBayar = sup.grand_total_terbayar != null ? sup.grand_total_terbayar : jobs.reduce((s, j) => s + (j.total_terbayar || 0), 0);
+  const gSisa = sup.grand_sisa != null ? sup.grand_sisa : (gHarga - gBayar);
+  const body = jobs.map((j, i) => {
+    const nopol = j.nopol || j.no_rangka || "-";
+    const rute = `${j.asal_kota || "-"} → ${j.tujuan_kota || "-"}`;
+    const lunas = (j.sisa || 0) <= 0;
+    return `<tr>
+      <td class="c">${i + 1}</td>
+      <td><b>${esc(nopol)}</b><div class="rp-note">${esc(j.vehicle_type || "Unit")}</div></td>
+      <td>${esc(rute)}</td>
+      <td class="r">${rp(j.total_harga)}</td>
+      <td class="r">${rp(j.total_terbayar)}</td>
+      <td class="r"><b>${rp(j.sisa)}</b></td>
+      <td class="c"><span class="rp-st ${lunas ? "y" : "n"}">${lunas ? "Lunas" : "Sisa"}</span></td>
+    </tr>`;
+  }).join("");
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${noDoc}</title>
+  <style>
+    ${DOC_BASE_CSS}
+    body { font-size: 11px; }
+    .doc-sheet { padding: 0; max-width: 210mm; }
+    .rps-meta-row { display:flex; justify-content:space-between; gap:24px; margin-bottom:14px; }
+    .rps-billto .lbl { font-size:10px; font-weight:700; text-transform:uppercase; color:${DOC_BRAND.muted}; letter-spacing:.5px; margin-bottom:4px; }
+    .rps-billto .val { font-size:15px; font-weight:800; color:${DOC_BRAND.ink}; }
+    .rps-meta-table { border-collapse:collapse; font-size:11px; }
+    .rps-meta-table td { padding:3px 0; } .rps-meta-table td:first-child { color:${DOC_BRAND.muted}; padding-right:18px; white-space:nowrap; }
+    .rps-meta-table td:last-child { font-weight:700; text-align:right; }
+    table.rps { width:100%; border-collapse:collapse; margin-bottom:14px; }
+    table.rps thead { display:table-header-group; } table.rps tfoot { display:table-row-group; }
+    table.rps tr { break-inside:avoid; page-break-inside:avoid; }
+    table.rps th { text-align:left; font-size:8.5px; text-transform:uppercase; letter-spacing:.3px; color:#fff; background:${DOC_BRAND.navy}; font-weight:700; padding:5px 7px; white-space:nowrap; }
+    table.rps th.r { text-align:right; } table.rps th.c { text-align:center; }
+    table.rps td { padding:4px 7px; font-size:9px; line-height:1.35; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; }
+    table.rps tbody tr:nth-child(even) td { background:${DOC_BRAND.paperMist}; }
+    table.rps td.c { text-align:center; } table.rps td.r { text-align:right; white-space:nowrap; }
+    table.rps .rp-note { font-size:8px; color:${DOC_BRAND.muted}; margin-top:2px; }
+    table.rps tfoot .tot td { border-top:2px solid ${DOC_BRAND.navy}; border-bottom:none; padding:7px 7px; font-size:10px; font-weight:800; background:#fff; }
+    table.rps tfoot .tot .lbl { text-align:right; }
+    .rps-note { font-size:10px; color:${DOC_BRAND.muted}; line-height:1.7; }
+    @page { size:A4 portrait; margin:8mm; }
+    @media print { @page { size:A4 portrait; margin:8mm; } }
+  </style></head><body>
+  <div class="doc-sheet">
+    ${docHeader({ docTitle: "RINGKASAN SUPPLIER" })}
+    <div class="rps-meta-row">
+      <div class="rps-billto"><div class="lbl">Supplier</div><div class="val">${esc(sup.nama || "-")}</div></div>
+      <table class="rps-meta-table">
+        <tr><td>No. Dokumen</td><td>${noDoc}</td></tr>
+        <tr><td>Tanggal</td><td>${tgl}</td></tr>
+        <tr><td>Jumlah Unit</td><td>${jobs.length}</td></tr>
+      </table>
+    </div>
+    <table class="rps">
+      <thead><tr>
+        <th class="c" style="width:24px">No</th><th>No. Polisi / Unit</th><th>Rute</th>
+        <th class="r" style="width:92px">Total Harga</th><th class="r" style="width:92px">Terbayar</th><th class="r" style="width:92px">Sisa</th><th class="c" style="width:52px">Status</th>
+      </tr></thead>
+      <tbody>${body}</tbody>
+      <tfoot><tr class="tot">
+        <td class="lbl" colspan="3">TOTAL</td>
+        <td class="r">${rp(gHarga)}</td><td class="r">${rp(gBayar)}</td><td class="r">${rp(gSisa)}</td><td></td>
+      </tr></tfoot>
+    </table>
+    <div class="rps-note"><b>Catatan:</b> Ringkasan pembayaran ke supplier. "Sisa" = Total Harga − Terbayar. Konfirmasi: <b>${DOC_BRAND.phone}</b>.</div>
+    ${docFooter({ docNo: `Ringkasan ${noDoc}` })}
+  </div>
+  <script>window.onload=()=>window.print()<\/script>
+  </body></html>`;
+  const w = window.open("", "_blank"); w.document.write(html); w.document.close();
+}
 
 function fRp(n) {
   n = Number(n) || 0;
@@ -341,8 +424,8 @@ export default function SupplierPage() {
               <div style={{ fontWeight: 800, fontSize: 16 }}>{selected.nama}</div>
               <div style={{ fontSize: 11, color: "#8b949e" }}>{selected.jenis || "Supplier"} {selected.no_hp && `· ${selected.no_hp}`}</div>
               <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-                <button style={{ ...BTN_GHOST, fontSize: 11, padding: "6px 12px" }} onClick={downloadRingkasan} disabled={ringkasanBusy} data-testid="sup-ringkasan-download">
-                  {ringkasanBusy ? "⏳ Membuat..." : "📄 Download Ringkasan"}
+                <button style={{ ...BTN_GHOST, fontSize: 11, padding: "6px 12px" }} onClick={() => printSupplierA4(selected)} data-testid="sup-ringkasan-print">
+                  {"🖨️ Cetak A4"}
                 </button>
                 <button style={{ ...BTN_GHOST, fontSize: 11, padding: "6px 12px" }} onClick={addProject} disabled={projSaving} data-testid="sup-project-add">
                   {projSaving ? "⏳..." : "📁 + Projek Baru"}
