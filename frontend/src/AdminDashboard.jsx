@@ -1258,6 +1258,8 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
   const [rangkaDraft, setRangkaDraft] = useState(order.no_rangka || "");
   const [editColly, setEditColly] = useState(false);
   const [collyDraft, setCollyDraft] = useState(order.jumlah_colly || "");
+  const [editArrival, setEditArrival] = useState(false);
+  const [arrivalDraft, setArrivalDraft] = useState(order.pickup_arrival || "");
   const [kordDraft, setKordDraft] = useState(order.koordinator_id || "");
   const [kordSaving, setKordSaving] = useState(false);
   const lbl = STATUS_LABEL[order.status] || { txt: order.status, cls: "adm-chip-new" };
@@ -1301,6 +1303,18 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
   const saveNama = async () => { await onPatch({ nama_driver: namaDraft.trim() }); setEditNama(false); };
   const saveRangka = async () => { await onPatch({ no_rangka: rangkaDraft.trim().toUpperCase() }); setEditRangka(false); };
   const saveColly = async () => { await onPatch({ jumlah_colly: collyDraft.replace(/[^0-9]/g, "") }); setEditColly(false); };
+  const saveArrival = async () => { await onPatch({ pickup_arrival: arrivalDraft }); setEditArrival(false); };
+  // Format ISO datetime-local ("2026-07-29T14:30") / tanggal ("2026-07-29") jadi "29/07/2026 14:30"
+  const fmtDT = (s) => {
+    if (!s) return "";
+    const [d, t] = String(s).split("T");
+    const p = String(d).split("-");
+    if (p.length !== 3) return s;
+    return `${p[2]}/${p[1]}/${p[0]}${t ? ` ${t}` : ""}`;
+  };
+  const jadwalDiminta = (order.pickup_date || order.pickup_time)
+    ? `${fmtDT(order.pickup_date) || "—"}${order.pickup_time ? ` ${order.pickup_time}` : ""}`.trim()
+    : "";
 
   return (
     <article
@@ -1482,6 +1496,42 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
             </div>
           </div>
         )}
+
+        {/* ── Jadwal jemput: diminta pelanggan (read-only) + aktual driver sampai (dicatat admin) ── */}
+        <div className="adm-field-row adm-full">
+          <div className="adm-field-key">🕒 Jadwal Jemput (diminta)</div>
+          <div className="adm-field-val">
+            {jadwalDiminta
+              ? <span className="adm-pill adm-mono">{jadwalDiminta}</span>
+              : <i className="adm-mute">belum diisi pelanggan</i>}
+          </div>
+        </div>
+        <div className="adm-field-row adm-full">
+          <div className="adm-field-key">🚚 Driver Sampai Lokasi (aktual)</div>
+          <div className="adm-field-val">
+            {editArrival ? (
+              <span className="adm-driver-edit-row">
+                <input
+                  className="adm-input-inline"
+                  type="datetime-local"
+                  value={arrivalDraft}
+                  onChange={(e) => setArrivalDraft(e.target.value)}
+                  autoFocus
+                  data-testid={`adm-arrival-input-${order.order_id}`}
+                />
+                <button className="adm-btn adm-btn-gold adm-btn-xs" onClick={saveArrival} data-testid={`adm-arrival-save-${order.order_id}`}>OK</button>
+                <button className="adm-btn adm-btn-ghost adm-btn-xs" onClick={() => { setEditArrival(false); setArrivalDraft(order.pickup_arrival || ""); }}><IcoX /></button>
+              </span>
+            ) : (
+              <span className="adm-driver-row">
+                {order.pickup_arrival
+                  ? <span className="adm-pill adm-mono">{fmtDT(order.pickup_arrival)}</span>
+                  : <i className="adm-mute">belum dicatat</i>}
+                <button className="adm-link" onClick={() => { setArrivalDraft(order.pickup_arrival || ""); setEditArrival(true); }} data-testid={`adm-arrival-edit-${order.order_id}`}><IcoPencil /></button>
+              </span>
+            )}
+          </div>
+        </div>
 
         <div className="adm-field-row">
           <div className="adm-field-key">Jumlah Colly</div>

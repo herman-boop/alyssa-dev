@@ -2260,6 +2260,7 @@ class OrderPatchBody(BaseModel):
     nopol: Optional[str] = None
     no_rangka: Optional[str] = None
     jumlah_colly: Optional[str] = None
+    pickup_arrival: Optional[str] = None  # aktual: kapan driver benar-benar sampai di lokasi jemput (ISO datetime-local)
 
 
 @api_router.patch("/admin/orders/{order_id}", dependencies=[Depends(require_admin_pin)])
@@ -2291,6 +2292,8 @@ async def admin_patch_order(order_id: str, payload: OrderPatchBody):
         upd["no_rangka"] = payload.no_rangka.strip()[:40]
     if payload.jumlah_colly is not None:
         upd["jumlah_colly"] = payload.jumlah_colly.strip()[:10]
+    if payload.pickup_arrival is not None:
+        upd["pickup_arrival"] = payload.pickup_arrival.strip()[:20]
     if len(upd) == 1:
         raise HTTPException(400, "No fields to update")
     await db.orders.update_one({"order_id": order_id}, {"$set": upd})

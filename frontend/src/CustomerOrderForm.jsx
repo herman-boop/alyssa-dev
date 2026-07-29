@@ -17,7 +17,7 @@ const KONDISI_OPTIONS = ["Bekas", "Baru"];
 
 // F1 — Unit Master (multi-unit per PO)
 const MAX_UNITS = 20;
-const emptyUnit = () => ({ vehicle_type: "", tipe_model: "", nopol: "", no_rangka: "", warna: "", tahun: "", tujuan: "", catatan: "" });
+const emptyUnit = () => ({ vehicle_type: "", tipe_model: "", nopol: "", no_rangka: "", warna: "", catatan: "" });
 
 /* ── Dark mode ── */
 function useDarkMode() {
@@ -344,11 +344,6 @@ export default function CustomerOrderForm() {
                                   onChange={(e) => setUnit(i, "warna", e.target.value)}
                                   placeholder="Hitam" data-testid={`ord-warna-${i}`} />
                               </Field>
-                              <Field label="Tahun">
-                                <input type="text" className="of-inp" value={u.tahun} maxLength={4}
-                                  onChange={(e) => setUnit(i, "tahun", e.target.value.replace(/\D/g, ""))}
-                                  placeholder="2024" data-testid={`ord-tahun-${i}`} />
-                              </Field>
                               <Field label="Catatan Unit" full hint="Opsional — kondisi khusus / kelengkapan unit ini.">
                                 <input type="text" className="of-inp" value={u.catatan}
                                   onChange={(e) => setUnit(i, "catatan", e.target.value)}
@@ -427,12 +422,21 @@ export default function CustomerOrderForm() {
                     placeholder="Jl. Sudirman, Kec. Tebet"
                     data-testid="ord-asal-alamat" />
                 </Field>
-                <Field label="Tanggal Pickup">
+                <div className="of-field--full" style={{ margin: "2px 0 2px" }}>
+                  <div style={{ display: "flex", gap: 10, alignItems: "flex-start", background: "#FDF6E6", border: "1px solid #D4A847", borderRadius: 12, padding: "10px 12px" }}>
+                    <span style={{ fontSize: 18, lineHeight: 1 }}>🕒</span>
+                    <div style={{ fontSize: 12.5, color: "#7a5b12", fontWeight: 600, lineHeight: 1.5 }}>
+                      <b>Kapan driver harus sampai di lokasi jemput?</b><br/>
+                      Isi tanggal &amp; jam di bawah. Kami jadwalkan driver tiba sesuai waktu ini. Kalau belum pasti, isi perkiraan — nanti bisa dikonfirmasi ulang oleh tim kami.
+                    </div>
+                  </div>
+                </div>
+                <Field label="Tanggal driver di lokasi" hint="Tanggal driver diharapkan tiba di lokasi jemput.">
                   <input type="date" className="of-inp" value={data.pickup_date}
                     onChange={(e) => set("pickup_date", e.target.value)}
                     data-testid="ord-pickup-date" />
                 </Field>
-                <Field label="Jam Pickup">
+                <Field label="Jam driver di lokasi" hint="Jam driver diharapkan tiba.">
                   <input type="time" className="of-inp" value={data.pickup_time}
                     onChange={(e) => set("pickup_time", e.target.value)}
                     data-testid="ord-pickup-time" />
@@ -545,7 +549,7 @@ export default function CustomerOrderForm() {
                     <>
                       <SRow k="Jumlah Unit" v={<b>{data.units.length} unit</b>} />
                       {data.units.map((u, i) => (
-                        <SRow key={i} k={`Unit ${i + 1}`} v={`${u.vehicle_type || "—"}${u.tipe_model ? ` · ${u.tipe_model}` : ""}${u.nopol ? ` · ${u.nopol}` : ""}${u.warna || u.tahun ? ` · ${u.warna || "—"}/${u.tahun || "—"}` : ""}`} />
+                        <SRow key={i} k={`Unit ${i + 1}`} v={`${u.vehicle_type || "—"}${u.tipe_model ? ` · ${u.tipe_model}` : ""}${u.nopol ? ` · ${u.nopol}` : ""}${u.warna ? ` · ${u.warna}` : ""}`} />
                       ))}
                     </>
                   ) : (
