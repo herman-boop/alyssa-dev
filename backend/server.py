@@ -1598,7 +1598,12 @@ async def admin_resend_wa(order_id: str):
     if not order:
         raise HTTPException(404, "Order not found")
     upd = await send_tracking_whatsapp(order, resend=True)
-    return {"ok": upd.get("wa_status") in ("terkirim", "dikirim_ulang"), **_wa_public_view({**order, **upd})}
+    return {
+        "ok": upd.get("wa_status") in ("terkirim", "dikirim_ulang"),
+        "wa_error": upd.get("wa_error"),          # alasan gagal asli dari provider (buat admin)
+        "wa_message_id": upd.get("wa_message_id"),
+        **_wa_public_view({**order, **upd}),
+    }
 
 
 @api_router.get("/orders")

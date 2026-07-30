@@ -1306,6 +1306,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
   const saveArrival = async () => { await onPatch({ pickup_arrival: arrivalDraft }); setEditArrival(false); };
   // ── Status WhatsApp konfirmasi + kirim ulang ──
   const [waStatus, setWaStatus] = useState(order.wa_status || "belum_dikirim");
+  const [waErr, setWaErr] = useState(order.wa_error || "");
   const [waBusy, setWaBusy] = useState(false);
   const WA_VIEW = {
     terkirim:      { txt: "Terkirim",      cls: "adm-pill", color: "#3fb950" },
@@ -1318,6 +1319,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
     try {
       const r = await axios.post(`${API}/admin/orders/${order.order_id}/resend-wa`, {}, { headers });
       setWaStatus(r.data?.wa_status || "dikirim_ulang");
+      setWaErr(r.data?.wa_error || "");
     } catch (e) {
       alert(e?.response?.data?.detail || "Gagal kirim ulang WhatsApp");
     } finally { setWaBusy(false); }
@@ -1561,6 +1563,11 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
                 {waBusy ? "Mengirim…" : "🔁 Kirim Ulang"}
               </button>
             </span>
+            {waStatus === "gagal" && waErr && (
+              <div style={{ fontSize: 11, color: "#f0a742", marginTop: 4 }} data-testid={`adm-wa-error-${order.order_id}`}>
+                Alasan: {waErr}
+              </div>
+            )}
           </div>
         </div>
 
