@@ -36,6 +36,21 @@ FONNTE_TOKEN     = os.environ.get("FONNTE_TOKEN", "").strip()
 REMINDER_TARGET  = os.environ.get("REMINDER_TARGET", "087779270110").strip()
 CRON_SECRET      = os.environ.get("CRON_SECRET", "").strip()
 
+# ── WhatsApp provider abstraction (order confirmation / tracking) ──
+# Satu abstraksi kirim WA dengan beberapa adapter; pilih via WA_PROVIDER.
+#   WA_PROVIDER = fonnte (default) | meta | wablas
+# Token/credensial HANYA disimpan di env backend, TIDAK PERNAH di frontend.
+#   fonnte : FONNTE_TOKEN (dipakai bareng reminder di atas)
+#   meta   : WA_TOKEN (access token), WA_PHONE_ID (phone number id), WA_TEMPLATE (opsional)
+#   wablas : WABLAS_TOKEN, WABLAS_DOMAIN
+# Kalau token provider kosong -> pesan cuma di-log (no-op), order tetap tersimpan.
+WA_PROVIDER      = (os.environ.get("WA_PROVIDER", "fonnte").strip().lower() or "fonnte")
+WA_TOKEN         = os.environ.get("WA_TOKEN", "").strip()
+WA_PHONE_ID      = os.environ.get("WA_PHONE_ID", "").strip()
+WA_TEMPLATE      = os.environ.get("WA_TEMPLATE", "").strip()
+WABLAS_TOKEN     = os.environ.get("WABLAS_TOKEN", "").strip()
+WABLAS_DOMAIN    = (os.environ.get("WABLAS_DOMAIN", "https://console.wablas.com").strip().rstrip("/"))
+
 # Backend-generated PDF (BASTK) — Chromium headless via Playwright renders the
 # real frontend page (same JSX/CSS as on-screen), then page.pdf() produces a
 # genuine vector PDF. Jauh lebih konsisten daripada window.print() + dialog
@@ -57,6 +72,11 @@ _ON_RAILWAY = bool(os.environ.get("RAILWAY_ENVIRONMENT_NAME") or os.environ.get(
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "").strip().rstrip("/")
 if not FRONTEND_URL and not _ON_RAILWAY:
     FRONTEND_URL = "http://localhost:3000"
+# Base URL publik untuk link tracking di pesan WhatsApp (halaman pelanggan).
+# Urutan: PUBLIC_BASE_URL -> FRONTEND_URL -> domain produksi default.
+PUBLIC_BASE_URL = (os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
+                   or FRONTEND_URL
+                   or "https://alyssaautologistiks.up.railway.app")
 # Override opsional untuk path executable Chromium (dev/sandbox saja — di
 # production biarkan kosong, biar Playwright pakai browser hasil
 # `playwright install chromium` saat build).
@@ -223,6 +243,166 @@ async def send_whatsapp(target: str, message: str) -> bool:
     except Exception as e:
         logger.warning(f"[wa:dispatch_fail] {e}")
         return False
+
+
+# ── WhatsApp valid-number check (Indonesia) ──
+def _wa_valid_id(no: str) -> bool:
+    """True kalau nomor HP Indonesia valid setelah dinormalisasi ke 62xxxx.
+    Aturan: mulai '628', total 10-15 digit (mis. 628123456789)."""
+    n = _wa_normalize(no)
+    return n.startswith("628") and 10 <= len(n) <= 15
+
+
+def _wa_send_sync(to: str, message: str) -> dict:
+    """Blocking send lewat provider terpilih (WA_PROVIDER). Tidak pernah raise.
+    Return: {ok: bool, message_id: str|None, error: str|None, provider: str}.
+    Token cuma dibaca dari env backend — tidak pernah dari request/frontend."""
+    prov = WA_PROVIDER
+    try:
+        if prov == "meta":
+            if not (WA_TOKEN and WA_PHONE_ID):
+                logger.info(f"[wa:skip] (meta creds kosong) to={to}")
+                return {"ok": False, "message_id": None, "error": "meta_creds_missing", "provider": prov}
+            r = _requests.post(
+                f"https://graph.facebook.com/v19.0/{WA_PHONE_ID}/messages",
+                headers={"Authorization": f"Bearer {WA_TOKEN}", "Content-Type": "application/json"},
+                json={"messaging_product": "whatsapp", "to": to, "type": "text",
+                      "text": {"preview_url": True, "body": message}},
+                timeout=15,
+            )
+            body = {}
+            try: body = r.json() or {}
+            except Exception: pass
+            if r.status_code // 100 == 2:
+                mid = (((body.get("messages") or [{}])[0]) or {}).get("id")
+                return {"ok": True, "message_id": mid, "error": None, "provider": prov}
+            return {"ok": False, "message_id": None, "error": f"http {r.status_code}: {r.text[:200]}", "provider": prov}
+
+        if prov == "wablas":
+            if not WABLAS_TOKEN:
+                logger.info(f"[wa:skip] (wablas token kosong) to={to}")
+                return {"ok": False, "message_id": None, "error": "wablas_token_missing", "provider": prov}
+            r = _requests.post(
+                f"{WABLAS_DOMAIN}/api/send-message",
+                headers={"Authorization": WABLAS_TOKEN},
+                data={"phone": to, "message": message},
+                timeout=15,
+            )
+            body = {}
+            try: body = r.json() or {}
+            except Exception: pass
+            ok = r.status_code // 100 == 2 and bool(body.get("status", False) if isinstance(body, dict) else False)
+            mid = None
+            if isinstance(body, dict):
+                data = body.get("data") or {}
+                if isinstance(data, dict):
+                    msgs = data.get("messages") or []
+                    if msgs and isinstance(msgs, list):
+                        mid = (msgs[0] or {}).get("id")
+                    mid = mid or data.get("id")
+            if ok:
+                return {"ok": True, "message_id": mid, "error": None, "provider": prov}
+            return {"ok": False, "message_id": None, "error": f"http {r.status_code}: {r.text[:200]}", "provider": prov}
+
+        # default: fonnte
+        if not FONNTE_TOKEN:
+            logger.info(f"[wa:skip] (no FONNTE_TOKEN) to={to}: {message[:60]}")
+            return {"ok": False, "message_id": None, "error": "fonnte_token_missing", "provider": "fonnte"}
+        r = _requests.post(
+            "https://api.fonnte.com/send",
+            headers={"Authorization": FONNTE_TOKEN},
+            data={"target": to, "message": message},
+            timeout=15,
+        )
+        body = {}
+        try: body = r.json() or {}
+        except Exception: pass
+        ok = r.status_code == 200 and bool(body.get("status", False))
+        mid = None
+        idv = body.get("id")
+        if isinstance(idv, list) and idv:
+            mid = str(idv[0])
+        elif idv:
+            mid = str(idv)
+        if ok:
+            return {"ok": True, "message_id": mid, "error": None, "provider": "fonnte"}
+        return {"ok": False, "message_id": None, "error": f"http {r.status_code}: {r.text[:200]}", "provider": "fonnte"}
+    except Exception as e:
+        return {"ok": False, "message_id": None, "error": str(e)[:200], "provider": prov}
+
+
+async def wa_send(to: str, message: str) -> dict:
+    """Async wrapper untuk provider WA. Never raises."""
+    try:
+        return await asyncio.to_thread(_wa_send_sync, to, message)
+    except Exception as e:
+        logger.warning(f"[wa:dispatch_fail] {e}")
+        return {"ok": False, "message_id": None, "error": str(e)[:200], "provider": WA_PROVIDER}
+
+
+def _tracking_message(nama: str, resi: str, tracking_url: str) -> str:
+    return (
+        f"Halo Bapak/Ibu {nama or 'Pelanggan'},\n\n"
+        "Terima kasih telah mempercayakan pengiriman kendaraan Anda kepada "
+        "PT Alyssa Auto Logistik.\n\n"
+        "Pesanan Anda telah berhasil dibuat.\n\n"
+        f"Nomor Resi / Trip ID:\n{resi}\n\n"
+        "Lacak status pengiriman melalui tautan berikut:\n"
+        f"{tracking_url}\n\n"
+        "Simpan pesan ini agar nomor resi dan link tracking mudah ditemukan kembali.\n\n"
+        "PT Alyssa Auto Logistik\n"
+        "Spesialis Pengiriman Kendaraan Seluruh Indonesia"
+    )
+
+
+def _wa_mask(no: str) -> str:
+    """628123456789 -> 6281****6789 (buat ditampilkan di halaman sukses)."""
+    n = _wa_normalize(no)
+    if len(n) <= 8:
+        return n
+    return n[:4] + "*" * (len(n) - 8) + n[-4:]
+
+
+async def send_tracking_whatsapp(order: dict, resend: bool = False) -> dict:
+    """Kirim pesan konfirmasi + link tracking ke nomor WA pelanggan.
+    - resi = order_id (langsung ada; tracking resolve lewat /public/trips fallback)
+    - best-effort: order tetap tersimpan walau gagal
+    - simpan status/message_id/waktu ke order (wa_*), idempotent lewat order_id
+    Return dict field wa_* yang tersimpan."""
+    order_id = order.get("order_id")
+    to_raw = order.get("customer_hp") or ""
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Validasi nomor — jangan kirim kalau tidak valid
+    if not _wa_valid_id(to_raw):
+        upd = {"wa_status": "gagal", "wa_error": "nomor WA tidak valid",
+               "wa_to": _wa_normalize(to_raw), "wa_updated_at": now}
+        await db.orders.update_one({"order_id": order_id}, {"$set": upd})
+        return upd
+
+    to = _wa_normalize(to_raw)
+    resi = order_id
+    tracking_url = f"{PUBLIC_BASE_URL}/?track={order_id}"
+    msg = _tracking_message(order.get("customer_nama") or "", resi, tracking_url)
+
+    res = await wa_send(to, msg)
+    upd = {
+        "wa_to": to,
+        "wa_tracking_url": tracking_url,
+        "wa_updated_at": now,
+        "wa_message_id": res.get("message_id"),
+        "wa_provider": res.get("provider"),
+        "wa_attempts": int(order.get("wa_attempts") or 0) + 1,
+    }
+    if res.get("ok"):
+        upd["wa_status"] = "dikirim_ulang" if resend else "terkirim"
+        upd["wa_sent_at"] = now
+        upd["wa_error"] = None
+    else:
+        upd["wa_status"] = "gagal"
+        upd["wa_error"] = res.get("error") or "gagal kirim"
+    await db.orders.update_one({"order_id": order_id}, {"$set": upd})
+    return upd
 
 
 # ---------- Models ----------
@@ -922,11 +1102,51 @@ async def delete_album_photo(trip_id: str, stage: str, photo_id: str):
 
 
 # ---------- Public tracking (read-only untuk pelanggan) ----------
+async def _public_order_fallback(track_id: str):
+    """Fallback tracking sebelum order di-convert jadi trip: pelanggan tetap bisa
+    buka link dari WA (resi = order_id) & lihat status 'pesanan diterima'.
+    Terima order_id langsung atau bentuk 'TRIP-<order_id>'."""
+    oid = track_id
+    if oid.startswith("TRIP-"):
+        oid = oid[len("TRIP-"):]
+    o = await db.orders.find_one({"order_id": oid}, {"_id": 0})
+    if not o:
+        return None
+    route = f'{o.get("asal_kota","")} - {o.get("tujuan_kota","")}'.strip(" -") or "—"
+    empty_album = {"asal": [], "kapal": [], "tujuan": [], "dokumen": []}
+    return {
+        "trip_id": o.get("trip_id") or track_id,
+        "order_id": o.get("order_id"),
+        "pending": True,                       # belum jadi trip (belum di-dispatch admin)
+        "status_order": o.get("status", "NEW"),
+        "nopol": o.get("nopol", ""),
+        "tipe_kendaraan": o.get("vehicle_type", ""),
+        "no_rangka": o.get("no_rangka", ""),
+        "route": route,
+        "nama_driver": "",
+        "legs": [],
+        "album": empty_album,
+        "handover": {"bastk": [], "resi": None},
+        "daily_count": 0, "daily_checkpoints": [],
+        "initial_done": 0, "initial_photos": {},
+        "vehicle_type": o.get("vehicle_type", ""),
+        "damage_marks": [], "customer_data": {}, "signatures": {}, "bastk_catatan": "",
+        "pickup": {"date": o.get("pickup_date", ""), "time": o.get("pickup_time", "")},
+        "progress": {"initial_complete": False, "handover_complete": False},
+        "created_at": o.get("created_at"), "updated_at": o.get("updated_at"),
+    }
+
+
 @api_router.get("/public/trips/{trip_id}")
 async def public_trip(trip_id: str):
-    """Read-only view untuk pelanggan. Hanya field aman yang ter-expose."""
+    """Read-only view untuk pelanggan. Hanya field aman yang ter-expose.
+    Kalau trip belum ada (order belum di-convert), fallback ke data order biar
+    link tracking dari pesan WhatsApp tetap valid."""
     doc = await db.trips.find_one({"trip_id": trip_id})
     if not doc:
+        fb = await _public_order_fallback(trip_id)
+        if fb:
+            return fb
         raise HTTPException(404, "Trip not found")
     h = doc.get("handover") or {}
     return {
@@ -1255,6 +1475,10 @@ async def create_order(payload: OrderBody):
             "tahun": u["tahun"],
             **shared,
             "trip_id": None,                 # filled when admin converts order → trip
+            # ── status pengiriman WhatsApp konfirmasi (auto setelah order tersimpan) ──
+            "wa_status": "belum_dikirim",    # belum_dikirim | terkirim | gagal | dikirim_ulang
+            "wa_to": _wa_normalize(shared.get("customer_hp") or ""),
+            "wa_attempts": 0,
             "created_at": now,
             "updated_at": now,
         }
@@ -1270,11 +1494,19 @@ async def create_order(payload: OrderBody):
         doc.pop("_id", None)
         created.append(doc)
 
+    # Kirim WhatsApp konfirmasi + link tracking ke pelanggan — di background biar
+    # submit tetap cepat. Best-effort: order sudah tersimpan, status kirim
+    # disimpan per order (wa_*) & bisa dikirim ulang dari dashboard / halaman sukses.
+    for d in created:
+        asyncio.create_task(send_tracking_whatsapp(d))
+
     # Balikin order pertama (buat SuccessScreen) + daftar semua order_id yang
     # dibuat (frontend pakai buat upload berkas ke tiap PO).
     resp = dict(created[0])
     resp["orders_created"] = [d["order_id"] for d in created]
     resp["jumlah_pesanan"] = len(created)
+    resp["wa_to_masked"] = _wa_mask(resp.get("customer_hp") or "")
+    resp["wa_valid"] = _wa_valid_id(resp.get("customer_hp") or "")
     return resp
 
 
@@ -1308,6 +1540,65 @@ async def get_order(order_id: str):
     doc = await _ensure_order_units(doc)
     doc["unit_summary"] = _order_unit_summary(doc)
     return doc
+
+
+def _wa_public_view(order: dict) -> dict:
+    """Ringkasan status WA yang aman ditampilkan ke pelanggan (tanpa data sensitif)."""
+    return {
+        "order_id": order.get("order_id"),
+        "wa_status": order.get("wa_status", "belum_dikirim"),
+        "wa_to_masked": _wa_mask(order.get("wa_to") or order.get("customer_hp") or ""),
+        "wa_sent_at": order.get("wa_sent_at"),
+        "wa_valid": _wa_valid_id(order.get("customer_hp") or ""),
+        "tracking_url": order.get("wa_tracking_url") or f"{PUBLIC_BASE_URL}/?track={order.get('order_id')}",
+    }
+
+
+@api_router.get("/orders/{order_id}/wa-status")
+async def get_order_wa_status(order_id: str):
+    """Status pengiriman WA untuk halaman sukses pelanggan (polling ringan)."""
+    order = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(404, "Order not found")
+    return _wa_public_view(order)
+
+
+def _wa_recent(order: dict, secs: int = 15) -> bool:
+    """True kalau WA baru saja dikirim (<secs detik) — cegah kirim dobel karena
+    tombol ditekan berulang."""
+    ts = order.get("wa_updated_at") or order.get("wa_sent_at")
+    if not ts:
+        return False
+    try:
+        t = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        return (datetime.now(timezone.utc) - t).total_seconds() < secs
+    except Exception:
+        return False
+
+
+@api_router.post("/orders/{order_id}/resend-wa")
+async def public_resend_wa(order_id: str):
+    """Kirim ulang WA ke nomor yang TERSIMPAN di order (dipakai tombol di halaman
+    sukses pelanggan). Anti-dobel: kalau baru saja terkirim, balikin status
+    sekarang tanpa kirim lagi. Nomor tidak bisa diganti dari sini."""
+    order = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(404, "Order not found")
+    if order.get("wa_status") in ("terkirim", "dikirim_ulang") and _wa_recent(order):
+        return _wa_public_view(order)
+    await send_tracking_whatsapp(order, resend=True)
+    fresh = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+    return _wa_public_view(fresh or order)
+
+
+@api_router.post("/admin/orders/{order_id}/resend-wa", dependencies=[Depends(require_admin_pin)])
+async def admin_resend_wa(order_id: str):
+    """Admin kirim ulang WA konfirmasi/tracking dari dashboard."""
+    order = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(404, "Order not found")
+    upd = await send_tracking_whatsapp(order, resend=True)
+    return {"ok": upd.get("wa_status") in ("terkirim", "dikirim_ulang"), **_wa_public_view({**order, **upd})}
 
 
 @api_router.get("/orders")

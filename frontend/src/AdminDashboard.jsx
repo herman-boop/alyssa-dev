@@ -1304,6 +1304,24 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
   const saveRangka = async () => { await onPatch({ no_rangka: rangkaDraft.trim().toUpperCase() }); setEditRangka(false); };
   const saveColly = async () => { await onPatch({ jumlah_colly: collyDraft.replace(/[^0-9]/g, "") }); setEditColly(false); };
   const saveArrival = async () => { await onPatch({ pickup_arrival: arrivalDraft }); setEditArrival(false); };
+  // ── Status WhatsApp konfirmasi + kirim ulang ──
+  const [waStatus, setWaStatus] = useState(order.wa_status || "belum_dikirim");
+  const [waBusy, setWaBusy] = useState(false);
+  const WA_VIEW = {
+    terkirim:      { txt: "Terkirim",      cls: "adm-pill", color: "#3fb950" },
+    dikirim_ulang: { txt: "Dikirim ulang", cls: "adm-pill", color: "#3fb950" },
+    gagal:         { txt: "Gagal",         cls: "adm-pill", color: "#f85149" },
+    belum_dikirim: { txt: "Belum dikirim", cls: "adm-pill", color: "#8b949e" },
+  };
+  const resendWa = async () => {
+    setWaBusy(true);
+    try {
+      const r = await axios.post(`${API}/admin/orders/${order.order_id}/resend-wa`, {}, { headers });
+      setWaStatus(r.data?.wa_status || "dikirim_ulang");
+    } catch (e) {
+      alert(e?.response?.data?.detail || "Gagal kirim ulang WhatsApp");
+    } finally { setWaBusy(false); }
+  };
   // Format ISO datetime-local ("2026-07-29T14:30") / tanggal ("2026-07-29") jadi "29/07/2026 14:30"
   const fmtDT = (s) => {
     if (!s) return "";
@@ -1530,6 +1548,19 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
                 <button className="adm-link" onClick={() => { setArrivalDraft(order.pickup_arrival || ""); setEditArrival(true); }} data-testid={`adm-arrival-edit-${order.order_id}`}><IcoPencil /></button>
               </span>
             )}
+          </div>
+        </div>
+        <div className="adm-field-row adm-full">
+          <div className="adm-field-key">💬 WhatsApp Konfirmasi</div>
+          <div className="adm-field-val">
+            <span className="adm-driver-row">
+              <span className="adm-pill" style={{ color: (WA_VIEW[waStatus] || WA_VIEW.belum_dikirim).color }} data-testid={`adm-wa-status-${order.order_id}`}>
+                {(WA_VIEW[waStatus] || WA_VIEW.belum_dikirim).txt}
+              </span>
+              <button className="adm-btn adm-btn-ghost adm-btn-xs" onClick={resendWa} disabled={waBusy} data-testid={`adm-wa-resend-${order.order_id}`}>
+                {waBusy ? "Mengirim…" : "🔁 Kirim Ulang"}
+              </button>
+            </span>
           </div>
         </div>
 

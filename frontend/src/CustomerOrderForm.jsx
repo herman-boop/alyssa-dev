@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
 import axios from "axios";
 import "./Order.css";
 import { VEHICLE_TYPE_LIST, VehicleSketch, useVehicleTypes } from "./VehicleSketches";
@@ -639,7 +639,56 @@ const IcoPlus = () => (
 );
 
 function SuccessScreen({ order, prevData, onAddAnother }) {
-  const trackUrl = order.trip_id ? `${window.location.origin}/track/${order.trip_id}` : "";
+  const orderIds = (order.orders_created && order.orders_created.length) ? order.orders_created : [order.order_id];
+  const resiText = orderIds.join(", ");
+  const trackUrl = `${window.location.origin}/?track=${order.order_id}`;
+
+  // Status pengiriman WhatsApp — polling ringan sampai bukan "belum_dikirim".
+  const [wa, setWa] = useState({ wa_status: order.wa_status || "belum_dikirim", wa_to_masked: order.wa_to_masked || "", wa_valid: order.wa_valid !== false });
+  const [copied, setCopied] = useState(false);
+  const [resending, setResending] = useState(false);
+
+  useEffect(() => {
+    let tries = 0, stop = false, timer;
+    const poll = async () => {
+      tries += 1;
+      try {
+        const r = await axios.get(`${API}/orders/${order.order_id}/wa-status`);
+        if (stop) return;
+        setWa((w) => ({ ...w, ...r.data }));
+        if (r.data?.wa_status && r.data.wa_status !== "belum_dikirim") return; // selesai
+      } catch (_) { /* diamkan */ }
+      if (!stop && tries < 8) timer = setTimeout(poll, 3000);
+    };
+    poll();
+    return () => { stop = true; if (timer) clearTimeout(timer); };
+  }, [order.order_id]);
+
+  const copyResi = async () => {
+    try { await navigator.clipboard.writeText(resiText); setCopied(true); setTimeout(() => setCopied(false), 1800); }
+    catch (_) { /* clipboard diblok — abaikan */ }
+  };
+
+  const resendWa = async () => {
+    setResending(true);
+    try {
+      // Kirim ulang ke SEMUA PO yang dibuat (nomor sama, tersimpan di backend)
+      let last = null;
+      for (const oid of orderIds) {
+        try { const r = await axios.post(`${API}/orders/${oid}/resend-wa`); last = r.data; } catch (_) {}
+      }
+      if (last) setWa((w) => ({ ...w, ...last }));
+    } finally { setResending(false); }
+  };
+
+  const waView = (() => {
+    const s = wa.wa_status;
+    if (!wa.wa_valid) return { color: "#f0a742", bg: "#2a1f0d", border: "#7a5b12", txt: `Nomor WhatsApp tidak valid — pesan tidak dikirim. Pastikan format 08xx / 62xx.` };
+    if (s === "terkirim" || s === "dikirim_ulang") return { color: "#3fb950", bg: "#0f2d1f", border: "#2ea043", txt: `Pesan tracking telah dikirim ke ${wa.wa_to_masked || "nomor Anda"} lewat WhatsApp.` };
+    if (s === "gagal") return { color: "#f85149", bg: "#2d1214", border: "#f85149", txt: `Gagal mengirim WhatsApp ke ${wa.wa_to_masked || "nomor Anda"}. Silakan kirim ulang.` };
+    return { color: "#58a6ff", bg: "#0d1b2a", border: "#1f6feb", txt: `Mengirim pesan tracking ke ${wa.wa_to_masked || "nomor Anda"} lewat WhatsApp…` };
+  })();
+
   return (
     <div className="of-root">
       <header className="of-hdr">
@@ -673,6 +722,28 @@ function SuccessScreen({ order, prevData, onAddAnother }) {
           <SRow k="Kontak"     v={`${order.customer_nama} · ${order.customer_hp}`} />
         </div>
 
+        {/* ── Status WhatsApp + aksi resi/tracking ── */}
+        <div style={{ background: waView.bg, border: `1px solid ${waView.border}`, borderRadius: 14, padding: "16px 18px", margin: "16px 0", textAlign: "left" }} data-testid="ord-success-wa">
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+            <span style={{ fontSize: 18 }}>💬</span>
+            <div style={{ fontSize: 13, fontWeight: 800, color: waView.color }} data-testid="ord-wa-status">{waView.txt}</div>
+          </div>
+          <div style={{ fontSize: 12, color: "#8b949e", marginBottom: 12 }}>
+            Nomor Resi: <b style={{ color: "#e6edf3" }} className="of-mono">{resiText}</b>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button type="button" className="of-btn of-btn--secondary" onClick={copyResi} data-testid="ord-copy-resi" style={{ flex: "1 1 140px", justifyContent: "center" }}>
+              {copied ? "✓ Tersalin" : "📋 Salin Nomor Resi"}
+            </button>
+            <a className="of-btn of-btn--secondary" href={trackUrl} target="_blank" rel="noreferrer" data-testid="ord-open-track" style={{ flex: "1 1 140px", justifyContent: "center" }}>
+              📍 Buka Halaman Tracking
+            </a>
+            <button type="button" className="of-btn of-btn--primary" onClick={resendWa} disabled={resending || !wa.wa_valid} data-testid="ord-resend-wa" style={{ flex: "1 1 140px", justifyContent: "center" }}>
+              {resending ? "Mengirim…" : "🔁 Kirim Ulang WhatsApp"}
+            </button>
+          </div>
+        </div>
+
         {/* Tambah kendaraan lain — tujuan sama */}
         {onAddAnother && (
           <div style={{ background: "linear-gradient(135deg,#0f2d1f,#1a4a2a)", border: "1px solid #2ea043", borderRadius: 14, padding: "18px 20px", margin: "16px 0", textAlign: "left" }}>
@@ -701,11 +772,6 @@ function SuccessScreen({ order, prevData, onAddAnother }) {
           <a className="of-btn of-btn--primary" href={`/status/${order.order_id}`} data-testid="ord-success-status">
             Cek Status Pesanan <IcoArrow />
           </a>
-          {trackUrl && (
-            <a className="of-btn of-btn--secondary" href={trackUrl} data-testid="ord-success-track">
-              Lacak Perjalanan <IcoArrow />
-            </a>
-          )}
           <a className="of-btn of-btn--ghost" href="?order=1" data-testid="ord-success-new">
             Buat Pesanan Baru (Tujuan Berbeda)
           </a>
