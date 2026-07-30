@@ -3335,12 +3335,17 @@ function t360StageForLeg(l) {
   return "asal";
 }
 
-function T360_Empty({ text, sub }) {
+function T360_Empty({ text, sub, actionLabel, onAction }) {
   return (
     <div className="t360-empty">
       <div style={{ display: "flex", justifyContent: "center" }}>{T360_ICONS.doc}</div>
       <div className="t360-empty-t">{text}</div>
       {sub && <div className="t360-empty-s">{sub}</div>}
+      {actionLabel && onAction && (
+        <div style={{ display: "flex", justifyContent: "center", marginTop: 14 }}>
+          <button className="adm-btn adm-btn-sm adm-btn-blue" onClick={onAction} data-testid="t360-empty-action">{actionLabel}</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -3681,7 +3686,7 @@ function Trip360Overview({ order, detail, legs, albumCount, checkpoints, docRead
 
 /* ── Route Leg (dengan Pemegang Unit) ── */
 function Trip360RouteLeg({ legs, album, checkpoints, bastk, activeLegIdx, onEditLegs }) {
-  if (legs.length === 0) return <T360_Empty text="Belum ada rute leg" sub="Rute belum disusun untuk trip ini. Klik 'Kelola Leg' untuk mengaturnya." />;
+  if (legs.length === 0) return <T360_Empty text="Belum ada rute leg" sub="Rute belum disusun untuk trip ini." actionLabel="✎ Kelola Leg" onAction={onEditLegs} />;
   return (
     <>
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
