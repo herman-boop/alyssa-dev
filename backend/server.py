@@ -3216,6 +3216,117 @@ async def vendor_mobile_pay(
     }
 
 
+@api_router.get("/vendor-mobile/vendors-unpaid", dependencies=[Depends(require_vendor_pin)])
+async def vendor_mobile_vendors_unpaid(limit: int = 300):
+    """Tagihan vendor DIKELOMPOKKAN per vendor (buat halaman 'Bayar per Vendor').
+    Tiap vendor: ringkasan total tagihan/terbayar/sisa + daftar PO/job-nya
+    (yang punya nilai tagihan) lengkap status per PO (belum/sebagian/lunas)."""
+    vendors = []
+    async for s in db.supplier_profiles.find({}, {"_id": 0}):
+        jobs_out = []
+        tot = terb = 0
+        for j in (s.get("jobs") or []):
+            jt = _supplier_job_totals(j)
+            th = jt.get("total_harga") or 0
+            if th <= 0:
+                continue
+            tb = jt.get("total_terbayar") or 0
+            si = jt.get("sisa") or 0
+            status = "lunas" if si <= 0 else ("sebagian" if tb > 0 else "belum")
+            jobs_out.append({
+                "job_id": j.get("id"), "trip_id": j.get("trip_id"),
+                "nopol": j.get("nopol") or "", "rute": _rute_str(j.get("asal_kota"), j.get("tujuan_kota")),
+                "kategori": j.get("kategori") or "Lainnya",
+                "total_harga": th, "terbayar": tb, "sisa": si, "status": status,
+                "tanggal": j.get("tanggal") or "",
+            })
+            tot += th
+            terb += tb
+        if not jobs_out:
+            continue
+        # PO belum lunas di atas, yang sisanya besar duluan
+        jobs_out.sort(key=lambda x: (x["status"] == "lunas", -(x["sisa"] or 0)))
+        vendors.append({
+            "supplier_id": s.get("id"), "supplier_nama": s.get("nama") or "-",
+            "total_tagihan": tot, "total_terbayar": terb, "total_sisa": tot - terb,
+            "jumlah_po": len(jobs_out), "jobs": jobs_out,
+        })
+    # Vendor yang masih ada sisa tampil duluan, sisa terbesar di atas
+    vendors.sort(key=lambda v: (v["total_sisa"] <= 0, -(v["total_sisa"] or 0)))
+    return {"items": vendors[:limit]}
+
+
+@api_router.post("/vendor-mobile/pay-batch", dependencies=[Depends(require_vendor_pin)])
+async def vendor_mobile_pay_batch(
+    supplier_id: str = Form(...),
+    job_ids: str = Form(...),            # id job dipisah koma, urutan = urutan bayar
+    amount: int = Form(...),
+    tanggal: Optional[str] = Form(None),
+    metode: str = Form("Transfer"),
+    catatan: str = Form(""),
+    bukti: Optional[UploadFile] = File(None),
+):
+    """Bayar beberapa PO/job SATU vendor sekaligus dengan 1 nominal.
+    Nominal didistribusi berurutan (waterfall): tiap PO dibayar sebesar
+    min(sisa nominal, sisa PO) sampai nominal habis. Kalau nominal lebih besar
+    dari total sisa, sisanya dikembalikan di 'sisa_nominal' (tidak overpay).
+    Bukti transfer yang sama dipakai untuk semua cicilan (ditandai batch_id)."""
+    if amount <= 0:
+        raise HTTPException(400, "Nominal harus lebih dari 0")
+    ids = [x.strip() for x in (job_ids or "").split(",") if x.strip()]
+    if not ids:
+        raise HTTPException(400, "Pilih minimal 1 PO")
+    sup = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not sup:
+        raise HTTPException(404, "Vendor tidak ditemukan")
+    jobs = sup.get("jobs") or []
+
+    tgl = (tanggal or "").strip()
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", tgl):
+        tgl = today_wib()
+
+    bukti_url = None
+    if bukti is not None and bukti.filename:
+        bukti_url = _save_upload(supplier_id, "payment/batch", bukti, ALLOWED_IMG | ALLOWED_DOC)
+
+    batch_id = _gen_supplier_id()
+    remaining = int(amount)
+    applied = []
+    for jid in ids:
+        if remaining <= 0:
+            break
+        idx = next((i for i, j in enumerate(jobs) if j.get("id") == jid), None)
+        if idx is None:
+            continue
+        sisa = _supplier_job_totals(jobs[idx]).get("sisa") or 0
+        if sisa <= 0:
+            continue
+        pay_amt = min(remaining, sisa)
+        payment = {
+            "id": _gen_supplier_id(), "amount": int(pay_amt),
+            "catatan": (catatan or "").strip()[:300], "bukti_url": bukti_url,
+            "tanggal": tgl, "tipe": "transfer",
+            "metode": (metode or "Transfer").strip()[:40],
+            "source": "vendor-mobile-batch", "batch_id": batch_id,
+        }
+        jobs[idx].setdefault("payments", []).append(payment)
+        remaining -= pay_amt
+        njt = _supplier_job_totals(jobs[idx])
+        applied.append({
+            "job_id": jid, "nopol": jobs[idx].get("nopol") or "",
+            "dibayar": int(pay_amt), "sisa": njt.get("sisa") or 0,
+            "status": "lunas" if (njt.get("sisa") or 0) <= 0 else "sebagian",
+        })
+    if not applied:
+        raise HTTPException(400, "Tidak ada tagihan yang bisa dibayar (mungkin sudah lunas)")
+    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
+    return {
+        "ok": True, "supplier_id": supplier_id, "supplier_nama": sup.get("nama"),
+        "batch_id": batch_id, "total_dibayar": int(amount) - remaining,
+        "sisa_nominal": remaining, "applied": applied,
+    }
+
+
 @api_router.post("/admin/trips/{trip_id}/finance/payments", dependencies=[Depends(require_admin_pin)])
 async def add_customer_payment(
     trip_id: str,

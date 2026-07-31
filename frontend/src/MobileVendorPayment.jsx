@@ -39,8 +39,10 @@ function BottomSheet({ open, title, onClose, children }) {
 }
 
 /* ══════════════ ROOT ══════════════ */
-export default function MobileVendorPayment() {
-  const [pin, setPin] = useState(() => localStorage.getItem(PIN_KEY) || "");
+export default function MobileVendorPayment({ embedded = false }) {
+  // Kalau dipakai di dalam dashboard admin (embedded), pakai PIN admin yang
+  // sudah tersimpan supaya tidak perlu login PIN dua kali.
+  const [pin, setPin] = useState(() => localStorage.getItem(PIN_KEY) || (embedded ? (localStorage.getItem("aal_admin_pin") || "") : ""));
   const [authed, setAuthed] = useState(false);
   const [pinInput, setPinInput] = useState("");
   const [pinErr, setPinErr] = useState("");
@@ -97,6 +99,9 @@ export default function MobileVendorPayment() {
       {toast && <div className="vp-toast">{toast}</div>}
 
       {screen === "home" && <HomeScreen go={setScreen} onLogout={logout} />}
+      {screen === "vendors" && (
+        <VendorsScreen headers={headers} onBack={() => setScreen("home")} setLoading={setLoading} flash={flash} />
+      )}
       {screen === "form" && (
         <FormScreen boot={boot} headers={headers} onBack={() => { setPrefill(null); setScreen("home"); }}
           setLoading={setLoading} flash={flash} prefill={prefill}
@@ -119,6 +124,7 @@ export default function MobileVendorPayment() {
 /* ══════════════ HOME (3 menu besar) ══════════════ */
 function HomeScreen({ go, onLogout }) {
   const menus = [
+    { key: "vendors", icon: "🏢", title: "Bayar per Vendor", sub: "Pilih vendor, centang PO, bayar sekaligus", cls: "vp-m-blue" },
     { key: "form", icon: "📝", title: "Catat Pembayaran", sub: "Input pembayaran ke vendor", cls: "vp-m-blue" },
     { key: "unpaid", icon: "⏳", title: "Belum Dibayar", sub: "Daftar tagihan vendor belum lunas", cls: "vp-m-gold" },
     { key: "history", icon: "🧾", title: "Riwayat Pembayaran", sub: "Lihat pembayaran yang sudah dicatat", cls: "vp-m-green" },
@@ -478,6 +484,270 @@ function HistoryScreen({ headers, onBack, setLoading, flash }) {
   );
 }
 
+/* ══════════════ BAYAR PER VENDOR (grouped + multi-select + batch) ══════════════ */
+const STATUS_CHIP = {
+  belum:    { txt: "Belum Dibayar", cls: "vp-st-belum" },
+  sebagian: { txt: "Sebagian",      cls: "vp-st-sebagian" },
+  lunas:    { txt: "Lunas",         cls: "vp-st-lunas" },
+};
+
+function VendorsScreen({ headers, onBack, setLoading, flash }) {
+  const [mode, setMode] = useState("list");      // list | detail | pay | success
+  const [vendors, setVendors] = useState([]);
+  const [vendor, setVendor] = useState(null);    // vendor terpilih (dengan jobs)
+  const [sel, setSel] = useState({});            // job_id -> true (PO dicentang)
+  const [result, setResult] = useState(null);
+
+  // form bayar
+  const [nominal, setNominal] = useState("");
+  const [tanggal, setTanggal] = useState(todayIso());
+  const [metode, setMetode] = useState("Transfer");
+  const [catatan, setCatatan] = useState("");
+  const [bukti, setBukti] = useState(null);
+  const [buktiPreview, setBuktiPreview] = useState("");
+  const [confirm, setConfirm] = useState(false);
+  const fileRef = useRef();
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { const r = await axios.get(`${API}/vendor-mobile/vendors-unpaid`, { headers }); setVendors(r.data.items || []); }
+    catch { flash("Gagal memuat vendor"); } finally { setLoading(false); }
+  }, []); // eslint-disable-line
+  useEffect(() => { if (mode === "list") load(); }, [mode, load]);
+
+  const openVendor = (v) => { setVendor(v); setSel({}); setMode("detail"); };
+  const payableJobs = (vendor?.jobs || []).filter((j) => (j.sisa || 0) > 0);
+  const selJobs = payableJobs.filter((j) => sel[j.job_id]);
+  const totalSel = selJobs.reduce((a, j) => a + (j.sisa || 0), 0);
+
+  const toggle = (jid) => setSel((s) => ({ ...s, [jid]: !s[jid] }));
+  const selectAll = () => {
+    const all = payableJobs.length > 0 && payableJobs.every((j) => sel[j.job_id]);
+    const next = {};
+    if (!all) payableJobs.forEach((j) => { next[j.job_id] = true; });
+    setSel(next);
+  };
+
+  const goPay = () => {
+    if (selJobs.length === 0) { flash("Centang minimal 1 PO dulu"); return; }
+    setNominal(String(totalSel));   // default = total sisa PO terpilih
+    setTanggal(todayIso()); setMetode("Transfer"); setCatatan(""); setBukti(null); setBuktiPreview("");
+    setMode("pay");
+  };
+
+  const onPickFile = (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    if (!f.type.startsWith("image/") && f.type !== "application/pdf") { flash("File harus gambar / PDF"); return; }
+    if (f.size > 8 * 1024 * 1024) { flash("Ukuran maksimal 8MB"); return; }
+    setBukti(f);
+    setBuktiPreview(f.type.startsWith("image/") ? URL.createObjectURL(f) : "");
+  };
+
+  const nominalNum = Number(onlyDigits(nominal)) || 0;
+
+  const doSave = async () => {
+    setConfirm(false); setLoading(true);
+    try {
+      const fd = new FormData();
+      fd.append("supplier_id", vendor.supplier_id);
+      fd.append("job_ids", selJobs.map((j) => j.job_id).join(","));   // urutan = urutan bayar (waterfall)
+      fd.append("amount", String(nominalNum));
+      fd.append("tanggal", tanggal);
+      fd.append("metode", metode);
+      fd.append("catatan", catatan);
+      if (bukti) fd.append("bukti", bukti);
+      const r = await axios.post(`${API}/vendor-mobile/pay-batch`, fd, { headers });
+      setResult({ ...r.data, _vendor: vendor.supplier_nama, _tanggal: tanggal, _metode: metode });
+      setMode("success");
+    } catch (e) {
+      flash(e?.response?.data?.detail || "Gagal menyimpan pembayaran");
+    } finally { setLoading(false); }
+  };
+
+  /* ── LIST vendor ── */
+  if (mode === "list") {
+    return (
+      <div className="vp-screen">
+        <div className="vp-topbar">
+          <button className="vp-back" onClick={onBack}>‹ Kembali</button>
+          <div className="vp-topbar-title">Bayar per Vendor</div><div style={{ width: 64 }} />
+        </div>
+        <div className="vp-body">
+          {vendors.length === 0 && <div className="vp-empty">🎉 Semua tagihan vendor sudah lunas.</div>}
+          {vendors.map((v) => (
+            <button key={v.supplier_id} className="vp-card vp-vendor-card" onClick={() => openVendor(v)}>
+              <div className="vp-card-top">
+                <span className="vp-card-nopol">🏢 {v.supplier_nama}</span>
+                <span className="vp-menu-arrow">›</span>
+              </div>
+              <div className="vp-card-rute">{v.jumlah_po} PO · Tagihan {fmtRp(v.total_tagihan)}</div>
+              <div className="vp-card-money">
+                <div><span className="vp-card-lbl">Sisa</span><span className="vp-card-sisa">{fmtRp(v.total_sisa)}</span></div>
+                {v.total_terbayar > 0 && <div className="vp-card-part">Terbayar {fmtRp(v.total_terbayar)}</div>}
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  /* ── DETAIL: centang PO ── */
+  if (mode === "detail") {
+    const allChecked = payableJobs.length > 0 && payableJobs.every((j) => sel[j.job_id]);
+    return (
+      <div className="vp-screen">
+        <div className="vp-topbar">
+          <button className="vp-back" onClick={() => setMode("list")}>‹ Kembali</button>
+          <div className="vp-topbar-title">Pilih PO</div><div style={{ width: 64 }} />
+        </div>
+        <div className="vp-body" style={{ paddingBottom: 120 }}>
+          <div className="vp-vendor-head">
+            <div className="vp-vendor-name">🏢 {vendor.supplier_nama}</div>
+            <div className="vp-vendor-sisa">Sisa total {fmtRp(vendor.total_sisa)}</div>
+          </div>
+          {payableJobs.length > 1 && (
+            <button className="vp-selectall" onClick={selectAll}>{allChecked ? "☑ Batal pilih semua" : "◻ Pilih semua PO"}</button>
+          )}
+          {(vendor.jobs || []).map((j) => {
+            const st = STATUS_CHIP[j.status] || STATUS_CHIP.belum;
+            const disabled = (j.sisa || 0) <= 0;
+            const on = !!sel[j.job_id];
+            return (
+              <div key={j.job_id} className={`vp-card vp-po-card ${on ? "vp-po-on" : ""} ${disabled ? "vp-po-off" : ""}`}
+                onClick={() => !disabled && toggle(j.job_id)}>
+                <div className="vp-po-row">
+                  <span className={`vp-check ${on ? "vp-check-on" : ""} ${disabled ? "vp-check-dis" : ""}`}>{on ? "✓" : ""}</span>
+                  <div style={{ flex: 1 }}>
+                    <div className="vp-card-top" style={{ marginBottom: 2 }}>
+                      <span className="vp-card-nopol">{j.nopol || "(tanpa nopol)"}</span>
+                      <span className={`vp-stchip ${st.cls}`}>{st.txt}</span>
+                    </div>
+                    <div className="vp-card-rute">{j.rute} · {j.kategori}</div>
+                    <div className="vp-po-money">
+                      <span className="vp-po-sisa">Sisa {fmtRp(j.sisa)}</span>
+                      {j.terbayar > 0 && <span className="vp-po-sub"> · terbayar {fmtRp(j.terbayar)} / {fmtRp(j.total_harga)}</span>}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          {payableJobs.length === 0 && <div className="vp-empty">Semua PO vendor ini sudah lunas 🎉</div>}
+        </div>
+        {/* Sticky total + bayar */}
+        <div className="vp-sticky">
+          <div className="vp-selbar">
+            <div><div className="vp-selbar-lbl">{selJobs.length} PO dipilih</div><div className="vp-selbar-amt">{fmtRp(totalSel)}</div></div>
+          </div>
+          <button className="vp-btn vp-btn-primary" disabled={selJobs.length === 0} onClick={goPay}>💰 Bayar yang Dipilih</button>
+        </div>
+      </div>
+    );
+  }
+
+  /* ── PAY: form bayar batch ── */
+  if (mode === "pay") {
+    return (
+      <div className="vp-screen">
+        <div className="vp-topbar">
+          <button className="vp-back" onClick={() => setMode("detail")}>‹ Kembali</button>
+          <div className="vp-topbar-title">Bayar Vendor</div><div style={{ width: 64 }} />
+        </div>
+        <div className="vp-body vp-body-form">
+          <div className="vp-vendor-head">
+            <div className="vp-vendor-name">🏢 {vendor.supplier_nama}</div>
+            <div className="vp-vendor-sisa">{selJobs.length} PO · total sisa {fmtRp(totalSel)}</div>
+          </div>
+
+          <div className="vp-field">
+            <label className="vp-label">Nominal Pembayaran</label>
+            <div className="vp-rp">
+              <span className="vp-rp-tag">Rp</span>
+              <input className="vp-input vp-rp-input" inputMode="numeric" type="text" placeholder="0"
+                value={fmtRpInput(nominal)} onChange={(e) => setNominal(onlyDigits(e.target.value))} />
+            </div>
+            <div className="vp-hint">Otomatis dibagi ke PO terpilih (yang paling atas didahulukan). Boleh kurang dari total (bayar sebagian).</div>
+          </div>
+
+          <div className="vp-field">
+            <label className="vp-label">Tanggal Pembayaran</label>
+            <input className="vp-input" type="date" value={tanggal} onChange={(e) => setTanggal(e.target.value)} />
+          </div>
+
+          <div className="vp-field">
+            <label className="vp-label">Metode Pembayaran</label>
+            <div className="vp-chips">
+              {["Transfer", "Tunai", "Lainnya"].map((m) => (
+                <button key={m} className={`vp-chip ${metode === m ? "vp-chip-on" : ""}`} onClick={() => setMetode(m)}>{m}</button>
+              ))}
+            </div>
+          </div>
+
+          <div className="vp-field">
+            <label className="vp-label">Bukti Transfer (opsional)</label>
+            <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={onPickFile} />
+            {bukti ? (
+              <div className="vp-bukti">
+                {buktiPreview ? <img src={buktiPreview} alt="bukti" className="vp-bukti-img" /> : <div className="vp-bukti-file">📄 {bukti.name}</div>}
+                <button className="vp-bukti-rm" onClick={() => { setBukti(null); setBuktiPreview(""); if (fileRef.current) fileRef.current.value = ""; }}>Hapus</button>
+              </div>
+            ) : (
+              <button className="vp-upload" onClick={() => fileRef.current && fileRef.current.click()}>📷 Ambil / Pilih Foto</button>
+            )}
+          </div>
+
+          <div className="vp-field">
+            <label className="vp-label">Catatan (opsional)</label>
+            <textarea className="vp-input vp-textarea" rows={2} placeholder="contoh: pelunasan 3 PO Surabaya"
+              value={catatan} onChange={(e) => setCatatan(e.target.value)} />
+          </div>
+          <div style={{ height: 12 }} />
+        </div>
+        <div className="vp-sticky">
+          <button className="vp-btn vp-btn-primary" disabled={nominalNum <= 0} onClick={() => setConfirm(true)}>💾 Simpan Pembayaran</button>
+        </div>
+
+        <BottomSheet open={confirm} title="Konfirmasi Pembayaran" onClose={() => setConfirm(false)}>
+          <div className="vp-confirm">
+            <Row k="Vendor" v={vendor.supplier_nama} />
+            <Row k="Jumlah PO" v={`${selJobs.length} PO`} />
+            <Row k="Nominal" v={fmtRp(nominalNum)} big />
+            <Row k="Tanggal" v={fmtTgl(tanggal)} />
+            <Row k="Metode" v={metode} />
+          </div>
+          <button className="vp-btn vp-btn-primary" onClick={doSave}>✅ Ya, Simpan</button>
+          <button className="vp-btn vp-btn-ghost" onClick={() => setConfirm(false)}>Batal</button>
+        </BottomSheet>
+      </div>
+    );
+  }
+
+  /* ── SUCCESS ── */
+  const r = result || {};
+  return (
+    <div className="vp-screen vp-center">
+      <div className="vp-success">
+        <div className="vp-success-check">✓</div>
+        <div className="vp-success-title">Pembayaran Tersimpan</div>
+        <div className="vp-success-amt">{fmtRp(r.total_dibayar)}</div>
+        <div className="vp-success-box">
+          <Row k="Vendor" v={r._vendor || "-"} />
+          <Row k="Tanggal" v={fmtTgl(r._tanggal)} />
+          <Row k="Metode" v={r._metode || "-"} />
+          {(r.applied || []).map((a) => (
+            <Row key={a.job_id} k={a.nopol || "PO"} v={`${fmtRp(a.dibayar)} · ${a.status === "lunas" ? "LUNAS ✅" : "sebagian"}`} />
+          ))}
+          {r.sisa_nominal > 0 && <Row k="Kelebihan nominal" v={fmtRp(r.sisa_nominal) + " (tidak terpakai)"} />}
+        </div>
+        <button className="vp-btn vp-btn-primary" onClick={() => { setResult(null); setSel({}); setMode("list"); }}>➕ Bayar Vendor Lain</button>
+        <button className="vp-btn vp-btn-ghost" onClick={onBack}>Kembali ke Menu</button>
+      </div>
+    </div>
+  );
+}
+
 /* ══════════════ SUCCESS ══════════════ */
 function SuccessScreen({ data, onAgain, onHome }) {
   const d = data || {};
@@ -648,6 +918,32 @@ function VpStyle() {
     @keyframes vpspin { to { transform:rotate(360deg);} }
     .vp-toast { position:fixed; left:50%; bottom:calc(env(safe-area-inset-bottom) + 20px); transform:translateX(-50%); z-index:210;
       background:var(--vp-ink); color:#fff; font-size:14px; font-weight:600; padding:12px 18px; border-radius:12px; max-width:88%; text-align:center; box-shadow:0 8px 24px rgba(0,0,0,.3); }
+
+    /* Bayar per Vendor */
+    .vp-vendor-card { display:block; width:100%; text-align:left; border:none; }
+    .vp-vendor-head { background:#eef3fb; border:1.5px solid var(--vp-navy); border-radius:14px; padding:14px 16px; margin-bottom:14px; }
+    .vp-vendor-name { font-size:18px; font-weight:900; color:var(--vp-navy); }
+    .vp-vendor-sisa { font-size:13.5px; color:var(--vp-mute); margin-top:3px; }
+    .vp-selectall { width:100%; text-align:left; background:#fff; border:1.5px solid var(--vp-line); border-radius:12px;
+      padding:14px 16px; font-size:15px; font-weight:700; color:var(--vp-navy); margin-bottom:12px; min-height:50px; }
+    .vp-po-card { padding:14px; }
+    .vp-po-on { border:2px solid var(--vp-navy); background:#f5f9ff; }
+    .vp-po-off { opacity:.55; }
+    .vp-po-row { display:flex; align-items:flex-start; gap:12px; }
+    .vp-check { flex-shrink:0; width:26px; height:26px; border-radius:8px; border:2px solid var(--vp-line); background:#fff;
+      display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:900; color:#fff; margin-top:2px; }
+    .vp-check-on { background:var(--vp-navy); border-color:var(--vp-navy); }
+    .vp-check-dis { background:#eef0f4; border-color:#e0e3ea; }
+    .vp-po-money { margin-top:6px; }
+    .vp-po-sisa { font-size:17px; font-weight:900; color:var(--vp-navy); }
+    .vp-po-sub { font-size:12.5px; color:var(--vp-mute); }
+    .vp-stchip { font-size:11px; font-weight:800; padding:4px 10px; border-radius:20px; white-space:nowrap; }
+    .vp-st-belum { color:#b42318; background:#fdecec; }
+    .vp-st-sebagian { color:#8a6d00; background:#fdf3e0; }
+    .vp-st-lunas { color:#1a7f42; background:#e6f7ec; }
+    .vp-selbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; padding:0 2px; }
+    .vp-selbar-lbl { font-size:13px; color:var(--vp-mute); }
+    .vp-selbar-amt { font-size:22px; font-weight:900; color:var(--vp-navy); }
     `}</style>
   );
 }

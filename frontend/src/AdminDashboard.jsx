@@ -8,6 +8,7 @@ import DriverData from "@/DriverData";
 import SupplierPage from "@/SupplierPage";
 import SelisihPage from "@/SelisihPage";
 import KompensasiPage from "@/KompensasiPage";
+import MobileVendorPayment from "@/MobileVendorPayment";
 import PermintaanHargaPage from "@/PermintaanHargaPage";
 import { DOC_BRAND, DOC_BASE_CSS, docHeader, docFooter, terbilangRupiah, nextDocNo } from "@/docTheme";
 import "@/App.css";
@@ -370,6 +371,7 @@ function Dashboard({ pin, onLogout }) {
     koordinator:  { title: "Koordinator", sub: "Kelola akun koordinator lapangan" },
     supplier:     { title: "Supplier", sub: "Kelola unit titipan & selisih harga supplier" },
     selisih:      { title: "Selisih Harga", sub: "Bandingkan HPP vs harga deal pelanggan" },
+    "pembayaran-vendor": { title: "Pembayaran Vendor", sub: "Bayar beberapa PO per vendor sekaligus (Keuangan)" },
     kompensasi:   { title: "Kompensasi", sub: "Kompensasi hutang piutang antar pihak" },
     "minta-harga":{ title: "Minta Harga", sub: "Permintaan harga ke perwakilan supplier" },
     laporan:      { title: "Laporan", sub: "Ringkasan performa & ekspor data" },
@@ -440,6 +442,12 @@ function Dashboard({ pin, onLogout }) {
 
       {activeTab === "kompensasi" && (
         <KompensasiPage />
+      )}
+
+      {activeTab === "pembayaran-vendor" && (
+        <div style={{ maxWidth: 560, margin: "0 auto" }}>
+          <MobileVendorPayment embedded />
+        </div>
       )}
 
       {activeTab === "minta-harga" && (
@@ -675,7 +683,7 @@ const STATUS_TONE = { NEW: "orange", DISPATCHED: "blue", ON_TRIP: "purple", DELI
 const SIDEBAR_ICON = {
   pesanan: "▦", "route-leg": "🧭", drivers: "👤", supplier: "🌿", koordinator: "🧑‍💼",
   kendaraan: "🚙", dokumen: "📄", histori: "🗂️", laporan: "📑", kalkulator: "🧮", selisih: "📊",
-  kompensasi: "🔄", "minta-harga": "📩", pengaturan: "⚙️",
+  kompensasi: "🔄", "minta-harga": "📩", pengaturan: "⚙️", "pembayaran-vendor": "🏢",
 };
 
 /* ════════════════════════════════════════
@@ -696,6 +704,7 @@ const SIDEBAR_PRIMARY = [
 const SIDEBAR_TOOLS = [
   { key: "kalkulator", label: "Kalkulator HPP" },
   { key: "selisih", label: "Selisih Harga" },
+  { key: "pembayaran-vendor", label: "Pembayaran Vendor" },
   { key: "kompensasi", label: "Kompensasi" },
   { key: "minta-harga", label: "Minta Harga" },
 ];
