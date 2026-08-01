@@ -400,6 +400,8 @@ function Dashboard({ pin, onLogout }) {
           setProfileMenuOpen={setProfileMenuOpen}
           onLogout={onLogout}
           onOpenSidebar={() => setSidebarOpen(true)}
+          dark={dark}
+          onToggleTheme={() => { toggleTheme(); setDark((d) => !d); }}
         />
 
         <div className="adm-content-wrap" style={{ padding: "22px 28px 40px", maxWidth: 1180, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
@@ -760,7 +762,7 @@ function Sidebar({ activeTab, setActiveTab, open, onNavigate }) {
 /* ════════════════════════════════════════
    TOP HEADER
 ════════════════════════════════════════ */
-function TopHeader({ title, sub, search, onSearch, onExport, onRefresh, profileMenuOpen, setProfileMenuOpen, onLogout, onOpenSidebar }) {
+function TopHeader({ title, sub, search, onSearch, onExport, onRefresh, profileMenuOpen, setProfileMenuOpen, onLogout, onOpenSidebar, dark, onToggleTheme }) {
   const iconBtn = { width: 34, height: 34, borderRadius: 8, border: "1px solid #1f2937", background: "#111826", color: "#9aa4b6", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: 14, flexShrink: 0 };
   return (
     <header className="adm-topheader-v2" style={{ padding: "18px 28px", borderBottom: "1px solid #171e2c", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap", background: "#0a0e14" }}>
@@ -787,6 +789,9 @@ function TopHeader({ title, sub, search, onSearch, onExport, onRefresh, profileM
         <a href="?guide=1" target="_blank" rel="noreferrer" style={iconBtn} title="Tutorial" data-testid="adm-tutorial-link">📖</a>
         <button style={iconBtn} title="Export CSV" onClick={onExport} data-testid="adm-export-csv">⬇</button>
         <button style={iconBtn} title="Refresh" onClick={onRefresh} data-testid="adm-refresh">↻</button>
+        {onToggleTheme && (
+          <button style={iconBtn} title="Mode gelap / terang" onClick={onToggleTheme} data-testid="adm-theme-toggle">{dark ? "☀️" : "🌙"}</button>
+        )}
         <div style={{ position: "relative" }}>
           <button
             onClick={() => setProfileMenuOpen((v) => !v)}
