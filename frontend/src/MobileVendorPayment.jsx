@@ -55,6 +55,20 @@ export default function MobileVendorPayment({ embedded = false }) {
   const [prefill, setPrefill] = useState(null);       // dari "Belum Dibayar → Bayar"
   const [lastSuccess, setLastSuccess] = useState(null);
 
+  // Mode gelap/terang (🌙/☀️). Standalone: kelola & simpan sendiri (key sama
+  // dg halaman lain: "aal-theme"). Embedded di admin: ikut tema admin, tombol
+  // disembunyiin biar nggak dobel.
+  const [dark, setDark] = useState(() => {
+    try { return (localStorage.getItem("aal-theme") || document.documentElement.getAttribute("data-theme")) === "dark"; }
+    catch { return false; }
+  });
+  useEffect(() => {
+    if (embedded) return;
+    document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+    try { localStorage.setItem("aal-theme", dark ? "dark" : "light"); } catch (_) {}
+  }, [dark, embedded]);
+  const toggleDark = () => setDark((d) => !d);
+
   const headers = { "X-Admin-Pin": pin };
   const flash = (m) => { setToast(m); setTimeout(() => setToast(""), 2600); };
 
@@ -98,7 +112,7 @@ export default function MobileVendorPayment({ embedded = false }) {
       {loading && <div className="vp-loading"><div className="vp-spinner" /></div>}
       {toast && <div className="vp-toast">{toast}</div>}
 
-      {screen === "home" && <HomeScreen go={setScreen} onLogout={logout} />}
+      {screen === "home" && <HomeScreen go={setScreen} onLogout={logout} dark={dark} toggleDark={toggleDark} showThemeToggle={!embedded} />}
       {screen === "vendors" && (
         <VendorsScreen headers={headers} onBack={() => setScreen("home")} setLoading={setLoading} flash={flash} />
       )}
@@ -122,7 +136,7 @@ export default function MobileVendorPayment({ embedded = false }) {
 }
 
 /* ══════════════ HOME (3 menu besar) ══════════════ */
-function HomeScreen({ go, onLogout }) {
+function HomeScreen({ go, onLogout, dark, toggleDark, showThemeToggle }) {
   const menus = [
     { key: "vendors", icon: "🏢", title: "Bayar per Vendor", sub: "Pilih vendor, centang PO, bayar sekaligus", cls: "vp-m-blue" },
     { key: "form", icon: "📝", title: "Catat Pembayaran", sub: "Input pembayaran ke vendor", cls: "vp-m-blue" },
@@ -133,7 +147,12 @@ function HomeScreen({ go, onLogout }) {
     <div className="vp-screen">
       <div className="vp-topbar vp-topbar-home">
         <div><div className="vp-hi">Halo 👋</div><div className="vp-brand">PT Alyssa Auto Logistik</div></div>
-        <button className="vp-logout" onClick={onLogout}>Keluar</button>
+        <div style={{ display: "flex", gap: 8 }}>
+          {showThemeToggle && (
+            <button className="vp-logout" onClick={toggleDark} aria-label="Ganti tema" title="Mode gelap/terang">{dark ? "☀️" : "🌙"}</button>
+          )}
+          <button className="vp-logout" onClick={onLogout}>Keluar</button>
+        </div>
       </div>
       <div className="vp-body">
         <div className="vp-menu-list">
@@ -944,6 +963,34 @@ function VpStyle() {
     .vp-selbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; padding:0 2px; }
     .vp-selbar-lbl { font-size:13px; color:var(--vp-mute); }
     .vp-selbar-amt { font-size:22px; font-weight:900; color:var(--vp-navy); }
+
+    /* ── Mode gelap (🌙) — dipicu data-theme="dark" di <html> ── */
+    :root[data-theme="dark"] { --vp-bg:#0a0e14; --vp-ink:#e6edf3; --vp-mute:#8b949e; --vp-line:#21262d; --vp-navy:#1b3a6b; }
+    [data-theme="dark"] .vp-menu,
+    [data-theme="dark"] .vp-card,
+    [data-theme="dark"] .vp-hcard,
+    [data-theme="dark"] .vp-vendor-card,
+    [data-theme="dark"] .vp-po-card,
+    [data-theme="dark"] .vp-success-box,
+    [data-theme="dark"] .vp-vendor-head,
+    [data-theme="dark"] .vp-sheet { background:#161b22; }
+    [data-theme="dark"] .vp-vendor-head { border-color:#1f6feb; }
+    [data-theme="dark"] .vp-input,
+    [data-theme="dark"] .vp-rp,
+    [data-theme="dark"] .vp-select,
+    [data-theme="dark"] .vp-chip,
+    [data-theme="dark"] .vp-change,
+    [data-theme="dark"] .vp-selectall,
+    [data-theme="dark"] .vp-results,
+    [data-theme="dark"] .vp-result,
+    [data-theme="dark"] .vp-check,
+    [data-theme="dark"] .vp-sheet-item { background:#0d1117; color:var(--vp-ink); border-color:var(--vp-line); }
+    [data-theme="dark"] .vp-btn-ghost { background:#161b22; color:var(--vp-ink); border-color:var(--vp-line); }
+    [data-theme="dark"] .vp-sheet-x { background:#21262d; color:var(--vp-ink); }
+    [data-theme="dark"] .vp-upload { background:#12233a; }
+    [data-theme="dark"] .vp-po-on,
+    [data-theme="dark"] .vp-picked { background:#12233a; }
+    [data-theme="dark"] .vp-sheet-grip { background:#30363d; }
     `}</style>
   );
 }
