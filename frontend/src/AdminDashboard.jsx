@@ -1016,6 +1016,148 @@ const ALBUM_STAGES = [
   { key: "dokumen", label: "Dokumen", icon: "📄" },
 ];
 
+/* ── Duplikat PO → biaya Vendor/Supplier (mirip "Duplikat transaksi" Mekari) ──
+   Ambil unit & rute dari PO, pilih vendor (tersimpan / baru), isi harga vendor
+   manual, simpan jadi supplier job. Reuse endpoint supplier yang sudah ada. */
+function DuplicateVendorModal({ order, headers, onClose }) {
+  const units = (Array.isArray(order.units) && order.units.length)
+    ? order.units
+    : [{ unit_id: "legacy", vehicle_type: order.vehicle_type, tipe_model: order.tipe_model, nopol: order.nopol, no_rangka: order.no_rangka }];
+  const rute = `${order.asal_kota || "—"} → ${order.tujuan_kota || "—"}`;
+  const rpID = (n) => "Rp " + (Number(n) || 0).toLocaleString("id-ID");
+
+  const [supQ, setSupQ] = useState("");
+  const [supList, setSupList] = useState([]);
+  const [supSel, setSupSel] = useState(null);   // {id, nama} tersimpan, atau {id:null, nama} baru
+  const [rows, setRows] = useState(() => units.map((u, i) => ({
+    key: u.unit_id || u.nopol || i,
+    checked: true,
+    vehicle_type: `${u.vehicle_type || ""}${u.tipe_model ? " " + u.tipe_model : ""}`.trim(),
+    nopol: (u.nopol || "").toUpperCase(),
+    no_rangka: (u.no_rangka || "").toUpperCase(),
+    harga: "",
+  })));
+  const [saving, setSaving] = useState(false);
+  const [done, setDone] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    const t = setTimeout(async () => {
+      try {
+        const r = await axios.get(`${API}/admin/suppliers`, { params: supQ.trim() ? { q: supQ.trim() } : {}, headers });
+        if (alive) setSupList(r.data?.items || []);
+      } catch { if (alive) setSupList([]); }
+    }, 300);
+    return () => { alive = false; clearTimeout(t); };
+  }, [supQ]); // eslint-disable-line
+
+  const setRow = (key, patch) => setRows((rs) => rs.map((r) => r.key === key ? { ...r, ...patch } : r));
+  const hargaNum = (s) => parseInt(String(s || "").replace(/[^0-9]/g, ""), 10) || 0;
+  const checkedRows = rows.filter((r) => r.checked && hargaNum(r.harga) > 0);
+  const canSave = !!(supSel && (supSel.id || supSel.nama)) && checkedRows.length > 0 && !saving;
+
+  const doSave = async () => {
+    setSaving(true);
+    try {
+      let sid = supSel.id;
+      if (!sid) {
+        const r = await axios.post(`${API}/admin/suppliers`, { nama: supSel.nama, jenis: "", no_hp: "", catatan: "" }, { headers });
+        sid = r.data?.id;
+      }
+      if (!sid) throw new Error("supplier");
+      for (const r of checkedRows) {
+        await axios.post(`${API}/admin/suppliers/${sid}/jobs`, {
+          vehicle_type: r.vehicle_type || "Kendaraan",
+          nopol: r.nopol, no_rangka: r.no_rangka,
+          asal_kota: order.asal_kota || "", tujuan_kota: order.tujuan_kota || "",
+          total_harga: hargaNum(r.harga),
+          catatan: `Duplikat dari ${order.order_id}`, tanggal: "",
+        }, { headers });
+      }
+      setDone(true);
+    } catch (e) {
+      alert(e?.response?.data?.detail || "Gagal duplikat ke vendor");
+    } finally { setSaving(false); }
+  };
+
+  return createPortal((
+    <div className="adm-vars">
+    <div className="adm-modal-bg" onClick={onClose} data-testid={`adm-dupvendor-modal-${order.order_id}`}>
+      <div className="adm-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 620 }}>
+        <div className="adm-modal-head">
+          <div>
+            <div className="adm-modal-title">🏢 Duplikat ke Vendor</div>
+            <div className="adm-modal-sub">{order.order_id} · {rute}</div>
+          </div>
+          <button className="adm-modal-close" onClick={onClose} aria-label="Tutup">✕</button>
+        </div>
+        <div className="adm-modal-body">
+          {done ? (
+            <div style={{ textAlign: "center", padding: "20px 0" }}>
+              <div style={{ fontSize: 40 }}>✅</div>
+              <div style={{ fontWeight: 800, fontSize: 16, margin: "8px 0" }}>Tersimpan ke vendor {supSel.nama}</div>
+              <div style={{ fontSize: 13, color: "var(--text-mute)", marginBottom: 16 }}>{checkedRows.length} unit masuk jadi biaya vendor. Cek di menu Supplier / Pembayaran Vendor.</div>
+              <button className="adm-btn adm-btn-gold" onClick={onClose}>Selesai</button>
+            </div>
+          ) : (
+            <>
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-mute)", marginBottom: 6, textTransform: "uppercase" }}>Vendor / Supplier</div>
+                {supSel ? (
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, background: "#12233a", border: "1px solid #1f6feb", borderRadius: 8, padding: "10px 12px" }}>
+                    <span style={{ fontWeight: 700 }}>🏢 {supSel.nama}{!supSel.id && <span style={{ color: "#e6b450", fontSize: 12 }}> (baru)</span>}</span>
+                    <button className="adm-btn adm-btn-ghost adm-btn-xs" onClick={() => setSupSel(null)}>Ganti</button>
+                  </div>
+                ) : (
+                  <>
+                    <input className="adm-input" style={{ width: "100%" }} placeholder="Ketik nama vendor untuk cari / buat baru…" value={supQ} onChange={(e) => setSupQ(e.target.value)} data-testid="adm-dupvendor-search" />
+                    {supList.length > 0 && (
+                      <div style={{ border: "1px solid #21262d", borderRadius: 8, marginTop: 6, maxHeight: 160, overflowY: "auto" }}>
+                        {supList.map((s) => (
+                          <button key={s.id} style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 12px", background: "none", border: "none", borderBottom: "1px solid #21262d", color: "#e6edf3", cursor: "pointer" }}
+                            onClick={() => setSupSel({ id: s.id, nama: s.nama })}>
+                            🏢 {s.nama} <span style={{ color: "#8b949e", fontSize: 12 }}>· sisa {rpID(s.grand_sisa)}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {supQ.trim() && (
+                      <button className="adm-btn adm-btn-gold adm-btn-xs" style={{ marginTop: 8 }} onClick={() => setSupSel({ id: null, nama: supQ.trim() })}>+ Buat vendor baru "{supQ.trim()}"</button>
+                    )}
+                  </>
+                )}
+              </div>
+
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-mute)", marginBottom: 6, textTransform: "uppercase" }}>Unit dari PO ini · isi harga vendor</div>
+              {rows.map((r) => (
+                <div key={r.key} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderTop: "1px solid #21262d" }}>
+                  <input type="checkbox" checked={r.checked} onChange={() => setRow(r.key, { checked: !r.checked })} style={{ width: 16, height: 16, flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13 }}>{r.vehicle_type || "Kendaraan"}{r.nopol ? ` · ${r.nopol}` : ""}</div>
+                    <div style={{ fontSize: 11.5, color: "var(--text-mute)" }}>{rute}</div>
+                  </div>
+                  <input className="adm-input adm-mono" inputMode="numeric" placeholder="Harga vendor (Rp)" value={r.harga}
+                    onChange={(e) => setRow(r.key, { harga: e.target.value.replace(/[^0-9]/g, "") })}
+                    style={{ width: 160, flexShrink: 0 }} disabled={!r.checked} data-testid={`adm-dupvendor-harga-${r.key}`} />
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+        {!done && (
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "12px 16px", borderTop: "1px solid #21262d" }}>
+            <button className="adm-btn adm-btn-ghost" onClick={onClose}>Batal</button>
+            <button className="adm-btn adm-btn-gold" disabled={!canSave} onClick={doSave} data-testid="adm-dupvendor-save">
+              {saving ? "Menyimpan…" : `Simpan ${checkedRows.length} unit ke vendor`}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+    </div>
+  ), document.body);
+}
+
 function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLegs, onOpenBonus, headers, kordList = [], cartHas = () => false, onToggleCartUnit = () => {}, onCartSetOrderUnits = () => {} }) {
   const [uploadingStage, setUploadingStage] = useState(null); // stage key lagi upload
   const [expanded, setExpanded] = useState(false);
@@ -1023,6 +1165,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
   const [showInvoice, setShowInvoice] = useState(false);
   const [showJadwal, setShowJadwal] = useState(false);
   const [showTrip360, setShowTrip360] = useState(false);
+  const [showDupVendor, setShowDupVendor] = useState(false);
   const albumFileRefs = useRef({});
 
   const units = Array.isArray(order.units) ? order.units : [];
@@ -1780,6 +1923,13 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
           style={{ background: "#2a2410", border: "1px solid #d4a847", color: "#e6b450" }}>
           🚢 Jadwal Pengiriman
         </button>
+        <button className="adm-btn adm-btn-sm" onClick={(e) => { e.stopPropagation(); setShowDupVendor(true); }} data-testid={`adm-dupvendor-${order.order_id}`}
+          style={{ background: "#241a2e", border: "1px solid #a371f7", color: "#c9a2ff" }}>
+          🏢 Duplikat ke Vendor
+        </button>
+        {showDupVendor && (
+          <DuplicateVendorModal order={order} headers={headers} onClose={() => setShowDupVendor(false)} />
+        )}
         {showJadwal && (
           <JadwalModal
             order={order}
