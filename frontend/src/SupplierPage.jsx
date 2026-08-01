@@ -7,17 +7,19 @@ const API = `${BACKEND_URL}/api`;
 
 /* Cetak Ringkasan Supplier sebagai A4 (teks vektor, kaya Penawaran) — tajam
    walau di-screenshot & kirim WhatsApp, huruf kecil biar muat. */
-function printSupplierA4(sup) {
+function printSupplierA4(sup, jobsOverride) {
   if (!sup) return;
   const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const rp = (n) => "Rp " + (Number(n) || 0).toLocaleString("id-ID");
   const now = new Date();
   const tgl = now.toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
   const noDoc = `RPS/AAL/${String(now.getDate()).padStart(2, "0")}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getFullYear()).slice(2)}/${now.getFullYear()}`;
-  const jobs = sup.jobs || [];
-  const gHarga = sup.grand_total_harga != null ? sup.grand_total_harga : jobs.reduce((s, j) => s + (j.total_harga || 0), 0);
-  const gBayar = sup.grand_total_terbayar != null ? sup.grand_total_terbayar : jobs.reduce((s, j) => s + (j.total_terbayar || 0), 0);
-  const gSisa = sup.grand_sisa != null ? sup.grand_sisa : (gHarga - gBayar);
+  // jobsOverride = unit yang dicentang. Kalau kosong -> semua unit. Total selalu
+  // dihitung dari unit yang benar-benar dicetak (biar cocok sama isi tabel).
+  const jobs = (jobsOverride && jobsOverride.length) ? jobsOverride : (sup.jobs || []);
+  const gHarga = jobs.reduce((s, j) => s + (j.total_harga || 0), 0);
+  const gBayar = jobs.reduce((s, j) => s + (j.total_terbayar || 0), 0);
+  const gSisa = gHarga - gBayar;
   const body = jobs.map((j, i) => {
     const nopol = j.nopol || j.no_rangka || "-";
     const rute = `${j.asal_kota || "-"} → ${j.tujuan_kota || "-"}`;
@@ -121,8 +123,10 @@ export default function SupplierPage() {
   const debounceRef = useRef(null);
   const [toast, setToast] = useState("");
   const [listRefreshTick, setListRefreshTick] = useState(0);
+  const [selJobs, setSelJobs] = useState({}); // job_id -> true (centang buat Cetak A4)
 
   const flash = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2200); };
+  const toggleSelJob = (id) => setSelJobs((s) => ({ ...s, [id]: !s[id] }));
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -424,9 +428,15 @@ export default function SupplierPage() {
               <div style={{ fontWeight: 800, fontSize: 16 }}>{selected.nama}</div>
               <div style={{ fontSize: 11, color: "#8b949e" }}>{selected.jenis || "Supplier"} {selected.no_hp && `· ${selected.no_hp}`}</div>
               <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-                <button style={{ ...BTN_GHOST, fontSize: 11, padding: "6px 12px" }} onClick={() => printSupplierA4(selected)} data-testid="sup-ringkasan-print">
-                  {"🖨️ Cetak A4"}
-                </button>
+                {(() => {
+                  const picked = (selected.jobs || []).filter((j) => selJobs[j.id]);
+                  return (
+                    <button style={{ ...BTN_GHOST, fontSize: 11, padding: "6px 12px" }}
+                      onClick={() => printSupplierA4(selected, picked)} data-testid="sup-ringkasan-print">
+                      {picked.length > 0 ? `🖨️ Cetak A4 (${picked.length} dipilih)` : "🖨️ Cetak A4 (semua)"}
+                    </button>
+                  );
+                })()}
                 <button style={{ ...BTN_GHOST, fontSize: 11, padding: "6px 12px" }} onClick={addProject} disabled={projSaving} data-testid="sup-project-add">
                   {projSaving ? "⏳..." : "📁 + Projek Baru"}
                 </button>
@@ -504,10 +514,13 @@ export default function SupplierPage() {
                 {jobs.map((job) => (
                   <div key={job.id} style={{ border: "1px solid #21262d", borderRadius: 10, padding: 14, marginBottom: 10 }} data-testid={`sup-job-${job.id}`}>
                     <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-                      <div>
-                        <div style={{ fontWeight: 700, fontSize: 13 }}>{job.vehicle_type || "—"} {job.nopol && <span style={{ color: "#8b949e" }}>· {job.nopol}</span>} {job.no_rangka && <span style={{ color: "#8b949e" }}>· {job.no_rangka}</span>}</div>
-                        <div style={{ fontSize: 12, color: "#8b949e" }}>{job.asal_kota || "—"} &rarr; {job.tujuan_kota || "—"} {job.tanggal && <span style={{ marginLeft: 6 }}>· {fDate(job.tanggal)}</span>}</div>
-                        {job.catatan && <div style={{ fontSize: 11, color: "#8b949e", marginTop: 2 }}>{job.catatan}</div>}
+                      <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                        <input type="checkbox" checked={!!selJobs[job.id]} onChange={() => toggleSelJob(job.id)} style={{ width: 16, height: 16, marginTop: 3, flexShrink: 0 }} title="Pilih untuk Cetak A4" data-testid={`sup-job-check-${job.id}`} />
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: 13 }}>{job.vehicle_type || "—"} {job.nopol && <span style={{ color: "#8b949e" }}>· {job.nopol}</span>} {job.no_rangka && <span style={{ color: "#8b949e" }}>· {job.no_rangka}</span>}</div>
+                          <div style={{ fontSize: 12, color: "#8b949e" }}>{job.asal_kota || "—"} &rarr; {job.tujuan_kota || "—"} {job.tanggal && <span style={{ marginLeft: 6 }}>· {fDate(job.tanggal)}</span>}</div>
+                          {job.catatan && <div style={{ fontSize: 11, color: "#8b949e", marginTop: 2 }}>{job.catatan}</div>}
+                        </div>
                       </div>
                       <div style={{ textAlign: "right" }}>
                         <div style={{ fontSize: 11, color: "#8b949e" }}>Harga: {fRp(job.total_harga)}</div>
