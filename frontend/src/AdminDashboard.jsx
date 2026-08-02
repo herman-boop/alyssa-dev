@@ -2429,20 +2429,6 @@ function JadwalModal({ order, headers, onClose, onPrint }) {
             </label>
           </div>
 
-          {/* isi cepat kapal */}
-          <div style={{ border: "1px dashed var(--border-2)", borderRadius: 9, padding: "10px 12px", marginBottom: 14, background: "var(--bg-2)" }}>
-            <div style={{ fontSize: 11, fontWeight: 800, color: "var(--text-2)", marginBottom: 8 }}>Isi cepat kapal → semua unit</div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
-              <label style={{ flex: 2, minWidth: 130 }}><span style={{ display: "block", fontSize: 10, color: "var(--text-mute)", marginBottom: 4 }}>Nama Kapal</span>
-                <input list="kapal-dl" className="adm-input" value={bulk.nama_kapal} onChange={(e) => setBulk((b) => ({ ...b, nama_kapal: e.target.value }))} placeholder="Serasi V" data-testid="adm-jadwal-bulk-kapal" /></label>
-              <label style={{ flex: 1, minWidth: 120 }}><span style={{ display: "block", fontSize: 10, color: "var(--text-mute)", marginBottom: 4 }}>Kapal Berangkat</span>
-                <input type="date" className="adm-input" value={bulk.etd} onChange={(e) => setBulk((b) => ({ ...b, etd: e.target.value }))} data-testid="adm-jadwal-bulk-etd" /></label>
-              <label style={{ width: 90 }}><span style={{ display: "block", fontSize: 10, color: "var(--text-mute)", marginBottom: 4 }}>Transit (hr)</span>
-                <input inputMode="numeric" className="adm-input" value={bulk.transit_hari} onChange={(e) => setBulk((b) => ({ ...b, transit_hari: e.target.value.replace(/\D/g, "") }))} placeholder="4" data-testid="adm-jadwal-bulk-transit" /></label>
-              <button className="adm-btn adm-btn-sm adm-btn-gold" onClick={applyBulk} data-testid="adm-jadwal-bulk-apply">Terapkan</button>
-            </div>
-          </div>
-
           <div className="jm-list">
             {rows.map((r, i) => {
               const u = units[i];
@@ -2972,18 +2958,6 @@ function JadwalGabunganModal({ cart, headers, onClose, onDone }) {
               <span style={{ display: "block", fontSize: 11, color: "var(--text-mute)", marginBottom: 5, fontWeight: 700 }}>Tanggal Siap Unit</span>
               <input type="date" className="adm-input" value={tanggalSiap} onChange={(e) => setTanggalSiap(e.target.value)} />
             </label>
-          </div>
-          <div style={{ border: "1px dashed var(--border-2)", borderRadius: 9, padding: "10px 12px", marginBottom: 14, background: "var(--bg-2)" }}>
-            <div style={{ fontSize: 11, fontWeight: 800, color: "var(--text-2)", marginBottom: 8 }}>Isi cepat kapal → semua unit</div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
-              <label style={{ flex: 2, minWidth: 130 }}><span style={{ display: "block", fontSize: 10, color: "var(--text-mute)", marginBottom: 4 }}>Nama Kapal</span>
-                <input list="kapal-dl" className="adm-input" value={bulk.nama_kapal} onChange={(e) => setBulk((b) => ({ ...b, nama_kapal: e.target.value }))} placeholder="KM Serasi V" data-testid="adm-jadwalgab-bulk-kapal" /></label>
-              <label style={{ flex: 1, minWidth: 120 }}><span style={{ display: "block", fontSize: 10, color: "var(--text-mute)", marginBottom: 4 }}>Kapal Berangkat</span>
-                <input type="date" className="adm-input" value={bulk.etd} onChange={(e) => setBulk((b) => ({ ...b, etd: e.target.value }))} data-testid="adm-jadwalgab-bulk-etd" /></label>
-              <label style={{ width: 90 }}><span style={{ display: "block", fontSize: 10, color: "var(--text-mute)", marginBottom: 4 }}>Transit (hr)</span>
-                <input inputMode="numeric" className="adm-input" value={bulk.transit_hari} onChange={(e) => setBulk((b) => ({ ...b, transit_hari: e.target.value.replace(/\D/g, "") }))} placeholder="4" data-testid="adm-jadwalgab-bulk-transit" /></label>
-              <button className="adm-btn adm-btn-sm adm-btn-gold" onClick={applyBulk} data-testid="adm-jadwalgab-bulk-apply">Terapkan</button>
-            </div>
           </div>
           <div className="jm-list">
             {rows.map((r, i) => {

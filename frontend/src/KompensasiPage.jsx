@@ -76,6 +76,14 @@ export default function KompensasiPage() {
       flash("Supplier tersimpan");
     } catch (e) { flash(e?.response?.data?.detail || "Gagal simpan supplier"); }
   };
+  // Auto-simpan: selesai ngetik nama baru (blur/Enter) langsung kesimpen.
+  const autoSaveRekanan = () => setTimeout(() => {
+    const nama = query.trim();
+    if (selected || nama.length < 2) return;
+    const exact = dropdown.find((s) => (s.nama || "").trim().toLowerCase() === nama.toLowerCase());
+    if (exact) { selectRekanan(exact); return; }
+    createOrOpenRekanan();
+  }, 250);
 
   const deleteRekanan = async () => {
     if (!selected) return;
@@ -312,7 +320,9 @@ export default function KompensasiPage() {
             style={I}
             value={query}
             onChange={(e) => { setQuery(e.target.value); setSelected(null); }}
-            placeholder="Ketik nama supplier (PT/perusahaan) untuk mencari atau membuat baru..."
+            onBlur={autoSaveRekanan}
+            onKeyDown={(e) => { if (e.key === "Enter") autoSaveRekanan(); }}
+            placeholder="Ketik nama supplier — otomatis tersimpan..."
             data-testid="komp-search"
           />
           {!selected && dropdown.length > 0 && (

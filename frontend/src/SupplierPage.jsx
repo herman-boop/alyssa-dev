@@ -152,6 +152,17 @@ export default function SupplierPage() {
       setQuery(r.data.nama); await reloadSelected(r.data.id); setListRefreshTick((t) => t + 1); flash("Supplier tersimpan");
     } catch (e) { flash(e?.response?.data?.detail || "Gagal simpan supplier"); }
   };
+  // Auto-simpan: selesai ngetik nama baru (blur/Enter) langsung kesimpen —
+  // nggak perlu klik tombol. Kalau namanya udah ada, langsung dibuka (backend
+  // create_supplier balikin yang sudah ada, jadi nggak dobel). Delay biar klik
+  // dropdown menang.
+  const autoSaveSupplier = () => setTimeout(() => {
+    const nama = query.trim();
+    if (selected || nama.length < 2) return;
+    const exact = dropdown.find((s) => (s.nama || "").trim().toLowerCase() === nama.toLowerCase());
+    if (exact) { selectSupplier(exact); return; }
+    createOrOpenSupplier();
+  }, 250);
 
   const jobs = useMemo(() => selected?.jobs || [], [selected]);
   const unpaidJobs = useMemo(() => jobs.filter((j) => (j.sisa || 0) > 0), [jobs]);
@@ -381,7 +392,7 @@ export default function SupplierPage() {
       <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 16, marginBottom: 14 }}>
         <label style={L}>Cari / Buat Supplier</label>
         <div style={{ position: "relative" }}>
-          <input style={I} value={query} onChange={(e) => { setQuery(e.target.value); setSelected(null); }} placeholder="Ketik nama supplier… (mis. PT PEL)" data-testid="sup-search" />
+          <input style={I} value={query} onChange={(e) => { setQuery(e.target.value); setSelected(null); }} onBlur={autoSaveSupplier} onKeyDown={(e) => { if (e.key === "Enter") autoSaveSupplier(); }} placeholder="Ketik nama supplier… (mis. PT PEL) — otomatis tersimpan" data-testid="sup-search" />
           {!selected && dropdown.length > 0 && (
             <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: C.card, border: `1px solid ${C.inpLine}`, borderRadius: 10, marginTop: 4, zIndex: 30, maxHeight: 300, overflowY: "auto", boxShadow: "0 8px 24px rgba(0,0,0,.4)" }}>
               {dropdown.map((s) => (
