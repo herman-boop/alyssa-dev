@@ -383,17 +383,11 @@ function Dashboard({ pin, onLogout }) {
   };
   const section = SECTION_META[activeTab] || SECTION_META.pesanan;
 
-  // Daftar nama kapal yang udah pernah dipakai — buat dropdown/saran di form Jadwal.
-  const kapalNames = useMemo(() => {
-    const set = new Set();
-    (orders || []).forEach((o) => (o.units || []).forEach((u) => { const k = (u.nama_kapal || "").trim(); if (k) set.add(k); }));
-    return [...set].sort();
-  }, [orders]);
-
   return (
     <div className="adm-shell" data-testid="adm-dashboard" style={{ display: "flex", minHeight: "100vh", background: "#0a0e14" }}>
-      {/* Daftar saran nama kapal (dipakai <input list="kapal-dl"> di semua form Jadwal) */}
-      <datalist id="kapal-dl">{kapalNames.map((n) => <option key={n} value={n} />)}</datalist>
+      {/* Saran metode angkut untuk kolom Nama Kapal — ketik "self"/"carrier"/"towing"
+          langsung nyaring, sisanya (nama kapal / rute) diketik manual. */}
+      <datalist id="kapal-dl">{["Self Drive", "Car Carrier", "Towing", "Kapal", "Self Loader", "Low Bed", "Trucking", "Container"].map((n) => <option key={n} value={n} />)}</datalist>
       <div className={`adm-sidebar-backdrop${sidebarOpen ? " open" : ""}`} onClick={() => setSidebarOpen(false)} />
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} open={sidebarOpen} onNavigate={() => setSidebarOpen(false)} />
 
