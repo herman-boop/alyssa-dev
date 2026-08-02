@@ -219,6 +219,7 @@ function Dashboard({ pin, onLogout }) {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [driverFilter, setDriverFilter] = useState("");
+  const [custFilter, setCustFilter] = useState(""); // pilih konsumen dari dropdown (nggak usah ngetik)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [convertModal, setConvertModal] = useState(null);
@@ -360,9 +361,16 @@ function Dashboard({ pin, onLogout }) {
     () => Array.from(new Set(orders.map((o) => o.nama_driver).filter(Boolean))).sort(),
     [orders]
   );
-  const visibleOrders = driverFilter ? orders.filter((o) => o.nama_driver === driverFilter) : orders;
-  const anyFilterActive = !!(search || statusFilter || dateFrom || dateTo || driverFilter);
-  const resetFilters = () => { setSearch(""); setStatusFilter(""); setDateFrom(""); setDateTo(""); setDriverFilter(""); };
+  const customerOptions = useMemo(
+    () => Array.from(new Set(orders.map((o) => o.customer_nama).filter(Boolean))).sort((a, b) => a.localeCompare(b, "id")),
+    [orders]
+  );
+  const visibleOrders = orders.filter((o) =>
+    (!driverFilter || o.nama_driver === driverFilter) &&
+    (!custFilter || o.customer_nama === custFilter)
+  );
+  const anyFilterActive = !!(search || statusFilter || dateFrom || dateTo || driverFilter || custFilter);
+  const resetFilters = () => { setSearch(""); setStatusFilter(""); setDateFrom(""); setDateTo(""); setDriverFilter(""); setCustFilter(""); };
 
   const SECTION_META = {
     pesanan:      { title: "Dashboard", sub: "Ringkasan semua aktivitas pengiriman kendaraan" },
@@ -544,6 +552,16 @@ function Dashboard({ pin, onLogout }) {
           <span style={{ color: "#8b949e", fontSize: 12 }}>~</span>
           <input type="date" className="adm-date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} min={dateFrom || undefined} data-testid="adm-date-to" title="Sampai tanggal" />
         </div>
+        <select
+          className="adm-status-sel"
+          value={custFilter}
+          onChange={(e) => setCustFilter(e.target.value)}
+          data-testid="adm-customer-filter"
+          title="Pilih konsumen"
+        >
+          <option value="">Semua Konsumen</option>
+          {customerOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
         <select
           className="adm-status-sel"
           value={driverFilter}
