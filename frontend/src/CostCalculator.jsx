@@ -224,6 +224,22 @@ export default function CostCalculator() {
     setPtSaveMsg("");
   };
 
+  // Auto-simpan pelanggan: begitu selesai ngetik nama baru (blur/Enter) & belum
+  // ada yang dipilih, langsung dibuat/diambil dari backend — nggak perlu klik
+  // "+ PT Baru" & nggak usah ngetik ulang. Delay 250ms biar klik dropdown menang.
+  const autoSavePt = () => {
+    setTimeout(async () => {
+      const nama = ptQuery.trim();
+      if (selectedPt || nama.length < 2) return;
+      const exact = ptDropdown.find((p) => (p.nama_pt || "").trim().toLowerCase() === nama.toLowerCase());
+      if (exact) { selectPt(exact); return; }
+      try {
+        const res = await axios.post(`${API}/admin/pelanggan`, { nama_pt: nama }, { headers: { "x-admin-pin": adminPin } });
+        setSelectedPt(res.data); setPtDropdown([]);
+      } catch (_) { /* diamkan — user masih bisa klik + PT Baru manual */ }
+    }, 250);
+  };
+
   const doSimpanPenawaran = async () => {
     if (!selectedPt || !routeList.length) return;
     setPtSaving(true);
@@ -574,8 +590,9 @@ export default function CostCalculator() {
                 style={I}
                 value={ptQuery}
                 onChange={(e) => setPtQuery(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && ptDropdown.length > 0) selectPt(ptDropdown[0]); }}
-                placeholder="Ketik nama PT untuk mencari atau membuat baru..."
+                onKeyDown={(e) => { if (e.key === "Enter") { if (ptDropdown.length > 0) selectPt(ptDropdown[0]); else autoSavePt(); } }}
+                onBlur={autoSavePt}
+                placeholder="Ketik nama PT — otomatis tersimpan (nggak perlu ngetik ulang)"
                 autoFocus
               />
             )}
@@ -693,12 +710,13 @@ export default function CostCalculator() {
         <div>
           {legs.map((l) => (
             <div key={l.id} style={{ display: "grid", gridTemplateColumns: "140px 1fr auto", gap: 6, alignItems: "center", marginBottom: 6 }}>
-              <select style={{ ...I, fontSize: 11 }} value={l.type} onChange={(e) => setLeg(l.id, { type: e.target.value })}>{LEG_TYPES.map((t) => <option key={t}>{t}</option>)}</select>
+              <input list="legtypes-dl" style={{ ...I, fontSize: 11 }} value={l.type} onChange={(e) => setLeg(l.id, { type: e.target.value })} placeholder="ketik: self drive / carrier / towing…" />
               <input style={{ ...I, textAlign: "right" }} value={l.cost} onChange={(e) => setLeg(l.id, { cost: e.target.value })} placeholder="0" />
               <button onClick={() => delLeg(l.id)} style={{ background: "none", border: "1px solid #f85149", color: "#f85149", padding: "4px 8px", borderRadius: 5, cursor: "pointer", fontSize: 11 }}>X</button>
             </div>
           ))}
         </div>
+        <datalist id="legtypes-dl">{LEG_TYPES.map((t) => <option key={t} value={t} />)}</datalist>
         <button onClick={() => addLeg()} style={{ background: "none", border: "1px dashed #30363d", color: "#8b949e", fontSize: 11, padding: "6px 10px", borderRadius: 6, cursor: "pointer", marginTop: 4, width: "100%" }}>+ Tambah Komponen Biaya</button>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 10 }}>

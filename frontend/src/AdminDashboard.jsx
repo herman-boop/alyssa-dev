@@ -383,8 +383,17 @@ function Dashboard({ pin, onLogout }) {
   };
   const section = SECTION_META[activeTab] || SECTION_META.pesanan;
 
+  // Daftar nama kapal yang udah pernah dipakai — buat dropdown/saran di form Jadwal.
+  const kapalNames = useMemo(() => {
+    const set = new Set();
+    (orders || []).forEach((o) => (o.units || []).forEach((u) => { const k = (u.nama_kapal || "").trim(); if (k) set.add(k); }));
+    return [...set].sort();
+  }, [orders]);
+
   return (
     <div className="adm-shell" data-testid="adm-dashboard" style={{ display: "flex", minHeight: "100vh", background: "#0a0e14" }}>
+      {/* Daftar saran nama kapal (dipakai <input list="kapal-dl"> di semua form Jadwal) */}
+      <datalist id="kapal-dl">{kapalNames.map((n) => <option key={n} value={n} />)}</datalist>
       <div className={`adm-sidebar-backdrop${sidebarOpen ? " open" : ""}`} onClick={() => setSidebarOpen(false)} />
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} open={sidebarOpen} onNavigate={() => setSidebarOpen(false)} />
 
@@ -2431,7 +2440,7 @@ function JadwalModal({ order, headers, onClose, onPrint }) {
             <div style={{ fontSize: 11, fontWeight: 800, color: "var(--text-2)", marginBottom: 8 }}>Isi cepat kapal → semua unit</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
               <label style={{ flex: 2, minWidth: 130 }}><span style={{ display: "block", fontSize: 10, color: "var(--text-mute)", marginBottom: 4 }}>Nama Kapal</span>
-                <input className="adm-input" value={bulk.nama_kapal} onChange={(e) => setBulk((b) => ({ ...b, nama_kapal: e.target.value }))} placeholder="Serasi V" data-testid="adm-jadwal-bulk-kapal" /></label>
+                <input list="kapal-dl" className="adm-input" value={bulk.nama_kapal} onChange={(e) => setBulk((b) => ({ ...b, nama_kapal: e.target.value }))} placeholder="Serasi V" data-testid="adm-jadwal-bulk-kapal" /></label>
               <label style={{ flex: 1, minWidth: 120 }}><span style={{ display: "block", fontSize: 10, color: "var(--text-mute)", marginBottom: 4 }}>Kapal Berangkat</span>
                 <input type="date" className="adm-input" value={bulk.etd} onChange={(e) => setBulk((b) => ({ ...b, etd: e.target.value }))} data-testid="adm-jadwal-bulk-etd" /></label>
               <label style={{ width: 90 }}><span style={{ display: "block", fontSize: 10, color: "var(--text-mute)", marginBottom: 4 }}>Transit (hr)</span>
@@ -2450,7 +2459,7 @@ function JadwalModal({ order, headers, onClose, onPrint }) {
                   <div className="jm-grid">
                     <label>Tujuan<input className="adm-input" value={r.tujuan} onChange={(e) => setRow(i, { tujuan: e.target.value.toUpperCase() })} placeholder={order.tujuan_kota || "kota tujuan"} data-testid={`adm-jadwal-tujuan-${i}`} /></label>
                     <label>No. Mesin<input className="adm-input" value={r.no_mesin} onChange={(e) => setRow(i, { no_mesin: e.target.value.toUpperCase() })} placeholder="2GDXXXX" data-testid={`adm-jadwal-mesin-${i}`} /></label>
-                    <label>Nama Kapal<input className="adm-input" value={r.nama_kapal} onChange={(e) => setRow(i, { nama_kapal: e.target.value })} placeholder="Serasi V" /></label>
+                    <label>Nama Kapal<input list="kapal-dl" className="adm-input" value={r.nama_kapal} onChange={(e) => setRow(i, { nama_kapal: e.target.value })} placeholder="Serasi V" /></label>
                     <label>Kapal Berangkat<input type="date" className="adm-input" value={r.etd} onChange={(e) => setRow(i, { etd: e.target.value })} /></label>
                     <label>Transit (hr)<input inputMode="numeric" className="adm-input" value={r.transit_hari} onChange={(e) => setRow(i, { transit_hari: e.target.value.replace(/\D/g, "") })} placeholder="4" /></label>
                     <div className="jm-eta">Estimasi Tiba<b>{eta ? jpFmt(eta) : "—"}</b></div>
@@ -2974,7 +2983,7 @@ function JadwalGabunganModal({ cart, headers, onClose, onDone }) {
             <div style={{ fontSize: 11, fontWeight: 800, color: "var(--text-2)", marginBottom: 8 }}>Isi cepat kapal → semua unit</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
               <label style={{ flex: 2, minWidth: 130 }}><span style={{ display: "block", fontSize: 10, color: "var(--text-mute)", marginBottom: 4 }}>Nama Kapal</span>
-                <input className="adm-input" value={bulk.nama_kapal} onChange={(e) => setBulk((b) => ({ ...b, nama_kapal: e.target.value }))} placeholder="KM Serasi V" data-testid="adm-jadwalgab-bulk-kapal" /></label>
+                <input list="kapal-dl" className="adm-input" value={bulk.nama_kapal} onChange={(e) => setBulk((b) => ({ ...b, nama_kapal: e.target.value }))} placeholder="KM Serasi V" data-testid="adm-jadwalgab-bulk-kapal" /></label>
               <label style={{ flex: 1, minWidth: 120 }}><span style={{ display: "block", fontSize: 10, color: "var(--text-mute)", marginBottom: 4 }}>Kapal Berangkat</span>
                 <input type="date" className="adm-input" value={bulk.etd} onChange={(e) => setBulk((b) => ({ ...b, etd: e.target.value }))} data-testid="adm-jadwalgab-bulk-etd" /></label>
               <label style={{ width: 90 }}><span style={{ display: "block", fontSize: 10, color: "var(--text-mute)", marginBottom: 4 }}>Transit (hr)</span>
@@ -2992,7 +3001,7 @@ function JadwalGabunganModal({ cart, headers, onClose, onDone }) {
                   <div className="jm-grid">
                     <label>Tujuan<input className="adm-input" value={r.tujuan} onChange={(e) => setRow(i, { tujuan: e.target.value.toUpperCase() })} placeholder="kota tujuan" /></label>
                     <label>No. Mesin<input className="adm-input" value={r.no_mesin} onChange={(e) => setRow(i, { no_mesin: e.target.value.toUpperCase() })} placeholder="2GDXXXX" /></label>
-                    <label>Nama Kapal<input className="adm-input" value={r.nama_kapal} onChange={(e) => setRow(i, { nama_kapal: e.target.value })} placeholder="KM Serasi V" /></label>
+                    <label>Nama Kapal<input list="kapal-dl" className="adm-input" value={r.nama_kapal} onChange={(e) => setRow(i, { nama_kapal: e.target.value })} placeholder="KM Serasi V" /></label>
                     <label>Kapal Berangkat<input type="date" className="adm-input" value={r.etd} onChange={(e) => setRow(i, { etd: e.target.value })} /></label>
                     <label>Transit (hr)<input inputMode="numeric" className="adm-input" value={r.transit_hari} onChange={(e) => setRow(i, { transit_hari: e.target.value.replace(/\D/g, "") })} placeholder="4" /></label>
                     <div className="jm-eta">Estimasi Tiba<b>{eta ? jpFmt(eta) : "—"}</b></div>
@@ -4865,7 +4874,7 @@ function RuteLegTab({ legs, setLeg, addLeg, delLeg, moveLeg, order, tripId, head
                   <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 800, marginBottom: 8, letterSpacing: .5 }}>🚢 INFO KAPAL</div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
                     <label style={MINI_LABEL}>Nama Kapal
-                      <input style={MINI_INPUT} value={leg.kapal || ""} onChange={e => setLeg(i, { kapal: e.target.value })} placeholder="KM Mutiara Persada" />
+                      <input list="kapal-dl" style={MINI_INPUT} value={leg.kapal || ""} onChange={e => setLeg(i, { kapal: e.target.value })} placeholder="KM Mutiara Persada" />
                     </label>
                     <label style={MINI_LABEL}>Marking / Kode
                       <input style={MINI_INPUT} value={leg.marking || ""} onChange={e => setLeg(i, { marking: e.target.value })} placeholder="AAL-001" />
