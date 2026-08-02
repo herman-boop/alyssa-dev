@@ -1041,6 +1041,9 @@ function DuplicateVendorModal({ order, headers, onClose }) {
     nopol: (u.nopol || "").toUpperCase(),
     no_rangka: (u.no_rangka || "").toUpperCase(),
     harga: "",
+    asal: order.asal_kota || "",       // default dari PO, bisa diedit
+    tujuan: order.tujuan_kota || "",   // default dari PO, bisa diedit
+    catatan: "",
   })));
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
@@ -1074,9 +1077,9 @@ function DuplicateVendorModal({ order, headers, onClose }) {
         await axios.post(`${API}/admin/suppliers/${sid}/jobs`, {
           vehicle_type: r.vehicle_type || "Kendaraan",
           nopol: r.nopol, no_rangka: r.no_rangka,
-          asal_kota: order.asal_kota || "", tujuan_kota: order.tujuan_kota || "",
+          asal_kota: (r.asal || "").trim(), tujuan_kota: (r.tujuan || "").trim(),
           total_harga: hargaNum(r.harga),
-          catatan: `Duplikat dari ${order.order_id}`, tanggal: "",
+          catatan: (r.catatan || "").trim() || `Duplikat dari ${order.order_id}`, tanggal: "",
         }, { headers });
       }
       setDone(true);
@@ -1133,17 +1136,27 @@ function DuplicateVendorModal({ order, headers, onClose }) {
                 )}
               </div>
 
-              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-mute)", marginBottom: 6, textTransform: "uppercase" }}>Unit dari PO ini · isi harga vendor</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-mute)", marginBottom: 6, textTransform: "uppercase" }}>Unit dari PO ini · isi harga, rute bisa diubah</div>
               {rows.map((r) => (
-                <div key={r.key} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderTop: "1px solid #21262d" }}>
-                  <input type="checkbox" checked={r.checked} onChange={() => setRow(r.key, { checked: !r.checked })} style={{ width: 16, height: 16, flexShrink: 0 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, fontSize: 13 }}>{r.vehicle_type || "Kendaraan"}{r.nopol ? ` · ${r.nopol}` : ""}</div>
-                    <div style={{ fontSize: 11.5, color: "var(--text-mute)" }}>{rute}</div>
-                  </div>
-                  <input className="adm-input adm-mono" inputMode="numeric" placeholder="Harga vendor (Rp)" value={r.harga}
-                    onChange={(e) => setRow(r.key, { harga: e.target.value.replace(/[^0-9]/g, "") })}
-                    style={{ width: 160, flexShrink: 0 }} disabled={!r.checked} data-testid={`adm-dupvendor-harga-${r.key}`} />
+                <div key={r.key} style={{ padding: "10px 0", borderTop: "1px solid #21262d" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                    <input type="checkbox" checked={r.checked} onChange={() => setRow(r.key, { checked: !r.checked })} style={{ width: 16, height: 16, flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 13 }}>{r.vehicle_type || "Kendaraan"}{r.nopol ? ` · ${r.nopol}` : ""}</div>
+                    </div>
+                  </label>
+                  {r.checked && (
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8, marginLeft: 26 }}>
+                      <input className="adm-input" placeholder="Kota asal" value={r.asal}
+                        onChange={(e) => setRow(r.key, { asal: e.target.value })} data-testid={`adm-dupvendor-asal-${r.key}`} />
+                      <input className="adm-input" placeholder="Kota tujuan" value={r.tujuan}
+                        onChange={(e) => setRow(r.key, { tujuan: e.target.value })} data-testid={`adm-dupvendor-tujuan-${r.key}`} />
+                      <input className="adm-input adm-mono" inputMode="numeric" placeholder="Harga vendor (Rp)" value={r.harga}
+                        onChange={(e) => setRow(r.key, { harga: e.target.value.replace(/[^0-9]/g, "") })} data-testid={`adm-dupvendor-harga-${r.key}`} />
+                      <input className="adm-input" placeholder="Catatan (opsional)" value={r.catatan}
+                        onChange={(e) => setRow(r.key, { catatan: e.target.value })} data-testid={`adm-dupvendor-catatan-${r.key}`} />
+                    </div>
+                  )}
                 </div>
               ))}
             </>
