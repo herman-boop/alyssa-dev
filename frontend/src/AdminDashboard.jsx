@@ -2959,6 +2959,20 @@ function JadwalGabunganModal({ cart, headers, onClose, onDone }) {
               <input type="date" className="adm-input" value={tanggalSiap} onChange={(e) => setTanggalSiap(e.target.value)} />
             </label>
           </div>
+          {/* Isi cepat: set kapal + tanggal berangkat + transit SEKALIGUS ke semua unit
+              (biar nggak edit satu-satu). Kosongin yg nggak mau diubah. */}
+          <div style={{ border: "1px dashed var(--gold-bd)", borderRadius: 9, padding: "10px 12px", marginBottom: 14, background: "var(--gold-bg)" }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: "var(--gold-xl)", marginBottom: 8 }}>⚡ Isi cepat → semua unit sekaligus (nggak usah edit satu-satu)</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <label style={{ flex: 2, minWidth: 130 }}><span style={{ display: "block", fontSize: 10, color: "var(--text-mute)", marginBottom: 4 }}>Nama Kapal</span>
+                <input list="kapal-dl" className="adm-input" value={bulk.nama_kapal} onChange={(e) => setBulk((b) => ({ ...b, nama_kapal: e.target.value }))} placeholder="KM Serasi V" data-testid="adm-jadwalgab-bulk-kapal" /></label>
+              <label style={{ flex: 1, minWidth: 120 }}><span style={{ display: "block", fontSize: 10, color: "var(--text-mute)", marginBottom: 4 }}>Kapal Berangkat</span>
+                <input type="date" className="adm-input" value={bulk.etd} onChange={(e) => setBulk((b) => ({ ...b, etd: e.target.value }))} data-testid="adm-jadwalgab-bulk-etd" /></label>
+              <label style={{ width: 90 }}><span style={{ display: "block", fontSize: 10, color: "var(--text-mute)", marginBottom: 4 }}>Transit (jam)</span>
+                <input inputMode="numeric" className="adm-input" value={bulk.transit_hari} onChange={(e) => setBulk((b) => ({ ...b, transit_hari: e.target.value.replace(/\D/g, "") }))} placeholder="4" data-testid="adm-jadwalgab-bulk-transit" /></label>
+              <button className="adm-btn adm-btn-sm adm-btn-gold" onClick={applyBulk} data-testid="adm-jadwalgab-bulk-apply">Terapkan ke semua</button>
+            </div>
+          </div>
           <div className="jm-list">
             {rows.map((r, i) => {
               const u = r.unit || {};
