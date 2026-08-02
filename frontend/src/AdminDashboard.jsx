@@ -2943,11 +2943,51 @@ function JadwalGabunganModal({ cart, headers, onClose, onDone }) {
   })));
   const [bulk, setBulk] = useState({ nama_kapal: "", etd: "", transit_hari: "" });
 
+  const [ordered, setOrdered] = useState(false); // sudah ngikut urutan dokumen lama?
+
   const setRow = (i, patch) => setRows((rs) => rs.map((r, x) => x === i ? { ...r, ...patch } : r));
   const applyBulk = () => setRows((rs) => rs.map((r) => ({
     ...r, nama_kapal: bulk.nama_kapal || r.nama_kapal, etd: bulk.etd || r.etd,
     transit_hari: bulk.transit_hari !== "" ? bulk.transit_hari : r.transit_hari,
   })));
+
+  // Geser 1 unit ke atas/bawah (kalau mau atur manual).
+  const uKey = (u) => `${u?.nopol || ""}|${u?.no_rangka || ""}`;
+  const move = (i, dir) => setRows((rs) => {
+    const j = i + dir;
+    if (j < 0 || j >= rs.length) return rs;
+    const c = rs.slice(); [c[i], c[j]] = [c[j], c[i]]; return c;
+  });
+
+  // Ikutin urutan dokumen lama: ambil Jadwal Gabungan terakhir customer ini,
+  // urutkan baris sesuai dokumen itu (biar nggak usah urutin ulang tiap cetak).
+  useEffect(() => {
+    if (customers.length !== 1) return;
+    let alive = true;
+    axios.get(`${API}/admin/doc-history?jenis=jadwal_gabungan`, { headers })
+      .then(({ data }) => {
+        if (!alive) return;
+        const recs = (data.items || []).filter((r) => (r.customer || "") === customers[0]);
+        if (!recs.length) return;
+        recs.sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
+        const seq = (recs[0].units || []).map((u) => uKey(u));
+        if (!seq.length) return;
+        const idx = new Map(seq.map((k, i) => [k, i]));
+        setRows((rs) => {
+          const dec = rs.map((r, i) => ({ r, i, k: uKey(r.unit) }));
+          dec.sort((a, b) => {
+            const ai = idx.has(a.k) ? idx.get(a.k) : 1e9 + a.i;
+            const bi = idx.has(b.k) ? idx.get(b.k) : 1e9 + b.i;
+            return ai - bi;
+          });
+          return dec.map((x) => x.r);
+        });
+        setOrdered(true);
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const docUnits = () => rows.map((r) => ({
     vehicle_type: r.unit?.vehicle_type, tipe_model: r.unit?.tipe_model, nopol: r.unit?.nopol,
@@ -3018,13 +3058,20 @@ function JadwalGabunganModal({ cart, headers, onClose, onDone }) {
               <button className="adm-btn adm-btn-sm adm-btn-gold" onClick={applyBulk} data-testid="adm-jadwalgab-bulk-apply">Terapkan ke semua</button>
             </div>
           </div>
+          <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 8 }}>
+            {ordered ? "✅ Urutan ngikutin dokumen terakhir yang lo cetak. " : ""}Geser pakai ↑/↓ kalau mau atur — urutan kesimpen otomatis pas cetak.
+          </div>
           <div className="jm-list">
             {rows.map((r, i) => {
               const u = r.unit || {};
               const eta = jpAddDays(r.etd, parseInt(r.transit_hari, 10) || 0);
               return (
                 <div key={u.unit_id || i} className="jm-unit">
-                  <div className="jm-unit-hd">{i + 1}. {u.vehicle_type || "—"}{u.tipe_model ? ` · ${u.tipe_model}` : ""} <span className="jm-nopol">{u.nopol || "nopol —"} · {r.order_id}</span></div>
+                  <div className="jm-unit-hd" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ flex: 1 }}>{i + 1}. {u.vehicle_type || "—"}{u.tipe_model ? ` · ${u.tipe_model}` : ""} <span className="jm-nopol">{u.nopol || "nopol —"} · {r.order_id}</span></span>
+                    <button type="button" className="adm-btn adm-btn-ghost adm-btn-sm" style={{ padding: "2px 7px" }} disabled={i === 0} onClick={() => move(i, -1)} title="Naik" data-testid={`adm-jadwalgab-up-${i}`}>↑</button>
+                    <button type="button" className="adm-btn adm-btn-ghost adm-btn-sm" style={{ padding: "2px 7px" }} disabled={i === rows.length - 1} onClick={() => move(i, 1)} title="Turun" data-testid={`adm-jadwalgab-down-${i}`}>↓</button>
+                  </div>
                   <div className="jm-grid">
                     <label>Tujuan<input className="adm-input" value={r.tujuan} onChange={(e) => setRow(i, { tujuan: e.target.value.toUpperCase() })} placeholder="kota tujuan" /></label>
                     <label>No. Mesin<input className="adm-input" value={r.no_mesin} onChange={(e) => setRow(i, { no_mesin: e.target.value.toUpperCase() })} placeholder="2GDXXXX" /></label>
