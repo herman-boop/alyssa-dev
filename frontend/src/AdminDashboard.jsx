@@ -560,6 +560,33 @@ function Dashboard({ pin, onLogout }) {
         )}
       </section>
 
+      {/* ── Bar pilih-cepat: 1 klik masukin SEMUA unit di daftar ini ke keranjang jadwal.
+           Gabung sama search customer → tarik semua unit 1 pelanggan tanpa centang satu-satu. ── */}
+      {!loading && !error && visibleOrders.length > 0 && (() => {
+        const allUnits = visibleOrders.flatMap((o) => (Array.isArray(o.units) ? o.units : []));
+        const total = allUnits.length;
+        const allSel = total > 0 && allUnits.every((u) => cartHas(u.unit_id));
+        const setAll = (add) => setJadwalCart((c) => {
+          const visIds = new Set(allUnits.map((u) => u.unit_id));
+          const kept = c.filter((x) => !visIds.has(x.unit?.unit_id));
+          if (!add) return kept;
+          const rows = [];
+          visibleOrders.forEach((o) => (Array.isArray(o.units) ? o.units : []).forEach((unit) =>
+            rows.push({ order_id: o.order_id, customer_nama: o.customer_nama, asal_kota: o.asal_kota, tujuan_kota: o.tujuan_kota, unit })));
+          return [...kept, ...rows];
+        });
+        return (
+          <div className="adm-card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "10px 14px", marginBottom: 10, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 12.5, color: "var(--text-mute)", fontWeight: 700 }}>
+              {search.trim() ? <>Hasil "{search.trim()}": </> : null}{visibleOrders.length} PO · {total} unit
+            </div>
+            <button className="adm-btn adm-btn-sm adm-btn-gold" onClick={() => setAll(!allSel)} data-testid="adm-selectall-units">
+              {allSel ? "✕ Batalkan pilih semua" : `☑️ Pilih semua unit → keranjang jadwal (${total})`}
+            </button>
+          </div>
+        );
+      })()}
+
       {/* ── List ── */}
       <section className="adm-list" data-testid="adm-list">
         {loading && [1,2,3].map(i => (
