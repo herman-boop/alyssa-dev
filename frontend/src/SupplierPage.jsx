@@ -500,6 +500,9 @@ export default function SupplierPage() {
                 <div style={{ textAlign: "center", padding: 40, color: C.mute, background: C.card, border: `1px solid ${C.line}`, borderRadius: 14 }}>🎉 Semua tagihan supplier ini sudah lunas.</div>
               ) : (
                 <>
+                  <div style={{ background: "#0d1b2a", border: `1px solid ${C.blue}`, borderRadius: 12, padding: "10px 12px", marginBottom: 12, fontSize: 12, color: C.mute }}>
+                    <b style={{ color: C.ink }}>Bayar borongan</b> — centang beberapa PO, 1 nominal dibagi otomatis. Mau bayar <b style={{ color: C.ink }}>1 PO aja</b>? Ke tab <b style={{ color: C.ink }}>Tagihan</b> → tombol <b style={{ color: C.ink }}>💵 Bayar PO Ini</b> (tanpa centang).
+                  </div>
                   <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
                     <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", marginBottom: 6 }}>
                       <input type="checkbox" checked={allUnpaidChecked} onChange={selectAllUnpaid} style={{ width: 20, height: 20 }} data-testid="sup-pay-all" />
@@ -595,7 +598,8 @@ export default function SupplierPage() {
                       <span style={{ color: C.mute }}>Sisa</span><span style={{ fontWeight: 900, color: j.sisa > 0 ? C.red : C.green }}>{fRp(j.sisa)}</span>
                     </div>
                     <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                      {j.sisa > 0 && <button style={{ ...BTN, flex: 1 }} onClick={() => { setPaySel({ [j.id]: true }); setPayAmount(String(j.sisa)); setTab("pembayaran"); }} data-testid={`sup-bayar-${j.id}`}>Bayar</button>}
+                      {/* Opsi 1: bayar PO ini langsung (tanpa centang) — buka form bayar, jumlah = sisa, tinggal atur tanggal. */}
+                      {j.sisa > 0 && <button style={{ ...BTN, flex: 1 }} onClick={() => { openDetail(j); setDpAmount(String(j.sisa)); }} data-testid={`sup-bayar-${j.id}`}>💵 Bayar PO Ini</button>}
                       <button style={{ ...BTN_GHOST, flex: 1 }} onClick={() => openDetail(j)} data-testid={`sup-detail-${j.id}`}>Lihat Detail</button>
                     </div>
                   </div>
