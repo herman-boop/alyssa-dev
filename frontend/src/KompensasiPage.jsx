@@ -36,6 +36,8 @@ export default function KompensasiPage() {
   const [dropdown, setDropdown] = useState([]);
   const [selected, setSelected] = useState(null); // full rekanan doc w/ items
   const debounceRef = useRef(null);
+  const rkSelectingRef = useRef(false); // lagi klik saran → jangan auto-bikin baru
+  const rkAutoSaveTimer = useRef(null);
   const [toast, setToast] = useState("");
   const [listRefreshTick, setListRefreshTick] = useState(0);
 
@@ -61,6 +63,7 @@ export default function KompensasiPage() {
   };
 
   const selectRekanan = async (s) => {
+    clearTimeout(rkAutoSaveTimer.current);
     setDropdown([]);
     setQuery(s.nama);
     await reloadSelected(s.id);
@@ -77,13 +80,19 @@ export default function KompensasiPage() {
     } catch (e) { flash(e?.response?.data?.detail || "Gagal simpan supplier"); }
   };
   // Auto-simpan: selesai ngetik nama baru (blur/Enter) langsung kesimpen.
-  const autoSaveRekanan = () => setTimeout(() => {
-    const nama = query.trim();
-    if (selected || nama.length < 2) return;
-    const exact = dropdown.find((s) => (s.nama || "").trim().toLowerCase() === nama.toLowerCase());
-    if (exact) { selectRekanan(exact); return; }
-    createOrOpenRekanan();
-  }, 250);
+  const autoSaveRekanan = () => {
+    clearTimeout(rkAutoSaveTimer.current);
+    rkAutoSaveTimer.current = setTimeout(() => {
+      if (rkSelectingRef.current) { rkSelectingRef.current = false; return; } // baru klik saran
+      const nama = query.trim();
+      if (selected || nama.length < 2) return;
+      const exact = dropdown.find((s) => (s.nama || "").trim().toLowerCase() === nama.toLowerCase());
+      if (exact) { selectRekanan(exact); return; }
+      // Masih ada saran cocok → jangan bikin nama setengah jadi (tinggal klik saran).
+      if (dropdown.length > 0) return;
+      createOrOpenRekanan();
+    }, 250);
+  };
 
   const deleteRekanan = async () => {
     if (!selected) return;
@@ -328,7 +337,7 @@ export default function KompensasiPage() {
           {!selected && dropdown.length > 0 && (
             <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#161b22", border: "1px solid #30363d", borderRadius: 8, marginTop: 4, zIndex: 10, maxHeight: 240, overflowY: "auto" }}>
               {dropdown.map((s) => (
-                <div key={s.id} onClick={() => selectRekanan(s)} style={{ padding: "9px 12px", cursor: "pointer", borderBottom: "1px solid #21262d", fontSize: 13, display: "flex", justifyContent: "space-between", gap: 10 }} data-testid={`komp-option-${s.id}`}>
+                <div key={s.id} onMouseDown={(e) => { e.preventDefault(); rkSelectingRef.current = true; selectRekanan(s); }} style={{ padding: "9px 12px", cursor: "pointer", borderBottom: "1px solid #21262d", fontSize: 13, display: "flex", justifyContent: "space-between", gap: 10 }} data-testid={`komp-option-${s.id}`}>
                   <span style={{ fontWeight: 700 }}>{s.nama}</span>
                   <span style={{ color: "#8b949e", fontSize: 11 }}>{s.jumlah_item || 0} rincian · sisa {fRp(s.sisa)}</span>
                 </div>

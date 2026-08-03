@@ -122,6 +122,8 @@ export default function CostCalculator() {
   // Pelanggan state
   const [ptQuery, setPtQuery] = useState("");
   const [ptDropdown, setPtDropdown] = useState([]);
+  const ptSelectingRef = useRef(false); // lagi klik saran → jangan auto-bikin baru
+  const ptAutoSaveTimer = useRef(null);
   const [selectedPt, setSelectedPt] = useState(null); // full pelanggan doc
   const [ptSaving, setPtSaving] = useState(false);
   const [ptSaveMsg, setPtSaveMsg] = useState("");
@@ -182,6 +184,7 @@ export default function CostCalculator() {
   }, [ptQuery, adminPin]);
 
   const selectPt = async (pt) => {
+    clearTimeout(ptAutoSaveTimer.current);
     setPtDropdown([]);
     setPtQuery(pt.nama_pt);
     // Load full doc with history
@@ -228,11 +231,15 @@ export default function CostCalculator() {
   // ada yang dipilih, langsung dibuat/diambil dari backend — nggak perlu klik
   // "+ PT Baru" & nggak usah ngetik ulang. Delay 250ms biar klik dropdown menang.
   const autoSavePt = () => {
-    setTimeout(async () => {
+    clearTimeout(ptAutoSaveTimer.current);
+    ptAutoSaveTimer.current = setTimeout(async () => {
+      if (ptSelectingRef.current) { ptSelectingRef.current = false; return; } // baru klik saran
       const nama = ptQuery.trim();
       if (selectedPt || nama.length < 2) return;
       const exact = ptDropdown.find((p) => (p.nama_pt || "").trim().toLowerCase() === nama.toLowerCase());
       if (exact) { selectPt(exact); return; }
+      // Masih ada saran cocok → jangan bikin nama setengah jadi (tinggal klik saran).
+      if (ptDropdown.length > 0) return;
       try {
         const res = await axios.post(`${API}/admin/pelanggan`, { nama_pt: nama }, { headers: { "x-admin-pin": adminPin } });
         setSelectedPt(res.data); setPtDropdown([]);
@@ -599,7 +606,7 @@ export default function CostCalculator() {
             {ptDropdown.length > 0 && (
               <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#161b22", border: "1px solid #30363d", borderRadius: 6, zIndex: 100, maxHeight: 200, overflowY: "auto" }}>
                 {ptDropdown.map((pt) => (
-                  <div key={pt.id} onClick={() => selectPt(pt)}
+                  <div key={pt.id} onMouseDown={(e) => { e.preventDefault(); ptSelectingRef.current = true; selectPt(pt); }}
                     style={{ padding: "8px 12px", cursor: "pointer", fontSize: 12, borderBottom: "1px solid #21262d" }}
                     onMouseEnter={(e) => e.currentTarget.style.background = "#21262d"}
                     onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}

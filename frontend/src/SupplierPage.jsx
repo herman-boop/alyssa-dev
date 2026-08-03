@@ -120,6 +120,8 @@ export default function SupplierPage() {
   const [dropdown, setDropdown] = useState([]);
   const [selected, setSelected] = useState(null);
   const debounceRef = useRef(null);
+  const selectingRef = useRef(false); // lagi klik saran → jangan auto-bikin baru
+  const autoSaveTimer = useRef(null);
   const [toast, setToast] = useState("");
   const [listRefreshTick, setListRefreshTick] = useState(0);
   const flash = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2400); };
@@ -144,7 +146,7 @@ export default function SupplierPage() {
     try { const r = await axios.get(`${API}/admin/suppliers/${id}`, { headers }); setSelected(r.data); }
     catch { flash("Gagal memuat data supplier"); }
   };
-  const selectSupplier = async (s) => { setDropdown([]); setQuery(s.nama); setPaySel({}); await reloadSelected(s.id); };
+  const selectSupplier = async (s) => { clearTimeout(autoSaveTimer.current); setDropdown([]); setQuery(s.nama); setPaySel({}); await reloadSelected(s.id); };
   const createOrOpenSupplier = async () => {
     if (!query.trim()) { flash("Masukkan nama supplier dulu"); return; }
     try {
@@ -156,13 +158,20 @@ export default function SupplierPage() {
   // nggak perlu klik tombol. Kalau namanya udah ada, langsung dibuka (backend
   // create_supplier balikin yang sudah ada, jadi nggak dobel). Delay biar klik
   // dropdown menang.
-  const autoSaveSupplier = () => setTimeout(() => {
-    const nama = query.trim();
-    if (selected || nama.length < 2) return;
-    const exact = dropdown.find((s) => (s.nama || "").trim().toLowerCase() === nama.toLowerCase());
-    if (exact) { selectSupplier(exact); return; }
-    createOrOpenSupplier();
-  }, 250);
+  const autoSaveSupplier = () => {
+    clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(() => {
+      if (selectingRef.current) { selectingRef.current = false; return; } // baru klik saran
+      const nama = query.trim();
+      if (selected || nama.length < 2) return;
+      const exact = dropdown.find((s) => (s.nama || "").trim().toLowerCase() === nama.toLowerCase());
+      if (exact) { selectSupplier(exact); return; }
+      // Masih ada saran yg cocok → jangan bikin nama setengah jadi. User tinggal
+      // klik saran, atau tekan tombol "+ Buat / Buka" kalau memang mau bikin baru.
+      if (dropdown.length > 0) return;
+      createOrOpenSupplier();
+    }, 250);
+  };
 
   const jobs = useMemo(() => selected?.jobs || [], [selected]);
   const unpaidJobs = useMemo(() => jobs.filter((j) => (j.sisa || 0) > 0), [jobs]);
@@ -414,7 +423,7 @@ export default function SupplierPage() {
           {!selected && dropdown.length > 0 && (
             <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: C.card, border: `1px solid ${C.inpLine}`, borderRadius: 10, marginTop: 4, zIndex: 30, maxHeight: 300, overflowY: "auto", boxShadow: "0 8px 24px rgba(0,0,0,.4)" }}>
               {dropdown.map((s) => (
-                <div key={s.id} onClick={() => selectSupplier(s)} style={{ padding: "12px 14px", cursor: "pointer", borderBottom: `1px solid ${C.line}`, display: "flex", justifyContent: "space-between", gap: 10 }} data-testid={`sup-option-${s.id}`}>
+                <div key={s.id} onMouseDown={(e) => { e.preventDefault(); selectingRef.current = true; selectSupplier(s); }} style={{ padding: "12px 14px", cursor: "pointer", borderBottom: `1px solid ${C.line}`, display: "flex", justifyContent: "space-between", gap: 10 }} data-testid={`sup-option-${s.id}`}>
                   <span style={{ fontWeight: 700 }}>{s.nama}</span>
                   <span style={{ color: C.mute, fontSize: 12 }}>{s.jumlah_unit || 0} unit · sisa {fRp(s.grand_sisa)}</span>
                 </div>
