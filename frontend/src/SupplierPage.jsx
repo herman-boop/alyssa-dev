@@ -549,6 +549,12 @@ export default function SupplierPage() {
                     <input style={{ ...I, marginBottom: 10 }} placeholder="Catatan (opsional)" value={payCatatan} onChange={(e) => setPayCatatan(e.target.value)} />
                     <input ref={payFileRef} type="file" accept="image/*,application/pdf" style={{ display: "none" }} onChange={(e) => setPayBukti(e.target.files?.[0] || null)} />
                     <button style={{ ...BTN_GHOST, width: "100%" }} onClick={() => payFileRef.current?.click()}>{payBukti ? `📎 ${payBukti.name.slice(0, 28)}` : "📎 Upload Bukti Transfer"}</button>
+                    {/* Tombol simpan di dalam form (deket) — biar nggak perlu turun ke bar bawah.
+                        Selalu bisa diklik; kalau belum lengkap, doBatchPay kasih pesannya. */}
+                    <button style={{ ...BTN, width: "100%", marginTop: 12, opacity: (selectedPayJobs.length && pNum(payAmount) > 0) ? 1 : 0.6 }} onClick={doBatchPay} disabled={paySaving} data-testid="sup-pay-save-inline">
+                      {paySaving ? "Menyimpan…" : selectedPayJobs.length ? `💾 Simpan Pembayaran · ${selectedPayJobs.length} tagihan` : "💾 Centang tagihan dulu"}
+                    </button>
+                    {!selectedPayJobs.length && <div style={{ fontSize: 11, color: C.mute, textAlign: "center", marginTop: 6 }}>Centang tagihan di atas dulu, terus isi nominal.</div>}
                   </div>
                 </>
               )}
@@ -639,7 +645,7 @@ export default function SupplierPage() {
               <div style={{ fontSize: 11, color: C.mute }}>{selectedPayJobs.length} tagihan · dipilih {fRp(totalSelSisa)}</div>
               <div style={{ fontSize: 20, fontWeight: 900 }}>{fRp(pNum(payAmount))}</div>
             </div>
-            <button style={{ ...BTN, flex: "0 0 auto", minWidth: 170 }} onClick={doBatchPay} disabled={paySaving || !selectedPayJobs.length || pNum(payAmount) <= 0} data-testid="sup-pay-save">
+            <button style={{ ...BTN, flex: "0 0 auto", minWidth: 170, opacity: (selectedPayJobs.length && pNum(payAmount) > 0) ? 1 : 0.6 }} onClick={doBatchPay} disabled={paySaving} data-testid="sup-pay-save">
               {paySaving ? "Menyimpan…" : "💾 Simpan Pembayaran"}
             </button>
           </div>
