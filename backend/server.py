@@ -1102,6 +1102,41 @@ async def delete_album_photo(trip_id: str, stage: str, photo_id: str):
 
 
 # ---------- Public tracking (read-only untuk pelanggan) ----------
+def _trip_public_view(doc: dict) -> dict:
+    """Bentuk view read-only trip buat pelanggan (cuma field aman)."""
+    h = doc.get("handover") or {}
+    return {
+        "trip_id": doc.get("trip_id"),
+        "nopol": doc.get("nopol"),
+        "tipe_kendaraan": doc.get("tipe_kendaraan", ""),
+        "no_rangka": doc.get("no_rangka", ""),
+        "route": doc.get("route", ""),
+        "nama_driver": doc.get("nama_driver", ""),
+        "legs": doc.get("legs", []),
+        "album": doc.get("album", {"asal": [], "kapal": [], "tujuan": [], "dokumen": []}),
+        "handover": {
+            "bastk": h.get("bastk", []),
+            "resi": h.get("resi"),
+        },
+        "daily_count": len(doc.get("daily_checkpoints", []) or []),
+        "daily_checkpoints": doc.get("daily_checkpoints", []) or [],
+        "initial_done": len(doc.get("initial_photos", {}) or {}),
+        "initial_photos": doc.get("initial_photos", {}) or {},
+        # BASTK fields (v2.6a, optional)
+        "vehicle_type": doc.get("vehicle_type", ""),
+        "damage_marks": doc.get("damage_marks", []),
+        "customer_data": doc.get("customer_data", {}),
+        "signatures": doc.get("signatures", {}),
+        "bastk_catatan": doc.get("bastk_catatan", ""),
+        "progress": {
+            "initial_complete": len(doc.get("initial_photos", {}) or {}) >= 5,
+            "handover_complete": bool(h.get("bastk")) and bool(h.get("resi")),
+        },
+        "created_at": doc.get("created_at"),
+        "updated_at": doc.get("updated_at"),
+    }
+
+
 async def _public_order_fallback(track_id: str):
     """Fallback tracking sebelum order di-convert jadi trip: pelanggan tetap bisa
     buka link dari WA (resi = order_id) & lihat status 'pesanan diterima'.
@@ -1112,6 +1147,14 @@ async def _public_order_fallback(track_id: str):
     o = await db.orders.find_one({"order_id": oid}, {"_id": 0})
     if not o:
         return None
+    # Kalau order SUDAH di-convert jadi trip (punya trip_id), link WA yg pakai
+    # order_id tetap harus nampilin trip beneran (foto album, checkpoint, dll) —
+    # bukan view kosong. Resolve order_id → trip_id → trip.
+    otid = o.get("trip_id")
+    if otid and otid != track_id:
+        trip = await db.trips.find_one({"trip_id": otid})
+        if trip:
+            return _trip_public_view(trip)
     route = f'{o.get("asal_kota","")} - {o.get("tujuan_kota","")}'.strip(" -") or "—"
     empty_album = {"asal": [], "kapal": [], "tujuan": [], "dokumen": []}
     return {
@@ -1148,37 +1191,7 @@ async def public_trip(trip_id: str):
         if fb:
             return fb
         raise HTTPException(404, "Trip not found")
-    h = doc.get("handover") or {}
-    return {
-        "trip_id": doc.get("trip_id"),
-        "nopol": doc.get("nopol"),
-        "tipe_kendaraan": doc.get("tipe_kendaraan", ""),
-        "no_rangka": doc.get("no_rangka", ""),
-        "route": doc.get("route", ""),
-        "nama_driver": doc.get("nama_driver", ""),
-        "legs": doc.get("legs", []),
-        "album": doc.get("album", {"asal": [], "kapal": [], "tujuan": [], "dokumen": []}),
-        "handover": {
-            "bastk": h.get("bastk", []),
-            "resi": h.get("resi"),
-        },
-        "daily_count": len(doc.get("daily_checkpoints", []) or []),
-        "daily_checkpoints": doc.get("daily_checkpoints", []) or [],
-        "initial_done": len(doc.get("initial_photos", {}) or {}),
-        "initial_photos": doc.get("initial_photos", {}) or {},
-        # BASTK fields (v2.6a, optional)
-        "vehicle_type": doc.get("vehicle_type", ""),
-        "damage_marks": doc.get("damage_marks", []),
-        "customer_data": doc.get("customer_data", {}),
-        "signatures": doc.get("signatures", {}),
-        "bastk_catatan": doc.get("bastk_catatan", ""),
-        "progress": {
-            "initial_complete": len(doc.get("initial_photos", {}) or {}) >= 5,
-            "handover_complete": bool(h.get("bastk")) and bool(h.get("resi")),
-        },
-        "created_at": doc.get("created_at"),
-        "updated_at": doc.get("updated_at"),
-    }
+    return _trip_public_view(doc)
 
 
 @api_router.get("/trips/{trip_id}/bastk/pdf")
