@@ -2460,7 +2460,11 @@ def _admin_orders_filter(
                 {"asal_kota": rx},
                 {"tujuan_kota": rx},
                 {"nopol": rx},
+                {"no_rangka": rx},
                 {"order_id": rx},
+                # 1 unit = 1 PO: nopol/rangka sering ada di dalam units[], bukan top-level
+                {"units.nopol": rx},
+                {"units.no_rangka": rx},
             ]
     # Date range — created_at is ISO UTC; filter via lexicographic compare (chronological for ISO 8601)
     date_q: dict = {}

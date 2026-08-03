@@ -260,13 +260,31 @@ export default function SupplierPage() {
       asal_kota: o.asal_kota || "", tujuan_kota: o.tujuan_kota || "", customer: o.customer_nama || "",
     }));
   };
-  const openTarik = async () => {
-    if (!selected) { flash("Pilih supplier dulu"); return; }
-    setTarikOpen(true); setTarikSel({}); setTarikQ(""); setTarikLoading(true);
-    try { const r = await axios.get(`${API}/admin/orders`, { headers }); setTarikOrders(r.data?.items || []); }
-    catch { flash("Gagal memuat order"); setTarikOrders([]); }
+  // Ambil order dari master admin PO. Kirim kata kunci ke server (q) biar
+  // nyari di SELURUH order (bukan cuma 100 terbaru) — cocok no PO, no rangka,
+  // nama pelanggan, asal/tujuan. Server nyari juga di dalam units[].
+  const fetchTarik = async (qStr) => {
+    setTarikLoading(true);
+    try {
+      const params = { limit: 500 };
+      if (qStr && qStr.trim()) params.q = qStr.trim();
+      const r = await axios.get(`${API}/admin/orders`, { headers, params });
+      setTarikOrders(r.data?.items || []);
+    } catch { flash("Gagal memuat order"); setTarikOrders([]); }
     finally { setTarikLoading(false); }
   };
+  const openTarik = async () => {
+    if (!selected) { flash("Pilih supplier dulu"); return; }
+    setTarikOpen(true); setTarikSel({}); setTarikQ("");
+    fetchTarik("");
+  };
+  // Debounce: tiap ketik di search, cari ulang ke server (biar master penuh kepakai).
+  useEffect(() => {
+    if (!tarikOpen) return;
+    const t = setTimeout(() => fetchTarik(tarikQ), 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tarikQ, tarikOpen]);
   const toggleTarik = (row) => setTarikSel((s) => { const n = { ...s }; if (n[row.key]) delete n[row.key]; else n[row.key] = { ...row, total_harga: "" }; return n; });
   const setTarikHarga = (key, val) => setTarikSel((s) => ({ ...s, [key]: { ...s[key], total_harga: val } }));
   const tarikRows = tarikOrders.flatMap(orderUnitsOf).filter((row) => {
@@ -624,7 +642,7 @@ export default function SupplierPage() {
         <Modal title="Tarik Unit dari PO" onClose={() => setTarikOpen(false)}
           foot={<><button style={BTN_GHOST} onClick={() => setTarikOpen(false)}>Batal</button><button style={BTN} onClick={doTarik} disabled={tarikSaving} data-testid="sup-tarik-save">{tarikSaving ? "Menarik…" : `Tarik ${tarikSelArr.length} Unit${tarikTotal > 0 ? ` · ${fRp(tarikTotal)}` : ""}`}</button></>}>
           <div style={{ fontSize: 12, color: C.mute, marginBottom: 10 }}>Centang unit, isi HPP (biaya ke supplier ini). Unit, nopol, customer &amp; rute otomatis dari PO.</div>
-          <input style={{ ...I, marginBottom: 10 }} placeholder="🔎 cari nopol / rute / customer…" value={tarikQ} onChange={(e) => setTarikQ(e.target.value)} />
+          <input style={{ ...I, marginBottom: 10 }} placeholder="🔎 cari: no PO / no rangka / nama pelanggan / asal / tujuan" value={tarikQ} onChange={(e) => setTarikQ(e.target.value)} data-testid="sup-tarik-search" />
           {tarikLoading ? <div style={{ padding: 20, textAlign: "center", color: C.mute }}>Memuat…</div> : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {tarikRows.map((row) => {
