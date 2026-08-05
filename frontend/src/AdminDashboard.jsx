@@ -4718,14 +4718,16 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
     if (/self drive/i.test(t)) return i === n - 1 ? "Self Drive Tujuan" : "Self Drive";
     return "Lainnya";
   };
-  const copyLegLink = async (leg, i) => {
+  const copyLegLink = async (leg, i, jenisOverride) => {
     if (!tripId) return;
     const n = legs.length;
     const isKapal = /^kapal/i.test(leg.tipe || "");
     const pNama = (isKapal ? leg.kord_kapal : leg.driver) || "";
     const pHp = (isKapal ? leg.kord_kapal_hp : leg.driver_hp) || "";
     const pTipe = isKapal ? "Petugas Kapal" : "Driver";
-    const jenis = jenisForLeg(leg, i, n);
+    // jenisOverride = peran eksplisit yg dipilih admin (Self Drive / Self Drive Asal /
+    // Self Drive Tujuan). Kalau nggak dikasih → auto dari tipe leg.
+    const jenis = jenisOverride || jenisForLeg(leg, i, n);
     // units snapshot (aman — nopol/tipe/rangka aja)
     const units = (Array.isArray(order?.units) && order.units.length)
       ? order.units.map((u) => ({ nopol: u.nopol || "", vehicle_type: `${u.vehicle_type || ""}${u.tipe_model ? " " + u.tipe_model : ""}`.trim(), no_rangka: u.no_rangka || "" }))
@@ -4750,7 +4752,10 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
       const nopol = units.map((u) => u.nopol).filter(Boolean).join(", ") || "-";
       const teks = `Halo Pak/Bu ${namaP} 👋\n\nTugas: ${jenis}\nLokasi: ${rute}\nUnit: ${nopol}\n\nBuka link tugas ini buat lihat instruksi & upload foto:\n🔗 ${link}\n\nInfo: PT Alyssa Auto Logistik · 0818 631 135`;
       const ok = await copyToClipboard(teks);
-      if (ok) { setCopiedLeg(i); setTimeout(() => setCopiedLeg(null), 2200); }
+      const copyKey = jenisOverride === "Self Drive" ? `${i}-full`
+        : jenisOverride === "Self Drive Asal" ? `${i}-asal`
+        : jenisOverride === "Self Drive Tujuan" ? `${i}-tujuan` : i;
+      if (ok) { setCopiedLeg(copyKey); setTimeout(() => setCopiedLeg(null), 2200); }
     } catch (e) {
       alert("Gagal bikin link tugas. Simpan Leg dulu (pastikan trip sudah ada), lalu coba lagi.");
     }
@@ -5066,13 +5071,28 @@ function RuteLegTab({ legs, setLeg, addLeg, delLeg, moveLeg, order, tripId, head
                     { done: (detail?.daily_count || 0) > 0, label: `Checkpoint harian terisi (${detail?.daily_count || 0})` },
                     { done: albumPhotos.length > 0, label: `Foto ${albumStage === "asal" ? "asal" : "tujuan"} (${albumPhotos.length})` },
                   ]} />
-                  {/* 6. Link driver */}
+                  {/* 6. Link driver — pilih PERAN eksplisit biar checklist pas & nggak ketuker */}
                   <div style={{ marginTop: 6, padding: "10px 12px", background: "#0d1117", border: "1px solid #21262d", borderRadius: 7 }}>
-                    <div style={{ fontSize: 10, color: "#8b949e", fontWeight: 700, marginBottom: 6 }}>LINK DRIVER LEG {i + 1}</div>
-                    <button type="button" onClick={() => copyLegLink(leg, i)} disabled={!tripId}
-                      style={{ ...SOLID_BTN_BLUE, width: "100%", background: copiedLeg === i ? "#2ea043" : "#1f6feb" }}>
-                      {copiedLeg === i ? "✓ Tersalin!" : "🔗 Salin Link Driver"}
-                    </button>
+                    <div style={{ fontSize: 10, color: "#8b949e", fontWeight: 700, marginBottom: 3 }}>LINK DRIVER LEG {i + 1}</div>
+                    <div style={{ fontSize: 9.5, color: "#6b7688", marginBottom: 8, lineHeight: 1.4 }}>
+                      Pilih peran → checklist otomatis nyesuaiin. <b>Self Drive full</b> = 1 driver asal→tujuan (nyebrang sendiri). <b>Driver Asal</b>/<b>Tujuan</b> = buat rute kapal/antar-pulau.
+                    </div>
+                    <div style={{ display: "grid", gap: 6 }}>
+                      <button type="button" onClick={() => copyLegLink(leg, i, "Self Drive")} disabled={!tripId}
+                        style={{ ...SOLID_BTN_BLUE, width: "100%", background: copiedLeg === `${i}-full` ? "#2ea043" : "#1f6feb" }}>
+                        {copiedLeg === `${i}-full` ? "✓ Tersalin!" : "🔗 Link Self Drive (full: asal→tujuan)"}
+                      </button>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                        <button type="button" onClick={() => copyLegLink(leg, i, "Self Drive Asal")} disabled={!tripId}
+                          style={{ ...GHOST_BTN_BLUE, background: copiedLeg === `${i}-asal` ? "#2ea043" : "transparent", color: copiedLeg === `${i}-asal` ? "#fff" : "#60a5fa" }}>
+                          {copiedLeg === `${i}-asal` ? "✓ Tersalin" : "📍 Driver Asal"}
+                        </button>
+                        <button type="button" onClick={() => copyLegLink(leg, i, "Self Drive Tujuan")} disabled={!tripId}
+                          style={{ ...GHOST_BTN_BLUE, background: copiedLeg === `${i}-tujuan` ? "#2ea043" : "transparent", color: copiedLeg === `${i}-tujuan` ? "#fff" : "#60a5fa" }}>
+                          {copiedLeg === `${i}-tujuan` ? "✓ Tersalin" : "🏁 Driver Tujuan"}
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}

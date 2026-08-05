@@ -2675,7 +2675,17 @@ import secrets as _secrets
 
 # Checklist default per jenis leg (bisa diubah admin saat bikin link).
 DEFAULT_LEG_CHECKLISTS = {
+    # Self Drive FULL: 1 driver door-to-door (ambil di asal → antar ke tujuan, nyebrang
+    # selat sendiri). Dapat checklist lengkap (pengambilan + serah terima).
     "Self Drive": [
+        "Foto depan kendaraan", "Foto belakang kendaraan", "Foto sisi kanan", "Foto sisi kiri",
+        "Foto speedometer", "Foto odometer", "Foto kondisi interior", "Foto kunci",
+        "Foto BASTK / surat jalan", "Foto kerusakan (jika ada)",
+        "Foto kendaraan sampai tujuan", "Foto serah terima customer", "Foto PoD / BASTK akhir",
+    ],
+    # Driver Asal (rute kapal/antar-pulau): CUMA foto pengambilan di asal. Biar driver
+    # asal nggak masukin foto tujuan yang nggak relevan.
+    "Self Drive Asal": [
         "Foto depan kendaraan", "Foto belakang kendaraan", "Foto sisi kanan", "Foto sisi kiri",
         "Foto speedometer", "Foto odometer", "Foto kondisi interior", "Foto kunci",
         "Foto BASTK / surat jalan", "Foto kerusakan (jika ada)",
@@ -2693,9 +2703,12 @@ DEFAULT_LEG_CHECKLISTS = {
         "Foto turun dari kapal", "Foto kondisi setelah turun", "Foto di area pelabuhan tujuan",
         "Foto serah terima ke driver berikutnya", "Foto dokumen keluar pelabuhan",
     ],
+    # Driver Tujuan: terima dari pelabuhan/driver sebelumnya → antar ke tujuan akhir.
+    # Fokus kamera tujuan + dokumen + scan buat berkas.
     "Self Drive Tujuan": [
         "Foto saat diterima driver", "Foto 4 sisi kendaraan", "Foto speedometer/odometer",
         "Foto kendaraan sampai tujuan", "Foto serah terima customer", "Foto PoD / BASTK akhir",
+        "Foto dokumen keluar / surat jalan", "Scan / foto berkas serah terima",
     ],
     "Towing": ["Foto kendaraan di towing", "Foto pengikatan", "Foto berangkat", "Foto tiba"],
     "Car Carrier": ["Foto kendaraan di carrier", "Foto pengikatan", "Foto berangkat", "Foto tiba"],
