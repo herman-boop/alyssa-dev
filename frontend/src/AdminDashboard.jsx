@@ -1194,13 +1194,16 @@ function DuplicateVendorModal({ order, headers, onClose }) {
                     </div>
                   </label>
                   {r.checked && (
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8, marginLeft: 26 }}>
-                      <input className="adm-input" placeholder="Kota asal" value={r.asal}
-                        onChange={(e) => setRow(r.key, { asal: e.target.value })} data-testid={`adm-dupvendor-asal-${r.key}`} />
-                      <input className="adm-input" placeholder="Kota tujuan" value={r.tujuan}
-                        onChange={(e) => setRow(r.key, { tujuan: e.target.value })} data-testid={`adm-dupvendor-tujuan-${r.key}`} />
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8, marginLeft: 26 }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                        <input className="adm-input" placeholder="Kota asal" value={r.asal}
+                          onChange={(e) => setRow(r.key, { asal: e.target.value })} data-testid={`adm-dupvendor-asal-${r.key}`} />
+                        <input className="adm-input" placeholder="Kota tujuan" value={r.tujuan}
+                          onChange={(e) => setRow(r.key, { tujuan: e.target.value })} data-testid={`adm-dupvendor-tujuan-${r.key}`} />
+                      </div>
                       <input className="adm-input adm-mono" inputMode="numeric" placeholder="Harga vendor (Rp)" value={r.harga}
                         onChange={(e) => setRow(r.key, { harga: e.target.value.replace(/[^0-9]/g, "") })} data-testid={`adm-dupvendor-harga-${r.key}`} />
+                      {/* Catatan pindah ke bawah asal-tujuan & harga, full-width, tetap di blok unit ini */}
                       <input className="adm-input" placeholder="Catatan (opsional)" value={r.catatan}
                         onChange={(e) => setRow(r.key, { catatan: e.target.value })} data-testid={`adm-dupvendor-catatan-${r.key}`} />
                     </div>
