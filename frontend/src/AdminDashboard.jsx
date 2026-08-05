@@ -5185,6 +5185,38 @@ function PetugasTaskTab({ tripId, headers }) {
                 ? <button onClick={() => nonaktif(t.token)} disabled={busy === t.token} style={{ flex: "1 1 120px", padding: "8px", borderRadius: 7, background: "transparent", border: "1px solid #5a1d1d", color: "#f85149", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>{busy === t.token ? "…" : "⛔ Nonaktifkan"}</button>
                 : <button onClick={() => buatUlang(t.token)} disabled={busy === t.token} style={{ flex: "1 1 120px", padding: "8px", borderRadius: 7, background: "transparent", border: "1px solid #7a5c14", color: "#EF9F27", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>{busy === t.token ? "…" : "♻️ Buat Ulang"}</button>}
             </div>
+            {/* serah terima indikator — leg selesai → admin bisa lanjut aktifkan leg berikutnya (jangan auto) */}
+            {t.status === "selesai" && (
+              <div style={{ margin: "0 14px 10px", padding: "8px 12px", background: "#0d2a10", border: "1px solid #238636", borderRadius: 8, fontSize: 11.5, color: "#3fb950", fontWeight: 700 }}>
+                ✓ Serah terima leg ini SELESAI — silakan aktifkan / buat link leg berikutnya secara manual.
+              </div>
+            )}
+            {/* input dari petugas (kapal/voyage/ETD/ETA/penerima/ttd) */}
+            {(() => {
+              const x = t.extra_inputs || {};
+              const rows = [
+                ["Nama Kapal", x.nama_kapal], ["Voyage", x.voyage],
+                ["Estimasi Berangkat", x.etd], ["Estimasi Tiba", x.eta],
+                ["Nama Penerima", x.penerima_nama], ["No. HP Penerima", x.penerima_hp],
+              ].filter(([, v]) => v);
+              if (!rows.length && !x.penerima_ttd) return null;
+              return (
+                <div style={{ margin: "0 14px 10px", padding: "8px 12px", background: "#12161c", border: "1px solid #21262d", borderRadius: 8 }}>
+                  <div style={{ fontSize: 10, color: "#8b949e", fontWeight: 700, marginBottom: 6, letterSpacing: .5 }}>INPUT PETUGAS</div>
+                  {rows.map(([k, v]) => (
+                    <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 11.5, padding: "2px 0" }}>
+                      <span style={{ color: "#8b949e" }}>{k}</span><span style={{ color: "#e6edf3", fontWeight: 700, textAlign: "right" }}>{v}</span>
+                    </div>
+                  ))}
+                  {x.penerima_ttd && (
+                    <div style={{ marginTop: 6 }}>
+                      <div style={{ fontSize: 10, color: "#8b949e", marginBottom: 3 }}>Tanda Tangan Penerima</div>
+                      <img src={x.penerima_ttd} alt="ttd" style={{ maxWidth: 200, background: "#fff", borderRadius: 6, border: "1px solid #21262d" }} />
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             {/* checkpoints */}
             <div style={{ padding: "0 14px 14px" }}>
               <div style={{ fontSize: 10, color: "#8b949e", fontWeight: 700, marginBottom: 6, letterSpacing: .5 }}>CHECKPOINT ({legCps.length})</div>

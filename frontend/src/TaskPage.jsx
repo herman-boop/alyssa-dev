@@ -167,6 +167,8 @@ export default function TaskPage() {
           <Section C={C} title="Serah Terima Customer">
             <Field C={C} label="Nama Penerima" value={extra.penerima_nama || ""} onChange={(v) => setExtra((x) => ({ ...x, penerima_nama: v }))} />
             <Field C={C} label="No. HP Penerima" value={extra.penerima_hp || ""} onChange={(v) => setExtra((x) => ({ ...x, penerima_hp: v }))} />
+            <div style={{ fontSize: 12, color: C.mute, fontWeight: 700, margin: "4px 0 6px" }}>Tanda Tangan Penerima</div>
+            <SignaturePad C={C} value={extra.penerima_ttd || ""} onChange={(v) => setExtra((x) => ({ ...x, penerima_ttd: v }))} />
           </Section>
         )}
 
@@ -197,6 +199,40 @@ function resolveUrl(u) {
   if (!u) return "";
   if (u.startsWith("http")) return u;
   return `${BACKEND_URL}${u.startsWith("/") ? "" : "/"}${u}`;
+}
+
+/* Tanda tangan penerima — canvas gambar (touch/mouse), simpan sebagai data URL. */
+function SignaturePad({ C, value, onChange }) {
+  const canvasRef = useRef(null);
+  const drawing = useRef(false);
+  const last = useRef(null);
+
+  const pos = (e) => {
+    const cv = canvasRef.current; const r = cv.getBoundingClientRect();
+    const t = e.touches ? e.touches[0] : e;
+    return { x: (t.clientX - r.left) * (cv.width / r.width), y: (t.clientY - r.top) * (cv.height / r.height) };
+  };
+  const start = (e) => { e.preventDefault(); drawing.current = true; last.current = pos(e); };
+  const move = (e) => {
+    if (!drawing.current) return; e.preventDefault();
+    const cv = canvasRef.current; const ctx = cv.getContext("2d"); const p = pos(e);
+    ctx.strokeStyle = "#0d1117"; ctx.lineWidth = 2.5; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(last.current.x, last.current.y); ctx.lineTo(p.x, p.y); ctx.stroke();
+    last.current = p;
+  };
+  const end = () => { if (!drawing.current) return; drawing.current = false; try { onChange(canvasRef.current.toDataURL("image/png")); } catch {} };
+  const clear = () => { const cv = canvasRef.current; cv.getContext("2d").clearRect(0, 0, cv.width, cv.height); onChange(""); };
+
+  return (
+    <div>
+      <canvas ref={canvasRef} width={600} height={200}
+        onMouseDown={start} onMouseMove={move} onMouseUp={end} onMouseLeave={end}
+        onTouchStart={start} onTouchMove={move} onTouchEnd={end}
+        style={{ width: "100%", height: 140, background: "#fff", borderRadius: 8, border: `1px solid ${C.line}`, touchAction: "none", display: value && !canvasRef.current ? "none" : "block" }} />
+      {value && <img src={value} alt="ttd" style={{ display: "none" }} />}
+      <button type="button" onClick={clear} style={{ marginTop: 6, padding: "6px 12px", borderRadius: 7, border: `1px solid ${C.line}`, background: "none", color: C.mute, fontSize: 12, cursor: "pointer" }}>🗑 Hapus tanda tangan</button>
+    </div>
+  );
 }
 
 function Section({ C, title, children }) {
