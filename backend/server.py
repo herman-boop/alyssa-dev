@@ -2897,6 +2897,22 @@ async def regen_leg_task(token: str):
     return {"ok": True, "token": new_token}
 
 
+@api_router.get("/admin/trips/{trip_id}/leg-checkpoints", dependencies=[Depends(require_admin_pin)])
+async def list_leg_checkpoints(trip_id: str):
+    """Checkpoint terstruktur per leg (hasil upload petugas via link tugas) buat
+    Trip 360 admin: Trip → Route Leg → Petugas → Checkpoint → Foto (+ GPS)."""
+    names = {}
+    async for p in db.petugas_profiles.find({}, {"_id": 0, "petugas_id": 1, "nama": 1}):
+        names[p.get("petugas_id")] = p.get("nama", "")
+    items = []
+    async for c in db.leg_checkpoints.find({"trip_id": trip_id}).sort("ts", 1):
+        c.pop("_id", None)
+        if not c.get("petugas_nama"):
+            c["petugas_nama"] = names.get(c.get("petugas_id"), "")
+        items.append(c)
+    return {"items": items, "total": len(items)}
+
+
 @api_router.get("/public/task/{token}")
 async def public_get_task(token: str):
     """Halaman petugas — akses ter-scope, cuma data leg dia."""

@@ -3532,11 +3532,23 @@ const TIPE_ICON = { "Self Drive": "🚗", "Kapal RoRo": "🚢", "Kapal Kontainer
 
 const DETAIL_TABS = [
   { key: "rute", label: "Rute Leg", icon: "🧭" },
+  { key: "petugas", label: "Petugas", icon: "👷" },
   { key: "foto", label: "Foto", icon: "📸" },
   { key: "checkpoint", label: "Checkpoint", icon: "📍" },
   { key: "dokumen", label: "Dokumen", icon: "📄" },
   { key: "ringkasan", label: "Ringkasan", icon: "📊" },
 ];
+
+// Status link tugas petugas (Fase 2) — warna + label
+const TASK_STATUS_META = {
+  belum_dibuka:  { t: "Belum Dibuka",  c: "#8b949e", bg: "#1c2128" },
+  sudah_dibuka:  { t: "Sudah Dibuka",  c: "#60a5fa", bg: "#0d2340" },
+  dikerjakan:    { t: "Sedang Dikerjakan", c: "#EF9F27", bg: "#2d2410" },
+  menunggu:      { t: "Menunggu Kelengkapan", c: "#e6b450", bg: "#2a2410" },
+  selesai:       { t: "Selesai",       c: "#3fb950", bg: "#0d2a10" },
+  kedaluwarsa:   { t: "Kedaluwarsa",   c: "#f85149", bg: "#2d1214" },
+  dinonaktifkan: { t: "Dinonaktifkan", c: "#f85149", bg: "#2d1214" },
+};
 
 const LEG_STATUS_COLOR = {
   "Menunggu":    { bg: "#2d2410", color: "#EF9F27", border: "#7a5c14" },
@@ -4816,6 +4828,7 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
               openMultiUnit={openMultiUnit} printKartuMuat={printKartuMuat}
             />
           )}
+          {activeTab === "petugas" && <PetugasTaskTab tripId={tripId} headers={headers} />}
           {activeTab === "foto" && <FotoTab detail={detail} loading={detailLoading} onView={setLightbox} />}
           {activeTab === "checkpoint" && <CheckpointTab detail={detail} loading={detailLoading} onView={setLightbox} />}
           {activeTab === "dokumen" && <DokumenTab detail={detail} loading={detailLoading} />}
@@ -5094,6 +5107,108 @@ function RuteLegTab({ legs, setLeg, addLeg, delLeg, moveLeg, order, tripId, head
         );
       })}
       <button onClick={addLeg} style={{ width: "100%", padding: "10px", border: "1px dashed #30363d", borderRadius: 9, background: "none", color: "#8b949e", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>+ Tambah Leg</button>
+    </div>
+  );
+}
+
+/* ── Tab: Petugas — Trip → Route Leg → Petugas → Checkpoint → Foto (Fase 3) ──
+   Kartu status link tugas (Fase 2) + tombol Salin/WA/Nonaktifkan/Buat Ulang,
+   plus checkpoint terstruktur per leg (foto + GPS + waktu). */
+function PetugasTaskTab({ tripId, headers }) {
+  const [tasks, setTasks] = useState([]);
+  const [cps, setCps] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState("");
+  const [copied, setCopied] = useState("");
+
+  const load = useCallback(async () => {
+    if (!tripId) { setLoading(false); return; }
+    setLoading(true);
+    try {
+      const [a, b] = await Promise.all([
+        axios.get(`${API}/admin/leg-tasks`, { params: { trip_id: tripId }, headers }),
+        axios.get(`${API}/admin/trips/${tripId}/leg-checkpoints`, { headers }),
+      ]);
+      setTasks(a.data?.items || []);
+      setCps(b.data?.items || []);
+    } catch { /* diamkan */ }
+    setLoading(false);
+  }, [tripId, headers]);
+  useEffect(() => { load(); }, [load]);
+
+  const linkOf = (tk) => `${window.location.origin}/task/${tk}`;
+  const salin = async (tk) => { try { await navigator.clipboard.writeText(linkOf(tk)); setCopied(tk); setTimeout(() => setCopied(""), 1600); } catch {} };
+  const waShare = (t) => {
+    const txt = `Halo ${t.petugas_nama || "Petugas"}, ini link tugas ${t.jenis || ""} Anda:\n${linkOf(t.token)}\n\nBuka lewat HP, ikuti checklist & upload foto. Terima kasih.`;
+    const hp = (t.petugas_hp || "").replace(/\D/g, "").replace(/^0/, "62");
+    window.open(hp ? `https://wa.me/${hp}?text=${encodeURIComponent(txt)}` : `https://wa.me/?text=${encodeURIComponent(txt)}`, "_blank");
+  };
+  const nonaktif = async (tk) => { if (!window.confirm("Nonaktifkan link tugas ini? Petugas nggak bisa buka lagi.")) return; setBusy(tk); try { await axios.post(`${API}/admin/leg-tasks/${tk}/disable`, {}, { headers }); await load(); } catch {} setBusy(""); };
+  const buatUlang = async (tk) => { if (!window.confirm("Buat ulang link? Link lama mati, isi tugas tetap.")) return; setBusy(tk); try { await axios.post(`${API}/admin/leg-tasks/${tk}/regen`, {}, { headers }); await load(); } catch {} setBusy(""); };
+
+  const fmtTs = (s) => { if (!s) return "—"; try { return new Date(s).toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); } catch { return s; } };
+
+  if (loading) return <div style={{ padding: 30, textAlign: "center", color: "#8b949e" }}>Memuat petugas…</div>;
+  if (tasks.length === 0) return (
+    <div style={{ padding: 30, textAlign: "center", color: "#8b949e" }}>
+      Belum ada link tugas petugas.<br /><span style={{ fontSize: 11, color: "#6b7688" }}>Bikin di tab <b>Rute Leg</b> → assign petugas → Salin Link Tugas.</span>
+    </div>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {tasks.map((t) => {
+        const meta = TASK_STATUS_META[t.status] || TASK_STATUS_META.belum_dibuka;
+        const done = (t.checklist || []).filter((c) => c.done).length;
+        const total = (t.checklist || []).length;
+        const legCps = cps.filter((c) => c.leg_index === t.leg_index || (t.route_leg_id && c.route_leg_id === t.route_leg_id));
+        return (
+          <div key={t.token} style={{ background: "#0d1117", border: "1px solid #21262d", borderRadius: 12, overflow: "hidden" }}>
+            {/* header */}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: "#12161c", borderBottom: "1px solid #21262d", flexWrap: "wrap" }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: "#e6edf3" }}>Leg {(t.leg_index ?? 0) + 1} · {t.jenis || "—"}</span>
+                  <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 10, background: meta.bg, color: meta.c }}>{meta.t}</span>
+                </div>
+                <div style={{ fontSize: 11, color: "#8b949e", marginTop: 3 }}>
+                  👷 {t.petugas_nama || "—"}{t.petugas_hp ? ` · ${t.petugas_hp}` : ""}{t.tipe_petugas ? ` · ${t.tipe_petugas}` : ""}
+                </div>
+                <div style={{ fontSize: 10.5, color: "#6b7688", marginTop: 2 }}>Checklist: {done}/{total} · Dibuka: {fmtTs(t.opened_at)}</div>
+              </div>
+            </div>
+            {/* actions */}
+            <div style={{ display: "flex", gap: 6, padding: "10px 14px", flexWrap: "wrap" }}>
+              <button onClick={() => salin(t.token)} disabled={t.disabled} style={{ ...SOLID_BTN_BLUE, flex: "1 1 120px", background: copied === t.token ? "#2ea043" : "#1f6feb", opacity: t.disabled ? 0.5 : 1 }}>{copied === t.token ? "✓ Tersalin" : "🔗 Salin Link"}</button>
+              <button onClick={() => waShare(t)} disabled={t.disabled} style={{ ...GHOST_BTN_BLUE, flex: "1 1 110px", opacity: t.disabled ? 0.5 : 1 }}>💬 WhatsApp</button>
+              {!t.disabled
+                ? <button onClick={() => nonaktif(t.token)} disabled={busy === t.token} style={{ flex: "1 1 120px", padding: "8px", borderRadius: 7, background: "transparent", border: "1px solid #5a1d1d", color: "#f85149", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>{busy === t.token ? "…" : "⛔ Nonaktifkan"}</button>
+                : <button onClick={() => buatUlang(t.token)} disabled={busy === t.token} style={{ flex: "1 1 120px", padding: "8px", borderRadius: 7, background: "transparent", border: "1px solid #7a5c14", color: "#EF9F27", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>{busy === t.token ? "…" : "♻️ Buat Ulang"}</button>}
+            </div>
+            {/* checkpoints */}
+            <div style={{ padding: "0 14px 14px" }}>
+              <div style={{ fontSize: 10, color: "#8b949e", fontWeight: 700, marginBottom: 6, letterSpacing: .5 }}>CHECKPOINT ({legCps.length})</div>
+              {legCps.length === 0 ? (
+                <div style={{ fontSize: 11, color: "#484f58" }}>Belum ada foto dari petugas.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {legCps.map((c) => (
+                    <div key={c.checkpoint_id} style={{ display: "flex", gap: 10, alignItems: "flex-start", background: "#12161c", border: "1px solid #21262d", borderRadius: 8, padding: 8 }}>
+                      {c.url && <img src={resolveTripUrl(c.url)} alt="" style={{ width: 54, height: 54, borderRadius: 7, objectFit: "cover", border: "1px solid #21262d", flexShrink: 0 }} />}
+                      <div style={{ flex: 1, minWidth: 0, fontSize: 11 }}>
+                        <div style={{ color: "#c9d1d9" }}>{fmtTs(c.ts)}{c.catatan ? ` · ${c.catatan}` : ""}</div>
+                        {c.lat != null && c.lng != null
+                          ? <a href={`https://www.google.com/maps?q=${c.lat},${c.lng}`} target="_blank" rel="noreferrer" style={{ fontSize: 10, color: "#60a5fa", marginTop: 3, display: "inline-block" }}>📍 {parseFloat(c.lat).toFixed(4)}, {parseFloat(c.lng).toFixed(4)} · Buka Maps</a>
+                          : <div style={{ fontSize: 10, color: "#6b7688", marginTop: 3 }}>📍 Lokasi tidak tersedia</div>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
