@@ -2666,6 +2666,337 @@ async def admin_patch_trip_legs(trip_id: str, body: LegsBody):
     return {"ok": True, "trip_id": trip_id, "legs_count": len(body.legs)}
 
 
+# ════════════════════════════════════════════════════════════════════
+# ROUTE LEG — Petugas & Link Tugas (Fase 1)
+# Master petugas (bisa dipakai ulang) + link tugas unik per-leg ber-token,
+# akses ter-scope (petugas cuma lihat tugasnya), upload foto -> checkpoint.
+# ════════════════════════════════════════════════════════════════════
+import secrets as _secrets
+
+# Checklist default per jenis leg (bisa diubah admin saat bikin link).
+DEFAULT_LEG_CHECKLISTS = {
+    "Self Drive": [
+        "Foto depan kendaraan", "Foto belakang kendaraan", "Foto sisi kanan", "Foto sisi kiri",
+        "Foto speedometer", "Foto odometer", "Foto kondisi interior", "Foto kunci",
+        "Foto BASTK / surat jalan", "Foto kerusakan (jika ada)",
+    ],
+    "Pelabuhan": [
+        "Foto tiba di pelabuhan", "Foto di area antre", "Foto di area parkir pelabuhan",
+        "Foto sebelum naik kapal", "Foto proses naik kapal", "Foto tiket/resi/manifest",
+        "Foto nama kapal", "Foto tambahan",
+    ],
+    "Kapal": [
+        "Foto kendaraan di dalam kapal", "Foto posisi parkir", "Foto pengamanan kendaraan",
+        "Foto dek / lokasi", "Foto nama kapal",
+    ],
+    "Pelabuhan Tujuan": [
+        "Foto turun dari kapal", "Foto kondisi setelah turun", "Foto di area pelabuhan tujuan",
+        "Foto serah terima ke driver berikutnya", "Foto dokumen keluar pelabuhan",
+    ],
+    "Self Drive Tujuan": [
+        "Foto saat diterima driver", "Foto 4 sisi kendaraan", "Foto speedometer/odometer",
+        "Foto kendaraan sampai tujuan", "Foto serah terima customer", "Foto PoD / BASTK akhir",
+    ],
+    "Towing": ["Foto kendaraan di towing", "Foto pengikatan", "Foto berangkat", "Foto tiba"],
+    "Car Carrier": ["Foto kendaraan di carrier", "Foto pengikatan", "Foto berangkat", "Foto tiba"],
+    "Handling": ["Foto proses handling", "Foto sebelum", "Foto sesudah"],
+    "Lainnya": ["Foto 1", "Foto 2"],
+}
+VALID_PETUGAS_TIPE = {"Driver", "Petugas Pelabuhan", "Petugas Kapal", "Koordinator", "Lainnya"}
+LEG_TASK_STATUS = {"belum_dibuka", "sudah_dibuka", "dikerjakan", "menunggu", "selesai", "kedaluwarsa", "dinonaktifkan"}
+
+
+def _album_stage_for_jenis(jenis: str) -> str:
+    j = (jenis or "").lower()
+    if "kapal" in j:
+        return "kapal"
+    if "tujuan" in j:
+        return "tujuan"
+    return "asal"
+
+
+def _petugas_public(p: dict) -> dict:
+    return {
+        "petugas_id": p.get("petugas_id"), "nama": p.get("nama", ""), "no_hp": p.get("no_hp", ""),
+        "tipe": p.get("tipe", ""), "perusahaan": p.get("perusahaan", ""), "catatan": p.get("catatan", ""),
+        "aktif": p.get("aktif", True),
+    }
+
+
+@api_router.get("/admin/petugas", dependencies=[Depends(require_admin_pin)])
+async def list_petugas(q: Optional[str] = None, limit: int = 20):
+    """Cari petugas (master) buat autocomplete di editor Route Leg."""
+    import re
+    filt = {}
+    if q and q.strip():
+        rx = re.compile(re.escape(q.strip()), re.IGNORECASE)
+        filt = {"$or": [{"nama": rx}, {"no_hp": rx}, {"perusahaan": rx}]}
+    items = []
+    async for p in db.petugas_profiles.find(filt).sort("nama", 1).limit(max(1, min(50, limit))):
+        p.pop("_id", None)
+        items.append(_petugas_public(p))
+    return {"items": items}
+
+
+class PetugasBody(BaseModel):
+    nama: str
+    no_hp: str = ""
+    tipe: str = "Driver"
+    perusahaan: str = ""
+    catatan: str = ""
+
+
+@api_router.post("/admin/petugas", dependencies=[Depends(require_admin_pin)])
+async def upsert_petugas(body: PetugasBody):
+    """Buat / ambil petugas. Kalau nama+HP sama persis → pakai yang ada (nggak dobel)."""
+    import re
+    nama = (body.nama or "").strip()
+    if not nama:
+        raise HTTPException(400, "Nama petugas wajib diisi")
+    no_hp = (body.no_hp or "").strip()
+    tipe = body.tipe if body.tipe in VALID_PETUGAS_TIPE else "Lainnya"
+    existing = await db.petugas_profiles.find_one({
+        "nama": re.compile(f"^{re.escape(nama)}$", re.IGNORECASE),
+        "no_hp": no_hp,
+    })
+    now = datetime.now(timezone.utc).isoformat()
+    if existing:
+        upd = {"tipe": tipe, "updated_at": now}
+        if body.perusahaan.strip(): upd["perusahaan"] = body.perusahaan.strip()
+        if body.catatan.strip(): upd["catatan"] = body.catatan.strip()
+        await db.petugas_profiles.update_one({"petugas_id": existing["petugas_id"]}, {"$set": upd})
+        existing.pop("_id", None)
+        return _petugas_public({**existing, **upd})
+    doc = {
+        "petugas_id": str(uuid.uuid4()), "nama": nama[:120], "no_hp": no_hp[:30], "tipe": tipe,
+        "perusahaan": body.perusahaan.strip()[:120], "catatan": body.catatan.strip()[:300],
+        "aktif": True, "created_at": now, "updated_at": now,
+    }
+    await db.petugas_profiles.insert_one(doc)
+    doc.pop("_id", None)
+    return _petugas_public(doc)
+
+
+def _leg_task_admin_view(t: dict) -> dict:
+    """View lengkap buat admin (semua field task)."""
+    t = dict(t); t.pop("_id", None)
+    return t
+
+
+def _leg_task_public_view(t: dict) -> dict:
+    """View ter-scope buat petugas — TANPA harga/HPP/profit/invoice/leg lain."""
+    return {
+        "token": t.get("token"),
+        "jenis": t.get("jenis", ""),
+        "tipe_petugas": t.get("tipe_petugas", ""),
+        "petugas_nama": t.get("petugas_nama", ""),
+        "asal": t.get("asal", ""), "tujuan": t.get("tujuan", ""),
+        "kapal": t.get("kapal", ""), "voyage": t.get("voyage", ""),
+        "instruksi": t.get("instruksi", ""),
+        "checklist": t.get("checklist", []),
+        "units": t.get("units", []),            # snapshot aman: nopol/tipe/rangka aja
+        "status": t.get("status", "belum_dibuka"),
+        "photos": t.get("photos", []),          # cuma foto yg dia sendiri upload di task ini
+        "extra_inputs": t.get("extra_inputs", {}),
+        "perusahaan": "PT Alyssa Auto Logistik",
+        "disabled": bool(t.get("disabled")),
+    }
+
+
+class LegTaskBody(BaseModel):
+    petugas_id: Optional[str] = None
+    petugas_nama: str = ""
+    petugas_hp: str = ""
+    tipe_petugas: str = "Driver"
+    jenis: str = "Self Drive"
+    asal: str = ""
+    tujuan: str = ""
+    kapal: str = ""
+    voyage: str = ""
+    instruksi: str = ""
+    checklist: Optional[List[str]] = None       # label list; kalau None → default per jenis
+    units: Optional[List[Dict[str, Any]]] = None  # [{nopol, vehicle_type, no_rangka}]
+    unit_ids: Optional[List[str]] = None
+
+
+@api_router.post("/admin/trips/{trip_id}/legs/{leg_index}/task-link", dependencies=[Depends(require_admin_pin)])
+async def create_leg_task_link(trip_id: str, leg_index: int, body: LegTaskBody):
+    """Bikin link tugas unik buat 1 leg. Token acak aman, nggak nampilin ID internal."""
+    trip = await db.trips.find_one({"trip_id": trip_id})
+    if not trip:
+        raise HTTPException(404, "Trip not found")
+    legs = trip.get("legs") or []
+    if leg_index < 0 or leg_index >= len(legs):
+        raise HTTPException(400, "Leg index tidak valid")
+    labels = body.checklist if body.checklist is not None else DEFAULT_LEG_CHECKLISTS.get(body.jenis, DEFAULT_LEG_CHECKLISTS["Lainnya"])
+    checklist = [{"key": str(uuid.uuid4())[:8], "label": lb, "done": False} for lb in labels]
+    # units snapshot (aman) — dari body, atau fallback dari trip (single unit)
+    units = body.units or [{
+        "nopol": trip.get("nopol", ""), "vehicle_type": trip.get("tipe_kendaraan", ""),
+        "no_rangka": trip.get("no_rangka", ""),
+    }]
+    token = _secrets.token_urlsafe(16)
+    now = datetime.now(timezone.utc).isoformat()
+    route_leg_id = legs[leg_index].get("route_leg_id") or str(uuid.uuid4())
+    doc = {
+        "token": token, "trip_id": trip_id, "leg_index": leg_index, "route_leg_id": route_leg_id,
+        "petugas_id": body.petugas_id, "petugas_nama": (body.petugas_nama or "").strip(),
+        "petugas_hp": (body.petugas_hp or "").strip(), "tipe_petugas": body.tipe_petugas,
+        "jenis": body.jenis, "asal": (body.asal or "").strip(), "tujuan": (body.tujuan or "").strip(),
+        "kapal": (body.kapal or "").strip(), "voyage": (body.voyage or "").strip(),
+        "instruksi": (body.instruksi or "").strip(), "checklist": checklist,
+        "units": units, "unit_ids": body.unit_ids or [],
+        "album_stage": _album_stage_for_jenis(body.jenis),
+        "status": "belum_dibuka", "disabled": False, "photos": [], "extra_inputs": {},
+        "created_at": now, "opened_at": None, "completed_at": None,
+    }
+    await db.leg_tasks.insert_one(doc)
+    # simpan token + petugas ref ke leg (backward-compatible, cuma nambah field)
+    legs[leg_index]["route_leg_id"] = route_leg_id
+    legs[leg_index]["task_token"] = token
+    if body.petugas_id:
+        legs[leg_index]["petugas_id"] = body.petugas_id
+    await db.trips.update_one({"trip_id": trip_id}, {"$set": {"legs": legs, "updated_at": now}})
+    return {"ok": True, "token": token, "task": _leg_task_admin_view(doc)}
+
+
+@api_router.get("/admin/leg-tasks", dependencies=[Depends(require_admin_pin)])
+async def list_leg_tasks(trip_id: str):
+    """Daftar task per-trip buat kartu di admin."""
+    items = []
+    async for t in db.leg_tasks.find({"trip_id": trip_id}).sort("leg_index", 1):
+        items.append(_leg_task_admin_view(t))
+    return {"items": items}
+
+
+@api_router.post("/admin/leg-tasks/{token}/disable", dependencies=[Depends(require_admin_pin)])
+async def disable_leg_task(token: str):
+    r = await db.leg_tasks.find_one({"token": token})
+    if not r:
+        raise HTTPException(404, "Task tidak ditemukan")
+    await db.leg_tasks.update_one({"token": token}, {"$set": {"disabled": True, "status": "dinonaktifkan"}})
+    return {"ok": True}
+
+
+@api_router.post("/admin/leg-tasks/{token}/regen", dependencies=[Depends(require_admin_pin)])
+async def regen_leg_task(token: str):
+    """Buat ulang token (link lama mati, isi task dipertahankan)."""
+    r = await db.leg_tasks.find_one({"token": token})
+    if not r:
+        raise HTTPException(404, "Task tidak ditemukan")
+    new_token = _secrets.token_urlsafe(16)
+    await db.leg_tasks.update_one({"token": token}, {"$set": {"token": new_token, "disabled": False, "status": "belum_dibuka", "opened_at": None}})
+    # update token di leg
+    trip = await db.trips.find_one({"trip_id": r.get("trip_id")})
+    if trip:
+        legs = trip.get("legs") or []
+        idx = r.get("leg_index")
+        if isinstance(idx, int) and 0 <= idx < len(legs) and legs[idx].get("task_token") == token:
+            legs[idx]["task_token"] = new_token
+            await db.trips.update_one({"trip_id": r.get("trip_id")}, {"$set": {"legs": legs}})
+    return {"ok": True, "token": new_token}
+
+
+@api_router.get("/public/task/{token}")
+async def public_get_task(token: str):
+    """Halaman petugas — akses ter-scope, cuma data leg dia."""
+    t = await db.leg_tasks.find_one({"token": token})
+    if not t:
+        raise HTTPException(404, "Link tugas tidak ditemukan")
+    if t.get("disabled"):
+        raise HTTPException(410, "Link tugas sudah dinonaktifkan")
+    # tandai sudah dibuka (sekali)
+    if t.get("status") == "belum_dibuka":
+        now = datetime.now(timezone.utc).isoformat()
+        await db.leg_tasks.update_one({"token": token}, {"$set": {"status": "sudah_dibuka", "opened_at": now}})
+        t["status"] = "sudah_dibuka"
+    return _leg_task_public_view(t)
+
+
+@api_router.post("/public/task/{token}/upload")
+async def public_task_upload(
+    token: str,
+    foto: UploadFile = File(...),
+    checklist_key: str = Form(""),
+    catatan: str = Form(""),
+    lat: Optional[float] = Form(None),
+    lng: Optional[float] = Form(None),
+    acc: Optional[float] = Form(None),
+):
+    """Petugas upload foto → simpan ke task + album leg + bikin checkpoint (GPS opsional)."""
+    t = await db.leg_tasks.find_one({"token": token})
+    if not t:
+        raise HTTPException(404, "Link tugas tidak ditemukan")
+    if t.get("disabled"):
+        raise HTTPException(410, "Link tugas sudah dinonaktifkan")
+    trip_id = t.get("trip_id")
+    url = _save_upload(trip_id, f"leg/{t.get('leg_index')}/{token[:8]}", foto, ALLOWED_IMG | ALLOWED_DOC)
+    now = datetime.now(timezone.utc).isoformat()
+    photo = {
+        "id": str(uuid.uuid4()), "url": url, "checklist_key": checklist_key or "",
+        "catatan": (catatan or "").strip()[:300], "ts": now, "source": "petugas",
+    }
+    if lat is not None and lng is not None:
+        photo["lat"] = float(lat); photo["lng"] = float(lng)
+        if acc is not None: photo["acc"] = float(acc)
+    # tandai checklist item done
+    checklist = t.get("checklist") or []
+    for it in checklist:
+        if it.get("key") == checklist_key:
+            it["done"] = True
+    # checkpoint per leg (koleksi terpisah biar terstruktur)
+    checkpoint = {
+        "checkpoint_id": str(uuid.uuid4()), "trip_id": trip_id, "route_leg_id": t.get("route_leg_id"),
+        "leg_index": t.get("leg_index"), "petugas_id": t.get("petugas_id"),
+        "jenis": t.get("jenis"), "status": "upload", "ts": now, "url": url,
+        "checklist_key": checklist_key or "", "catatan": photo.get("catatan", ""),
+        "source": "petugas_link",
+        **({"lat": photo["lat"], "lng": photo["lng"], "acc": photo.get("acc")} if "lat" in photo else {}),
+    }
+    await db.leg_checkpoints.insert_one(dict(checkpoint))
+    checkpoint.pop("_id", None)
+    # push ke task + album trip (biar Trip 360 admin tetap kelihatan)
+    stage = t.get("album_stage") or "asal"
+    await db.leg_tasks.update_one({"token": token}, {
+        "$push": {"photos": photo},
+        "$set": {"checklist": checklist, "status": "dikerjakan", "updated_at": now},
+    })
+    await db.trips.update_one({"trip_id": trip_id}, {
+        "$push": {f"album.{stage}": {"id": photo["id"], "url": url, "catatan": photo["catatan"], "uploaded_by": f"petugas:{t.get('petugas_nama','')}", "ts": now}},
+        "$set": {"updated_at": now},
+    })
+    t = await db.leg_tasks.find_one({"token": token})
+    return _leg_task_public_view(t)
+
+
+class TaskSubmitBody(BaseModel):
+    extra_inputs: Optional[Dict[str, Any]] = None
+    selesai: bool = False
+
+
+@api_router.post("/public/task/{token}/submit")
+async def public_task_submit(token: str, body: TaskSubmitBody):
+    """Petugas simpan input tambahan (nama kapal/voyage/penerima/ttd) & tandai selesai."""
+    t = await db.leg_tasks.find_one({"token": token})
+    if not t:
+        raise HTTPException(404, "Link tugas tidak ditemukan")
+    if t.get("disabled"):
+        raise HTTPException(410, "Link tugas sudah dinonaktifkan")
+    now = datetime.now(timezone.utc).isoformat()
+    upd = {"updated_at": now}
+    if body.extra_inputs:
+        merged = {**(t.get("extra_inputs") or {}), **body.extra_inputs}
+        upd["extra_inputs"] = merged
+    if body.selesai:
+        upd["status"] = "selesai"; upd["completed_at"] = now
+    else:
+        if t.get("status") in ("belum_dibuka", "sudah_dibuka"):
+            upd["status"] = "dikerjakan"
+    await db.leg_tasks.update_one({"token": token}, {"$set": upd})
+    t = await db.leg_tasks.find_one({"token": token})
+    return _leg_task_public_view(t)
+
+
 class KoordinatorBody(BaseModel):
     koordinator_id: Optional[str] = None
     koordinator_nama: Optional[str] = None

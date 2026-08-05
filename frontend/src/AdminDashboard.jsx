@@ -4695,33 +4695,53 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
     const w = window.open("", "_blank"); w.document.write(html); w.document.close();
   };
 
+  // Bikin LINK TUGAS ber-token (scoped) buat 1 leg, simpan petugas ke master,
+  // lalu salin teks WhatsApp berisi link /task/{token}. Petugas cuma lihat
+  // tugasnya (unit, lokasi, instruksi, checklist) — nggak ada harga/leg lain.
+  const jenisForLeg = (leg, i, n) => {
+    const t = leg.tipe || "";
+    if (/^kapal/i.test(t)) return "Kapal";
+    if (/car carrier/i.test(t)) return "Car Carrier";
+    if (/towing/i.test(t)) return "Towing";
+    if (/self drive/i.test(t)) return i === n - 1 ? "Self Drive Tujuan" : "Self Drive";
+    return "Lainnya";
+  };
   const copyLegLink = async (leg, i) => {
-    const base = window.location.origin;
-    const p = new URLSearchParams({
-      trip: tripId,
-      nopol: order?.nopol || order?.vehicle_type || "",
-      driver: leg.driver || `Driver Leg ${i + 1}`,
-      route: `${leg.asal} → ${leg.tujuan}`,
-      tipe: leg.tipe,
-    });
-    if (order?.no_rangka) p.set("rangka", order.no_rangka);
-    const link = `${base}/trip/${tripId}?${p.toString()}`;
-    const isKapal = leg.tipe && leg.tipe.startsWith("Kapal");
-    const namaDriver = leg.driver || (isKapal ? "Petugas Pelabuhan" : `Driver Leg ${i + 1}`);
-    const rute = `${leg.asal || "—"} → ${leg.tujuan || "—"}`;
-    const nopol = order?.nopol || order?.vehicle_type || "";
-
-    let panduan;
-    if (isKapal) {
-      panduan = `1. Foto kendaraan saat masuk kapal\n2. Foto kendaraan di dalam kapal\n3. Foto kendaraan saat bongkar kapal`;
-    } else {
-      panduan = `1. Foto kendaraan 5 sisi sebelum berangkat\n2. Foto checkpoint tiap hari jam 06.00–18.00 WIB`;
+    if (!tripId) return;
+    const n = legs.length;
+    const isKapal = /^kapal/i.test(leg.tipe || "");
+    const pNama = (isKapal ? leg.kord_kapal : leg.driver) || "";
+    const pHp = (isKapal ? leg.kord_kapal_hp : leg.driver_hp) || "";
+    const pTipe = isKapal ? "Petugas Kapal" : "Driver";
+    const jenis = jenisForLeg(leg, i, n);
+    // units snapshot (aman — nopol/tipe/rangka aja)
+    const units = (Array.isArray(order?.units) && order.units.length)
+      ? order.units.map((u) => ({ nopol: u.nopol || "", vehicle_type: `${u.vehicle_type || ""}${u.tipe_model ? " " + u.tipe_model : ""}`.trim(), no_rangka: u.no_rangka || "" }))
+      : [{ nopol: order?.nopol || "", vehicle_type: order?.vehicle_type || "", no_rangka: order?.no_rangka || "" }];
+    try {
+      // simpan petugas ke master (biar bisa dipakai ulang) — best-effort
+      let petugas_id = null;
+      if (pNama) {
+        try { const pr = await axios.post(`${API}/admin/petugas`, { nama: pNama, no_hp: pHp, tipe: pTipe }, { headers }); petugas_id = pr.data?.petugas_id || null; } catch {}
+      }
+      const r = await axios.post(`${API}/admin/trips/${tripId}/legs/${i}/task-link`, {
+        petugas_id, petugas_nama: pNama, petugas_hp: pHp, tipe_petugas: pTipe,
+        jenis, asal: leg.asal || "", tujuan: leg.tujuan || "", kapal: leg.kapal || "", voyage: leg.voyage || "",
+        instruksi: leg.instruksi || leg.catatan || "", units,
+      }, { headers });
+      const token = r.data?.token;
+      if (!token) throw new Error("no token");
+      setLeg(i, { task_token: token });
+      const link = `${window.location.origin}/task/${token}`;
+      const namaP = pNama || (isKapal ? "Petugas Kapal" : `Driver Leg ${i + 1}`);
+      const rute = `${leg.asal || "—"} → ${leg.tujuan || "—"}`;
+      const nopol = units.map((u) => u.nopol).filter(Boolean).join(", ") || "-";
+      const teks = `Halo Pak/Bu ${namaP} 👋\n\nTugas: ${jenis}\nLokasi: ${rute}\nUnit: ${nopol}\n\nBuka link tugas ini buat lihat instruksi & upload foto:\n🔗 ${link}\n\nInfo: PT Alyssa Auto Logistik · 0818 631 135`;
+      const ok = await copyToClipboard(teks);
+      if (ok) { setCopiedLeg(i); setTimeout(() => setCopiedLeg(null), 2200); }
+    } catch (e) {
+      alert("Gagal bikin link tugas. Simpan Leg dulu (pastikan trip sudah ada), lalu coba lagi.");
     }
-
-    const teks = `Halo Pak/Bu ${namaDriver} 👋\n\nPengiriman: ${rute}\nKendaraan: ${nopol}\n\n🔗 ${link}\n\nPanduan:\n${panduan}\n\nInfo: PT Alyssa Auto Logistik · 0818 631 135`;
-
-    const ok = await copyToClipboard(teks);
-    if (ok) { setCopiedLeg(i); setTimeout(() => setCopiedLeg(null), 2000); }
   };
 
   const setLeg = (i, patch) => setLegs(ls => ls.map((l, idx) => idx === i ? { ...l, ...patch } : l));
