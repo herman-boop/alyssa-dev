@@ -18,7 +18,7 @@ function resolveUrl(url) {
 
 /* Alamat bertingkat (desa → kecamatan → kabupaten → provinsi) dari koordinat,
    bahasa Indonesia. Best-effort; gagal/timeout → []. */
-async function reverseGeocode(lat, lng) {
+export async function reverseGeocode(lat, lng) {
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 5000);
@@ -265,7 +265,7 @@ async function canvasToPdfFile(canvas, baseName) {
 }
 
 /* Modal scanner: auto-deteksi 4 sudut (OpenCV) + geser manual + perspective transform + filter. */
-function CropModal({ url, file, onCancel, onConfirm }) {
+export function CropModal({ url, file, onCancel, onConfirm }) {
   const imgRef = useRef(null);
   // 4 sudut bebas (quad) dlm fraksi 0..1
   const [corners, setCorners] = useState({ tl: { x: 0.06, y: 0.06 }, tr: { x: 0.94, y: 0.06 }, br: { x: 0.94, y: 0.94 }, bl: { x: 0.06, y: 0.94 } });
@@ -562,7 +562,7 @@ function CropModal({ url, file, onCancel, onConfirm }) {
 
 /* "Cap" foto: bakar lokasi + waktu ke dalam gambar (mirip GPS Map Camera).
    `lines` ditulis di bar bawah. Gagal apa pun → kembalikan file asli. */
-function stampPhoto(file, lines) {
+export function stampPhoto(file, lines) {
   return new Promise((resolve) => {
     try {
       const img = new Image();

@@ -4710,52 +4710,43 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
   // Bikin LINK TUGAS ber-token (scoped) buat 1 leg, simpan petugas ke master,
   // lalu salin teks WhatsApp berisi link /task/{token}. Petugas cuma lihat
   // tugasnya (unit, lokasi, instruksi, checklist) — nggak ada harga/leg lain.
-  const jenisForLeg = (leg, i, n) => {
-    const t = leg.tipe || "";
-    if (/^kapal/i.test(t)) return "Kapal";
-    if (/car carrier/i.test(t)) return "Car Carrier";
-    if (/towing/i.test(t)) return "Towing";
-    if (/self drive/i.test(t)) return i === n - 1 ? "Self Drive Tujuan" : "Self Drive";
-    return "Lainnya";
+  // Peta peran (5 tahap) → tipe_tugas + label + sumber nama petugas di leg.
+  const ROLE_MAP = {
+    driver_full:     { tipe_tugas: "driver_full",     jenis: "Self Drive",       tipe_petugas: "Driver",           src: "driver",  label: "Driver (Self Drive)" },
+    driver_asal:     { tipe_tugas: "driver_asal",     jenis: "Self Drive Asal",  tipe_petugas: "Driver",           src: "driver",  label: "Driver Asal" },
+    driver_tujuan:   { tipe_tugas: "driver_tujuan",   jenis: "Self Drive Tujuan",tipe_petugas: "Driver",           src: "driver",  label: "Driver Tujuan" },
+    pelabuhan_asal:  { tipe_tugas: "pelabuhan_asal",  jenis: "Pelabuhan Asal",   tipe_petugas: "Petugas Pelabuhan",src: "petugas", label: "Petugas Pelabuhan Asal" },
+    pelabuhan_tujuan:{ tipe_tugas: "pelabuhan_tujuan",jenis: "Pelabuhan Tujuan", tipe_petugas: "Petugas Pelabuhan",src: "petugas", label: "Petugas Pelabuhan Tujuan" },
+    kapal:           { tipe_tugas: "kapal",           jenis: "Kapal",            tipe_petugas: "Petugas Kapal",    src: "kapal",   label: "Petugas Kapal" },
   };
-  const copyLegLink = async (leg, i, jenisOverride) => {
+  const copyLegLink = async (leg, i, roleKey) => {
     if (!tripId) return;
-    const n = legs.length;
-    const isKapal = /^kapal/i.test(leg.tipe || "");
-    const pNama = (isKapal ? leg.kord_kapal : leg.driver) || "";
-    const pHp = (isKapal ? leg.kord_kapal_hp : leg.driver_hp) || "";
-    const pTipe = isKapal ? "Petugas Kapal" : "Driver";
-    // jenisOverride = peran eksplisit yg dipilih admin (Self Drive / Self Drive Asal /
-    // Self Drive Tujuan). Kalau nggak dikasih → auto dari tipe leg.
-    const jenis = jenisOverride || jenisForLeg(leg, i, n);
-    // units snapshot (aman — nopol/tipe/rangka aja)
+    const r0 = ROLE_MAP[roleKey] || ROLE_MAP.driver_asal;
+    const pNama = (r0.src === "kapal" ? leg.kord_kapal : r0.src === "petugas" ? leg.petugas_nama : leg.driver) || leg.petugas_nama || "";
+    const pHp = (r0.src === "kapal" ? leg.kord_kapal_hp : r0.src === "petugas" ? leg.petugas_hp : leg.driver_hp) || leg.petugas_hp || "";
     const units = (Array.isArray(order?.units) && order.units.length)
       ? order.units.map((u) => ({ nopol: u.nopol || "", vehicle_type: `${u.vehicle_type || ""}${u.tipe_model ? " " + u.tipe_model : ""}`.trim(), no_rangka: u.no_rangka || "" }))
       : [{ nopol: order?.nopol || "", vehicle_type: order?.vehicle_type || "", no_rangka: order?.no_rangka || "" }];
     try {
-      // simpan petugas ke master (biar bisa dipakai ulang) — best-effort
       let petugas_id = null;
       if (pNama) {
-        try { const pr = await axios.post(`${API}/admin/petugas`, { nama: pNama, no_hp: pHp, tipe: pTipe }, { headers }); petugas_id = pr.data?.petugas_id || null; } catch {}
+        try { const pr = await axios.post(`${API}/admin/petugas`, { nama: pNama, no_hp: pHp, tipe: r0.tipe_petugas }, { headers }); petugas_id = pr.data?.petugas_id || null; } catch {}
       }
       const r = await axios.post(`${API}/admin/trips/${tripId}/legs/${i}/task-link`, {
-        petugas_id, petugas_nama: pNama, petugas_hp: pHp, tipe_petugas: pTipe,
-        jenis, asal: leg.asal || "", tujuan: leg.tujuan || "", kapal: leg.kapal || "", voyage: leg.voyage || "",
+        petugas_id, petugas_nama: pNama, petugas_hp: pHp, tipe_petugas: r0.tipe_petugas, tipe_tugas: r0.tipe_tugas,
+        jenis: r0.jenis, asal: leg.asal || "", tujuan: leg.tujuan || "", kapal: leg.kapal || "", voyage: leg.voyage || "",
         instruksi: leg.instruksi || leg.catatan || "", units,
       }, { headers });
       const token = r.data?.token;
       if (!token) throw new Error("no token");
       setLeg(i, { task_token: token });
       const link = `${window.location.origin}/task/${token}`;
-      const namaP = pNama || (isKapal ? "Petugas Kapal" : `Driver Leg ${i + 1}`);
+      const namaP = pNama || r0.label;
       const rute = `${leg.asal || "—"} → ${leg.tujuan || "—"}`;
       const nopol = units.map((u) => u.nopol).filter(Boolean).join(", ") || "-";
-      const teks = `Halo Pak/Bu ${namaP} 👋\n\nTugas: ${jenis}\nLokasi: ${rute}\nUnit: ${nopol}\n\nBuka link tugas ini buat lihat instruksi & upload foto:\n🔗 ${link}\n\nInfo: PT Alyssa Auto Logistik · 0818 631 135`;
+      const teks = `Halo Pak/Bu ${namaP} 👋\n\nTugas: ${r0.label}\nLokasi: ${rute}\nUnit: ${nopol}\n\nBuka link tugas ini buat lihat instruksi & upload foto:\n🔗 ${link}\n\nInfo: PT Alyssa Auto Logistik · 0818 631 135`;
       const ok = await copyToClipboard(teks);
-      const copyKey = jenisOverride === "Self Drive" ? `${i}-full`
-        : jenisOverride === "Self Drive Asal" ? `${i}-asal`
-        : jenisOverride === "Self Drive Tujuan" ? `${i}-tujuan` : i;
-      if (ok) { setCopiedLeg(copyKey); setTimeout(() => setCopiedLeg(null), 2200); }
+      if (ok) { setCopiedLeg(`${i}-${roleKey}`); setTimeout(() => setCopiedLeg(null), 2200); }
     } catch (e) {
       alert("Gagal bikin link tugas. Simpan Leg dulu (pastikan trip sudah ada), lalu coba lagi.");
     }
@@ -4763,6 +4754,15 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
 
   const setLeg = (i, patch) => setLegs(ls => ls.map((l, idx) => idx === i ? { ...l, ...patch } : l));
   const addLeg = () => setLegs(ls => [...ls, { tipe: "Self Drive", asal: "", tujuan: "", kapal: "", eta: "", status: "Menunggu", catatan: "" }]);
+  // Lanjutkan Tahap Berikutnya: bikin leg baru (asal = tujuan leg terakhir), histori
+  // tahap sebelumnya tetap, nggak minta input kendaraan ulang. Persist ke backend.
+  const nextLeg = async () => {
+    if (!tripId) { addLeg(); return; }
+    try {
+      const r = await axios.post(`${API}/admin/trips/${tripId}/next-leg`, {}, { headers });
+      if (r.data?.legs) setLegs(r.data.legs); else addLeg();
+    } catch { addLeg(); }
+  };
   const delLeg = (i) => setLegs(ls => ls.filter((_, idx) => idx !== i));
   const moveLeg = (i, dir) => {
     const j = i + dir;
@@ -4826,7 +4826,7 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
         <div style={{ padding: "18px 22px" }}>
           {activeTab === "rute" && (
             <RuteLegTab
-              legs={legs} setLeg={setLeg} addLeg={addLeg} delLeg={delLeg} moveLeg={moveLeg}
+              legs={legs} setLeg={setLeg} addLeg={addLeg} nextLeg={nextLeg} delLeg={delLeg} moveLeg={moveLeg}
               order={order} tripId={tripId} headers={headers}
               detail={detail}
               copiedLeg={copiedLeg} copyLegLink={copyLegLink}
@@ -4955,7 +4955,7 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
 }
 
 /* ── Tab: Rute Leg — kartu workflow per leg ── */
-function RuteLegTab({ legs, setLeg, addLeg, delLeg, moveLeg, order, tripId, headers, detail, copiedLeg, copyLegLink, openMultiUnit, printKartuMuat }) {
+function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tripId, headers, detail, copiedLeg, copyLegLink, openMultiUnit, printKartuMuat }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       {legs.map((leg, i) => {
@@ -5038,14 +5038,26 @@ function RuteLegTab({ legs, setLeg, addLeg, delLeg, moveLeg, order, tripId, head
                     <button type="button" onClick={() => printKartuMuat(leg, order)} style={SOLID_BTN_BLUE}>🖨️ Kartu Muat (1 Unit)</button>
                     <button type="button" onClick={() => openMultiUnit(leg)} style={GHOST_BTN_BLUE}>📋 Kartu Muat Multi Unit</button>
                   </div>
-                  {/* 6. Link petugas pelabuhan */}
+                  {/* 6. Link tugas — leg antar-pulau: petugas kapal + pelabuhan */}
                   <div style={{ marginTop: 10, padding: "10px 12px", background: "#0a1628", border: "1px solid #1f3a5a", borderRadius: 7 }}>
-                    <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 700, marginBottom: 6 }}>LINK PETUGAS PELABUHAN</div>
-                    <div style={{ fontSize: 10, color: "#4a6fa5", marginBottom: 8 }}>Kirim ke petugas pelabuhan buat upload foto kendaraan masuk / di dalam / bongkar kapal.</div>
-                    <button type="button" onClick={() => copyLegLink(leg, i)} disabled={!tripId}
-                      style={{ ...SOLID_BTN_BLUE, width: "100%", background: copiedLeg === i ? "#2ea043" : "#1f6feb" }}>
-                      {copiedLeg === i ? "✓ Tersalin!" : "🔗 Salin Link Petugas Pelabuhan"}
-                    </button>
+                    <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 700, marginBottom: 3 }}>LINK TUGAS LEG {i + 1} (ANTAR PULAU)</div>
+                    <div style={{ fontSize: 9.5, color: "#4a6fa5", marginBottom: 8 }}>Tiap peran link beda & ter-scope. Isi nama petugas di blok 👷 di atas dulu.</div>
+                    <div style={{ display: "grid", gap: 6 }}>
+                      <button type="button" onClick={() => copyLegLink(leg, i, "kapal")} disabled={!tripId}
+                        style={{ ...SOLID_BTN_BLUE, width: "100%", background: copiedLeg === `${i}-kapal` ? "#2ea043" : "#1f6feb" }}>
+                        {copiedLeg === `${i}-kapal` ? "✓ Tersalin!" : "🚢 Link Petugas Kapal"}
+                      </button>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                        <button type="button" onClick={() => copyLegLink(leg, i, "pelabuhan_asal")} disabled={!tripId}
+                          style={{ ...GHOST_BTN_BLUE, background: copiedLeg === `${i}-pelabuhan_asal` ? "#2ea043" : "transparent", color: copiedLeg === `${i}-pelabuhan_asal` ? "#fff" : "#60a5fa" }}>
+                          {copiedLeg === `${i}-pelabuhan_asal` ? "✓" : "⚓ Pelabuhan Asal"}
+                        </button>
+                        <button type="button" onClick={() => copyLegLink(leg, i, "pelabuhan_tujuan")} disabled={!tripId}
+                          style={{ ...GHOST_BTN_BLUE, background: copiedLeg === `${i}-pelabuhan_tujuan` ? "#2ea043" : "transparent", color: copiedLeg === `${i}-pelabuhan_tujuan` ? "#fff" : "#60a5fa" }}>
+                          {copiedLeg === `${i}-pelabuhan_tujuan` ? "✓" : "⚓ Pelabuhan Tujuan"}
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               ) : (
@@ -5078,18 +5090,28 @@ function RuteLegTab({ legs, setLeg, addLeg, delLeg, moveLeg, order, tripId, head
                       Pilih peran → checklist otomatis nyesuaiin. <b>Self Drive full</b> = 1 driver asal→tujuan (nyebrang sendiri). <b>Driver Asal</b>/<b>Tujuan</b> = buat rute kapal/antar-pulau.
                     </div>
                     <div style={{ display: "grid", gap: 6 }}>
-                      <button type="button" onClick={() => copyLegLink(leg, i, "Self Drive")} disabled={!tripId}
-                        style={{ ...SOLID_BTN_BLUE, width: "100%", background: copiedLeg === `${i}-full` ? "#2ea043" : "#1f6feb" }}>
-                        {copiedLeg === `${i}-full` ? "✓ Tersalin!" : "🔗 Link Self Drive (full: asal→tujuan)"}
+                      <button type="button" onClick={() => copyLegLink(leg, i, "driver_full")} disabled={!tripId}
+                        style={{ ...SOLID_BTN_BLUE, width: "100%", background: copiedLeg === `${i}-driver_full` ? "#2ea043" : "#1f6feb" }}>
+                        {copiedLeg === `${i}-driver_full` ? "✓ Tersalin!" : "🔗 Link Self Drive (full: asal→tujuan)"}
                       </button>
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                        <button type="button" onClick={() => copyLegLink(leg, i, "Self Drive Asal")} disabled={!tripId}
-                          style={{ ...GHOST_BTN_BLUE, background: copiedLeg === `${i}-asal` ? "#2ea043" : "transparent", color: copiedLeg === `${i}-asal` ? "#fff" : "#60a5fa" }}>
-                          {copiedLeg === `${i}-asal` ? "✓ Tersalin" : "📍 Driver Asal"}
+                        <button type="button" onClick={() => copyLegLink(leg, i, "driver_asal")} disabled={!tripId}
+                          style={{ ...GHOST_BTN_BLUE, background: copiedLeg === `${i}-driver_asal` ? "#2ea043" : "transparent", color: copiedLeg === `${i}-driver_asal` ? "#fff" : "#60a5fa" }}>
+                          {copiedLeg === `${i}-driver_asal` ? "✓ Tersalin" : "📍 Driver Asal"}
                         </button>
-                        <button type="button" onClick={() => copyLegLink(leg, i, "Self Drive Tujuan")} disabled={!tripId}
-                          style={{ ...GHOST_BTN_BLUE, background: copiedLeg === `${i}-tujuan` ? "#2ea043" : "transparent", color: copiedLeg === `${i}-tujuan` ? "#fff" : "#60a5fa" }}>
-                          {copiedLeg === `${i}-tujuan` ? "✓ Tersalin" : "🏁 Driver Tujuan"}
+                        <button type="button" onClick={() => copyLegLink(leg, i, "driver_tujuan")} disabled={!tripId}
+                          style={{ ...GHOST_BTN_BLUE, background: copiedLeg === `${i}-driver_tujuan` ? "#2ea043" : "transparent", color: copiedLeg === `${i}-driver_tujuan` ? "#fff" : "#60a5fa" }}>
+                          {copiedLeg === `${i}-driver_tujuan` ? "✓ Tersalin" : "🏁 Driver Tujuan"}
+                        </button>
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                        <button type="button" onClick={() => copyLegLink(leg, i, "pelabuhan_asal")} disabled={!tripId}
+                          style={{ ...GHOST_BTN_BLUE, fontSize: 11, background: copiedLeg === `${i}-pelabuhan_asal` ? "#2ea043" : "transparent", color: copiedLeg === `${i}-pelabuhan_asal` ? "#fff" : "#8b949e" }}>
+                          {copiedLeg === `${i}-pelabuhan_asal` ? "✓" : "⚓ Pelabuhan Asal"}
+                        </button>
+                        <button type="button" onClick={() => copyLegLink(leg, i, "pelabuhan_tujuan")} disabled={!tripId}
+                          style={{ ...GHOST_BTN_BLUE, fontSize: 11, background: copiedLeg === `${i}-pelabuhan_tujuan` ? "#2ea043" : "transparent", color: copiedLeg === `${i}-pelabuhan_tujuan` ? "#fff" : "#8b949e" }}>
+                          {copiedLeg === `${i}-pelabuhan_tujuan` ? "✓" : "⚓ Pelabuhan Tujuan"}
                         </button>
                       </div>
                     </div>
@@ -5126,7 +5148,10 @@ function RuteLegTab({ legs, setLeg, addLeg, delLeg, moveLeg, order, tripId, head
           </div>
         );
       })}
-      <button onClick={addLeg} style={{ width: "100%", padding: "10px", border: "1px dashed #30363d", borderRadius: 9, background: "none", color: "#8b949e", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>+ Tambah Leg</button>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <button onClick={addLeg} style={{ padding: "10px", border: "1px dashed #30363d", borderRadius: 9, background: "none", color: "#8b949e", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>+ Tambah Leg</button>
+        <button onClick={nextLeg} disabled={!tripId} title="Bikin tahap berikutnya (asal = tujuan leg terakhir), histori tetap" style={{ padding: "10px", border: "none", borderRadius: 9, background: "#1f6feb", color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 800 }}>➡️ Lanjutkan Tahap Berikutnya</button>
+      </div>
     </div>
   );
 }
