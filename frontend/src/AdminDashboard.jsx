@@ -2223,6 +2223,7 @@ function InvoiceModal({ order, headers, onClose, onPrint }) {
   })));
   const [withTax, setWithTax] = useState(true);
   const [taxInclusive, setTaxInclusive] = useState(false); // true = harga SUDAH termasuk 1.1% (pajak dipecah dari dalam)
+  const [withPph23, setWithPph23] = useState(true); // potong PPh 23 (2%) dari DPP
   const [jatuhTempo, setJatuhTempo] = useState(todayIso);
   const [metode, setMetode] = useState("Cash on Delivery");
   const [pesan, setPesan] = useState("");
@@ -2254,7 +2255,8 @@ function InvoiceModal({ order, headers, onClose, onPrint }) {
   // else (default): 1.1% ditambah di atas harga (Total = subtotal + ppn).
   const dpp = withTax && taxInclusive ? Math.round(subtotal / 1.011) : subtotal;
   const ppn = !withTax ? 0 : (taxInclusive ? subtotal - dpp : Math.round(subtotal * 0.011));
-  const total = taxInclusive ? subtotal : subtotal + ppn;
+  const pph23 = withPph23 ? Math.round(dpp * 0.02) : 0;
+  const total = (taxInclusive ? subtotal : subtotal + ppn) - pph23;
   const checkedCount = rows.filter((r) => r.checked && hargaNum(r.harga) > 0).length;
   const fRp = (n) => "Rp " + n.toLocaleString("id-ID");
 
@@ -2265,7 +2267,7 @@ function InvoiceModal({ order, headers, onClose, onPrint }) {
       .map(({ r, u }) => ({ nama: "Jasa Pengiriman", ket: unitKet(u), qty: 1, harga: hargaNum(r.harga) }));
     if (!lines.length) return;
     // Buka jendela cetak DULU di dalam gesture klik (kalau di-await, mobile blokir popup).
-    onPrint(lines, withTax, { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive });
+    onPrint(lines, withTax, { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23 });
     // Tandai unit sudah diinvoice di belakang layar (best-effort).
     const ids = rows.filter((r) => r.checked && hargaNum(r.harga) > 0 && r.unit_id !== "legacy").map((r) => r.unit_id);
     if (ids.length && headers) {
@@ -2376,11 +2378,16 @@ function InvoiceModal({ order, headers, onClose, onPrint }) {
               <span style={{ fontSize: 13 }}>Harga sudah termasuk pajak 1.1% <span style={{ color: "var(--text-mute)" }}>(pajak dipecah dari dalam, total nggak nambah)</span></span>
             </label>
           )}
+          <label style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, cursor: "pointer" }}>
+            <input type="checkbox" checked={withPph23} onChange={(e) => setWithPph23(e.target.checked)} style={{ accentColor: "#58a6ff", width: 16, height: 16 }} data-testid="adm-invoice-pph23" />
+            <span>Potong PPh 23 (2%) <span style={{ color: "var(--text-mute)", fontSize: 12 }}>(dipotong dari DPP)</span></span>
+          </label>
           {subtotal > 0 && (
             <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px", fontSize: 13 }}>
               <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>{withTax && taxInclusive ? `DPP (${checkedCount} unit)` : `Subtotal (${checkedCount} unit)`}</span><span>{fRp(withTax && taxInclusive ? dpp : subtotal)}</span></div>
               <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>PPN 1.1%{withTax && taxInclusive ? " (termasuk)" : ""}</span><span>{withTax ? fRp(ppn) : "—"}</span></div>
-              <div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0 0", marginTop: 4, borderTop: "1px solid var(--border)", fontWeight: 800 }}><span>Total</span><span>{fRp(total)}</span></div>
+              {withPph23 && <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "#e6a23c" }}><span>Potongan PPh 23 (2%)</span><span>- {fRp(pph23)}</span></div>}
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0 0", marginTop: 4, borderTop: "1px solid var(--border)", fontWeight: 800 }}><span>Total Tagihan</span><span>{fRp(total)}</span></div>
             </div>
           )}
         </div>
@@ -2667,12 +2674,14 @@ async function printInvoiceDoc(lines, withTax, extra) {
   lines = (lines || []).filter((l) => (l.harga || 0) > 0);
   if (!lines.length) return "";
   const w = window.open("", "_blank"); // buka dulu (gesture) biar nggak keblok popup
-  const { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive } = extra;
+  const { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23 } = extra;
   const subtotal = lines.reduce((s, l) => s + (l.harga || 0) * (l.qty || 1), 0);
   // taxInclusive: harga SUDAH termasuk 1.1% → pajak dipecah dari dalam (total = subtotal).
   const dpp = withTax && taxInclusive ? Math.round(subtotal / 1.011) : subtotal;
   const ppn = !withTax ? 0 : (taxInclusive ? subtotal - dpp : Math.round(subtotal * 0.011));
-  const total = taxInclusive ? subtotal : subtotal + ppn;
+  // PPh 23 dipotong 2% dari DPP (nilai jasa). Grand Total = DPP + PPN − PPh23.
+  const pph23 = withPph23 ? Math.round(dpp * 0.02) : 0;
+  const total = (taxInclusive ? subtotal : subtotal + ppn) - pph23;
   const fRp = (n) => n.toLocaleString("id-ID") + ",00";
   const fmtTgl = (iso) => { if (!iso) return "—"; const [y, m, d] = iso.split("-"); return `${d}-${m}-${y}`; };
   const todayIso = new Date().toISOString().slice(0, 10);
@@ -2757,7 +2766,8 @@ async function printInvoiceDoc(lines, withTax, extra) {
       <div class="inv-totals-box">
         <div class="row"><span>${withTax && taxInclusive ? "DPP (Dasar Pengenaan Pajak)" : "Subtotal"}</span><span>Rp ${fRp(withTax && taxInclusive ? dpp : subtotal)}</span></div>
         <div class="row"><span>PPN Logistik (1.1%)${withTax && taxInclusive ? " — termasuk" : ""}</span><span>${withTax ? "Rp " + fRp(ppn) : "—"}</span></div>
-        <div class="row grand"><span>TOTAL</span><span>Rp ${fRp(total)}</span></div>
+        ${withPph23 ? `<div class="row"><span>Potongan PPh 23 (2%)</span><span>- Rp ${fRp(pph23)}</span></div>` : ""}
+        <div class="row grand"><span>TOTAL TAGIHAN</span><span>Rp ${fRp(total)}</span></div>
       </div>
     </div>
     <div class="inv-pay-box">
@@ -3147,6 +3157,7 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
   }, []); // eslint-disable-line
   const [withTax, setWithTax] = useState(true);
   const [taxInclusive, setTaxInclusive] = useState(false); // true = harga SUDAH termasuk 1.1%
+  const [withPph23, setWithPph23] = useState(true); // potong PPh 23 (2%) dari DPP
   const [jatuhTempo, setJatuhTempo] = useState(todayIso);
   const [metode, setMetode] = useState("Cash on Delivery");
   const [pesan, setPesan] = useState("");
@@ -3177,7 +3188,8 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
   const subtotal = rows.reduce((s, r) => s + hargaNum(r.harga), 0);
   const dpp = withTax && taxInclusive ? Math.round(subtotal / 1.011) : subtotal;
   const ppn = !withTax ? 0 : (taxInclusive ? subtotal - dpp : Math.round(subtotal * 0.011));
-  const total = taxInclusive ? subtotal : subtotal + ppn;
+  const pph23 = withPph23 ? Math.round(dpp * 0.02) : 0;
+  const total = (taxInclusive ? subtotal : subtotal + ppn) - pph23;
   const okCount = rows.filter((r) => hargaNum(r.harga) > 0).length;
   const fRp = (n) => "Rp " + n.toLocaleString("id-ID");
 
@@ -3187,7 +3199,7 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
     if (!lines.length) { alert("Isi harga minimal 1 unit dulu."); return; }
     const orderIds = Array.from(new Set(rows.map((r) => r.order_id).filter(Boolean)));
     const cust = customers.length === 1 ? customers[0] : `${customers.length} customer`;
-    const extra = { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, customer_nama: cust, order_id: orderIds.join(", ") };
+    const extra = { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23, customer_nama: cust, order_id: orderIds.join(", ") };
     const noInv = await printInvoiceDoc(lines, withTax, extra); // nomor auto-increment dari server
     saveDocHistory({
       jenis: "invoice", no_dokumen: noInv, customer: cust,
@@ -3287,11 +3299,16 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
               <span style={{ fontSize: 13 }}>Harga sudah termasuk pajak 1.1% <span style={{ color: "var(--text-mute)" }}>(pajak dipecah dari dalam, total nggak nambah)</span></span>
             </label>
           )}
+          <label style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, cursor: "pointer" }}>
+            <input type="checkbox" checked={withPph23} onChange={(e) => setWithPph23(e.target.checked)} style={{ accentColor: "#58a6ff", width: 16, height: 16 }} data-testid="adm-invgab-pph23" />
+            <span>Potong PPh 23 (2%) <span style={{ color: "var(--text-mute)", fontSize: 12 }}>(dipotong dari DPP)</span></span>
+          </label>
           {subtotal > 0 && (
             <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px", fontSize: 13 }}>
               <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>{withTax && taxInclusive ? `DPP (${okCount} unit)` : `Subtotal (${okCount} unit)`}</span><span>{fRp(withTax && taxInclusive ? dpp : subtotal)}</span></div>
               <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>PPN 1.1%{withTax && taxInclusive ? " (termasuk)" : ""}</span><span>{withTax ? fRp(ppn) : "—"}</span></div>
-              <div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0 0", marginTop: 4, borderTop: "1px solid var(--border)", fontWeight: 800 }}><span>Total</span><span>{fRp(total)}</span></div>
+              {withPph23 && <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "#e6a23c" }}><span>Potongan PPh 23 (2%)</span><span>- {fRp(pph23)}</span></div>}
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0 0", marginTop: 4, borderTop: "1px solid var(--border)", fontWeight: 800 }}><span>Total Tagihan</span><span>{fRp(total)}</span></div>
             </div>
           )}
         </div>

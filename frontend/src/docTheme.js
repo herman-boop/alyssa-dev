@@ -32,7 +32,14 @@ export const DOC_BASE_CSS = `
      dicetak / Save as PDF — tanpa ini latar warna di-strip walau "Background
      graphics" tidak dicentang, sehingga teks putih di atas navy jadi hilang. */
   html { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-  body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: ${DOC_BRAND.ink}; background: #fff; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  /* Ketajaman teks: font sistem asli (vektor di PDF), antialias & presisi geometri,
+     TANPA transform/scale/zoom/opacity/filter di area teks. */
+  html, body, .doc-sheet, .doc-sheet * {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: geometricPrecision;
+  }
+  body { font-family: Arial, "Helvetica Neue", Helvetica, "Segoe UI", Roboto, sans-serif; font-size: 11px; color: ${DOC_BRAND.ink}; background: #fff; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   .doc-sheet { padding: 14mm 14mm 10mm; max-width: 210mm; margin: 0 auto; }
   .doc-header { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; padding-bottom:14px; border-bottom:2.5px solid ${DOC_BRAND.navy}; margin-bottom:16px; }
   .doc-brand { display:flex; align-items:center; gap:12px; }
