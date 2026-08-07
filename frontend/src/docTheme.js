@@ -20,8 +20,11 @@ export const DOC_BRAND = {
   navy: "#0f2a5c",
   navyDeep: "#0a1e42",
   gold: "#c9973a",
-  ink: "#1f2430",
-  muted: "#6b7280",
+  // Semua TEKS dokumen cetak = hitam pekat (#000) supaya tajam di printer laser
+  // & inkjet. Warna biru/emas dipertahankan HANYA untuk elemen non-teks:
+  // background header, garis dekoratif, kotak TOTAL, badge bank.
+  ink: "#000000",
+  muted: "#000000",
   line: "#e3e6ec",
   paperMist: "#f7f8fa",
 };
@@ -44,10 +47,10 @@ export const DOC_BASE_CSS = `
   .doc-header { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; padding-bottom:14px; border-bottom:2.5px solid ${DOC_BRAND.navy}; margin-bottom:16px; }
   .doc-brand { display:flex; align-items:center; gap:12px; }
   .doc-brand img { width:46px; height:46px; object-fit:contain; flex-shrink:0; }
-  .doc-brand-name { font-size:15px; font-weight:900; color:${DOC_BRAND.navy}; letter-spacing:.3px; }
-  .doc-brand-tag { font-size:9px; color:${DOC_BRAND.gold}; font-weight:700; text-transform:uppercase; letter-spacing:.6px; margin-top:1px; }
+  .doc-brand-name { font-size:15px; font-weight:900; color:#000; letter-spacing:.3px; }
+  .doc-brand-tag { font-size:9px; color:#000; font-weight:700; text-transform:uppercase; letter-spacing:.6px; margin-top:1px; }
   .doc-addr { text-align:right; font-size:9.5px; color:${DOC_BRAND.muted}; line-height:1.6; }
-  .doc-title { font-size:20px; font-weight:900; color:${DOC_BRAND.navy}; letter-spacing:.5px; text-align:right; margin-bottom:2px; }
+  .doc-title { font-size:20px; font-weight:900; color:#000; letter-spacing:.5px; text-align:right; margin-bottom:2px; }
   .doc-footer { display:flex; justify-content:space-between; align-items:center; padding-top:10px; margin-top:20px; border-top:1px solid ${DOC_BRAND.line}; font-size:8.5px; color:${DOC_BRAND.muted}; }
   @media print {
     @page { margin:0; size:A4 portrait; }
