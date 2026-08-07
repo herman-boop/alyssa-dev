@@ -1238,6 +1238,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
   const albumFileRefs = useRef({});
 
   const units = Array.isArray(order.units) ? order.units : [];
+  const u0 = units[0] || {}; // 1 unit = 1 PO: master data kendaraan ada di unit, bukan field atas
   const uSum = order.unit_summary || null;
   const allUnitsSelected = units.length > 0 && units.every((u) => cartHas(u.unit_id));
 
@@ -1473,10 +1474,10 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
   const [editNama, setEditNama] = useState(false);
   const [namaDraft, setNamaDraft] = useState(order.nama_driver || "");
   const [editVehicle, setEditVehicle] = useState(false);
-  const [vtDraft, setVtDraft] = useState(order.vehicle_type || "");
-  const [nopolDraft, setNopolDraft] = useState(order.nopol || "");
+  const [vtDraft, setVtDraft] = useState(order.vehicle_type || u0.vehicle_type || "");
+  const [nopolDraft, setNopolDraft] = useState(order.nopol || u0.nopol || "");
   const [editRangka, setEditRangka] = useState(false);
-  const [rangkaDraft, setRangkaDraft] = useState(order.no_rangka || "");
+  const [rangkaDraft, setRangkaDraft] = useState(order.no_rangka || u0.no_rangka || "");
   const [editColly, setEditColly] = useState(false);
   const [collyDraft, setCollyDraft] = useState(order.jumlah_colly || "");
   const [editArrival, setEditArrival] = useState(false);
@@ -1658,13 +1659,13 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
                   data-testid={`adm-vehicle-nopol-${order.order_id}`}
                 />
                 <button className="adm-btn adm-btn-gold adm-btn-xs" onClick={saveVehicle} data-testid={`adm-vehicle-save-${order.order_id}`}>OK</button>
-                <button className="adm-btn adm-btn-ghost adm-btn-xs" onClick={() => { setEditVehicle(false); setVtDraft(order.vehicle_type || ""); setNopolDraft(order.nopol || ""); }}><IcoX /></button>
+                <button className="adm-btn adm-btn-ghost adm-btn-xs" onClick={() => { setEditVehicle(false); setVtDraft(order.vehicle_type || u0.vehicle_type || ""); setNopolDraft(order.nopol || u0.nopol || ""); }}><IcoX /></button>
               </span>
             ) : (
               <span className="adm-driver-row">
-                {order.vehicle_type || "—"}
-                {order.nopol
-                  ? <span className="adm-pill adm-mono">{order.nopol}</span>
+                {order.vehicle_type || u0.vehicle_type || "—"}{(!order.vehicle_type && u0.tipe_model) ? ` ${u0.tipe_model}` : ""}
+                {(order.nopol || u0.nopol)
+                  ? <span className="adm-pill adm-mono">{order.nopol || u0.nopol}</span>
                   : <i className="adm-mute">nopol belum diisi</i>}
                 <button className="adm-link" onClick={() => setEditVehicle(true)} data-testid={`adm-vehicle-edit-${order.order_id}`}><IcoPencil /></button>
               </span>
@@ -1685,12 +1686,12 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
                   data-testid={`adm-rangka-input-${order.order_id}`}
                 />
                 <button className="adm-btn adm-btn-gold adm-btn-xs" onClick={saveRangka} data-testid={`adm-rangka-save-${order.order_id}`}>OK</button>
-                <button className="adm-btn adm-btn-ghost adm-btn-xs" onClick={() => { setEditRangka(false); setRangkaDraft(order.no_rangka || ""); }}><IcoX /></button>
+                <button className="adm-btn adm-btn-ghost adm-btn-xs" onClick={() => { setEditRangka(false); setRangkaDraft(order.no_rangka || u0.no_rangka || ""); }}><IcoX /></button>
               </span>
             ) : (
               <span className="adm-driver-row">
-                {order.no_rangka
-                  ? <span className="adm-pill adm-mono">{order.no_rangka}</span>
+                {(order.no_rangka || u0.no_rangka)
+                  ? <span className="adm-pill adm-mono">{order.no_rangka || u0.no_rangka}</span>
                   : <i className="adm-mute">belum diisi</i>}
                 <button className="adm-link" onClick={() => setEditRangka(true)} data-testid={`adm-rangka-edit-${order.order_id}`}><IcoPencil /></button>
               </span>
