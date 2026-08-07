@@ -1235,6 +1235,10 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
   const [showJadwal, setShowJadwal] = useState(false);
   const [showTrip360, setShowTrip360] = useState(false);
   const [showDupVendor, setShowDupVendor] = useState(false);
+  const [showSJ, setShowSJ] = useState(false); // modal input harga surat jalan
+  const [sjHargaDraft, setSjHargaDraft] = useState("");
+  const [sjPpn, setSjPpn] = useState(true);
+  const [sjPph, setSjPph] = useState(true);
   const albumFileRefs = useRef({});
 
   const units = Array.isArray(order.units) ? order.units : [];
@@ -1273,9 +1277,22 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
     setUploadingStage(null);
   };
 
-  const printSuratJalan = () => {
+  const printSuratJalan = (pricing = {}) => {
     const tgl = new Date().toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
     const noSurat = `AAL-${order.order_id?.slice(-6) || "000000"}`;
+    // Harga opsional di surat jalan. DPP = harga; PPN 1.1%; PPh 23 2%; Total = DPP+PPN-PPh.
+    const sjHarga = parseInt(String(pricing.harga || "").replace(/[^0-9]/g, ""), 10) || 0;
+    const sjPpn = (sjHarga > 0 && pricing.withTax) ? Math.round(sjHarga * 0.011) : 0;
+    const sjPph = (sjHarga > 0 && pricing.withPph23) ? Math.round(sjHarga * 0.02) : 0;
+    const sjTotal = sjHarga + sjPpn - sjPph;
+    const rp = (n) => "Rp " + (Number(n) || 0).toLocaleString("id-ID") + ",00";
+    const pricingHtml = sjHarga > 0 ? `
+      <div class="biaya-box">
+        <div class="biaya-row"><span>Biaya Pengiriman</span><span>${rp(sjHarga)}</span></div>
+        ${pricing.withTax ? `<div class="biaya-row"><span>PPN 1.1%</span><span>${rp(sjPpn)}</span></div>` : ""}
+        ${pricing.withPph23 ? `<div class="biaya-row"><span>Potongan PPh 23 (2%)</span><span>- ${rp(sjPph)}</span></div>` : ""}
+        <div class="biaya-row biaya-total"><span>TOTAL</span><span>${rp(sjTotal)}</span></div>
+      </div>` : "";
     // M3 = P x L x T (cm) / 1.000.000 — dihitung otomatis dari dimensi yang diisi di form pesanan.
     const p = parseFloat(order.panjang), l = parseFloat(order.lebar), t = parseFloat(order.tinggi);
     const m3 = (p > 0 && l > 0 && t > 0) ? ((p * l * t) / 1_000_000).toFixed(3) : "";
@@ -1285,9 +1302,8 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
     const jmlColly = (order.jumlah_colly || "").trim() || "1";
     // 2 lembar identik ditumpuk 1 halaman A4 (lebar A4, tinggi A4/2 per lembar) biar sekali
     // cetak langsung dapet 2 rangkap (arsip kantor + tanda terima) tanpa buang kertas kosong.
-    const renderCopy = (copyLabel) => `
+    const renderCopy = () => `
     <div class="outer">
-      <div class="copy-tag">${copyLabel}</div>
       <!-- HEADER -->
       <div class="header">
         <div class="logo-box">
@@ -1409,6 +1425,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
         Kerusakan/kehilangan yang disebabkan bukan karena kelalaian PT. Alyssa Auto Logistik tidak menjadi tanggung jawab perusahaan.
         &nbsp;|&nbsp; <i>Goods have been inspected and match the description above.</i>
       </div>
+      ${pricingHtml}
     </div>`;
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Surat Jalan ${noSurat}</title>
     <style>
@@ -1451,12 +1468,13 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
       .sign-space { height: 40px; }
       .sign-name { font-size: 9px; border-top: 1px solid #555; margin-top: 4px; padding-top: 2px; color: #333; }
       .catatan { padding: 6px 8px; border-top: 1px solid #000; font-size: 9px; color: #333; line-height: 1.5; }
+      .biaya-box { border-top: 2px solid #000; padding: 6px 8px; margin-left: auto; width: 46%; }
+      .biaya-row { display: flex; justify-content: space-between; font-size: 11px; padding: 2px 0; }
+      .biaya-total { border-top: 1px solid #000; margin-top: 3px; padding-top: 4px; font-weight: 900; font-size: 12px; }
       @media print { @page { margin: 0; size: A4 portrait; } body { padding: 0; } }
     </style></head><body>
     <div class="sheet">
-      <div class="copy-slot">${renderCopy("Lembar 1 — Arsip Kantor")}</div>
-      <div class="cutline"><span class="dash"></span>&nbsp;✂ potong di sini&nbsp;<span class="dash"></span></div>
-      <div class="copy-slot">${renderCopy("Lembar 2 — Tanda Terima")}</div>
+      <div class="copy-slot">${renderCopy()}</div>
     </div>
     <script>window.onload=()=>window.print()<\/script>
     </body></html>`;
@@ -1981,7 +1999,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
             </button>
           </span>
         ))}
-        <button className="adm-btn adm-btn-sm" onClick={() => printSuratJalan()}
+        <button className="adm-btn adm-btn-sm" onClick={(e) => { e.stopPropagation(); setShowSJ(true); }}
           style={{ background: "#1a2e1a", border: "1px solid #3fb950", color: "#3fb950" }}>
           📄 Surat Jalan
         </button>
@@ -2000,6 +2018,55 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
         {showDupVendor && (
           <DuplicateVendorModal order={order} headers={headers} onClose={() => setShowDupVendor(false)} />
         )}
+        {showSJ && (() => {
+          const h = parseInt(String(sjHargaDraft).replace(/[^0-9]/g, ""), 10) || 0;
+          const ppn = h > 0 && sjPpn ? Math.round(h * 0.011) : 0;
+          const pph = h > 0 && sjPph ? Math.round(h * 0.02) : 0;
+          const tot = h + ppn - pph;
+          const fRp = (n) => "Rp " + (Number(n) || 0).toLocaleString("id-ID");
+          const doPrint = () => { printSuratJalan({ harga: sjHargaDraft, withTax: sjPpn, withPph23: sjPph }); setShowSJ(false); };
+          return createPortal((
+            <div className="adm-vars"><div className="adm-modal-bg" onClick={() => setShowSJ(false)}>
+              <div className="adm-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 460 }}>
+                <div className="adm-modal-head">
+                  <div><div className="adm-modal-title">📄 Cetak Surat Jalan</div>
+                    <div className="adm-modal-sub">{order.order_id} · 1 lembar</div></div>
+                  <button className="adm-modal-close" onClick={() => setShowSJ(false)}>✕</button>
+                </div>
+                <div className="adm-modal-body">
+                  <label style={{ display: "block", marginBottom: 12 }}>
+                    <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", marginBottom: 5, fontWeight: 700 }}>Harga / Biaya Pengiriman (opsional — kosongkan kalau tanpa harga)</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, border: "1px solid var(--border)", borderRadius: 8, padding: "0 12px" }}>
+                      <span style={{ fontWeight: 800, color: "var(--text-mute)" }}>Rp</span>
+                      <input inputMode="numeric" className="adm-input" style={{ border: "none", fontSize: 20, fontWeight: 800, padding: "12px 0" }} placeholder="0"
+                        value={h ? h.toLocaleString("id-ID") : ""} onChange={(e) => setSjHargaDraft(e.target.value)} data-testid="adm-sj-harga" autoFocus />
+                    </div>
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, cursor: "pointer" }}>
+                    <input type="checkbox" checked={sjPpn} onChange={(e) => setSjPpn(e.target.checked)} style={{ width: 16, height: 16, accentColor: "#58a6ff" }} />
+                    <span>Kenakan PPN 1.1%</span>
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, cursor: "pointer" }}>
+                    <input type="checkbox" checked={sjPph} onChange={(e) => setSjPph(e.target.checked)} style={{ width: 16, height: 16, accentColor: "#58a6ff" }} />
+                    <span>Potong PPh 23 (2%)</span>
+                  </label>
+                  {h > 0 && (
+                    <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px", fontSize: 13 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>Biaya</span><span>{fRp(h)}</span></div>
+                      {sjPpn && <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>PPN 1.1%</span><span>{fRp(ppn)}</span></div>}
+                      {sjPph && <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "#e6a23c" }}><span>Potongan PPh 23 (2%)</span><span>- {fRp(pph)}</span></div>}
+                      <div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0 0", marginTop: 4, borderTop: "1px solid var(--border)", fontWeight: 800 }}><span>Total</span><span>{fRp(tot)}</span></div>
+                    </div>
+                  )}
+                </div>
+                <div className="adm-modal-foot">
+                  <button className="adm-btn adm-btn-ghost" onClick={() => setShowSJ(false)}>Batal</button>
+                  <button className="adm-btn adm-btn-gold" onClick={doPrint} data-testid="adm-sj-print">🖨️ Cetak Surat Jalan</button>
+                </div>
+              </div>
+            </div></div>
+          ), document.body);
+        })()}
         {showJadwal && (
           <JadwalModal
             order={order}
