@@ -2806,6 +2806,9 @@ async function printInvoiceDoc(lines, withTax, extra) {
     html { print-color-adjust: exact; -webkit-print-color-adjust: exact; text-rendering: geometricPrecision; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
     .doc-sheet { padding: 0; max-width: 186mm; margin: 0 auto; }   /* 210mm − margin 12mm kiri/kanan = 186mm */
     .doc-title { font-size: 23px; }                                 /* Judul Invoice 22–24px Bold */
+    /* Paksa HITAM PEKAT (menang atas cache/CSS lain) — judul & nama perusahaan
+       jangan biru lagi biar tajam di printer. */
+    .doc-title, .doc-brand-name { color: #000 !important; }
     .doc-footer { font-size: 9px; }                                 /* Footer 9px */
     .inv-meta-row { display:flex; justify-content:space-between; gap:24px; margin-bottom:16px; }
     .inv-billto .lbl { font-size:9px; font-weight:700; text-transform:uppercase; color:${DOC_BRAND.muted}; letter-spacing:.5px; margin-bottom:4px; }
