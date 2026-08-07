@@ -48,7 +48,7 @@ export const DOC_BASE_CSS = `
   .doc-brand { display:flex; align-items:center; gap:12px; }
   .doc-brand img { width:46px; height:46px; object-fit:contain; flex-shrink:0; }
   .doc-brand-name { font-size:15px; font-weight:900; color:#000; letter-spacing:.3px; }
-  .doc-brand-tag { font-size:9px; color:#000; font-weight:700; text-transform:uppercase; letter-spacing:.6px; margin-top:1px; }
+  .doc-brand-tag { font-size:9px; color:${DOC_BRAND.gold}; font-weight:700; text-transform:uppercase; letter-spacing:.6px; margin-top:1px; }
   .doc-addr { text-align:right; font-size:9.5px; color:${DOC_BRAND.muted}; line-height:1.6; }
   .doc-title { font-size:20px; font-weight:900; color:#000; letter-spacing:.5px; text-align:right; margin-bottom:2px; }
   .doc-footer { display:flex; justify-content:space-between; align-items:center; padding-top:10px; margin-top:20px; border-top:1px solid ${DOC_BRAND.line}; font-size:8.5px; color:${DOC_BRAND.muted}; }

@@ -2807,7 +2807,6 @@ async function printInvoiceDoc(lines, withTax, extra) {
     .doc-sheet { padding: 0; max-width: 186mm; margin: 0 auto; }   /* 210mm − margin 12mm kiri/kanan = 186mm */
     .doc-title { font-size: 23px; }                                 /* Judul Invoice 22–24px Bold */
     .doc-footer { font-size: 9px; }                                 /* Footer 9px */
-    .doc-brand img { width:48px; height:48px; }                     /* logo dari SVG → tajam di segala zoom */
     .inv-meta-row { display:flex; justify-content:space-between; gap:24px; margin-bottom:16px; }
     .inv-billto .lbl { font-size:9px; font-weight:700; text-transform:uppercase; color:${DOC_BRAND.muted}; letter-spacing:.5px; margin-bottom:4px; }
     .inv-billto .val { font-size:14px; font-weight:800; color:${DOC_BRAND.ink}; }
@@ -2846,7 +2845,7 @@ async function printInvoiceDoc(lines, withTax, extra) {
     .inv-sign-jab { font-size:9.5px; color:${DOC_BRAND.muted}; margin-top:2px; }
   </style></head><body>
   <div class="doc-sheet">
-    ${docHeader({ docTitle: "FAKTUR / INVOICE", logoUrl: "/logo.svg" })}
+    ${docHeader({ docTitle: "FAKTUR / INVOICE", logoUrl: "/logo.png" })}
     <div class="inv-meta-row">
       <div class="inv-billto">
         <div class="lbl">Ditagihkan Kepada</div>
