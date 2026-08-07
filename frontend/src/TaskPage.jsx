@@ -189,7 +189,7 @@ export default function TaskPage() {
             </div>
             <input ref={albumInput} type="file" accept="image/*" capture="environment" multiple style={{ display: "none" }} onChange={(e) => onAlbumPick(e.target.files)} />
             <button style={bigBtn} disabled={busy} onClick={() => albumInput.current?.click()}>📷 {task.foto_title || "Tambah Foto"}</button>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
+            <div className="keep-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
               {(task.photos || []).slice().reverse().map((p) => (
                 <img key={p.id} src={resolveUrl(p.url)} alt="" style={{ width: "100%", aspectRatio: "1", borderRadius: 8, objectFit: "cover", border: `1px solid ${C.line}` }} />
               ))}
@@ -233,7 +233,7 @@ export default function TaskPage() {
                 {(task.allowed_document_types || []).length === 0 && <div style={{ fontSize: 12, color: C.mute }}>Tidak ada dokumen untuk tugas ini.</div>}
               </div>
               {(task.documents || []).length > 0 && (
-                <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
+                <div className="keep-grid" style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
                   {(task.documents || []).slice().reverse().map((d) => (
                     <a key={d.id} href={resolveUrl(d.url)} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
                       <div style={{ width: "100%", aspectRatio: "1", borderRadius: 8, border: `1px solid ${C.line}`, background: "#0d1117", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: C.mute, fontSize: 10, padding: 4, textAlign: "center" }}>

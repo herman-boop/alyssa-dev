@@ -2634,7 +2634,7 @@ function AlbumScreen({ visible, onBack, trip, albumStage, setAlbumStage, albumUp
             <div style={{ fontSize: 14 }}>Belum ada foto {stageLabel.toLowerCase()}.</div>
           </div>
         ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 20 }} data-testid={`album-gallery-${albumStage}`}>
+          <div className="keep-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 20 }} data-testid={`album-gallery-${albumStage}`}>
             {stagePhotos.map((p) => {
               const isPdf = (p.url || "").toLowerCase().endsWith(".pdf");
               return (
@@ -2857,7 +2857,7 @@ function DokumenScreen({ visible, onBack, trip, bastkList, resi, handoverDone, u
                 <div style={{ fontSize: 12, color: "#86EFAC" }}>{bastkList.length} halaman BASTK tersimpan</div>
               </div>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, margin: "16px 0" }} data-testid="dokumen-bastk-gallery">
+            <div className="keep-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, margin: "16px 0" }} data-testid="dokumen-bastk-gallery">
               {bastkList.map((b) => {
                 const isPdf = (b.url || "").toLowerCase().endsWith(".pdf");
                 return (

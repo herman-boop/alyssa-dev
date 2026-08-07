@@ -5322,7 +5322,7 @@ function FotoTab({ detail, loading, onView }) {
             {photos.length === 0 ? (
               <div style={{ fontSize: 11, color: "#484f58" }}>Belum ada foto.</div>
             ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))", gap: 8 }}>
+              <div className="keep-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))", gap: 8 }}>
                 {photos.map((p, i) => (
                   <div key={i} onClick={() => onView(resolveTripUrl(p.url))} style={{ cursor: "pointer" }}>
                     <img src={resolveTripUrl(p.url)} alt="" style={{ width: "100%", aspectRatio: "1", borderRadius: 8, objectFit: "cover", border: "1px solid #21262d" }} />
@@ -5382,7 +5382,7 @@ function DokumenTab({ detail, loading }) {
       <div>
         <div style={{ fontSize: 12, fontWeight: 800, color: "#e6edf3", marginBottom: 8 }}>📄 BASTK <span style={{ color: "#8b949e", fontWeight: 600 }}>({bastk.length})</span></div>
         {bastk.length === 0 ? <div style={{ fontSize: 11, color: "#484f58" }}>Belum ada dokumen BASTK.</div> : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))", gap: 8 }}>
+          <div className="keep-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))", gap: 8 }}>
             {bastk.map((b, i) => {
               const isPdf = /\.pdf$/i.test(b.url || "");
               return (
@@ -5426,7 +5426,7 @@ function RingkasanTab({ legs, detail }) {
   ];
   return (
     <div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10, marginBottom: 18 }}>
+      <div className="keep-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10, marginBottom: 18 }}>
         {stats.map(s => (
           <div key={s.label} style={{ background: "#0d1117", border: "1px solid #21262d", borderRadius: 10, padding: "12px 14px" }}>
             <div style={{ fontSize: 20, fontWeight: 800, color: "#EF9F27" }}>{s.val}</div>
