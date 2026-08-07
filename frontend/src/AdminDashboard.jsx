@@ -1240,6 +1240,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
   const [sjNoPo, setSjNoPo] = useState(""); // No PO pelanggan (opsional) → tampil di surat jalan
   const [sjPpn, setSjPpn] = useState(true);
   const [sjPph, setSjPph] = useState(true);
+  const [sjTaxIncl, setSjTaxIncl] = useState(false); // true = harga SUDAH termasuk PPN 1.1%
   const albumFileRefs = useRef({});
 
   const units = Array.isArray(order.units) ? order.units : [];
@@ -1281,16 +1282,22 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
   const printSuratJalan = (pricing = {}) => {
     const tgl = new Date().toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
     const noSurat = `AAL-${order.order_id?.slice(-6) || "000000"}`;
-    // Harga opsional di surat jalan. DPP = harga; PPN 1.1%; PPh 23 2%; Total = DPP+PPN-PPh.
+    // Harga opsional di surat jalan.
+    // taxInclusive: harga yg diketik SUDAH termasuk PPN 1.1% → PPN dipecah dari dalam
+    //   (DPP = harga/1.011, PPN = harga − DPP, total sebelum PPh = harga).
+    // taxExclusive: DPP = harga, PPN 1.1% ditambah di atas harga.
+    // PPh 23 2% selalu dihitung dari DPP; Grand Total = (taxIncl ? harga : harga+PPN) − PPh.
     const sjHarga = parseInt(String(pricing.harga || "").replace(/[^0-9]/g, ""), 10) || 0;
-    const sjPpn = (sjHarga > 0 && pricing.withTax) ? Math.round(sjHarga * 0.011) : 0;
-    const sjPph = (sjHarga > 0 && pricing.withPph23) ? Math.round(sjHarga * 0.02) : 0;
-    const sjTotal = sjHarga + sjPpn - sjPph;
+    const sjTaxIncl = !!pricing.taxInclusive;
+    const sjDpp = (pricing.withTax && sjTaxIncl) ? Math.round(sjHarga / 1.011) : sjHarga;
+    const sjPpn = !pricing.withTax ? 0 : (sjTaxIncl ? sjHarga - sjDpp : Math.round(sjHarga * 0.011));
+    const sjPph = pricing.withPph23 ? Math.round(sjDpp * 0.02) : 0;
+    const sjTotal = (sjTaxIncl ? sjHarga : sjHarga + sjPpn) - sjPph;
     const rp = (n) => "Rp " + (Number(n) || 0).toLocaleString("id-ID") + ",00";
     const pricingHtml = sjHarga > 0 ? `
       <div class="biaya-box">
-        <div class="biaya-row"><span>Biaya Pengiriman</span><span>${rp(sjHarga)}</span></div>
-        ${pricing.withTax ? `<div class="biaya-row"><span>PPN 1.1%</span><span>${rp(sjPpn)}</span></div>` : ""}
+        <div class="biaya-row"><span>${pricing.withTax && sjTaxIncl ? "DPP (Dasar Pengenaan Pajak)" : "Biaya Pengiriman"}</span><span>${rp(pricing.withTax && sjTaxIncl ? sjDpp : sjHarga)}</span></div>
+        ${pricing.withTax ? `<div class="biaya-row"><span>PPN 1.1%${sjTaxIncl ? " (termasuk)" : ""}</span><span>${rp(sjPpn)}</span></div>` : ""}
         ${pricing.withPph23 ? `<div class="biaya-row"><span>Potongan PPh 23 (2%)</span><span>- ${rp(sjPph)}</span></div>` : ""}
         <div class="biaya-row biaya-total"><span>TOTAL</span><span>${rp(sjTotal)}</span></div>
       </div>` : "";
@@ -2021,11 +2028,12 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
         )}
         {showSJ && (() => {
           const h = parseInt(String(sjHargaDraft).replace(/[^0-9]/g, ""), 10) || 0;
-          const ppn = h > 0 && sjPpn ? Math.round(h * 0.011) : 0;
-          const pph = h > 0 && sjPph ? Math.round(h * 0.02) : 0;
-          const tot = h + ppn - pph;
+          const dpp = (sjPpn && sjTaxIncl) ? Math.round(h / 1.011) : h;
+          const ppn = !sjPpn ? 0 : (sjTaxIncl ? h - dpp : Math.round(h * 0.011));
+          const pph = sjPph ? Math.round(dpp * 0.02) : 0;
+          const tot = (sjTaxIncl ? h : h + ppn) - pph;
           const fRp = (n) => "Rp " + (Number(n) || 0).toLocaleString("id-ID");
-          const doPrint = () => { printSuratJalan({ harga: sjHargaDraft, withTax: sjPpn, withPph23: sjPph, noPo: sjNoPo }); setShowSJ(false); };
+          const doPrint = () => { printSuratJalan({ harga: sjHargaDraft, withTax: sjPpn, withPph23: sjPph, taxInclusive: sjTaxIncl, noPo: sjNoPo }); setShowSJ(false); };
           return createPortal((
             <div className="adm-vars"><div className="adm-modal-bg" onClick={() => setShowSJ(false)}>
               <div className="adm-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 460 }}>
@@ -2051,14 +2059,20 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
                     <input type="checkbox" checked={sjPpn} onChange={(e) => setSjPpn(e.target.checked)} style={{ width: 16, height: 16, accentColor: "#58a6ff" }} />
                     <span>Kenakan PPN 1.1%</span>
                   </label>
+                  {sjPpn && (
+                    <label style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, cursor: "pointer", paddingLeft: 26 }}>
+                      <input type="checkbox" checked={sjTaxIncl} onChange={(e) => setSjTaxIncl(e.target.checked)} style={{ width: 16, height: 16, accentColor: "#58a6ff" }} data-testid="adm-sj-tax-inclusive" />
+                      <span style={{ fontSize: 13 }}>Harga sudah termasuk pajak 1.1% <span style={{ color: "var(--text-mute)" }}>(pajak dipecah dari dalam, total nggak nambah)</span></span>
+                    </label>
+                  )}
                   <label style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, cursor: "pointer" }}>
                     <input type="checkbox" checked={sjPph} onChange={(e) => setSjPph(e.target.checked)} style={{ width: 16, height: 16, accentColor: "#58a6ff" }} />
                     <span>Potong PPh 23 (2%)</span>
                   </label>
                   {h > 0 && (
                     <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px", fontSize: 13 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>Biaya</span><span>{fRp(h)}</span></div>
-                      {sjPpn && <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>PPN 1.1%</span><span>{fRp(ppn)}</span></div>}
+                      <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>{sjPpn && sjTaxIncl ? "DPP (Dasar Pengenaan Pajak)" : "Biaya"}</span><span>{fRp(sjPpn && sjTaxIncl ? dpp : h)}</span></div>
+                      {sjPpn && <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>PPN 1.1%{sjTaxIncl ? " (termasuk)" : ""}</span><span>{fRp(ppn)}</span></div>}
                       {sjPph && <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "#e6a23c" }}><span>Potongan PPh 23 (2%)</span><span>- {fRp(pph)}</span></div>}
                       <div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0 0", marginTop: 4, borderTop: "1px solid var(--border)", fontWeight: 800 }}><span>Total</span><span>{fRp(tot)}</span></div>
                     </div>
