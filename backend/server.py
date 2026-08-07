@@ -1180,18 +1180,61 @@ async def _public_order_fallback(track_id: str):
     }
 
 
+# Peta album buat foto dari link petugas → bucket tracking (asal/kapal/tujuan)
+_TASK_ALBUM_BUCKET = {
+    "pelabuhan_asal": "asal", "pelabuhan_tujuan": "tujuan", "kapal": "kapal",
+    "driver_asal": "asal", "driver_tujuan": "tujuan", "driver_full": "asal",
+}
+
+
+async def _merge_task_media(trip_id: str, view: dict):
+    """Gabungin foto & dokumen dari SEMUA link tugas petugas ke album tracking,
+    biar foto yg diupload lewat /task/{token} PASTI muncul di tracking pelanggan
+    & admin — walau push langsung ke trip.album kelewat atau masuk bucket lain."""
+    if not trip_id:
+        return
+    album = view.get("album") or {"asal": [], "kapal": [], "tujuan": [], "dokumen": []}
+    seen = set()
+    for arr in album.values():
+        for p in (arr or []):
+            if p.get("url"):
+                seen.add(p["url"])
+    async for t in db.leg_tasks.find({"trip_id": trip_id}):
+        bucket = _TASK_ALBUM_BUCKET.get(t.get("tipe_tugas"), t.get("album_key") or "asal")
+        if bucket not in album:
+            album[bucket] = []
+        who = f"petugas:{t.get('petugas_nama', '')}"
+        for p in (t.get("photos") or []):
+            u = p.get("url")
+            if u and u not in seen:
+                album[bucket].append({"id": p.get("id"), "url": u, "catatan": p.get("catatan", ""), "uploaded_by": who, "ts": p.get("ts")})
+                seen.add(u)
+        for d in (t.get("documents") or []):
+            u = d.get("url")
+            if u and u not in seen:
+                album.setdefault("dokumen", []).append({"id": d.get("id"), "url": u, "catatan": d.get("doc_type", ""), "uploaded_by": who, "ts": d.get("ts")})
+                seen.add(u)
+    view["album"] = album
+
+
 @api_router.get("/public/trips/{trip_id}")
 async def public_trip(trip_id: str):
     """Read-only view untuk pelanggan. Hanya field aman yang ter-expose.
     Kalau trip belum ada (order belum di-convert), fallback ke data order biar
     link tracking dari pesan WhatsApp tetap valid."""
     doc = await db.trips.find_one({"trip_id": trip_id})
+    real_trip_id = None
     if not doc:
         fb = await _public_order_fallback(trip_id)
-        if fb:
-            return fb
-        raise HTTPException(404, "Trip not found")
-    return _trip_public_view(doc)
+        if not fb:
+            raise HTTPException(404, "Trip not found")
+        view = fb
+        real_trip_id = fb.get("trip_id")
+    else:
+        view = _trip_public_view(doc)
+        real_trip_id = doc.get("trip_id")
+    await _merge_task_media(real_trip_id, view)
+    return view
 
 
 @api_router.get("/trips/{trip_id}/bastk/pdf")
