@@ -1237,6 +1237,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
   const [showDupVendor, setShowDupVendor] = useState(false);
   const [showSJ, setShowSJ] = useState(false); // modal input harga surat jalan
   const [sjHargaDraft, setSjHargaDraft] = useState("");
+  const [sjNoPo, setSjNoPo] = useState(""); // No PO pelanggan (opsional) → tampil di surat jalan
   const [sjPpn, setSjPpn] = useState(true);
   const [sjPph, setSjPph] = useState(true);
   const albumFileRefs = useRef({});
@@ -1330,8 +1331,8 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
           <div class="val">${order.customer_nama || "&nbsp;"}</div>
         </div>
         <div class="info-cell" style="flex:1">
-          <div class="lbl">Ref. PO / SL No.</div>
-          <div class="val">${order.order_id || "&nbsp;"}</div>
+          <div class="lbl">No. PO Pelanggan / Ref.</div>
+          <div class="val">${(pricing.noPo && pricing.noPo.trim()) ? pricing.noPo : (order.order_id || "&nbsp;")}</div>
         </div>
       </div>
 
@@ -2024,7 +2025,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
           const pph = h > 0 && sjPph ? Math.round(h * 0.02) : 0;
           const tot = h + ppn - pph;
           const fRp = (n) => "Rp " + (Number(n) || 0).toLocaleString("id-ID");
-          const doPrint = () => { printSuratJalan({ harga: sjHargaDraft, withTax: sjPpn, withPph23: sjPph }); setShowSJ(false); };
+          const doPrint = () => { printSuratJalan({ harga: sjHargaDraft, withTax: sjPpn, withPph23: sjPph, noPo: sjNoPo }); setShowSJ(false); };
           return createPortal((
             <div className="adm-vars"><div className="adm-modal-bg" onClick={() => setShowSJ(false)}>
               <div className="adm-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 460 }}>
@@ -2034,6 +2035,10 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
                   <button className="adm-modal-close" onClick={() => setShowSJ(false)}>✕</button>
                 </div>
                 <div className="adm-modal-body">
+                  <label style={{ display: "block", marginBottom: 12 }}>
+                    <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", marginBottom: 5, fontWeight: 700 }}>No. PO Pelanggan / Catatan (opsional)</span>
+                    <input className="adm-input" placeholder="mis. PO-1234 dari pelanggan" value={sjNoPo} onChange={(e) => setSjNoPo(e.target.value)} data-testid="adm-sj-nopo" />
+                  </label>
                   <label style={{ display: "block", marginBottom: 12 }}>
                     <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", marginBottom: 5, fontWeight: 700 }}>Harga / Biaya Pengiriman (opsional — kosongkan kalau tanpa harga)</span>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, border: "1px solid var(--border)", borderRadius: 8, padding: "0 12px" }}>
