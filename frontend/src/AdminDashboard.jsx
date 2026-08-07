@@ -2798,32 +2798,43 @@ async function printInvoiceDoc(lines, withTax, extra) {
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${noInvoice}</title>
   <style>
     ${DOC_BASE_CSS}
+    /* ── Kualitas cetak A4 (setara invoice Mekari Jurnal / BCA Bisnis) ──
+       Teks 100% VEKTOR & selectable (bukan gambar/canvas/screenshot), font
+       native, TANPA transform:scale/zoom/filter → tetap tajam di zoom 400–800%
+       & di printer laser/inkjet. Override ini HANYA berlaku di dokumen invoice. */
+    @page { size: A4 portrait; margin: 12mm; }
+    html { print-color-adjust: exact; -webkit-print-color-adjust: exact; text-rendering: geometricPrecision; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+    .doc-sheet { padding: 0; max-width: 186mm; margin: 0 auto; }   /* 210mm − margin 12mm kiri/kanan = 186mm */
+    .doc-title { font-size: 23px; }                                 /* Judul Invoice 22–24px Bold */
+    .doc-footer { font-size: 9px; }                                 /* Footer 9px */
+    .doc-brand img { width:48px; height:48px; }                     /* logo dari SVG → tajam di segala zoom */
     .inv-meta-row { display:flex; justify-content:space-between; gap:24px; margin-bottom:16px; }
     .inv-billto .lbl { font-size:9px; font-weight:700; text-transform:uppercase; color:${DOC_BRAND.muted}; letter-spacing:.5px; margin-bottom:4px; }
     .inv-billto .val { font-size:14px; font-weight:800; color:${DOC_BRAND.ink}; }
-    .inv-meta-table { border-collapse:collapse; font-size:10.5px; }
+    .inv-meta-table { border-collapse:collapse; font-size:10px; }
     .inv-meta-table td { padding:2.5px 0; }
     .inv-meta-table td:first-child { color:${DOC_BRAND.muted}; padding-right:18px; white-space:nowrap; }
     .inv-meta-table td:last-child { font-weight:700; text-align:right; }
     .inv-total-bar { display:flex; justify-content:space-between; align-items:center; background:${DOC_BRAND.navyDeep}; color:#fff; padding:10px 16px; border-radius:6px; margin-bottom:18px; }
     .inv-total-bar span:first-child { font-size:10.5px; font-weight:700; letter-spacing:.6px; text-transform:uppercase; opacity:.85; }
-    .inv-total-bar span:last-child { font-size:15px; font-weight:900; }
+    .inv-total-bar span:last-child { font-size:19px; font-weight:900; }
     table.inv-items { width:100%; border-collapse:collapse; margin-bottom:14px; }
     table.inv-items thead { display:table-header-group; }
     table.inv-items tr { break-inside:avoid; page-break-inside:avoid; }
-    table.inv-items th { text-align:left; font-size:9px; text-transform:uppercase; letter-spacing:.4px; color:${DOC_BRAND.muted}; font-weight:700; padding:7px 8px; border-bottom:1.5px solid ${DOC_BRAND.navy}; }
-    table.inv-items td { padding:10px 8px; font-size:11px; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; background:${DOC_BRAND.paperMist}; }
+    table.inv-items th { text-align:left; font-size:10px; text-transform:uppercase; letter-spacing:.4px; color:${DOC_BRAND.muted}; font-weight:700; padding:7px 8px; border-bottom:1.5px solid ${DOC_BRAND.navy}; }
+    table.inv-items td { padding:10px 8px; font-size:10px; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; background:${DOC_BRAND.paperMist}; }
     table.inv-items .num { text-align:right; }
     .inv-summary { display:flex; justify-content:space-between; gap:24px; margin-bottom:18px; }
     .inv-note { flex:1; font-size:10px; color:${DOC_BRAND.muted}; line-height:1.7; }
     .inv-note b { color:${DOC_BRAND.ink}; }
+    .inv-terbilang { font-size:9px; font-style:italic; }           /* Terbilang 9px Italic */
     .inv-totals-box { width:230px; }
     .inv-totals-box .row { display:flex; justify-content:space-between; padding:5px 0; font-size:10.5px; color:${DOC_BRAND.muted}; }
     .inv-totals-box .row.grand { border-top:1.5px solid ${DOC_BRAND.navy}; margin-top:4px; padding-top:8px; font-size:13px; font-weight:900; color:#000; }
     .inv-pay-box { display:flex; align-items:center; gap:12px; padding:12px 16px; background:${DOC_BRAND.paperMist}; border-radius:8px; margin-bottom:20px; }
     .inv-pay-badge { width:40px; height:40px; border-radius:7px; background:${DOC_BRAND.navy}; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:900; font-size:10px; flex-shrink:0; }
     .inv-pay-num { font-size:14px; font-weight:900; letter-spacing:.5px; color:${DOC_BRAND.ink}; }
-    .inv-pay-name { font-size:9.5px; color:${DOC_BRAND.muted}; margin-top:1px; }
+    .inv-pay-name { font-size:10px; color:${DOC_BRAND.muted}; margin-top:1px; }
     .inv-sign-row { display:flex; justify-content:flex-end; margin-top:26px; }
     .inv-sign-cell { width:260px; text-align:center; position:relative; }
     .inv-sign-lbl { font-size:10px; color:${DOC_BRAND.muted}; margin-bottom:6px; }
@@ -2835,7 +2846,7 @@ async function printInvoiceDoc(lines, withTax, extra) {
     .inv-sign-jab { font-size:9.5px; color:${DOC_BRAND.muted}; margin-top:2px; }
   </style></head><body>
   <div class="doc-sheet">
-    ${docHeader({ docTitle: "FAKTUR / INVOICE" })}
+    ${docHeader({ docTitle: "FAKTUR / INVOICE", logoUrl: "/logo.svg" })}
     <div class="inv-meta-row">
       <div class="inv-billto">
         <div class="lbl">Ditagihkan Kepada</div>
@@ -2868,7 +2879,7 @@ async function printInvoiceDoc(lines, withTax, extra) {
       <div class="inv-note">
         ${pesan ? `<b>Pesan:</b> ${pesan}<br>` : ""}
         <b>Jumlah Unit:</b> ${lines.length}<br>
-        <b>Terbilang:</b> <i>${terbilangRupiah(total)}</i>
+        <b>Terbilang:</b> <i class="inv-terbilang">${terbilangRupiah(total)}</i>
       </div>
       <div class="inv-totals-box">
         <div class="row"><span>${withTax && taxInclusive ? "DPP (Dasar Pengenaan Pajak)" : "Subtotal"}</span><span>Rp ${fRp(withTax && taxInclusive ? dpp : subtotal)}</span></div>
