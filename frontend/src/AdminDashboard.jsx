@@ -2212,10 +2212,16 @@ function BonusModal({ tripId, order, headers, onClose, onSave }) {
 ════════════════════════════════════════ */
 function InvoiceModal({ order, headers, onClose, onPrint }) {
   const todayIso = new Date().toISOString().slice(0, 10);
-  // Unit dari PO (F1). Fallback 1 unit dari field legacy kalau belum ada units[].
-  const orderUnits = (Array.isArray(order.units) && order.units.length)
-    ? order.units
-    : [{ unit_id: "legacy", vehicle_type: order.vehicle_type, tipe_model: order.tipe_model, nopol: order.nopol, no_rangka: order.no_rangka, warna: order.warna, tahun: order.tahun, status_invoice: "Belum Ditagih" }];
+  // Cargo (barang/kargo umum) vs kendaraan. Cargo dikenali dari isi_kiriman terisi
+  // atau shipment_type/jenis_kiriman = cargo → invoice pakai deskripsi cargo, bukan nopol/rangka.
+  const isCargo = !!(String(order.isi_kiriman || "").trim())
+    || ["cargo", "barang"].includes(String(order.shipment_type || order.jenis_kiriman || order.tipe_kiriman || "").toLowerCase());
+  // Unit dari PO (F1). Cargo = 1 baris jasa. Fallback 1 unit legacy kalau belum ada units[].
+  const orderUnits = isCargo
+    ? [{ unit_id: "cargo", cargo: true, status_invoice: order.status_invoice || "Belum Ditagih" }]
+    : (Array.isArray(order.units) && order.units.length)
+      ? order.units
+      : [{ unit_id: "legacy", vehicle_type: order.vehicle_type, tipe_model: order.tipe_model, nopol: order.nopol, no_rangka: order.no_rangka, warna: order.warna, tahun: order.tahun, status_invoice: "Belum Ditagih" }];
   const [rows, setRows] = useState(() => orderUnits.map((u) => ({
     unit_id: u.unit_id,
     // unit yang sudah diinvoice default TIDAK dicentang (cegah dobel)
@@ -2245,8 +2251,18 @@ function InvoiceModal({ order, headers, onClose, onPrint }) {
   const hargaNum = (s) => parseInt(String(s || "").replace(/[^0-9]/g, ""), 10) || 0;
   const setRow = (i, patch) => setRows((rs) => rs.map((r, x) => x === i ? { ...r, ...patch } : r));
   const unitKet = (u) => {
-    const veh = `${u.vehicle_type || ""}${u.tipe_model ? " " + u.tipe_model : ""}`.trim() || "Kendaraan";
     const rute = `(${order.asal_kota || "—"}–${order.tujuan_kota || "—"})`;
+    if (u.cargo || isCargo) {
+      const p = parseFloat(order.panjang), l = parseFloat(order.lebar), t = parseFloat(order.tinggi);
+      const m3 = (p > 0 && l > 0 && t > 0) ? ((p * l * t) / 1_000_000).toFixed(3) : "";
+      const detail = [
+        order.jumlah_colly ? `${order.jumlah_colly} colly` : "",
+        order.berat ? `${order.berat} kg` : "",
+        m3 ? `${m3} m³` : "",
+      ].filter(Boolean).join(" · ");
+      return `${order.isi_kiriman || "Cargo / Barang"} ${rute}${detail ? `<br>${detail}` : ""}`;
+    }
+    const veh = `${u.vehicle_type || ""}${u.tipe_model ? " " + u.tipe_model : ""}`.trim() || "Kendaraan";
     const rangka = u.no_rangka ? `<br>No. Rangka: ${u.no_rangka}` : "";
     return `${veh}${u.nopol ? " " + u.nopol : ""} ${rute}${rangka}`;
   };
@@ -2265,12 +2281,12 @@ function InvoiceModal({ order, headers, onClose, onPrint }) {
     const lines = rows
       .map((r, i) => ({ r, u: orderUnits[i] }))
       .filter(({ r }) => r.checked && hargaNum(r.harga) > 0)
-      .map(({ r, u }) => ({ nama: "Jasa Pengiriman", ket: unitKet(u), qty: 1, harga: hargaNum(r.harga) }));
+      .map(({ r, u }) => ({ nama: isCargo ? "Jasa Pengiriman Cargo" : "Jasa Pengiriman", ket: unitKet(u), qty: 1, harga: hargaNum(r.harga) }));
     if (!lines.length) return;
     // Buka jendela cetak DULU di dalam gesture klik (kalau di-await, mobile blokir popup).
     onPrint(lines, withTax, { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23 });
     // Tandai unit sudah diinvoice di belakang layar (best-effort).
-    const ids = rows.filter((r) => r.checked && hargaNum(r.harga) > 0 && r.unit_id !== "legacy").map((r) => r.unit_id);
+    const ids = rows.filter((r) => r.checked && hargaNum(r.harga) > 0 && r.unit_id !== "legacy" && r.unit_id !== "cargo").map((r) => r.unit_id);
     if (ids.length && headers) {
       axios.post(`${API}/admin/orders/${order.order_id}/units/mark-invoiced`, { unit_ids: ids }, { headers }).catch(() => {});
     }
@@ -2301,10 +2317,14 @@ function InvoiceModal({ order, headers, onClose, onPrint }) {
                   <input type="checkbox" checked={r.checked} onChange={(e) => setRow(i, { checked: e.target.checked })} data-testid={`adm-invu-check-${i}`} style={{ width: 16, height: 16, accentColor: "#58a6ff", flexShrink: 0 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {i + 1}. {u.vehicle_type || "—"}{u.tipe_model ? ` · ${u.tipe_model}` : ""}
+                      {i + 1}. {(u.cargo || isCargo) ? (order.isi_kiriman || "Cargo / Barang") : `${u.vehicle_type || "—"}${u.tipe_model ? ` · ${u.tipe_model}` : ""}`}
                       {invoiced && <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 800, color: "var(--gold-xl)", background: "var(--gold-bg)", padding: "1px 6px", borderRadius: 4 }}>SUDAH DIINVOICE</span>}
                     </div>
-                    <div style={{ fontSize: 10.5, color: "var(--text-mute)", fontFamily: "var(--mono)" }}>{u.nopol || "nopol —"}{u.no_rangka ? ` · ${u.no_rangka}` : ""}</div>
+                    <div style={{ fontSize: 10.5, color: "var(--text-mute)", fontFamily: "var(--mono)" }}>
+                      {(u.cargo || isCargo)
+                        ? [order.jumlah_colly ? `${order.jumlah_colly} colly` : "", order.berat ? `${order.berat} kg` : ""].filter(Boolean).join(" · ") || "cargo"
+                        : `${u.nopol || "nopol —"}${u.no_rangka ? ` · ${u.no_rangka}` : ""}`}
+                    </div>
                   </div>
                   <div className="adm-invu-harga">
                     <span>Rp</span>
