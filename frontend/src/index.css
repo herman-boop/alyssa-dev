@@ -112,3 +112,46 @@ code {
         border-bottom-color: inherit;
     }
 }
+
+/* ══════════════════════════════════════════════════════════════════
+   MOBILE-FIRST GLOBAL — aktif HANYA di layar kecil (cover screen
+   Samsung Z Fold4 ±360dp). Desktop TIDAK berubah. Tujuan: bisa jalanin
+   seluruh operasional 1 tangan tanpa zoom & tanpa horizontal scroll.
+   Dokumen cetak A4 (window.open) TIDAK kena — itu tab terpisah.
+   ══════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 640px) {
+  /* Cegah horizontal scroll di HP */
+  html, body, #root { max-width: 100%; overflow-x: hidden; }
+
+  /* Semua input/select/textarea min 16px → HP nggak auto-zoom pas fokus */
+  input, select, textarea,
+  .adm-input, .adm-search { font-size: 16px !important; }
+
+  /* Grid 2-3 kolom inline di dalam konten admin & modal → jadi 1 kolom.
+     Thumbnail (repeat(...)) pakai "repeat" jadi TIDAK kena aturan ini. */
+  .adm-modal [style*="1fr 1fr"],
+  .adm-content-wrap [style*="1fr 1fr"],
+  .adm-list [style*="1fr 1fr"] { grid-template-columns: 1fr !important; }
+
+  /* MODAL admin → fullscreen (bottom-sheet feel), override maxWidth inline */
+  .adm-modal-bg { padding: 0 !important; place-items: stretch !important; }
+  .adm-modal {
+    max-width: 100% !important; width: 100% !important;
+    min-height: 100vh; max-height: 100vh; border-radius: 0 !important;
+    animation: none;
+  }
+  .adm-modal-head { border-radius: 0 !important; position: sticky; top: 0; z-index: 5; }
+  .adm-modal-foot { position: sticky; bottom: 0; }
+
+  /* Tombol aksi utama min 46-48px (gampang disentuh 1 tangan) */
+  .adm-btn { min-height: 46px; }
+  .adm-btn.adm-btn-sm { min-height: 38px; }
+
+  /* Tombol yg berjajar di footer/aksi → full width, wrap rapi */
+  .adm-modal-foot { flex-wrap: wrap; }
+  .adm-modal-foot .adm-btn { flex: 1 1 140px; }
+
+  /* Amanin elemen umum biar nggak keluar layar */
+  .adm-content-wrap img, .adm-modal img { max-width: 100%; height: auto; }
+}
