@@ -377,6 +377,7 @@ function Dashboard({ pin, onLogout }) {
   const SECTION_META = {
     beranda:      { title: "Beranda", sub: "Ringkasan cepat operasional pengiriman" },
     pesanan:      { title: "Dashboard", sub: "Ringkasan semua aktivitas pengiriman kendaraan" },
+    "rekap-tagih":{ title: "Tagihan Hari Ini", sub: "Rekap invoice yang sudah dicetak — kirim ke admin buat input Mekari" },
     kalkulator:   { title: "Kalkulator HPP", sub: "Hitung harga pokok & margin per rute" },
     drivers:      { title: "Driver", sub: "Kelola data driver & dokumen" },
     koordinator:  { title: "Koordinator", sub: "Kelola akun koordinator lapangan" },
@@ -510,6 +511,10 @@ function Dashboard({ pin, onLogout }) {
 
       {activeTab === "histori" && (
         <HistoriDokumen headers={headers} />
+      )}
+
+      {activeTab === "rekap-tagih" && (
+        <TagihanHariIni headers={headers} />
       )}
 
       {activeTab === "pesanan" && <>
@@ -769,7 +774,7 @@ const TONE = {
 };
 const STATUS_TONE = { NEW: "orange", DISPATCHED: "blue", ON_TRIP: "purple", DELIVERED: "green", CANCELLED: "red" };
 const SIDEBAR_ICON = {
-  beranda: "🏠",
+  beranda: "🏠", "rekap-tagih": "💰",
   pesanan: "▦", "route-leg": "🧭", drivers: "👤", supplier: "🌿", koordinator: "🧑‍💼",
   kendaraan: "🚙", dokumen: "📄", histori: "🗂️", laporan: "📑", kalkulator: "🧮", selisih: "📊",
   kompensasi: "🔄", "minta-harga": "📩", pengaturan: "⚙️", "pembayaran-vendor": "🏢",
@@ -796,7 +801,7 @@ function MobileHome({ stats, orders, onNav, onTrip, onSearchSubmit, onOpenSideba
   const QUICK = [
     { ic: "🚚", label: "Pesanan", go: () => onNav("pesanan") },
     { ic: "📦", label: "Trip", go: onTrip },
-    { ic: "🧾", label: "Invoice", go: () => onNav("histori") },
+    { ic: "🧾", label: "Invoice", go: () => onNav("rekap-tagih") },
     { ic: "🔗", label: "Tracking", go: onTrip },
     { ic: "👨‍✈️", label: "Driver", go: () => onNav("drivers") },
     { ic: "🚢", label: "Kapal", go: () => onNav("supplier") },
@@ -969,6 +974,7 @@ const SIDEBAR_PRIMARY = [
   { key: "beranda", label: "Beranda" },
   { key: "pesanan", label: "Dashboard" },
   { key: "pesanan", label: "Pesanan" },
+  { key: "rekap-tagih", label: "Tagihan Hari Ini" },
   { key: "route-leg", label: "Route Leg" },
   { key: "drivers", label: "Driver" },
   { key: "supplier", label: "Supplier" },
@@ -2886,6 +2892,117 @@ function saveDocHistory(rec, headers) {
   try {
     axios.post(`${API}/admin/doc-history`, rec, { headers }).catch(() => {});
   } catch (e) { /* jangan sampai ganggu cetak */ }
+}
+
+/* ════════════════════════════════════════
+   TAGIHAN HARI INI — rekap invoice yang SUDAH dicetak (tagih) pada 1 hari,
+   ditarik dari histori dokumen (jenis=invoice). Dipakai admin buat handoff ke
+   staf yang input ke Mekari. Status "sudah diinput Mekari" disimpan lokal
+   (localStorage) di browser admin — tidak menyentuh backend.
+════════════════════════════════════════ */
+function invTotalFromRec(rec) {
+  const lines = Array.isArray(rec.lines) ? rec.lines : [];
+  const subtotal = lines.reduce((s, l) => s + (Number(l.harga) || 0) * (Number(l.qty) || 1), 0);
+  const m = rec.meta || {};
+  const withTax = !!m.withTax, taxIncl = !!m.taxInclusive, withPph = !!m.withPph23;
+  const dpp = withTax && taxIncl ? Math.round(subtotal / 1.011) : subtotal;
+  const ppn = !withTax ? 0 : (taxIncl ? subtotal - dpp : Math.round(subtotal * 0.011));
+  const pph = withPph ? Math.round(dpp * 0.02) : 0;
+  const total = (taxIncl ? subtotal : subtotal + ppn) - pph;
+  return { subtotal, ppn, pph, total };
+}
+const MEKARI_LS_KEY = "aal_mekari_input_v1";
+function loadMekariMarks() { try { return JSON.parse(localStorage.getItem(MEKARI_LS_KEY) || "{}"); } catch { return {}; } }
+function saveMekariMarks(m) { try { localStorage.setItem(MEKARI_LS_KEY, JSON.stringify(m)); } catch {} }
+
+function TagihanHariIni({ headers }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [day, setDay] = useState(() => new Date().toISOString().slice(0, 10));
+  const [marks, setMarks] = useState(() => loadMekariMarks());
+  const [toast, setToast] = useState("");
+  const flash = (m) => { setToast(m); setTimeout(() => setToast(""), 2400); };
+
+  useEffect(() => {
+    setLoading(true);
+    axios.get(`${API}/admin/doc-history`, { headers, params: { jenis: "invoice", limit: 1000 } })
+      .then((r) => setItems(r.data?.items || []))
+      .catch(() => setItems([]))
+      .finally(() => setLoading(false));
+  }, [headers]);
+
+  const sameDay = (iso) => { if (!iso) return false; const d = new Date(iso); const [y, m, dd] = day.split("-"); return d.getFullYear() === +y && d.getMonth() + 1 === +m && d.getDate() === +dd; };
+  const rows = useMemo(() => items.filter((r) => sameDay(r.created_at)), [items, day]);
+  const poOf = (r) => (Array.isArray(r.order_ids) && r.order_ids.length ? r.order_ids.join(", ") : (r.meta?.order_id || "—"));
+  const grand = rows.reduce((s, r) => s + invTotalFromRec(r).total, 0);
+  const doneCount = rows.filter((r) => marks[r.id]).length;
+  const fmtDayLabel = (() => { const [y, m, d] = day.split("-"); return `${d}/${m}/${y}`; })();
+
+  const toggleMark = (id) => { setMarks((prev) => { const next = { ...prev, [id]: !prev[id] }; if (!next[id]) delete next[id]; saveMekariMarks(next); return next; }); };
+
+  const buildRecapText = () => {
+    const head = `REKAP TAGIHAN — ${fmtDayLabel}\nPT Alyssa Auto Logistik\n(untuk diinput ke Mekari)\n`;
+    const body = rows.map((r, i) => {
+      const t = invTotalFromRec(r);
+      return `${i + 1}. ${r.no_dokumen || "-"}\n   Customer: ${r.customer || "-"}\n   No. PO: ${poOf(r)}\n   Total: Rp ${t.total.toLocaleString("id-ID")}${marks[r.id] ? "  ✅ sudah input" : ""}`;
+    }).join("\n\n");
+    const foot = `\n\nTotal: ${rows.length} invoice · Rp ${grand.toLocaleString("id-ID")}`;
+    return head + "\n" + body + foot;
+  };
+  const copyRecap = async () => { const ok = await copyToClipboard(buildRecapText()); flash(ok ? "✓ Rekap disalin" : "Gagal menyalin"); };
+  const waRecap = () => { window.open(`https://wa.me/?text=${encodeURIComponent(buildRecapText())}`, "_blank"); };
+  const reprint = (r) => { try { printInvoiceDoc(r.lines, r.meta?.withTax, r.meta || {}); } catch {} };
+
+  return (
+    <div style={{ maxWidth: 820, margin: "0 auto" }}>
+      <div className="adm-card" style={{ padding: 16, marginBottom: 14 }}>
+        <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <label style={{ flex: "0 0 auto" }}>
+            <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", marginBottom: 5, fontWeight: 700 }}>Tanggal Tagihan</span>
+            <input type="date" className="adm-input" value={day} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setDay(e.target.value)} data-testid="tagih-date" />
+          </label>
+          <div style={{ flex: 1, minWidth: 160 }}>
+            <div style={{ fontSize: 22, fontWeight: 900, color: "var(--text)" }}>Rp {grand.toLocaleString("id-ID")}</div>
+            <div style={{ fontSize: 12, color: "var(--text-mute)" }}>{rows.length} invoice dicetak · {doneCount} sudah diinput Mekari</div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button className="adm-btn adm-btn-sm" onClick={copyRecap} disabled={!rows.length} data-testid="tagih-copy">📋 Salin Rekap</button>
+            <button className="adm-btn adm-btn-sm adm-btn-blue" onClick={waRecap} disabled={!rows.length} data-testid="tagih-wa">💬 Kirim ke Admin (WA)</button>
+          </div>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="adm-card" style={{ padding: 30, textAlign: "center", color: "var(--text-mute)" }}>Memuat…</div>
+      ) : rows.length === 0 ? (
+        <div className="adm-empty"><div style={{ fontWeight: 700, marginBottom: 6, color: "var(--text-2)" }}>Belum ada invoice dicetak</div><div>pada tanggal {fmtDayLabel}. Cetak invoice dari kartu PO dulu ya.</div></div>
+      ) : rows.map((r) => {
+        const t = invTotalFromRec(r);
+        const done = !!marks[r.id];
+        return (
+          <div key={r.id} className="adm-card" style={{ padding: "12px 14px", marginBottom: 10, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", borderLeft: done ? "3px solid #3fb950" : "3px solid transparent" }} data-testid={`tagih-row-${r.id}`}>
+          <div style={{ flex: "1 1 240px", minWidth: 0 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: "var(--text)" }}>{r.no_dokumen || "-"}</div>
+            <div style={{ fontSize: 12.5, color: "var(--text-2)", marginTop: 2 }}>{r.customer || "-"}</div>
+            <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 2 }}>No. PO: {poOf(r)} · {fmtTs(r.created_at)}</div>
+          </div>
+          <div style={{ textAlign: "right", flex: "0 0 auto" }}>
+            <div style={{ fontWeight: 900, fontSize: 15, color: "var(--gold-xl)" }}>Rp {t.total.toLocaleString("id-ID")}</div>
+            <div style={{ fontSize: 10.5, color: "var(--text-mute)" }}>{r.meta?.withTax ? "+PPN" : "tanpa PPN"}{r.meta?.withPph23 ? " · −PPh23" : ""}</div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flex: "0 0 auto", flexWrap: "wrap" }}>
+            <button className="adm-btn adm-btn-sm adm-btn-ghost" onClick={() => reprint(r)}>🖨️ Cetak ulang</button>
+            <label className={`adm-btn adm-btn-sm ${done ? "adm-btn-green" : ""}`} style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <input type="checkbox" checked={done} onChange={() => toggleMark(r.id)} style={{ width: 15, height: 15 }} data-testid={`tagih-mekari-${r.id}`} />
+              {done ? "Sudah di Mekari" : "Tandai input Mekari"}
+            </label>
+          </div>
+          </div>
+        );
+      })}
+      {toast && <div className="adm-toast" data-testid="tagih-toast">{toast}</div>}
+    </div>
+  );
 }
 
 const DOC_HIST_FILTERS = [
