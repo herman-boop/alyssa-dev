@@ -378,6 +378,7 @@ function Dashboard({ pin, onLogout }) {
     beranda:      { title: "Beranda", sub: "Ringkasan cepat operasional pengiriman" },
     pesanan:      { title: "Dashboard", sub: "Ringkasan semua aktivitas pengiriman kendaraan" },
     "rekap-tagih":{ title: "Tagihan Hari Ini", sub: "Rekap invoice yang sudah dicetak — kirim ke admin buat input Mekari" },
+    kontak:       { title: "Kontak", sub: "Buku alamat pelanggan & supplier" },
     kalkulator:   { title: "Kalkulator HPP", sub: "Hitung harga pokok & margin per rute" },
     drivers:      { title: "Driver", sub: "Kelola data driver & dokumen" },
     koordinator:  { title: "Koordinator", sub: "Kelola akun koordinator lapangan" },
@@ -515,6 +516,10 @@ function Dashboard({ pin, onLogout }) {
 
       {activeTab === "rekap-tagih" && (
         <TagihanHariIni headers={headers} onBack={() => setActiveTab("pesanan")} />
+      )}
+
+      {activeTab === "kontak" && (
+        <KontakBox headers={headers} />
       )}
 
       {activeTab === "pesanan" && <>
@@ -779,7 +784,7 @@ const TONE = {
 };
 const STATUS_TONE = { NEW: "orange", DISPATCHED: "blue", ON_TRIP: "purple", DELIVERED: "green", CANCELLED: "red" };
 const SIDEBAR_ICON = {
-  beranda: "🏠", "rekap-tagih": "💰",
+  beranda: "🏠", "rekap-tagih": "💰", kontak: "📇",
   pesanan: "▦", "route-leg": "🧭", drivers: "👤", supplier: "🌿", koordinator: "🧑‍💼",
   kendaraan: "🚙", dokumen: "📄", histori: "🗂️", laporan: "📑", kalkulator: "🧮", selisih: "📊",
   kompensasi: "🔄", "minta-harga": "📩", pengaturan: "⚙️", "pembayaran-vendor": "🏢",
@@ -982,6 +987,7 @@ const SIDEBAR_PRIMARY = [
   { key: "route-leg", label: "Route Leg" },
   { key: "drivers", label: "Driver" },
   { key: "supplier", label: "Supplier" },
+  { key: "kontak", label: "Kontak" },
   { key: "koordinator", label: "Koordinator" },
   { key: "kendaraan", label: "Kendaraan" },
   { key: "dokumen", label: "Dokumen" },
@@ -2887,6 +2893,185 @@ function JadwalModal({ order, headers, onClose, onPrint }) {
     </div>
     </div>
   ), document.body);
+}
+
+/* ════════════════════════════════════════
+   KONTAK — buku alamat Pelanggan & Supplier. Disimpan lokal di browser admin
+   (localStorage) supaya jalan tanpa deploy backend. Bisa tarik pelanggan dari
+   PO & supplier dari modul Supplier, tambah/edit/hapus manual, dan otomatis
+   kasih notif kalau ada nama yang kemungkinan dobel.
+════════════════════════════════════════ */
+const KONTAK_LS_KEY = "aal_contacts_v1";
+function loadContacts() { try { const a = JSON.parse(localStorage.getItem(KONTAK_LS_KEY) || "[]"); return Array.isArray(a) ? a : []; } catch { return []; } }
+function saveContacts(a) { try { localStorage.setItem(KONTAK_LS_KEY, JSON.stringify(a)); } catch {} }
+function normName(s) { return String(s || "").toLowerCase().replace(/[.,]/g, "").replace(/\s+/g, " ").trim(); }
+const KONTAK_EMPTY = { nama: "", perusahaan: "", no_hp: "", email: "", alamat: "", catatan: "" };
+
+function KontakBox({ headers }) {
+  const [all, setAll] = useState(() => loadContacts());
+  const [jenis, setJenis] = useState("pelanggan");
+  const [search, setSearch] = useState("");
+  const [edit, setEdit] = useState(null); // null | {id?, ...fields}
+  const [busy, setBusy] = useState(false);
+  const [toast, setToast] = useState("");
+  const flash = (m) => { setToast(m); setTimeout(() => setToast(""), 2600); };
+  const persist = (next) => { setAll(next); saveContacts(next); };
+
+  const list = useMemo(() => {
+    const q = normName(search);
+    return all.filter((c) => c.jenis === jenis)
+      .filter((c) => !q || normName(`${c.nama} ${c.perusahaan} ${c.no_hp} ${c.email}`).includes(q))
+      .sort((a, b) => (a.nama || "").localeCompare(b.nama || "", "id"));
+  }, [all, jenis, search]);
+
+  // Deteksi dobel: nama ternormalisasi sama muncul >1x di jenis aktif
+  const dupGroups = useMemo(() => {
+    const map = {};
+    all.filter((c) => c.jenis === jenis).forEach((c) => { const k = normName(c.nama); if (!k) return; (map[k] = map[k] || []).push(c); });
+    return Object.values(map).filter((g) => g.length > 1);
+  }, [all, jenis]);
+
+  const saveEdit = () => {
+    const nama = (edit.nama || "").trim();
+    if (!nama) { flash("Nama wajib diisi"); return; }
+    if (edit.id) {
+      persist(all.map((c) => c.id === edit.id ? { ...c, ...edit, nama } : c));
+      flash("✓ Kontak diperbarui");
+    } else {
+      const dupe = all.some((c) => c.jenis === jenis && normName(c.nama) === normName(nama));
+      const rec = { id: "CT-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), jenis, ...KONTAK_EMPTY, ...edit, nama };
+      persist([...all, rec]);
+      flash(dupe ? "✓ Ditambah — ⚠️ nama mirip sudah ada" : "✓ Kontak ditambah");
+    }
+    setEdit(null);
+  };
+  const del = (c) => { if (!window.confirm(`Hapus kontak "${c.nama}"?`)) return; persist(all.filter((x) => x.id !== c.id)); flash("🗑️ Kontak dihapus"); };
+
+  const importPelanggan = async () => {
+    setBusy(true);
+    try {
+      const r = await axios.get(`${API}/admin/orders`, { headers, params: { limit: 500 } });
+      const orders = r.data?.items || [];
+      const existing = new Set(all.filter((c) => c.jenis === "pelanggan").map((c) => normName(c.nama)));
+      const seen = {};
+      orders.forEach((o) => {
+        const nm = (o.customer_nama || "").trim(); if (!nm) return;
+        const k = normName(nm); if (!k || existing.has(k)) return;
+        const cur = seen[k];
+        if (!cur) seen[k] = { nama: nm, no_hp: (o.customer_hp || "").trim(), email: (o.customer_email || "").trim() };
+        else { if (nm.length > cur.nama.length) cur.nama = nm; if (!cur.no_hp) cur.no_hp = (o.customer_hp || "").trim(); if (!cur.email) cur.email = (o.customer_email || "").trim(); }
+      });
+      const add = Object.values(seen).map((v) => ({ id: "CT-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), jenis: "pelanggan", ...KONTAK_EMPTY, ...v }));
+      if (add.length) persist([...all, ...add]);
+      flash(add.length ? `✓ ${add.length} pelanggan ditarik dari PO` : "Semua pelanggan sudah ada");
+    } catch { flash("Gagal menarik dari PO"); } finally { setBusy(false); }
+  };
+  const importSupplier = async () => {
+    setBusy(true);
+    try {
+      const r = await axios.get(`${API}/admin/suppliers`, { headers });
+      const sups = r.data?.items || [];
+      const existing = new Set(all.filter((c) => c.jenis === "supplier").map((c) => normName(c.nama)));
+      const add = [];
+      sups.forEach((s) => { const nm = (s.nama || "").trim(); const k = normName(nm); if (!nm || existing.has(k)) return; existing.add(k); add.push({ id: "CT-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), jenis: "supplier", ...KONTAK_EMPTY, nama: nm, no_hp: (s.no_hp || "").trim(), catatan: (s.jenis || "").trim() }); });
+      if (add.length) persist([...all, ...add]);
+      flash(add.length ? `✓ ${add.length} supplier ditarik` : "Semua supplier sudah ada");
+    } catch { flash("Gagal menarik supplier"); } finally { setBusy(false); }
+  };
+
+  const countP = all.filter((c) => c.jenis === "pelanggan").length;
+  const countS = all.filter((c) => c.jenis === "supplier").length;
+
+  return (
+    <div style={{ maxWidth: 980, margin: "0 auto" }}>
+      {/* Tabs jenis */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        <button className={`adm-btn adm-btn-sm ${jenis === "pelanggan" ? "adm-btn-blue" : "adm-btn-ghost"}`} onClick={() => setJenis("pelanggan")} data-testid="kontak-tab-pelanggan">👤 Pelanggan ({countP})</button>
+        <button className={`adm-btn adm-btn-sm ${jenis === "supplier" ? "adm-btn-blue" : "adm-btn-ghost"}`} onClick={() => setJenis("supplier")} data-testid="kontak-tab-supplier">🌿 Supplier ({countS})</button>
+      </div>
+
+      {/* Toolbar */}
+      <div className="adm-card" style={{ padding: 12, marginBottom: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <input type="text" className="adm-input" style={{ flex: 1, minWidth: 180 }} placeholder="Cari nama, perusahaan, HP, email…" value={search} onChange={(e) => setSearch(e.target.value)} data-testid="kontak-search" />
+        <button className="adm-btn adm-btn-sm adm-btn-gold" onClick={() => setEdit({ ...KONTAK_EMPTY })} data-testid="kontak-add">+ Tambah Kontak</button>
+        {jenis === "pelanggan"
+          ? <button className="adm-btn adm-btn-sm" onClick={importPelanggan} disabled={busy} data-testid="kontak-import">⬇️ Tarik dari PO</button>
+          : <button className="adm-btn adm-btn-sm" onClick={importSupplier} disabled={busy} data-testid="kontak-import">⬇️ Tarik dari Supplier</button>}
+      </div>
+
+      {/* Notif dobel */}
+      {dupGroups.length > 0 && (
+        <div className="t360-fin-err" style={{ marginBottom: 12, background: "var(--gold-bg)", borderColor: "var(--gold-bd)", color: "var(--gold-xl)" }} data-testid="kontak-dup-warn">
+          ⚠️ Ada {dupGroups.length} kemungkinan kontak dobel: {dupGroups.map((g) => `"${g[0].nama}" (${g.length}×)`).join(", ")}. Cek & hapus yang duplikat biar rapi.
+        </div>
+      )}
+
+      {/* Tabel */}
+      {list.length === 0 ? (
+        <div className="adm-empty"><div style={{ fontWeight: 700, marginBottom: 6, color: "var(--text-2)" }}>Belum ada {jenis === "pelanggan" ? "pelanggan" : "supplier"}</div><div>Klik "Tambah Kontak" atau "{jenis === "pelanggan" ? "Tarik dari PO" : "Tarik dari Supplier"}".</div></div>
+      ) : (
+        <div className="adm-card" style={{ padding: 0, overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ textAlign: "left", color: "var(--text-3)", fontSize: 11.5, textTransform: "uppercase" }}>
+                <th style={{ padding: "10px 12px" }}>Nama</th>
+                <th style={{ padding: "10px 12px" }}>Perusahaan</th>
+                <th style={{ padding: "10px 12px" }}>No. HP</th>
+                <th style={{ padding: "10px 12px" }}>Email</th>
+                <th style={{ padding: "10px 12px" }}>Alamat</th>
+                <th style={{ padding: "10px 12px", textAlign: "right" }}>Aksi</th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((c) => {
+                const isDup = dupGroups.some((g) => g.some((x) => x.id === c.id));
+                return (
+                  <tr key={c.id} style={{ borderTop: "1px solid var(--line)" }} data-testid={`kontak-row-${c.id}`}>
+                    <td style={{ padding: "10px 12px", fontWeight: 700, color: "var(--text)" }}>{c.nama}{isDup && <span title="Kemungkinan dobel" style={{ marginLeft: 6 }}>⚠️</span>}</td>
+                    <td style={{ padding: "10px 12px", color: "var(--text-2)" }}>{c.perusahaan || "—"}</td>
+                    <td style={{ padding: "10px 12px", color: "var(--text-2)" }}>{c.no_hp || "—"}</td>
+                    <td style={{ padding: "10px 12px", color: "var(--text-2)" }}>{c.email || "—"}</td>
+                    <td style={{ padding: "10px 12px", color: "var(--text-2)", maxWidth: 220, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.alamat || "—"}</td>
+                    <td style={{ padding: "10px 12px", textAlign: "right", whiteSpace: "nowrap" }}>
+                      <button className="adm-btn adm-btn-sm adm-btn-ghost" onClick={() => setEdit(c)}>✏️</button>{" "}
+                      <button className="adm-btn adm-btn-sm adm-btn-danger" onClick={() => del(c)} data-testid={`kontak-del-${c.id}`}>🗑️ Hapus</button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Modal tambah/edit */}
+      {edit && (
+        <div className="adm-modal-bg" onClick={() => setEdit(null)}>
+          <div className="adm-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 460 }}>
+            <div className="adm-modal-head">
+              <div className="adm-modal-title">{edit.id ? "✏️ Edit Kontak" : "+ Tambah Kontak"} · {jenis === "pelanggan" ? "Pelanggan" : "Supplier"}</div>
+              <button className="adm-modal-close" onClick={() => setEdit(null)} aria-label="Tutup">✕</button>
+            </div>
+            <div className="adm-modal-body" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {[["nama", "Nama *", "PT Transkon Jaya, TBK"], ["perusahaan", "Nama Perusahaan", "opsional"], ["no_hp", "No. Handphone", "0812…"], ["email", "Email", "opsional"], ["alamat", "Alamat", "opsional"], ["catatan", "Catatan", "opsional"]].map(([k, lbl, ph]) => (
+                <label key={k}>
+                  <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", fontWeight: 700, marginBottom: 4 }}>{lbl}</span>
+                  {k === "alamat" || k === "catatan"
+                    ? <textarea className="adm-input" rows={2} value={edit[k] || ""} placeholder={ph} onChange={(e) => setEdit({ ...edit, [k]: e.target.value })} data-testid={`kontak-f-${k}`} />
+                    : <input type="text" className="adm-input" value={edit[k] || ""} placeholder={ph} onChange={(e) => setEdit({ ...edit, [k]: e.target.value })} data-testid={`kontak-f-${k}`} />}
+                </label>
+              ))}
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "12px 16px" }}>
+              <button className="adm-btn adm-btn-sm adm-btn-ghost" onClick={() => setEdit(null)}>Batal</button>
+              <button className="adm-btn adm-btn-sm adm-btn-gold" onClick={saveEdit} data-testid="kontak-save">Simpan</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {toast && <div className="adm-toast" data-testid="kontak-toast">{toast}</div>}
+    </div>
+  );
 }
 
 /* ════════════════════════════════════════
