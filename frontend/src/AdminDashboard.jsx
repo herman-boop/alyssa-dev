@@ -2561,6 +2561,7 @@ function InvoiceModal({ order, headers, onClose, onPrint }) {
   const [taxInclusive, setTaxInclusive] = useState(false); // true = harga SUDAH termasuk 1.1% (pajak dipecah dari dalam)
   const [withPph23, setWithPph23] = useState(true); // potong PPh 23 (2%) dari DPP
   const [jatuhTempo, setJatuhTempo] = useState(todayIso);
+  const [tanggalInvoice, setTanggalInvoice] = useState(todayIso); // tanggal di invoice (bisa disamain dgn tgl pajak)
   const [metode, setMetode] = useState("Cash on Delivery");
   const [noInvoiceManual, setNoInvoiceManual] = useState(""); // No. Invoice manual (opsional) — samain dgn faktur pajak yg sudah terbit
   const [pesan, setPesan] = useState("");
@@ -2614,7 +2615,7 @@ function InvoiceModal({ order, headers, onClose, onPrint }) {
       .map(({ r, u }) => ({ nama: isCargo ? "Jasa Pengiriman Cargo" : "Jasa Pengiriman", ket: unitKet(u), qty: 1, harga: hargaNum(r.harga) }));
     if (!lines.length) return;
     // Buka jendela cetak DULU di dalam gesture klik (kalau di-await, mobile blokir popup).
-    onPrint(lines, withTax, { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23, no_invoice: noInvoiceManual.trim() || undefined });
+    onPrint(lines, withTax, { jatuhTempo, tanggalInvoice, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23, no_invoice: noInvoiceManual.trim() || undefined });
     // Tandai unit sudah diinvoice di belakang layar (best-effort).
     const ids = rows.filter((r) => r.checked && hargaNum(r.harga) > 0 && r.unit_id !== "legacy" && r.unit_id !== "cargo").map((r) => r.unit_id);
     if (ids.length && headers) {
@@ -2666,6 +2667,10 @@ function InvoiceModal({ order, headers, onClose, onPrint }) {
             })}
           </div>
           <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+            <label style={{ flex: 1 }}>
+              <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", marginBottom: 5, fontWeight: 700 }}>Tanggal Invoice</span>
+              <input type="date" className="adm-input" value={tanggalInvoice} onChange={(e) => setTanggalInvoice(e.target.value)} data-testid="adm-invoice-tanggal" />
+            </label>
             <label style={{ flex: 1 }}>
               <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", marginBottom: 5, fontWeight: 700 }}>Jatuh Tempo</span>
               <input type="date" className="adm-input" value={jatuhTempo} onChange={(e) => setJatuhTempo(e.target.value)} data-testid="adm-invoice-tempo" />
@@ -3372,7 +3377,7 @@ async function printInvoiceDoc(lines, withTax, extra) {
   const fRp = (n) => n.toLocaleString("id-ID") + ",00";
   const fmtTgl = (iso) => { if (!iso) return "—"; const [y, m, d] = iso.split("-"); return `${d}-${m}-${y}`; };
   const todayIso = new Date().toISOString().slice(0, 10);
-  const tgl = fmtTgl(todayIso);
+  const tgl = fmtTgl(extra.tanggalInvoice || todayIso); // pakai tanggal input (biar bisa samain dgn tgl pajak), fallback hari ini
   const noInvoice = extra.no_invoice || await nextDocNo("invoice", "INV"); // nomor auto-increment
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${noInvoice}</title>
@@ -3886,6 +3891,7 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
   const [taxInclusive, setTaxInclusive] = useState(false); // true = harga SUDAH termasuk 1.1%
   const [withPph23, setWithPph23] = useState(true); // potong PPh 23 (2%) dari DPP
   const [jatuhTempo, setJatuhTempo] = useState(todayIso);
+  const [tanggalInvoice, setTanggalInvoice] = useState(todayIso); // tanggal di invoice (bisa disamain dgn tgl pajak)
   const [metode, setMetode] = useState("Cash on Delivery");
   const [noInvoiceManual, setNoInvoiceManual] = useState(""); // No. Invoice manual (opsional)
   const [pesan, setPesan] = useState("");
@@ -3927,7 +3933,7 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
     if (!lines.length) { alert("Isi harga minimal 1 unit dulu."); return; }
     const orderIds = Array.from(new Set(rows.map((r) => r.order_id).filter(Boolean)));
     const cust = billTo.trim() || (customers.length === 1 ? customers[0] : `${customers.length} customer`);
-    const extra = { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23, customer_nama: cust, order_id: orderIds.join(", "), no_invoice: noInvoiceManual.trim() || undefined };
+    const extra = { jatuhTempo, tanggalInvoice, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23, customer_nama: cust, order_id: orderIds.join(", "), no_invoice: noInvoiceManual.trim() || undefined };
     const noInv = await printInvoiceDoc(lines, withTax, extra); // nomor auto-increment dari server
     saveDocHistory({
       jenis: "invoice", no_dokumen: noInv, customer: cust,
@@ -3984,6 +3990,10 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
             })}
           </div>
           <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+            <label style={{ flex: 1 }}>
+              <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", marginBottom: 5, fontWeight: 700 }}>Tanggal Invoice</span>
+              <input type="date" className="adm-input" value={tanggalInvoice} onChange={(e) => setTanggalInvoice(e.target.value)} data-testid="adm-invgab-tanggal" />
+            </label>
             <label style={{ flex: 1 }}>
               <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", marginBottom: 5, fontWeight: 700 }}>Jatuh Tempo</span>
               <input type="date" className="adm-input" value={jatuhTempo} onChange={(e) => setJatuhTempo(e.target.value)} />
