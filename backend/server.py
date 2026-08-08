@@ -1228,6 +1228,44 @@ async def _merge_task_media(trip_id: str, view: dict):
     view["album"] = album
 
 
+async def _merge_task_checkpoints(trip_id: str, view: dict):
+    """Gabungin CHECKPOINT dari link petugas (collection leg_checkpoints) ke
+    daily_checkpoints view — biar panel 'DRIVER CHECKPOINT', riwayat, & peta GPS
+    di halaman tracking ikut nampilin checkpoint yang dikirim driver via link
+    tugas (bukan cuma checkpoint app driver lama)."""
+    if not trip_id:
+        return
+    daily = list(view.get("daily_checkpoints") or [])
+    seen = {c.get("id") or c.get("checkpoint_id") for c in daily if (c.get("id") or c.get("checkpoint_id"))}
+    added = False
+    async for c in db.leg_checkpoints.find({"trip_id": trip_id}).sort("ts", 1):
+        cid = c.get("checkpoint_id")
+        if cid and cid in seen:
+            continue
+        item = {
+            "id": cid,
+            "ts": c.get("ts"),
+            "status": c.get("jenis") or "Checkpoint",   # dipakai sbg label jenis di UI
+            "keterangan": c.get("catatan") or "",
+            "url": c.get("url"),
+            "reported_by": c.get("petugas_nama") or "",
+        }
+        if c.get("lat") is not None and c.get("lng") is not None:
+            item["lat"] = c.get("lat"); item["lng"] = c.get("lng")
+            if c.get("acc") is not None:
+                item["acc"] = c.get("acc")
+        if c.get("alamat"):
+            item["alamat"] = c.get("alamat")
+        daily.append(item)
+        if cid:
+            seen.add(cid)
+        added = True
+    if added:
+        daily.sort(key=lambda x: x.get("ts") or "")
+        view["daily_checkpoints"] = daily
+        view["daily_count"] = len(daily)
+
+
 @api_router.get("/public/trips/{trip_id}")
 async def public_trip(trip_id: str):
     """Read-only view untuk pelanggan. Hanya field aman yang ter-expose.
@@ -1245,6 +1283,7 @@ async def public_trip(trip_id: str):
         view = _trip_public_view(doc)
         real_trip_id = doc.get("trip_id")
     await _merge_task_media(real_trip_id, view)
+    await _merge_task_checkpoints(real_trip_id, view)
     return view
 
 
