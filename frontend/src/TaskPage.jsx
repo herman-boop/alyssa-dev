@@ -59,22 +59,55 @@ export default function TaskPage() {
     navigator.geolocation.getCurrentPosition(
       (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy }),
       () => resolve(null),
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 15000 }
     );
   });
+
+  // ── Watermark WAJIB & seragam di SEMUA foto link driver ──
+  // Setiap foto (album maupun checkpoint) selalu dicap: No. Pol unit + tanggal
+  // (dd/mm/yyyy) + jam + lokasi (alamat/GPS). Head opsional = jenis checkpoint.
+  const stampNopol = () => {
+    const u = (task?.units || [])[0] || {};
+    return u.nopol || u.no_rangka || "-";
+  };
+  const stampDateTime = () => {
+    const now = new Date();
+    const tgl = now.toLocaleDateString("id-ID", { day: "2-digit", month: "2-digit", year: "numeric" });
+    const jam = now.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    return `${tgl} · ${jam}`;
+  };
+  const buildStampLines = (head, geo, alamat) => {
+    const loc = (alamat && alamat !== "Lokasi tidak tersedia" && alamat !== "Lokasi terekam")
+      ? alamat
+      : (geo ? `${geo.lat.toFixed(5)}, ${geo.lng.toFixed(5)}` : "Lokasi GPS tidak aktif");
+    const lines = [];
+    if (head) lines.push(head);
+    lines.push(`🚚 ${stampNopol()}`);
+    lines.push(`📅 ${stampDateTime()}`);
+    lines.push(`📍 ${loc}`);
+    return lines;
+  };
 
   /* ── ALBUM: 1 tombol kamera → semua foto masuk album (geotag) ── */
   const onAlbumPick = async (files) => {
     const arr = Array.from(files || []);
     if (!arr.length) return;
     setBusy(true);
+    flash("Mengambil lokasi GPS…");
     const geo = await getGeo();
+    if (!geo) {
+      setBusy(false);
+      flash("⚠️ Aktifkan izin Lokasi (GPS) dulu — lokasi WAJIB tercetak di foto");
+      if (albumInput.current) albumInput.current.value = "";
+      return;
+    }
+    let alamat = "";
+    try { alamat = await reverseGeocode(geo.lat, geo.lng); } catch { alamat = ""; }
     let okc = 0;
     for (const file of arr) {
       let up = file;
       try {
-        const lines = [new Date().toLocaleString("id-ID"), geo ? `${geo.lat.toFixed(5)}, ${geo.lng.toFixed(5)}` : "Lokasi tidak tersedia"];
-        up = await stampPhoto(file, lines);
+        up = await stampPhoto(file, buildStampLines("", geo, alamat));
       } catch { up = file; }
       try {
         const fd = new FormData();
@@ -102,14 +135,22 @@ export default function TaskPage() {
   };
   const saveCheckpoint = async () => {
     if (!cp?.jenis) { flash("Pilih jenis checkpoint dulu"); return; }
+    // Lokasi WAJIB. Kalau GPS belum kebaca, coba ambil ulang; kalau tetap gagal, stop.
+    let geo = cp.geo, alamat = cp.alamat;
+    if (!geo) {
+      flash("Mengambil lokasi GPS…");
+      geo = await getGeo();
+      if (geo) { try { alamat = await reverseGeocode(geo.lat, geo.lng); } catch {} setCp((c) => c ? { ...c, geo, alamat: alamat || "Lokasi terekam" } : c); }
+    }
+    if (!geo) { flash("⚠️ Aktifkan izin Lokasi (GPS) dulu — lokasi WAJIB di checkpoint"); return; }
     setBusy(true);
     try {
       const fd = new FormData();
       fd.append("jenis", cp.jenis);
       fd.append("catatan", cp.catatan || "");
-      fd.append("alamat", cp.alamat && cp.alamat !== "Lokasi tidak tersedia" ? cp.alamat : "");
-      if (cp.geo) { fd.append("lat", cp.geo.lat); fd.append("lng", cp.geo.lng); fd.append("acc", cp.geo.acc); }
-      if (cp.file) { let up = cp.file; try { up = await stampPhoto(cp.file, [cp.jenis, new Date().toLocaleString("id-ID")]); } catch {} fd.append("foto", up); }
+      fd.append("alamat", alamat && alamat !== "Lokasi tidak tersedia" ? alamat : "");
+      fd.append("lat", geo.lat); fd.append("lng", geo.lng); if (geo.acc != null) fd.append("acc", geo.acc);
+      if (cp.file) { let up = cp.file; try { up = await stampPhoto(cp.file, buildStampLines(cp.jenis, geo, alamat)); } catch {} fd.append("foto", up); }
       const r = await axios.post(`${API}/public/task/${token}/checkpoint`, fd, { headers: { "Content-Type": "multipart/form-data" } });
       setTask(r.data); setCp(null); flash("✓ Checkpoint tersimpan");
     } catch (e) { flash(e?.response?.data?.detail || "Gagal simpan checkpoint"); }
