@@ -209,7 +209,9 @@ function PinScreen({ pin, setPin, doLogin, authing, authError }) {
 function Dashboard({ pin, onLogout }) {
   const headers = useMemo(() => ({ "X-Admin-Pin": pin }), [pin]);
   const [dark, setDark] = useState(() => document.documentElement.getAttribute("data-theme") === "dark");
-  const [activeTab, setActiveTab] = useState("pesanan");
+  // Default: HP → Beranda (home mobile ala aplikasi), desktop → Dashboard/Pesanan.
+  const [activeTab, setActiveTab] = useState(() => (typeof window !== "undefined" && window.innerWidth <= 640) ? "beranda" : "pesanan");
+  const [createSheet, setCreateSheet] = useState(false);
   const [stats, setStats] = useState(null);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -219,6 +221,7 @@ function Dashboard({ pin, onLogout }) {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [driverFilter, setDriverFilter] = useState("");
+  const [custFilter, setCustFilter] = useState(""); // pilih konsumen dari dropdown (nggak usah ngetik)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [convertModal, setConvertModal] = useState(null);
@@ -360,11 +363,19 @@ function Dashboard({ pin, onLogout }) {
     () => Array.from(new Set(orders.map((o) => o.nama_driver).filter(Boolean))).sort(),
     [orders]
   );
-  const visibleOrders = driverFilter ? orders.filter((o) => o.nama_driver === driverFilter) : orders;
-  const anyFilterActive = !!(search || statusFilter || dateFrom || dateTo || driverFilter);
-  const resetFilters = () => { setSearch(""); setStatusFilter(""); setDateFrom(""); setDateTo(""); setDriverFilter(""); };
+  const customerOptions = useMemo(
+    () => Array.from(new Set(orders.map((o) => o.customer_nama).filter(Boolean))).sort((a, b) => a.localeCompare(b, "id")),
+    [orders]
+  );
+  const visibleOrders = orders.filter((o) =>
+    (!driverFilter || o.nama_driver === driverFilter) &&
+    (!custFilter || o.customer_nama === custFilter)
+  );
+  const anyFilterActive = !!(search || statusFilter || dateFrom || dateTo || driverFilter || custFilter);
+  const resetFilters = () => { setSearch(""); setStatusFilter(""); setDateFrom(""); setDateTo(""); setDriverFilter(""); setCustFilter(""); };
 
   const SECTION_META = {
+    beranda:      { title: "Beranda", sub: "Ringkasan cepat operasional pengiriman" },
     pesanan:      { title: "Dashboard", sub: "Ringkasan semua aktivitas pengiriman kendaraan" },
     kalkulator:   { title: "Kalkulator HPP", sub: "Hitung harga pokok & margin per rute" },
     drivers:      { title: "Driver", sub: "Kelola data driver & dokumen" },
@@ -392,6 +403,7 @@ function Dashboard({ pin, onLogout }) {
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} open={sidebarOpen} onNavigate={() => setSidebarOpen(false)} />
 
       <div className="adm-main" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+        {activeTab !== "beranda" && (
         <TopHeader
           title={section.title}
           sub={section.sub}
@@ -406,8 +418,25 @@ function Dashboard({ pin, onLogout }) {
           dark={dark}
           onToggleTheme={() => { toggleTheme(); setDark((d) => !d); }}
         />
+        )}
 
-        <div className="adm-content-wrap" style={{ padding: "22px 28px 40px", maxWidth: 1180, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+        {activeTab === "beranda" && (
+          <MobileHome
+            stats={stats}
+            orders={orders}
+            onNav={setActiveTab}
+            onTrip={(st) => { setStatusFilter(st && typeof st === "string" ? st : "ON_TRIP"); setActiveTab("pesanan"); }}
+            onSearchSubmit={(q) => { setSearch(q); setActiveTab("pesanan"); }}
+            onOpenSidebar={() => setSidebarOpen(true)}
+            onOpenJadwalGab={() => setShowJadwalGab(true)}
+            onOpenInvoiceGab={() => setShowInvoiceGab(true)}
+            onOpenOrder={(o) => { setSearch(o.order_id); setActiveTab("pesanan"); }}
+            onOpenSettings={() => setActiveTab("pengaturan")}
+            flash={flash}
+          />
+        )}
+
+        <div className="adm-content-wrap" style={{ padding: "22px 28px 40px", maxWidth: 1180, width: "100%", margin: "0 auto", boxSizing: "border-box", display: activeTab === "beranda" ? "none" : undefined }}>
 
       {activeTab === "kalkulator" && (
         <div style={{ maxWidth: 900, margin: "0 auto" }}>
@@ -546,6 +575,16 @@ function Dashboard({ pin, onLogout }) {
         </div>
         <select
           className="adm-status-sel"
+          value={custFilter}
+          onChange={(e) => setCustFilter(e.target.value)}
+          data-testid="adm-customer-filter"
+          title="Pilih konsumen"
+        >
+          <option value="">Semua Konsumen</option>
+          {customerOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select
+          className="adm-status-sel"
           value={driverFilter}
           onChange={(e) => setDriverFilter(e.target.value)}
           data-testid="adm-driver-filter"
@@ -559,6 +598,33 @@ function Dashboard({ pin, onLogout }) {
           </button>
         )}
       </section>
+
+      {/* ── Bar pilih-cepat: 1 klik masukin SEMUA unit di daftar ini ke keranjang jadwal.
+           Gabung sama search customer → tarik semua unit 1 pelanggan tanpa centang satu-satu. ── */}
+      {!loading && !error && visibleOrders.length > 0 && (() => {
+        const allUnits = visibleOrders.flatMap((o) => (Array.isArray(o.units) ? o.units : []));
+        const total = allUnits.length;
+        const allSel = total > 0 && allUnits.every((u) => cartHas(u.unit_id));
+        const setAll = (add) => setJadwalCart((c) => {
+          const visIds = new Set(allUnits.map((u) => u.unit_id));
+          const kept = c.filter((x) => !visIds.has(x.unit?.unit_id));
+          if (!add) return kept;
+          const rows = [];
+          visibleOrders.forEach((o) => (Array.isArray(o.units) ? o.units : []).forEach((unit) =>
+            rows.push({ order_id: o.order_id, customer_nama: o.customer_nama, asal_kota: o.asal_kota, tujuan_kota: o.tujuan_kota, unit })));
+          return [...kept, ...rows];
+        });
+        return (
+          <div className="adm-card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "10px 14px", marginBottom: 10, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 12.5, color: "var(--text-mute)", fontWeight: 700 }}>
+              {search.trim() ? <>Hasil "{search.trim()}": </> : null}{visibleOrders.length} PO · {total} unit
+            </div>
+            <button className="adm-btn adm-btn-sm adm-btn-gold" onClick={() => setAll(!allSel)} data-testid="adm-selectall-units">
+              {allSel ? "✕ Batalkan pilih semua" : `☑️ Pilih semua unit → keranjang jadwal (${total})`}
+            </button>
+          </div>
+        );
+      })()}
 
       {/* ── List ── */}
       <section className="adm-list" data-testid="adm-list">
@@ -668,7 +734,24 @@ function Dashboard({ pin, onLogout }) {
 
       </>}
         </div>
+
+        <BottomNav
+          activeTab={activeTab}
+          onNav={setActiveTab}
+          onCreate={() => setCreateSheet(true)}
+          onTrip={() => { setStatusFilter("ON_TRIP"); setActiveTab("pesanan"); }}
+        />
       </div>
+
+      {createSheet && (
+        <CreateSheet
+          onClose={() => setCreateSheet(false)}
+          onJadwalGab={() => setShowJadwalGab(true)}
+          onInvoiceGab={() => setShowInvoiceGab(true)}
+          onNav={setActiveTab}
+          flash={flash}
+        />
+      )}
     </div>
   );
 }
@@ -686,15 +769,204 @@ const TONE = {
 };
 const STATUS_TONE = { NEW: "orange", DISPATCHED: "blue", ON_TRIP: "purple", DELIVERED: "green", CANCELLED: "red" };
 const SIDEBAR_ICON = {
+  beranda: "🏠",
   pesanan: "▦", "route-leg": "🧭", drivers: "👤", supplier: "🌿", koordinator: "🧑‍💼",
   kendaraan: "🚙", dokumen: "📄", histori: "🗂️", laporan: "📑", kalkulator: "🧮", selisih: "📊",
   kompensasi: "🔄", "minta-harga": "📩", pengaturan: "⚙️", "pembayaran-vendor": "🏢",
 };
 
 /* ════════════════════════════════════════
+   MOBILE HOME (Beranda) — dashboard mobile ala aplikasi logistics premium.
+   HANYA UI/UX baru: semua data dari props existing (stats, orders), semua aksi
+   nyambung ke tab / modal yang sudah ada. Tidak menyentuh backend/logic.
+════════════════════════════════════════ */
+function greetingByHour() {
+  const h = new Date().getHours();
+  if (h < 11) return "Selamat pagi";
+  if (h < 15) return "Selamat siang";
+  if (h < 19) return "Selamat sore";
+  return "Selamat malam";
+}
+
+function MobileHome({ stats, orders, onNav, onTrip, onSearchSubmit, onOpenSidebar, onOpenJadwalGab, onOpenInvoiceGab, onOpenOrder, flash, onOpenSettings }) {
+  const [q, setQ] = useState("");
+  const active = (orders || []).filter((o) => o.status === "ON_TRIP");
+  const activeTop = active.slice(0, 3);
+
+  const QUICK = [
+    { ic: "🚚", label: "Pesanan", go: () => onNav("pesanan") },
+    { ic: "📦", label: "Trip", go: onTrip },
+    { ic: "🧾", label: "Invoice", go: () => onNav("histori") },
+    { ic: "🔗", label: "Tracking", go: onTrip },
+    { ic: "👨‍✈️", label: "Driver", go: () => onNav("drivers") },
+    { ic: "🚢", label: "Kapal", go: () => onNav("supplier") },
+    { ic: "📄", label: "Dokumen", go: () => onNav("dokumen") },
+    { ic: "•••", label: "Lainnya", go: onOpenSidebar },
+  ];
+  const RINGKAS = stats ? [
+    { label: "Total", value: stats.total || 0, tone: "#8b98ab", onClick: () => onNav("pesanan") },
+    { label: "Baru", value: stats.by_status?.NEW || 0, tone: "#EF9F27", onClick: () => onTrip("NEW") },
+    { label: "Dispatched", value: stats.by_status?.DISPATCHED || 0, tone: "#5b8def", onClick: () => onTrip("DISPATCHED") },
+    { label: "On-Trip", value: stats.by_status?.ON_TRIP || 0, tone: "#a371f7", onClick: () => onTrip("ON_TRIP") },
+    { label: "Selesai", value: stats.by_status?.DELIVERED || 0, tone: "#3fb950", onClick: () => onTrip("DELIVERED") },
+    { label: "Batal", value: stats.by_status?.CANCELLED || 0, tone: "#f85149", onClick: () => onTrip("CANCELLED") },
+  ] : [];
+
+  const submitSearch = (e) => { e.preventDefault(); onSearchSubmit(q.trim()); };
+
+  return (
+    <div className="mh">
+      {/* Header */}
+      <div className="mh-header">
+        <div className="mh-head-row">
+          <div className="mh-brand">
+            <Logo size={34} />
+            <div>
+              <div className="mh-brand-name">ALYSSA AUTO LOGISTIK</div>
+              <div className="mh-greet">{greetingByHour()}, Admin</div>
+            </div>
+          </div>
+          <div className="mh-head-icons">
+            <button className="mh-iconbtn" title="Notifikasi" onClick={() => onNav("histori")}>🔔</button>
+            <button className="mh-iconbtn" title="Pengaturan" onClick={onOpenSettings}>⚙️</button>
+          </div>
+        </div>
+        <div className="mh-sub">Kelola pengiriman kendaraan dengan lebih mudah</div>
+        <form className="mh-search" onSubmit={submitSearch}>
+          <span className="mh-search-ico">🔎</span>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cari No. Resi / Customer / Unit / No. Rangka"
+            enterKeyHint="search" data-testid="mh-search" />
+        </form>
+      </div>
+
+      {/* Akses Cepat */}
+      <section className="mh-sec">
+        <div className="mh-sec-hd"><span className="mh-sec-title">Akses Cepat</span>
+          <button className="mh-sec-act" onClick={onOpenSidebar}>Atur</button></div>
+        <div className="mh-quick-grid">
+          {QUICK.map((it) => (
+            <button key={it.label} className="mh-quick" onClick={it.go} data-testid={`mh-quick-${it.label}`}>
+              <span className="mh-quick-ic">{it.ic}</span>
+              <span className="mh-quick-lbl">{it.label}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {/* Ringkasan Pengiriman */}
+      <section className="mh-sec">
+        <div className="mh-sec-hd"><span className="mh-sec-title">Ringkasan Pengiriman</span></div>
+        <div className="mh-ring-grid">
+          {RINGKAS.map((r) => (
+            <button key={r.label} className="mh-ring" onClick={r.onClick}>
+              <span className="mh-ring-val" style={{ color: r.tone }}>{r.value}</span>
+              <span className="mh-ring-lbl">{r.label}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {/* Pengiriman Aktif */}
+      <section className="mh-sec">
+        <div className="mh-sec-hd"><span className="mh-sec-title">Pengiriman Aktif</span>
+          {active.length > 0 && <button className="mh-sec-act" onClick={onTrip} data-testid="mh-see-all">Lihat Semua</button>}</div>
+        {activeTop.length === 0 ? (
+          <div className="mh-empty">🚛 Belum ada pengiriman yang sedang berjalan.</div>
+        ) : activeTop.map((o) => {
+          const veh = `${o.vehicle_type || (o.units?.[0]?.vehicle_type) || "Kendaraan"}${o.tipe_model ? " " + o.tipe_model : ""}`.trim();
+          return (
+            <button key={o.order_id} className="mh-ship" onClick={() => onOpenOrder(o)} data-testid={`mh-ship-${o.order_id}`}>
+              <div className="mh-ship-top">
+                <div className="mh-ship-veh">🚛 {veh}</div>
+                <span className="mh-ship-arrow">›</span>
+              </div>
+              <div className="mh-ship-cust">{o.customer_nama || "-"}</div>
+              <div className="mh-ship-route">{o.asal_kota || "?"} <span className="mh-ship-sep">→</span> {o.tujuan_kota || "?"}</div>
+              <ProgressTimeline order={o} />
+            </button>
+          );
+        })}
+      </section>
+
+      {/* Aksi Operasional */}
+      <section className="mh-sec">
+        <div className="mh-sec-hd"><span className="mh-sec-title">Aksi Operasional</span></div>
+        <button className="mh-act" onClick={async () => { const ok = await copyToClipboard(`${window.location.origin}/order`); flash(ok ? "✓ Link form pesanan disalin" : "Gagal menyalin"); }}>
+          <span className="mh-act-ic">🔗</span>
+          <span className="mh-act-body"><b>Link Form Pesanan</b><small>Bagikan ke customer</small></span>
+          <span className="mh-act-arrow">›</span>
+        </button>
+        <button className="mh-act" onClick={onOpenJadwalGab}>
+          <span className="mh-act-ic">📅</span>
+          <span className="mh-act-body"><b>Jadwal Gabungan</b><small>Atur beberapa unit sekaligus</small></span>
+          <span className="mh-act-arrow">›</span>
+        </button>
+        <button className="mh-act" onClick={onOpenInvoiceGab}>
+          <span className="mh-act-ic">🧾</span>
+          <span className="mh-act-body"><b>Invoice Gabungan</b><small>Tagih beberapa unit dalam 1 invoice</small></span>
+          <span className="mh-act-arrow">›</span>
+        </button>
+      </section>
+    </div>
+  );
+}
+
+/* Bottom navigation mobile — 5 item, tombol tengah "Buat". Desktop di-hide via CSS. */
+function BottomNav({ activeTab, onNav, onCreate, onTrip }) {
+  const items = [
+    { key: "beranda", ic: "🏠", label: "Beranda", go: () => onNav("beranda") },
+    { key: "pesanan", ic: "📦", label: "Pesanan", go: () => onNav("pesanan") },
+    { key: "__buat", ic: "＋", label: "Buat", center: true, go: onCreate },
+    { key: "__trip", ic: "🚚", label: "Trip", go: onTrip },
+    { key: "pengaturan", ic: "👤", label: "Akun", go: () => onNav("pengaturan") },
+  ];
+  return (
+    <nav className="adm-bottomnav" data-testid="adm-bottomnav">
+      {items.map((it) => it.center ? (
+        <button key={it.key} className="adm-bnav-center" onClick={it.go} data-testid="adm-bnav-buat">
+          <span className="adm-bnav-plus">{it.ic}</span>
+          <span className="adm-bnav-lbl">{it.label}</span>
+        </button>
+      ) : (
+        <button key={it.key} className={`adm-bnav-item${activeTab === it.key ? " active" : ""}`} onClick={it.go} data-testid={`adm-bnav-${it.key}`}>
+          <span className="adm-bnav-ic">{it.ic}</span>
+          <span className="adm-bnav-lbl">{it.label}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+/* Bottom-sheet "Buat" — aksi bikin cepat. */
+function CreateSheet({ onClose, onJadwalGab, onInvoiceGab, onNav, flash }) {
+  const items = [
+    { ic: "🔗", t: "Link Form Pesanan", s: "Salin & bagikan ke customer", go: async () => { const ok = await copyToClipboard(`${window.location.origin}/order`); flash(ok ? "✓ Link form pesanan disalin" : "Gagal menyalin"); onClose(); } },
+    { ic: "📅", t: "Jadwal Gabungan", s: "Gabung beberapa unit ke 1 jadwal", go: () => { onClose(); onJadwalGab(); } },
+    { ic: "🧾", t: "Invoice Gabungan", s: "Tagih beberapa unit dalam 1 invoice", go: () => { onClose(); onInvoiceGab(); } },
+    { ic: "📋", t: "Lihat Pesanan Baru", s: "Proses pesanan yang masuk", go: () => { onClose(); onNav("pesanan"); } },
+  ];
+  return createPortal(
+    <div className="adm-sheet-bg" onClick={onClose} data-testid="adm-create-sheet">
+      <div className="adm-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="adm-sheet-grip" />
+        <div className="adm-sheet-title">Buat / Aksi Cepat</div>
+        {items.map((it) => (
+          <button key={it.t} className="adm-sheet-item" onClick={it.go}>
+            <span className="adm-sheet-ic">{it.ic}</span>
+            <span className="adm-sheet-body"><b>{it.t}</b><small>{it.s}</small></span>
+            <span className="adm-act-arrow">›</span>
+          </button>
+        ))}
+        <button className="adm-btn adm-btn-ghost" style={{ width: "100%", marginTop: 8 }} onClick={onClose}>Tutup</button>
+      </div>
+    </div>, document.body);
+}
+
+/* ════════════════════════════════════════
    SIDEBAR
 ════════════════════════════════════════ */
 const SIDEBAR_PRIMARY = [
+  { key: "beranda", label: "Beranda" },
   { key: "pesanan", label: "Dashboard" },
   { key: "pesanan", label: "Pesanan" },
   { key: "route-leg", label: "Route Leg" },
@@ -1149,13 +1421,16 @@ function DuplicateVendorModal({ order, headers, onClose }) {
                     </div>
                   </label>
                   {r.checked && (
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8, marginLeft: 26 }}>
-                      <input className="adm-input" placeholder="Kota asal" value={r.asal}
-                        onChange={(e) => setRow(r.key, { asal: e.target.value })} data-testid={`adm-dupvendor-asal-${r.key}`} />
-                      <input className="adm-input" placeholder="Kota tujuan" value={r.tujuan}
-                        onChange={(e) => setRow(r.key, { tujuan: e.target.value })} data-testid={`adm-dupvendor-tujuan-${r.key}`} />
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8, marginLeft: 26 }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                        <input className="adm-input" placeholder="Kota asal" value={r.asal}
+                          onChange={(e) => setRow(r.key, { asal: e.target.value })} data-testid={`adm-dupvendor-asal-${r.key}`} />
+                        <input className="adm-input" placeholder="Kota tujuan" value={r.tujuan}
+                          onChange={(e) => setRow(r.key, { tujuan: e.target.value })} data-testid={`adm-dupvendor-tujuan-${r.key}`} />
+                      </div>
                       <input className="adm-input adm-mono" inputMode="numeric" placeholder="Harga vendor (Rp)" value={r.harga}
                         onChange={(e) => setRow(r.key, { harga: e.target.value.replace(/[^0-9]/g, "") })} data-testid={`adm-dupvendor-harga-${r.key}`} />
+                      {/* Catatan pindah ke bawah asal-tujuan & harga, full-width, tetap di blok unit ini */}
                       <input className="adm-input" placeholder="Catatan (opsional)" value={r.catatan}
                         onChange={(e) => setRow(r.key, { catatan: e.target.value })} data-testid={`adm-dupvendor-catatan-${r.key}`} />
                     </div>
@@ -1187,9 +1462,16 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
   const [showJadwal, setShowJadwal] = useState(false);
   const [showTrip360, setShowTrip360] = useState(false);
   const [showDupVendor, setShowDupVendor] = useState(false);
+  const [showSJ, setShowSJ] = useState(false); // modal input harga surat jalan
+  const [sjHargaDraft, setSjHargaDraft] = useState("");
+  const [sjNoPo, setSjNoPo] = useState(""); // No PO pelanggan (opsional) → tampil di surat jalan
+  const [sjPpn, setSjPpn] = useState(true);
+  const [sjPph, setSjPph] = useState(true);
+  const [sjTaxIncl, setSjTaxIncl] = useState(false); // true = harga SUDAH termasuk PPN 1.1%
   const albumFileRefs = useRef({});
 
   const units = Array.isArray(order.units) ? order.units : [];
+  const u0 = units[0] || {}; // 1 unit = 1 PO: master data kendaraan ada di unit, bukan field atas
   const uSum = order.unit_summary || null;
   const allUnitsSelected = units.length > 0 && units.every((u) => cartHas(u.unit_id));
 
@@ -1224,9 +1506,28 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
     setUploadingStage(null);
   };
 
-  const printSuratJalan = () => {
+  const printSuratJalan = (pricing = {}) => {
     const tgl = new Date().toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
     const noSurat = `AAL-${order.order_id?.slice(-6) || "000000"}`;
+    // Harga opsional di surat jalan.
+    // taxInclusive: harga yg diketik SUDAH termasuk PPN 1.1% → PPN dipecah dari dalam
+    //   (DPP = harga/1.011, PPN = harga − DPP, total sebelum PPh = harga).
+    // taxExclusive: DPP = harga, PPN 1.1% ditambah di atas harga.
+    // PPh 23 2% selalu dihitung dari DPP; Grand Total = (taxIncl ? harga : harga+PPN) − PPh.
+    const sjHarga = parseInt(String(pricing.harga || "").replace(/[^0-9]/g, ""), 10) || 0;
+    const sjTaxIncl = !!pricing.taxInclusive;
+    const sjDpp = (pricing.withTax && sjTaxIncl) ? Math.round(sjHarga / 1.011) : sjHarga;
+    const sjPpn = !pricing.withTax ? 0 : (sjTaxIncl ? sjHarga - sjDpp : Math.round(sjHarga * 0.011));
+    const sjPph = pricing.withPph23 ? Math.round(sjDpp * 0.02) : 0;
+    const sjTotal = (sjTaxIncl ? sjHarga : sjHarga + sjPpn) - sjPph;
+    const rp = (n) => "Rp " + (Number(n) || 0).toLocaleString("id-ID") + ",00";
+    const pricingHtml = sjHarga > 0 ? `
+      <div class="biaya-box">
+        <div class="biaya-row"><span>${pricing.withTax && sjTaxIncl ? "DPP (Dasar Pengenaan Pajak)" : "Biaya Pengiriman"}</span><span>${rp(pricing.withTax && sjTaxIncl ? sjDpp : sjHarga)}</span></div>
+        ${pricing.withTax ? `<div class="biaya-row"><span>PPN 1.1%${sjTaxIncl ? " (termasuk)" : ""}</span><span>${rp(sjPpn)}</span></div>` : ""}
+        ${pricing.withPph23 ? `<div class="biaya-row"><span>Potongan PPh 23 (2%)</span><span>- ${rp(sjPph)}</span></div>` : ""}
+        <div class="biaya-row biaya-total"><span>TOTAL</span><span>${rp(sjTotal)}</span></div>
+      </div>` : "";
     // M3 = P x L x T (cm) / 1.000.000 — dihitung otomatis dari dimensi yang diisi di form pesanan.
     const p = parseFloat(order.panjang), l = parseFloat(order.lebar), t = parseFloat(order.tinggi);
     const m3 = (p > 0 && l > 0 && t > 0) ? ((p * l * t) / 1_000_000).toFixed(3) : "";
@@ -1236,9 +1537,8 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
     const jmlColly = (order.jumlah_colly || "").trim() || "1";
     // 2 lembar identik ditumpuk 1 halaman A4 (lebar A4, tinggi A4/2 per lembar) biar sekali
     // cetak langsung dapet 2 rangkap (arsip kantor + tanda terima) tanpa buang kertas kosong.
-    const renderCopy = (copyLabel) => `
+    const renderCopy = () => `
     <div class="outer">
-      <div class="copy-tag">${copyLabel}</div>
       <!-- HEADER -->
       <div class="header">
         <div class="logo-box">
@@ -1265,8 +1565,8 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
           <div class="val">${order.customer_nama || "&nbsp;"}</div>
         </div>
         <div class="info-cell" style="flex:1">
-          <div class="lbl">Ref. PO / SL No.</div>
-          <div class="val">${order.order_id || "&nbsp;"}</div>
+          <div class="lbl">No. PO Pelanggan / Ref.</div>
+          <div class="val">${(pricing.noPo && pricing.noPo.trim()) ? pricing.noPo : (order.order_id || "&nbsp;")}</div>
         </div>
       </div>
 
@@ -1360,6 +1660,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
         Kerusakan/kehilangan yang disebabkan bukan karena kelalaian PT. Alyssa Auto Logistik tidak menjadi tanggung jawab perusahaan.
         &nbsp;|&nbsp; <i>Goods have been inspected and match the description above.</i>
       </div>
+      ${pricingHtml}
     </div>`;
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Surat Jalan ${noSurat}</title>
     <style>
@@ -1402,12 +1703,13 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
       .sign-space { height: 40px; }
       .sign-name { font-size: 9px; border-top: 1px solid #555; margin-top: 4px; padding-top: 2px; color: #333; }
       .catatan { padding: 6px 8px; border-top: 1px solid #000; font-size: 9px; color: #333; line-height: 1.5; }
+      .biaya-box { border-top: 2px solid #000; padding: 6px 8px; margin-left: auto; width: 46%; }
+      .biaya-row { display: flex; justify-content: space-between; font-size: 11px; padding: 2px 0; }
+      .biaya-total { border-top: 1px solid #000; margin-top: 3px; padding-top: 4px; font-weight: 900; font-size: 12px; }
       @media print { @page { margin: 0; size: A4 portrait; } body { padding: 0; } }
     </style></head><body>
     <div class="sheet">
-      <div class="copy-slot">${renderCopy("Lembar 1 — Arsip Kantor")}</div>
-      <div class="cutline"><span class="dash"></span>&nbsp;✂ potong di sini&nbsp;<span class="dash"></span></div>
-      <div class="copy-slot">${renderCopy("Lembar 2 — Tanda Terima")}</div>
+      <div class="copy-slot">${renderCopy()}</div>
     </div>
     <script>window.onload=()=>window.print()<\/script>
     </body></html>`;
@@ -1425,10 +1727,10 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
   const [editNama, setEditNama] = useState(false);
   const [namaDraft, setNamaDraft] = useState(order.nama_driver || "");
   const [editVehicle, setEditVehicle] = useState(false);
-  const [vtDraft, setVtDraft] = useState(order.vehicle_type || "");
-  const [nopolDraft, setNopolDraft] = useState(order.nopol || "");
+  const [vtDraft, setVtDraft] = useState(order.vehicle_type || u0.vehicle_type || "");
+  const [nopolDraft, setNopolDraft] = useState(order.nopol || u0.nopol || "");
   const [editRangka, setEditRangka] = useState(false);
-  const [rangkaDraft, setRangkaDraft] = useState(order.no_rangka || "");
+  const [rangkaDraft, setRangkaDraft] = useState(order.no_rangka || u0.no_rangka || "");
   const [editColly, setEditColly] = useState(false);
   const [collyDraft, setCollyDraft] = useState(order.jumlah_colly || "");
   const [editArrival, setEditArrival] = useState(false);
@@ -1610,13 +1912,13 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
                   data-testid={`adm-vehicle-nopol-${order.order_id}`}
                 />
                 <button className="adm-btn adm-btn-gold adm-btn-xs" onClick={saveVehicle} data-testid={`adm-vehicle-save-${order.order_id}`}>OK</button>
-                <button className="adm-btn adm-btn-ghost adm-btn-xs" onClick={() => { setEditVehicle(false); setVtDraft(order.vehicle_type || ""); setNopolDraft(order.nopol || ""); }}><IcoX /></button>
+                <button className="adm-btn adm-btn-ghost adm-btn-xs" onClick={() => { setEditVehicle(false); setVtDraft(order.vehicle_type || u0.vehicle_type || ""); setNopolDraft(order.nopol || u0.nopol || ""); }}><IcoX /></button>
               </span>
             ) : (
               <span className="adm-driver-row">
-                {order.vehicle_type || "—"}
-                {order.nopol
-                  ? <span className="adm-pill adm-mono">{order.nopol}</span>
+                {order.vehicle_type || u0.vehicle_type || "—"}{(!order.vehicle_type && u0.tipe_model) ? ` ${u0.tipe_model}` : ""}
+                {(order.nopol || u0.nopol)
+                  ? <span className="adm-pill adm-mono">{order.nopol || u0.nopol}</span>
                   : <i className="adm-mute">nopol belum diisi</i>}
                 <button className="adm-link" onClick={() => setEditVehicle(true)} data-testid={`adm-vehicle-edit-${order.order_id}`}><IcoPencil /></button>
               </span>
@@ -1637,12 +1939,12 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
                   data-testid={`adm-rangka-input-${order.order_id}`}
                 />
                 <button className="adm-btn adm-btn-gold adm-btn-xs" onClick={saveRangka} data-testid={`adm-rangka-save-${order.order_id}`}>OK</button>
-                <button className="adm-btn adm-btn-ghost adm-btn-xs" onClick={() => { setEditRangka(false); setRangkaDraft(order.no_rangka || ""); }}><IcoX /></button>
+                <button className="adm-btn adm-btn-ghost adm-btn-xs" onClick={() => { setEditRangka(false); setRangkaDraft(order.no_rangka || u0.no_rangka || ""); }}><IcoX /></button>
               </span>
             ) : (
               <span className="adm-driver-row">
-                {order.no_rangka
-                  ? <span className="adm-pill adm-mono">{order.no_rangka}</span>
+                {(order.no_rangka || u0.no_rangka)
+                  ? <span className="adm-pill adm-mono">{order.no_rangka || u0.no_rangka}</span>
                   : <i className="adm-mute">belum diisi</i>}
                 <button className="adm-link" onClick={() => setEditRangka(true)} data-testid={`adm-rangka-edit-${order.order_id}`}><IcoPencil /></button>
               </span>
@@ -1932,7 +2234,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
             </button>
           </span>
         ))}
-        <button className="adm-btn adm-btn-sm" onClick={() => printSuratJalan()}
+        <button className="adm-btn adm-btn-sm" onClick={(e) => { e.stopPropagation(); setShowSJ(true); }}
           style={{ background: "#1a2e1a", border: "1px solid #3fb950", color: "#3fb950" }}>
           📄 Surat Jalan
         </button>
@@ -1951,6 +2253,66 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
         {showDupVendor && (
           <DuplicateVendorModal order={order} headers={headers} onClose={() => setShowDupVendor(false)} />
         )}
+        {showSJ && (() => {
+          const h = parseInt(String(sjHargaDraft).replace(/[^0-9]/g, ""), 10) || 0;
+          const dpp = (sjPpn && sjTaxIncl) ? Math.round(h / 1.011) : h;
+          const ppn = !sjPpn ? 0 : (sjTaxIncl ? h - dpp : Math.round(h * 0.011));
+          const pph = sjPph ? Math.round(dpp * 0.02) : 0;
+          const tot = (sjTaxIncl ? h : h + ppn) - pph;
+          const fRp = (n) => "Rp " + (Number(n) || 0).toLocaleString("id-ID");
+          const doPrint = () => { printSuratJalan({ harga: sjHargaDraft, withTax: sjPpn, withPph23: sjPph, taxInclusive: sjTaxIncl, noPo: sjNoPo }); setShowSJ(false); };
+          return createPortal((
+            <div className="adm-vars"><div className="adm-modal-bg" onClick={() => setShowSJ(false)}>
+              <div className="adm-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 460 }}>
+                <div className="adm-modal-head">
+                  <div><div className="adm-modal-title">📄 Cetak Surat Jalan</div>
+                    <div className="adm-modal-sub">{order.order_id} · 1 lembar</div></div>
+                  <button className="adm-modal-close" onClick={() => setShowSJ(false)}>✕</button>
+                </div>
+                <div className="adm-modal-body">
+                  <label style={{ display: "block", marginBottom: 12 }}>
+                    <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", marginBottom: 5, fontWeight: 700 }}>No. PO Pelanggan / Catatan (opsional)</span>
+                    <input className="adm-input" placeholder="mis. PO-1234 dari pelanggan" value={sjNoPo} onChange={(e) => setSjNoPo(e.target.value)} data-testid="adm-sj-nopo" />
+                  </label>
+                  <label style={{ display: "block", marginBottom: 12 }}>
+                    <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", marginBottom: 5, fontWeight: 700 }}>Harga / Biaya Pengiriman (opsional — kosongkan kalau tanpa harga)</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, border: "1px solid var(--border)", borderRadius: 8, padding: "0 12px" }}>
+                      <span style={{ fontWeight: 800, color: "var(--text-mute)" }}>Rp</span>
+                      <input inputMode="numeric" className="adm-input" style={{ border: "none", fontSize: 20, fontWeight: 800, padding: "12px 0" }} placeholder="0"
+                        value={h ? h.toLocaleString("id-ID") : ""} onChange={(e) => setSjHargaDraft(e.target.value)} data-testid="adm-sj-harga" autoFocus />
+                    </div>
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, cursor: "pointer" }}>
+                    <input type="checkbox" checked={sjPpn} onChange={(e) => setSjPpn(e.target.checked)} style={{ width: 16, height: 16, accentColor: "#58a6ff" }} />
+                    <span>Kenakan PPN 1.1%</span>
+                  </label>
+                  {sjPpn && (
+                    <label style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, cursor: "pointer", paddingLeft: 26 }}>
+                      <input type="checkbox" checked={sjTaxIncl} onChange={(e) => setSjTaxIncl(e.target.checked)} style={{ width: 16, height: 16, accentColor: "#58a6ff" }} data-testid="adm-sj-tax-inclusive" />
+                      <span style={{ fontSize: 13 }}>Harga sudah termasuk pajak 1.1% <span style={{ color: "var(--text-mute)" }}>(pajak dipecah dari dalam, total nggak nambah)</span></span>
+                    </label>
+                  )}
+                  <label style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, cursor: "pointer" }}>
+                    <input type="checkbox" checked={sjPph} onChange={(e) => setSjPph(e.target.checked)} style={{ width: 16, height: 16, accentColor: "#58a6ff" }} />
+                    <span>Potong PPh 23 (2%)</span>
+                  </label>
+                  {h > 0 && (
+                    <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px", fontSize: 13 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>{sjPpn && sjTaxIncl ? "DPP (Dasar Pengenaan Pajak)" : "Biaya"}</span><span>{fRp(sjPpn && sjTaxIncl ? dpp : h)}</span></div>
+                      {sjPpn && <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>PPN 1.1%{sjTaxIncl ? " (termasuk)" : ""}</span><span>{fRp(ppn)}</span></div>}
+                      {sjPph && <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "#e6a23c" }}><span>Potongan PPh 23 (2%)</span><span>- {fRp(pph)}</span></div>}
+                      <div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0 0", marginTop: 4, borderTop: "1px solid var(--border)", fontWeight: 800 }}><span>Total</span><span>{fRp(tot)}</span></div>
+                    </div>
+                  )}
+                </div>
+                <div className="adm-modal-foot">
+                  <button className="adm-btn adm-btn-ghost" onClick={() => setShowSJ(false)}>Batal</button>
+                  <button className="adm-btn adm-btn-gold" onClick={doPrint} data-testid="adm-sj-print">🖨️ Cetak Surat Jalan</button>
+                </div>
+              </div>
+            </div></div>
+          ), document.body);
+        })()}
         {showJadwal && (
           <JadwalModal
             order={order}
@@ -2163,10 +2525,16 @@ function BonusModal({ tripId, order, headers, onClose, onSave }) {
 ════════════════════════════════════════ */
 function InvoiceModal({ order, headers, onClose, onPrint }) {
   const todayIso = new Date().toISOString().slice(0, 10);
-  // Unit dari PO (F1). Fallback 1 unit dari field legacy kalau belum ada units[].
-  const orderUnits = (Array.isArray(order.units) && order.units.length)
-    ? order.units
-    : [{ unit_id: "legacy", vehicle_type: order.vehicle_type, tipe_model: order.tipe_model, nopol: order.nopol, no_rangka: order.no_rangka, warna: order.warna, tahun: order.tahun, status_invoice: "Belum Ditagih" }];
+  // Cargo (barang/kargo umum) vs kendaraan. Cargo dikenali dari isi_kiriman terisi
+  // atau shipment_type/jenis_kiriman = cargo → invoice pakai deskripsi cargo, bukan nopol/rangka.
+  const isCargo = !!(String(order.isi_kiriman || "").trim())
+    || ["cargo", "barang"].includes(String(order.shipment_type || order.jenis_kiriman || order.tipe_kiriman || "").toLowerCase());
+  // Unit dari PO (F1). Cargo = 1 baris jasa. Fallback 1 unit legacy kalau belum ada units[].
+  const orderUnits = isCargo
+    ? [{ unit_id: "cargo", cargo: true, status_invoice: order.status_invoice || "Belum Ditagih" }]
+    : (Array.isArray(order.units) && order.units.length)
+      ? order.units
+      : [{ unit_id: "legacy", vehicle_type: order.vehicle_type, tipe_model: order.tipe_model, nopol: order.nopol, no_rangka: order.no_rangka, warna: order.warna, tahun: order.tahun, status_invoice: "Belum Ditagih" }];
   const [rows, setRows] = useState(() => orderUnits.map((u) => ({
     unit_id: u.unit_id,
     // unit yang sudah diinvoice default TIDAK dicentang (cegah dobel)
@@ -2174,8 +2542,11 @@ function InvoiceModal({ order, headers, onClose, onPrint }) {
     harga: "",
   })));
   const [withTax, setWithTax] = useState(true);
+  const [taxInclusive, setTaxInclusive] = useState(false); // true = harga SUDAH termasuk 1.1% (pajak dipecah dari dalam)
+  const [withPph23, setWithPph23] = useState(true); // potong PPh 23 (2%) dari DPP
   const [jatuhTempo, setJatuhTempo] = useState(todayIso);
   const [metode, setMetode] = useState("Cash on Delivery");
+  const [noInvoiceManual, setNoInvoiceManual] = useState(""); // No. Invoice manual (opsional) — samain dgn faktur pajak yg sudah terbit
   const [pesan, setPesan] = useState("");
   const [ttdNama, setTtdNama] = useState("");
   const [ttdJabatan, setTtdJabatan] = useState("Finance & Accounting Controller");
@@ -2194,15 +2565,29 @@ function InvoiceModal({ order, headers, onClose, onPrint }) {
   const hargaNum = (s) => parseInt(String(s || "").replace(/[^0-9]/g, ""), 10) || 0;
   const setRow = (i, patch) => setRows((rs) => rs.map((r, x) => x === i ? { ...r, ...patch } : r));
   const unitKet = (u) => {
-    const veh = `${u.vehicle_type || ""}${u.tipe_model ? " " + u.tipe_model : ""}`.trim() || "Kendaraan";
     const rute = `(${order.asal_kota || "—"}–${order.tujuan_kota || "—"})`;
+    if (u.cargo || isCargo) {
+      const p = parseFloat(order.panjang), l = parseFloat(order.lebar), t = parseFloat(order.tinggi);
+      const m3 = (p > 0 && l > 0 && t > 0) ? ((p * l * t) / 1_000_000).toFixed(3) : "";
+      const detail = [
+        order.jumlah_colly ? `${order.jumlah_colly} colly` : "",
+        order.berat ? `${order.berat} kg` : "",
+        m3 ? `${m3} m³` : "",
+      ].filter(Boolean).join(" · ");
+      return `${order.isi_kiriman || "Cargo / Barang"} ${rute}${detail ? `<br>${detail}` : ""}`;
+    }
+    const veh = `${u.vehicle_type || ""}${u.tipe_model ? " " + u.tipe_model : ""}`.trim() || "Kendaraan";
     const rangka = u.no_rangka ? `<br>No. Rangka: ${u.no_rangka}` : "";
     return `${veh}${u.nopol ? " " + u.nopol : ""} ${rute}${rangka}`;
   };
 
   const subtotal = rows.reduce((s, r) => s + (r.checked ? hargaNum(r.harga) : 0), 0);
-  const ppn = withTax ? Math.round(subtotal * 0.011) : 0;
-  const total = subtotal + ppn;
+  // taxInclusive: harga yg diketik SUDAH termasuk 1.1% → pajak dipecah dari dalam (Total = subtotal).
+  // else (default): 1.1% ditambah di atas harga (Total = subtotal + ppn).
+  const dpp = withTax && taxInclusive ? Math.round(subtotal / 1.011) : subtotal;
+  const ppn = !withTax ? 0 : (taxInclusive ? subtotal - dpp : Math.round(subtotal * 0.011));
+  const pph23 = withPph23 ? Math.round(dpp * 0.02) : 0;
+  const total = (taxInclusive ? subtotal : subtotal + ppn) - pph23;
   const checkedCount = rows.filter((r) => r.checked && hargaNum(r.harga) > 0).length;
   const fRp = (n) => "Rp " + n.toLocaleString("id-ID");
 
@@ -2210,12 +2595,12 @@ function InvoiceModal({ order, headers, onClose, onPrint }) {
     const lines = rows
       .map((r, i) => ({ r, u: orderUnits[i] }))
       .filter(({ r }) => r.checked && hargaNum(r.harga) > 0)
-      .map(({ r, u }) => ({ nama: "Jasa Pengiriman", ket: unitKet(u), qty: 1, harga: hargaNum(r.harga) }));
+      .map(({ r, u }) => ({ nama: isCargo ? "Jasa Pengiriman Cargo" : "Jasa Pengiriman", ket: unitKet(u), qty: 1, harga: hargaNum(r.harga) }));
     if (!lines.length) return;
     // Buka jendela cetak DULU di dalam gesture klik (kalau di-await, mobile blokir popup).
-    onPrint(lines, withTax, { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel });
+    onPrint(lines, withTax, { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23, no_invoice: noInvoiceManual.trim() || undefined });
     // Tandai unit sudah diinvoice di belakang layar (best-effort).
-    const ids = rows.filter((r) => r.checked && hargaNum(r.harga) > 0 && r.unit_id !== "legacy").map((r) => r.unit_id);
+    const ids = rows.filter((r) => r.checked && hargaNum(r.harga) > 0 && r.unit_id !== "legacy" && r.unit_id !== "cargo").map((r) => r.unit_id);
     if (ids.length && headers) {
       axios.post(`${API}/admin/orders/${order.order_id}/units/mark-invoiced`, { unit_ids: ids }, { headers }).catch(() => {});
     }
@@ -2246,10 +2631,14 @@ function InvoiceModal({ order, headers, onClose, onPrint }) {
                   <input type="checkbox" checked={r.checked} onChange={(e) => setRow(i, { checked: e.target.checked })} data-testid={`adm-invu-check-${i}`} style={{ width: 16, height: 16, accentColor: "#58a6ff", flexShrink: 0 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {i + 1}. {u.vehicle_type || "—"}{u.tipe_model ? ` · ${u.tipe_model}` : ""}
+                      {i + 1}. {(u.cargo || isCargo) ? (order.isi_kiriman || "Cargo / Barang") : `${u.vehicle_type || "—"}${u.tipe_model ? ` · ${u.tipe_model}` : ""}`}
                       {invoiced && <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 800, color: "var(--gold-xl)", background: "var(--gold-bg)", padding: "1px 6px", borderRadius: 4 }}>SUDAH DIINVOICE</span>}
                     </div>
-                    <div style={{ fontSize: 10.5, color: "var(--text-mute)", fontFamily: "var(--mono)" }}>{u.nopol || "nopol —"}{u.no_rangka ? ` · ${u.no_rangka}` : ""}</div>
+                    <div style={{ fontSize: 10.5, color: "var(--text-mute)", fontFamily: "var(--mono)" }}>
+                      {(u.cargo || isCargo)
+                        ? [order.jumlah_colly ? `${order.jumlah_colly} colly` : "", order.berat ? `${order.berat} kg` : ""].filter(Boolean).join(" · ") || "cargo"
+                        : `${u.nopol || "nopol —"}${u.no_rangka ? ` · ${u.no_rangka}` : ""}`}
+                    </div>
                   </div>
                   <div className="adm-invu-harga">
                     <span>Rp</span>
@@ -2273,6 +2662,11 @@ function InvoiceModal({ order, headers, onClose, onPrint }) {
               </select>
             </label>
           </div>
+          <label style={{ display: "block", marginBottom: 14 }}>
+            <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", marginBottom: 5, fontWeight: 700 }}>No. Invoice / Faktur (manual — opsional)</span>
+            <input type="text" className="adm-input" value={noInvoiceManual} onChange={(e) => setNoInvoiceManual(e.target.value)} placeholder="Kosongkan = nomor otomatis. Isi untuk samakan dgn faktur pajak / revisi." data-testid="adm-invoice-nomanual" />
+            <span style={{ display: "block", fontSize: 10.5, color: "var(--text-mute)", marginTop: 5 }}>Buat revisi / samakan dengan faktur pajak yang sudah terbit, ketik nomornya di sini.</span>
+          </label>
           <label style={{ display: "block", marginBottom: 14 }}>
             <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", marginBottom: 5, fontWeight: 700 }}>Pesan / Catatan (opsional)</span>
             <input type="text" className="adm-input" value={pesan} onChange={(e) => setPesan(e.target.value)} placeholder="contoh: Door to door" data-testid="adm-invoice-pesan" />
@@ -2302,7 +2696,7 @@ function InvoiceModal({ order, headers, onClose, onPrint }) {
             )}
             <div style={{ fontSize: 10.5, color: "var(--text-mute)", marginTop: 6 }}>Disarankan gambar latar transparan (PNG). Muncul di atas nama penandatangan pada invoice.</div>
           </div>
-          <label style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, cursor: "pointer" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, cursor: "pointer" }}>
             <input
               type="checkbox"
               checked={withTax}
@@ -2312,11 +2706,28 @@ function InvoiceModal({ order, headers, onClose, onPrint }) {
             />
             <span>Kenakan PPN Logistik (1.1%)</span>
           </label>
+          {withTax && (
+            <label style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, cursor: "pointer", paddingLeft: 26 }}>
+              <input
+                type="checkbox"
+                checked={taxInclusive}
+                onChange={(e) => setTaxInclusive(e.target.checked)}
+                style={{ accentColor: "#58a6ff", width: 16, height: 16 }}
+                data-testid="adm-invoice-tax-inclusive"
+              />
+              <span style={{ fontSize: 13 }}>Harga sudah termasuk pajak 1.1% <span style={{ color: "var(--text-mute)" }}>(pajak dipecah dari dalam, total nggak nambah)</span></span>
+            </label>
+          )}
+          <label style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, cursor: "pointer" }}>
+            <input type="checkbox" checked={withPph23} onChange={(e) => setWithPph23(e.target.checked)} style={{ accentColor: "#58a6ff", width: 16, height: 16 }} data-testid="adm-invoice-pph23" />
+            <span>Potong PPh 23 (2%) <span style={{ color: "var(--text-mute)", fontSize: 12 }}>(dipotong dari DPP)</span></span>
+          </label>
           {subtotal > 0 && (
             <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px", fontSize: 13 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>Subtotal ({checkedCount} unit)</span><span>{fRp(subtotal)}</span></div>
-              <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>PPN 1.1%</span><span>{withTax ? fRp(ppn) : "—"}</span></div>
-              <div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0 0", marginTop: 4, borderTop: "1px solid var(--border)", fontWeight: 800 }}><span>Total</span><span>{fRp(total)}</span></div>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>{withTax && taxInclusive ? `DPP (${checkedCount} unit)` : `Subtotal (${checkedCount} unit)`}</span><span>{fRp(withTax && taxInclusive ? dpp : subtotal)}</span></div>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>PPN 1.1%{withTax && taxInclusive ? " (termasuk)" : ""}</span><span>{withTax ? fRp(ppn) : "—"}</span></div>
+              {withPph23 && <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "#e6a23c" }}><span>Potongan PPh 23 (2%)</span><span>- {fRp(pph23)}</span></div>}
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0 0", marginTop: 4, borderTop: "1px solid var(--border)", fontWeight: 800 }}><span>Total Tagihan</span><span>{fRp(total)}</span></div>
             </div>
           )}
         </div>
@@ -2603,10 +3014,14 @@ async function printInvoiceDoc(lines, withTax, extra) {
   lines = (lines || []).filter((l) => (l.harga || 0) > 0);
   if (!lines.length) return "";
   const w = window.open("", "_blank"); // buka dulu (gesture) biar nggak keblok popup
-  const { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel } = extra;
+  const { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23 } = extra;
   const subtotal = lines.reduce((s, l) => s + (l.harga || 0) * (l.qty || 1), 0);
-  const ppn = withTax ? Math.round(subtotal * 0.011) : 0;
-  const total = subtotal + ppn;
+  // taxInclusive: harga SUDAH termasuk 1.1% → pajak dipecah dari dalam (total = subtotal).
+  const dpp = withTax && taxInclusive ? Math.round(subtotal / 1.011) : subtotal;
+  const ppn = !withTax ? 0 : (taxInclusive ? subtotal - dpp : Math.round(subtotal * 0.011));
+  // PPh 23 dipotong 2% dari DPP (nilai jasa). Grand Total = DPP + PPN − PPh23.
+  const pph23 = withPph23 ? Math.round(dpp * 0.02) : 0;
+  const total = (taxInclusive ? subtotal : subtotal + ppn) - pph23;
   const fRp = (n) => n.toLocaleString("id-ID") + ",00";
   const fmtTgl = (iso) => { if (!iso) return "—"; const [y, m, d] = iso.split("-"); return `${d}-${m}-${y}`; };
   const todayIso = new Date().toISOString().slice(0, 10);
@@ -2616,32 +3031,45 @@ async function printInvoiceDoc(lines, withTax, extra) {
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${noInvoice}</title>
   <style>
     ${DOC_BASE_CSS}
+    /* ── Kualitas cetak A4 (setara invoice Mekari Jurnal / BCA Bisnis) ──
+       Teks 100% VEKTOR & selectable (bukan gambar/canvas/screenshot), font
+       native, TANPA transform:scale/zoom/filter → tetap tajam di zoom 400–800%
+       & di printer laser/inkjet. Override ini HANYA berlaku di dokumen invoice. */
+    @page { size: A4 portrait; margin: 12mm; }
+    html { print-color-adjust: exact; -webkit-print-color-adjust: exact; text-rendering: geometricPrecision; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+    .doc-sheet { padding: 0; max-width: 186mm; margin: 0 auto; }   /* 210mm − margin 12mm kiri/kanan = 186mm */
+    .doc-title { font-size: 23px; }                                 /* Judul Invoice 22–24px Bold */
+    /* Paksa HITAM PEKAT (menang atas cache/CSS lain) — judul & nama perusahaan
+       jangan biru lagi biar tajam di printer. */
+    .doc-title, .doc-brand-name { color: #000 !important; }
+    .doc-footer { font-size: 9px; }                                 /* Footer 9px */
     .inv-meta-row { display:flex; justify-content:space-between; gap:24px; margin-bottom:16px; }
     .inv-billto .lbl { font-size:9px; font-weight:700; text-transform:uppercase; color:${DOC_BRAND.muted}; letter-spacing:.5px; margin-bottom:4px; }
     .inv-billto .val { font-size:14px; font-weight:800; color:${DOC_BRAND.ink}; }
-    .inv-meta-table { border-collapse:collapse; font-size:10.5px; }
+    .inv-meta-table { border-collapse:collapse; font-size:10px; }
     .inv-meta-table td { padding:2.5px 0; }
     .inv-meta-table td:first-child { color:${DOC_BRAND.muted}; padding-right:18px; white-space:nowrap; }
     .inv-meta-table td:last-child { font-weight:700; text-align:right; }
     .inv-total-bar { display:flex; justify-content:space-between; align-items:center; background:${DOC_BRAND.navyDeep}; color:#fff; padding:10px 16px; border-radius:6px; margin-bottom:18px; }
     .inv-total-bar span:first-child { font-size:10.5px; font-weight:700; letter-spacing:.6px; text-transform:uppercase; opacity:.85; }
-    .inv-total-bar span:last-child { font-size:15px; font-weight:900; }
+    .inv-total-bar span:last-child { font-size:19px; font-weight:900; }
     table.inv-items { width:100%; border-collapse:collapse; margin-bottom:14px; }
     table.inv-items thead { display:table-header-group; }
     table.inv-items tr { break-inside:avoid; page-break-inside:avoid; }
-    table.inv-items th { text-align:left; font-size:9px; text-transform:uppercase; letter-spacing:.4px; color:${DOC_BRAND.muted}; font-weight:700; padding:7px 8px; border-bottom:1.5px solid ${DOC_BRAND.navy}; }
-    table.inv-items td { padding:10px 8px; font-size:11px; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; background:${DOC_BRAND.paperMist}; }
+    table.inv-items th { text-align:left; font-size:10px; text-transform:uppercase; letter-spacing:.4px; color:${DOC_BRAND.muted}; font-weight:700; padding:7px 8px; border-bottom:1.5px solid ${DOC_BRAND.navy}; }
+    table.inv-items td { padding:10px 8px; font-size:10px; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; background:${DOC_BRAND.paperMist}; }
     table.inv-items .num { text-align:right; }
     .inv-summary { display:flex; justify-content:space-between; gap:24px; margin-bottom:18px; }
     .inv-note { flex:1; font-size:10px; color:${DOC_BRAND.muted}; line-height:1.7; }
     .inv-note b { color:${DOC_BRAND.ink}; }
+    .inv-terbilang { font-size:9px; font-style:italic; }           /* Terbilang 9px Italic */
     .inv-totals-box { width:230px; }
     .inv-totals-box .row { display:flex; justify-content:space-between; padding:5px 0; font-size:10.5px; color:${DOC_BRAND.muted}; }
-    .inv-totals-box .row.grand { border-top:1.5px solid ${DOC_BRAND.navy}; margin-top:4px; padding-top:8px; font-size:13px; font-weight:900; color:${DOC_BRAND.navy}; }
+    .inv-totals-box .row.grand { border-top:1.5px solid ${DOC_BRAND.navy}; margin-top:4px; padding-top:8px; font-size:13px; font-weight:900; color:#000; }
     .inv-pay-box { display:flex; align-items:center; gap:12px; padding:12px 16px; background:${DOC_BRAND.paperMist}; border-radius:8px; margin-bottom:20px; }
     .inv-pay-badge { width:40px; height:40px; border-radius:7px; background:${DOC_BRAND.navy}; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:900; font-size:10px; flex-shrink:0; }
     .inv-pay-num { font-size:14px; font-weight:900; letter-spacing:.5px; color:${DOC_BRAND.ink}; }
-    .inv-pay-name { font-size:9.5px; color:${DOC_BRAND.muted}; margin-top:1px; }
+    .inv-pay-name { font-size:10px; color:${DOC_BRAND.muted}; margin-top:1px; }
     .inv-sign-row { display:flex; justify-content:flex-end; margin-top:26px; }
     .inv-sign-cell { width:260px; text-align:center; position:relative; }
     .inv-sign-lbl { font-size:10px; color:${DOC_BRAND.muted}; margin-bottom:6px; }
@@ -2653,7 +3081,7 @@ async function printInvoiceDoc(lines, withTax, extra) {
     .inv-sign-jab { font-size:9.5px; color:${DOC_BRAND.muted}; margin-top:2px; }
   </style></head><body>
   <div class="doc-sheet">
-    ${docHeader({ docTitle: "FAKTUR / INVOICE" })}
+    ${docHeader({ docTitle: "FAKTUR / INVOICE", logoUrl: "/logo.png" })}
     <div class="inv-meta-row">
       <div class="inv-billto">
         <div class="lbl">Ditagihkan Kepada</div>
@@ -2686,12 +3114,13 @@ async function printInvoiceDoc(lines, withTax, extra) {
       <div class="inv-note">
         ${pesan ? `<b>Pesan:</b> ${pesan}<br>` : ""}
         <b>Jumlah Unit:</b> ${lines.length}<br>
-        <b>Terbilang:</b> <i>${terbilangRupiah(total)}</i>
+        <b>Terbilang:</b> <i class="inv-terbilang">${terbilangRupiah(total)}</i>
       </div>
       <div class="inv-totals-box">
-        <div class="row"><span>Subtotal</span><span>Rp ${fRp(subtotal)}</span></div>
-        <div class="row"><span>PPN Logistik (1.1%)</span><span>${withTax ? "Rp " + fRp(ppn) : "—"}</span></div>
-        <div class="row grand"><span>TOTAL</span><span>Rp ${fRp(total)}</span></div>
+        <div class="row"><span>${withTax && taxInclusive ? "DPP (Dasar Pengenaan Pajak)" : "Subtotal"}</span><span>Rp ${fRp(withTax && taxInclusive ? dpp : subtotal)}</span></div>
+        <div class="row"><span>PPN Logistik (1.1%)${withTax && taxInclusive ? " — termasuk" : ""}</span><span>${withTax ? "Rp " + fRp(ppn) : "—"}</span></div>
+        ${withPph23 ? `<div class="row"><span>Potongan PPh 23 (2%)</span><span>- Rp ${fRp(pph23)}</span></div>` : ""}
+        <div class="row grand"><span>TOTAL TAGIHAN</span><span>Rp ${fRp(total)}</span></div>
       </div>
     </div>
     <div class="inv-pay-box">
@@ -2898,11 +3327,51 @@ function JadwalGabunganModal({ cart, headers, onClose, onDone }) {
   })));
   const [bulk, setBulk] = useState({ nama_kapal: "", etd: "", transit_hari: "" });
 
+  const [ordered, setOrdered] = useState(false); // sudah ngikut urutan dokumen lama?
+
   const setRow = (i, patch) => setRows((rs) => rs.map((r, x) => x === i ? { ...r, ...patch } : r));
   const applyBulk = () => setRows((rs) => rs.map((r) => ({
     ...r, nama_kapal: bulk.nama_kapal || r.nama_kapal, etd: bulk.etd || r.etd,
     transit_hari: bulk.transit_hari !== "" ? bulk.transit_hari : r.transit_hari,
   })));
+
+  // Geser 1 unit ke atas/bawah (kalau mau atur manual).
+  const uKey = (u) => `${u?.nopol || ""}|${u?.no_rangka || ""}`;
+  const move = (i, dir) => setRows((rs) => {
+    const j = i + dir;
+    if (j < 0 || j >= rs.length) return rs;
+    const c = rs.slice(); [c[i], c[j]] = [c[j], c[i]]; return c;
+  });
+
+  // Ikutin urutan dokumen lama: ambil Jadwal Gabungan terakhir customer ini,
+  // urutkan baris sesuai dokumen itu (biar nggak usah urutin ulang tiap cetak).
+  useEffect(() => {
+    if (customers.length !== 1) return;
+    let alive = true;
+    axios.get(`${API}/admin/doc-history?jenis=jadwal_gabungan`, { headers })
+      .then(({ data }) => {
+        if (!alive) return;
+        const recs = (data.items || []).filter((r) => (r.customer || "") === customers[0]);
+        if (!recs.length) return;
+        recs.sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
+        const seq = (recs[0].units || []).map((u) => uKey(u));
+        if (!seq.length) return;
+        const idx = new Map(seq.map((k, i) => [k, i]));
+        setRows((rs) => {
+          const dec = rs.map((r, i) => ({ r, i, k: uKey(r.unit) }));
+          dec.sort((a, b) => {
+            const ai = idx.has(a.k) ? idx.get(a.k) : 1e9 + a.i;
+            const bi = idx.has(b.k) ? idx.get(b.k) : 1e9 + b.i;
+            return ai - bi;
+          });
+          return dec.map((x) => x.r);
+        });
+        setOrdered(true);
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const docUnits = () => rows.map((r) => ({
     vehicle_type: r.unit?.vehicle_type, tipe_model: r.unit?.tipe_model, nopol: r.unit?.nopol,
@@ -2959,13 +3428,34 @@ function JadwalGabunganModal({ cart, headers, onClose, onDone }) {
               <input type="date" className="adm-input" value={tanggalSiap} onChange={(e) => setTanggalSiap(e.target.value)} />
             </label>
           </div>
+          {/* Isi cepat: set kapal + tanggal berangkat + transit SEKALIGUS ke semua unit
+              (biar nggak edit satu-satu). Kosongin yg nggak mau diubah. */}
+          <div style={{ border: "1px dashed var(--gold-bd)", borderRadius: 9, padding: "10px 12px", marginBottom: 14, background: "var(--gold-bg)" }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: "var(--gold-xl)", marginBottom: 8 }}>⚡ Isi cepat → semua unit sekaligus (nggak usah edit satu-satu)</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <label style={{ flex: 2, minWidth: 130 }}><span style={{ display: "block", fontSize: 10, color: "var(--text-mute)", marginBottom: 4 }}>Nama Kapal</span>
+                <input list="kapal-dl" className="adm-input" value={bulk.nama_kapal} onChange={(e) => setBulk((b) => ({ ...b, nama_kapal: e.target.value }))} placeholder="KM Serasi V" data-testid="adm-jadwalgab-bulk-kapal" /></label>
+              <label style={{ flex: 1, minWidth: 120 }}><span style={{ display: "block", fontSize: 10, color: "var(--text-mute)", marginBottom: 4 }}>Kapal Berangkat</span>
+                <input type="date" className="adm-input" value={bulk.etd} onChange={(e) => setBulk((b) => ({ ...b, etd: e.target.value }))} data-testid="adm-jadwalgab-bulk-etd" /></label>
+              <label style={{ width: 90 }}><span style={{ display: "block", fontSize: 10, color: "var(--text-mute)", marginBottom: 4 }}>Transit (jam)</span>
+                <input inputMode="numeric" className="adm-input" value={bulk.transit_hari} onChange={(e) => setBulk((b) => ({ ...b, transit_hari: e.target.value.replace(/\D/g, "") }))} placeholder="4" data-testid="adm-jadwalgab-bulk-transit" /></label>
+              <button className="adm-btn adm-btn-sm adm-btn-gold" onClick={applyBulk} data-testid="adm-jadwalgab-bulk-apply">Terapkan ke semua</button>
+            </div>
+          </div>
+          <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 8 }}>
+            {ordered ? "✅ Urutan ngikutin dokumen terakhir yang lo cetak. " : ""}Geser pakai ↑/↓ kalau mau atur — urutan kesimpen otomatis pas cetak.
+          </div>
           <div className="jm-list">
             {rows.map((r, i) => {
               const u = r.unit || {};
               const eta = jpAddDays(r.etd, parseInt(r.transit_hari, 10) || 0);
               return (
                 <div key={u.unit_id || i} className="jm-unit">
-                  <div className="jm-unit-hd">{i + 1}. {u.vehicle_type || "—"}{u.tipe_model ? ` · ${u.tipe_model}` : ""} <span className="jm-nopol">{u.nopol || "nopol —"} · {r.order_id}</span></div>
+                  <div className="jm-unit-hd" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ flex: 1 }}>{i + 1}. {u.vehicle_type || "—"}{u.tipe_model ? ` · ${u.tipe_model}` : ""} <span className="jm-nopol">{u.nopol || "nopol —"} · {r.order_id}</span></span>
+                    <button type="button" className="adm-btn adm-btn-ghost adm-btn-sm" style={{ padding: "2px 7px" }} disabled={i === 0} onClick={() => move(i, -1)} title="Naik" data-testid={`adm-jadwalgab-up-${i}`}>↑</button>
+                    <button type="button" className="adm-btn adm-btn-ghost adm-btn-sm" style={{ padding: "2px 7px" }} disabled={i === rows.length - 1} onClick={() => move(i, 1)} title="Turun" data-testid={`adm-jadwalgab-down-${i}`}>↓</button>
+                  </div>
                   <div className="jm-grid">
                     <label>Tujuan<input className="adm-input" value={r.tujuan} onChange={(e) => setRow(i, { tujuan: e.target.value.toUpperCase() })} placeholder="kota tujuan" /></label>
                     <label>No. Mesin<input className="adm-input" value={r.no_mesin} onChange={(e) => setRow(i, { no_mesin: e.target.value.toUpperCase() })} placeholder="2GDXXXX" /></label>
@@ -3019,8 +3509,11 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
     return () => { alive = false; };
   }, []); // eslint-disable-line
   const [withTax, setWithTax] = useState(true);
+  const [taxInclusive, setTaxInclusive] = useState(false); // true = harga SUDAH termasuk 1.1%
+  const [withPph23, setWithPph23] = useState(true); // potong PPh 23 (2%) dari DPP
   const [jatuhTempo, setJatuhTempo] = useState(todayIso);
   const [metode, setMetode] = useState("Cash on Delivery");
+  const [noInvoiceManual, setNoInvoiceManual] = useState(""); // No. Invoice manual (opsional)
   const [pesan, setPesan] = useState("");
   const [ttdNama, setTtdNama] = useState("");
   const [ttdJabatan, setTtdJabatan] = useState("Finance & Accounting Controller");
@@ -3047,8 +3540,10 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
   };
 
   const subtotal = rows.reduce((s, r) => s + hargaNum(r.harga), 0);
-  const ppn = withTax ? Math.round(subtotal * 0.011) : 0;
-  const total = subtotal + ppn;
+  const dpp = withTax && taxInclusive ? Math.round(subtotal / 1.011) : subtotal;
+  const ppn = !withTax ? 0 : (taxInclusive ? subtotal - dpp : Math.round(subtotal * 0.011));
+  const pph23 = withPph23 ? Math.round(dpp * 0.02) : 0;
+  const total = (taxInclusive ? subtotal : subtotal + ppn) - pph23;
   const okCount = rows.filter((r) => hargaNum(r.harga) > 0).length;
   const fRp = (n) => "Rp " + n.toLocaleString("id-ID");
 
@@ -3058,7 +3553,7 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
     if (!lines.length) { alert("Isi harga minimal 1 unit dulu."); return; }
     const orderIds = Array.from(new Set(rows.map((r) => r.order_id).filter(Boolean)));
     const cust = customers.length === 1 ? customers[0] : `${customers.length} customer`;
-    const extra = { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel, customer_nama: cust, order_id: orderIds.join(", ") };
+    const extra = { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23, customer_nama: cust, order_id: orderIds.join(", "), no_invoice: noInvoiceManual.trim() || undefined };
     const noInv = await printInvoiceDoc(lines, withTax, extra); // nomor auto-increment dari server
     saveDocHistory({
       jenis: "invoice", no_dokumen: noInv, customer: cust,
@@ -3123,6 +3618,11 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
             </label>
           </div>
           <label style={{ display: "block", marginBottom: 14 }}>
+            <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", marginBottom: 5, fontWeight: 700 }}>No. Invoice / Faktur (manual — opsional)</span>
+            <input type="text" className="adm-input" value={noInvoiceManual} onChange={(e) => setNoInvoiceManual(e.target.value)} placeholder="Kosongkan = nomor otomatis. Isi untuk samakan dgn faktur pajak / revisi." data-testid="adm-invgab-nomanual" />
+            <span style={{ display: "block", fontSize: 10.5, color: "var(--text-mute)", marginTop: 5 }}>Buat revisi / samakan dengan faktur pajak yang sudah terbit, ketik nomornya di sini.</span>
+          </label>
+          <label style={{ display: "block", marginBottom: 14 }}>
             <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", marginBottom: 5, fontWeight: 700 }}>Pesan / Catatan (opsional)</span>
             <input type="text" className="adm-input" value={pesan} onChange={(e) => setPesan(e.target.value)} placeholder="contoh: Door to door" />
           </label>
@@ -3148,15 +3648,26 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
               <input type="file" accept="image/*" className="adm-input" onChange={onStempel} />
             )}
           </div>
-          <label style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, cursor: "pointer" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, cursor: "pointer" }}>
             <input type="checkbox" checked={withTax} onChange={(e) => setWithTax(e.target.checked)} style={{ accentColor: "#58a6ff", width: 16, height: 16 }} data-testid="adm-invgab-tax" />
             <span>Kenakan PPN Logistik (1.1%)</span>
           </label>
+          {withTax && (
+            <label style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, cursor: "pointer", paddingLeft: 26 }}>
+              <input type="checkbox" checked={taxInclusive} onChange={(e) => setTaxInclusive(e.target.checked)} style={{ accentColor: "#58a6ff", width: 16, height: 16 }} data-testid="adm-invgab-tax-inclusive" />
+              <span style={{ fontSize: 13 }}>Harga sudah termasuk pajak 1.1% <span style={{ color: "var(--text-mute)" }}>(pajak dipecah dari dalam, total nggak nambah)</span></span>
+            </label>
+          )}
+          <label style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, cursor: "pointer" }}>
+            <input type="checkbox" checked={withPph23} onChange={(e) => setWithPph23(e.target.checked)} style={{ accentColor: "#58a6ff", width: 16, height: 16 }} data-testid="adm-invgab-pph23" />
+            <span>Potong PPh 23 (2%) <span style={{ color: "var(--text-mute)", fontSize: 12 }}>(dipotong dari DPP)</span></span>
+          </label>
           {subtotal > 0 && (
             <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px", fontSize: 13 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>Subtotal ({okCount} unit)</span><span>{fRp(subtotal)}</span></div>
-              <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>PPN 1.1%</span><span>{withTax ? fRp(ppn) : "—"}</span></div>
-              <div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0 0", marginTop: 4, borderTop: "1px solid var(--border)", fontWeight: 800 }}><span>Total</span><span>{fRp(total)}</span></div>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>{withTax && taxInclusive ? `DPP (${okCount} unit)` : `Subtotal (${okCount} unit)`}</span><span>{fRp(withTax && taxInclusive ? dpp : subtotal)}</span></div>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>PPN 1.1%{withTax && taxInclusive ? " (termasuk)" : ""}</span><span>{withTax ? fRp(ppn) : "—"}</span></div>
+              {withPph23 && <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "#e6a23c" }}><span>Potongan PPh 23 (2%)</span><span>- {fRp(pph23)}</span></div>}
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0 0", marginTop: 4, borderTop: "1px solid var(--border)", fontWeight: 800 }}><span>Total Tagihan</span><span>{fRp(total)}</span></div>
             </div>
           )}
         </div>
@@ -3397,11 +3908,23 @@ const TIPE_ICON = { "Self Drive": "🚗", "Kapal RoRo": "🚢", "Kapal Kontainer
 
 const DETAIL_TABS = [
   { key: "rute", label: "Rute Leg", icon: "🧭" },
+  { key: "petugas", label: "Petugas", icon: "👷" },
   { key: "foto", label: "Foto", icon: "📸" },
   { key: "checkpoint", label: "Checkpoint", icon: "📍" },
   { key: "dokumen", label: "Dokumen", icon: "📄" },
   { key: "ringkasan", label: "Ringkasan", icon: "📊" },
 ];
+
+// Status link tugas petugas (Fase 2) — warna + label
+const TASK_STATUS_META = {
+  belum_dibuka:  { t: "Belum Dibuka",  c: "#8b949e", bg: "#1c2128" },
+  sudah_dibuka:  { t: "Sudah Dibuka",  c: "#60a5fa", bg: "#0d2340" },
+  dikerjakan:    { t: "Sedang Dikerjakan", c: "#EF9F27", bg: "#2d2410" },
+  menunggu:      { t: "Menunggu Kelengkapan", c: "#e6b450", bg: "#2a2410" },
+  selesai:       { t: "Selesai",       c: "#3fb950", bg: "#0d2a10" },
+  kedaluwarsa:   { t: "Kedaluwarsa",   c: "#f85149", bg: "#2d1214" },
+  dinonaktifkan: { t: "Dinonaktifkan", c: "#f85149", bg: "#2d1214" },
+};
 
 const LEG_STATUS_COLOR = {
   "Menunggu":    { bg: "#2d2410", color: "#EF9F27", border: "#7a5c14" },
@@ -4560,37 +5083,62 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
     const w = window.open("", "_blank"); w.document.write(html); w.document.close();
   };
 
-  const copyLegLink = async (leg, i) => {
-    const base = window.location.origin;
-    const p = new URLSearchParams({
-      trip: tripId,
-      nopol: order?.nopol || order?.vehicle_type || "",
-      driver: leg.driver || `Driver Leg ${i + 1}`,
-      route: `${leg.asal} → ${leg.tujuan}`,
-      tipe: leg.tipe,
-    });
-    if (order?.no_rangka) p.set("rangka", order.no_rangka);
-    const link = `${base}/trip/${tripId}?${p.toString()}`;
-    const isKapal = leg.tipe && leg.tipe.startsWith("Kapal");
-    const namaDriver = leg.driver || (isKapal ? "Petugas Pelabuhan" : `Driver Leg ${i + 1}`);
-    const rute = `${leg.asal || "—"} → ${leg.tujuan || "—"}`;
-    const nopol = order?.nopol || order?.vehicle_type || "";
-
-    let panduan;
-    if (isKapal) {
-      panduan = `1. Foto kendaraan saat masuk kapal\n2. Foto kendaraan di dalam kapal\n3. Foto kendaraan saat bongkar kapal`;
-    } else {
-      panduan = `1. Foto kendaraan 5 sisi sebelum berangkat\n2. Foto checkpoint tiap hari jam 06.00–18.00 WIB`;
+  // Bikin LINK TUGAS ber-token (scoped) buat 1 leg, simpan petugas ke master,
+  // lalu salin teks WhatsApp berisi link /task/{token}. Petugas cuma lihat
+  // tugasnya (unit, lokasi, instruksi, checklist) — nggak ada harga/leg lain.
+  // Peta peran (5 tahap) → tipe_tugas + label + sumber nama petugas di leg.
+  const ROLE_MAP = {
+    driver_full:     { tipe_tugas: "driver_full",     jenis: "Self Drive",       tipe_petugas: "Driver",           src: "driver",  label: "Driver (Self Drive)" },
+    driver_asal:     { tipe_tugas: "driver_asal",     jenis: "Self Drive Asal",  tipe_petugas: "Driver",           src: "driver",  label: "Driver Asal" },
+    driver_tujuan:   { tipe_tugas: "driver_tujuan",   jenis: "Self Drive Tujuan",tipe_petugas: "Driver",           src: "driver",  label: "Driver Tujuan" },
+    pelabuhan_asal:  { tipe_tugas: "pelabuhan_asal",  jenis: "Pelabuhan Asal",   tipe_petugas: "Petugas Pelabuhan",src: "petugas", label: "Petugas Pelabuhan Asal" },
+    pelabuhan_tujuan:{ tipe_tugas: "pelabuhan_tujuan",jenis: "Pelabuhan Tujuan", tipe_petugas: "Petugas Pelabuhan",src: "petugas", label: "Petugas Pelabuhan Tujuan" },
+    kapal:           { tipe_tugas: "kapal",           jenis: "Kapal",            tipe_petugas: "Petugas Kapal",    src: "kapal",   label: "Petugas Kapal" },
+  };
+  const copyLegLink = async (leg, i, roleKey) => {
+    if (!tripId) return;
+    const r0 = ROLE_MAP[roleKey] || ROLE_MAP.driver_asal;
+    const pNama = (r0.src === "kapal" ? leg.kord_kapal : r0.src === "petugas" ? leg.petugas_nama : leg.driver) || leg.petugas_nama || "";
+    const pHp = (r0.src === "kapal" ? leg.kord_kapal_hp : r0.src === "petugas" ? leg.petugas_hp : leg.driver_hp) || leg.petugas_hp || "";
+    const units = (Array.isArray(order?.units) && order.units.length)
+      ? order.units.map((u) => ({ nopol: u.nopol || "", vehicle_type: `${u.vehicle_type || ""}${u.tipe_model ? " " + u.tipe_model : ""}`.trim(), no_rangka: u.no_rangka || "" }))
+      : [{ nopol: order?.nopol || "", vehicle_type: order?.vehicle_type || "", no_rangka: order?.no_rangka || "" }];
+    try {
+      let petugas_id = null;
+      if (pNama) {
+        try { const pr = await axios.post(`${API}/admin/petugas`, { nama: pNama, no_hp: pHp, tipe: r0.tipe_petugas }, { headers }); petugas_id = pr.data?.petugas_id || null; } catch {}
+      }
+      const r = await axios.post(`${API}/admin/trips/${tripId}/legs/${i}/task-link`, {
+        petugas_id, petugas_nama: pNama, petugas_hp: pHp, tipe_petugas: r0.tipe_petugas, tipe_tugas: r0.tipe_tugas,
+        jenis: r0.jenis, asal: leg.asal || "", tujuan: leg.tujuan || "", kapal: leg.kapal || "", voyage: leg.voyage || "",
+        instruksi: leg.instruksi || leg.catatan || "", units,
+      }, { headers });
+      const token = r.data?.token;
+      if (!token) throw new Error("no token");
+      setLeg(i, { task_token: token });
+      const link = `${window.location.origin}/task/${token}`;
+      const namaP = pNama || r0.label;
+      const rute = `${leg.asal || "—"} → ${leg.tujuan || "—"}`;
+      const nopol = units.map((u) => u.nopol).filter(Boolean).join(", ") || "-";
+      const teks = `Halo Pak/Bu ${namaP} 👋\n\nTugas: ${r0.label}\nLokasi: ${rute}\nUnit: ${nopol}\n\nBuka link tugas ini buat lihat instruksi & upload foto:\n🔗 ${link}\n\nInfo: PT Alyssa Auto Logistik · 0818 631 135`;
+      const ok = await copyToClipboard(teks);
+      if (ok) { setCopiedLeg(`${i}-${roleKey}`); setTimeout(() => setCopiedLeg(null), 2200); }
+    } catch (e) {
+      alert("Gagal bikin link tugas. Simpan Leg dulu (pastikan trip sudah ada), lalu coba lagi.");
     }
-
-    const teks = `Halo Pak/Bu ${namaDriver} 👋\n\nPengiriman: ${rute}\nKendaraan: ${nopol}\n\n🔗 ${link}\n\nPanduan:\n${panduan}\n\nInfo: PT Alyssa Auto Logistik · 0818 631 135`;
-
-    const ok = await copyToClipboard(teks);
-    if (ok) { setCopiedLeg(i); setTimeout(() => setCopiedLeg(null), 2000); }
   };
 
   const setLeg = (i, patch) => setLegs(ls => ls.map((l, idx) => idx === i ? { ...l, ...patch } : l));
   const addLeg = () => setLegs(ls => [...ls, { tipe: "Self Drive", asal: "", tujuan: "", kapal: "", eta: "", status: "Menunggu", catatan: "" }]);
+  // Lanjutkan Tahap Berikutnya: bikin leg baru (asal = tujuan leg terakhir), histori
+  // tahap sebelumnya tetap, nggak minta input kendaraan ulang. Persist ke backend.
+  const nextLeg = async () => {
+    if (!tripId) { addLeg(); return; }
+    try {
+      const r = await axios.post(`${API}/admin/trips/${tripId}/next-leg`, {}, { headers });
+      if (r.data?.legs) setLegs(r.data.legs); else addLeg();
+    } catch { addLeg(); }
+  };
   const delLeg = (i) => setLegs(ls => ls.filter((_, idx) => idx !== i));
   const moveLeg = (i, dir) => {
     const j = i + dir;
@@ -4654,13 +5202,14 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
         <div style={{ padding: "18px 22px" }}>
           {activeTab === "rute" && (
             <RuteLegTab
-              legs={legs} setLeg={setLeg} addLeg={addLeg} delLeg={delLeg} moveLeg={moveLeg}
+              legs={legs} setLeg={setLeg} addLeg={addLeg} nextLeg={nextLeg} delLeg={delLeg} moveLeg={moveLeg}
               order={order} tripId={tripId} headers={headers}
               detail={detail}
               copiedLeg={copiedLeg} copyLegLink={copyLegLink}
               openMultiUnit={openMultiUnit} printKartuMuat={printKartuMuat}
             />
           )}
+          {activeTab === "petugas" && <PetugasTaskTab tripId={tripId} headers={headers} />}
           {activeTab === "foto" && <FotoTab detail={detail} loading={detailLoading} onView={setLightbox} />}
           {activeTab === "checkpoint" && <CheckpointTab detail={detail} loading={detailLoading} onView={setLightbox} />}
           {activeTab === "dokumen" && <DokumenTab detail={detail} loading={detailLoading} />}
@@ -4782,7 +5331,7 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
 }
 
 /* ── Tab: Rute Leg — kartu workflow per leg ── */
-function RuteLegTab({ legs, setLeg, addLeg, delLeg, moveLeg, order, tripId, headers, detail, copiedLeg, copyLegLink, openMultiUnit, printKartuMuat }) {
+function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tripId, headers, detail, copiedLeg, copyLegLink, openMultiUnit, printKartuMuat }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       {legs.map((leg, i) => {
@@ -4865,14 +5414,26 @@ function RuteLegTab({ legs, setLeg, addLeg, delLeg, moveLeg, order, tripId, head
                     <button type="button" onClick={() => printKartuMuat(leg, order)} style={SOLID_BTN_BLUE}>🖨️ Kartu Muat (1 Unit)</button>
                     <button type="button" onClick={() => openMultiUnit(leg)} style={GHOST_BTN_BLUE}>📋 Kartu Muat Multi Unit</button>
                   </div>
-                  {/* 6. Link petugas pelabuhan */}
+                  {/* 6. Link tugas — leg antar-pulau: petugas kapal + pelabuhan */}
                   <div style={{ marginTop: 10, padding: "10px 12px", background: "#0a1628", border: "1px solid #1f3a5a", borderRadius: 7 }}>
-                    <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 700, marginBottom: 6 }}>LINK PETUGAS PELABUHAN</div>
-                    <div style={{ fontSize: 10, color: "#4a6fa5", marginBottom: 8 }}>Kirim ke petugas pelabuhan buat upload foto kendaraan masuk / di dalam / bongkar kapal.</div>
-                    <button type="button" onClick={() => copyLegLink(leg, i)} disabled={!tripId}
-                      style={{ ...SOLID_BTN_BLUE, width: "100%", background: copiedLeg === i ? "#2ea043" : "#1f6feb" }}>
-                      {copiedLeg === i ? "✓ Tersalin!" : "🔗 Salin Link Petugas Pelabuhan"}
-                    </button>
+                    <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 700, marginBottom: 3 }}>LINK TUGAS LEG {i + 1} (ANTAR PULAU)</div>
+                    <div style={{ fontSize: 9.5, color: "#4a6fa5", marginBottom: 8 }}>Tiap peran link beda & ter-scope. Isi nama petugas di blok 👷 di atas dulu.</div>
+                    <div style={{ display: "grid", gap: 6 }}>
+                      <button type="button" onClick={() => copyLegLink(leg, i, "kapal")} disabled={!tripId}
+                        style={{ ...SOLID_BTN_BLUE, width: "100%", background: copiedLeg === `${i}-kapal` ? "#2ea043" : "#1f6feb" }}>
+                        {copiedLeg === `${i}-kapal` ? "✓ Tersalin!" : "🚢 Link Petugas Kapal"}
+                      </button>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                        <button type="button" onClick={() => copyLegLink(leg, i, "pelabuhan_asal")} disabled={!tripId}
+                          style={{ ...GHOST_BTN_BLUE, background: copiedLeg === `${i}-pelabuhan_asal` ? "#2ea043" : "transparent", color: copiedLeg === `${i}-pelabuhan_asal` ? "#fff" : "#60a5fa" }}>
+                          {copiedLeg === `${i}-pelabuhan_asal` ? "✓" : "⚓ Pelabuhan Asal"}
+                        </button>
+                        <button type="button" onClick={() => copyLegLink(leg, i, "pelabuhan_tujuan")} disabled={!tripId}
+                          style={{ ...GHOST_BTN_BLUE, background: copiedLeg === `${i}-pelabuhan_tujuan` ? "#2ea043" : "transparent", color: copiedLeg === `${i}-pelabuhan_tujuan` ? "#fff" : "#60a5fa" }}>
+                          {copiedLeg === `${i}-pelabuhan_tujuan` ? "✓" : "⚓ Pelabuhan Tujuan"}
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               ) : (
@@ -4898,13 +5459,38 @@ function RuteLegTab({ legs, setLeg, addLeg, delLeg, moveLeg, order, tripId, head
                     { done: (detail?.daily_count || 0) > 0, label: `Checkpoint harian terisi (${detail?.daily_count || 0})` },
                     { done: albumPhotos.length > 0, label: `Foto ${albumStage === "asal" ? "asal" : "tujuan"} (${albumPhotos.length})` },
                   ]} />
-                  {/* 6. Link driver */}
+                  {/* 6. Link driver — pilih PERAN eksplisit biar checklist pas & nggak ketuker */}
                   <div style={{ marginTop: 6, padding: "10px 12px", background: "#0d1117", border: "1px solid #21262d", borderRadius: 7 }}>
-                    <div style={{ fontSize: 10, color: "#8b949e", fontWeight: 700, marginBottom: 6 }}>LINK DRIVER LEG {i + 1}</div>
-                    <button type="button" onClick={() => copyLegLink(leg, i)} disabled={!tripId}
-                      style={{ ...SOLID_BTN_BLUE, width: "100%", background: copiedLeg === i ? "#2ea043" : "#1f6feb" }}>
-                      {copiedLeg === i ? "✓ Tersalin!" : "🔗 Salin Link Driver"}
-                    </button>
+                    <div style={{ fontSize: 10, color: "#8b949e", fontWeight: 700, marginBottom: 3 }}>LINK DRIVER LEG {i + 1}</div>
+                    <div style={{ fontSize: 9.5, color: "#6b7688", marginBottom: 8, lineHeight: 1.4 }}>
+                      Pilih peran → checklist otomatis nyesuaiin. <b>Self Drive full</b> = 1 driver asal→tujuan (nyebrang sendiri). <b>Driver Asal</b>/<b>Tujuan</b> = buat rute kapal/antar-pulau.
+                    </div>
+                    <div style={{ display: "grid", gap: 6 }}>
+                      <button type="button" onClick={() => copyLegLink(leg, i, "driver_full")} disabled={!tripId}
+                        style={{ ...SOLID_BTN_BLUE, width: "100%", background: copiedLeg === `${i}-driver_full` ? "#2ea043" : "#1f6feb" }}>
+                        {copiedLeg === `${i}-driver_full` ? "✓ Tersalin!" : "🔗 Link Self Drive (full: asal→tujuan)"}
+                      </button>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                        <button type="button" onClick={() => copyLegLink(leg, i, "driver_asal")} disabled={!tripId}
+                          style={{ ...GHOST_BTN_BLUE, background: copiedLeg === `${i}-driver_asal` ? "#2ea043" : "transparent", color: copiedLeg === `${i}-driver_asal` ? "#fff" : "#60a5fa" }}>
+                          {copiedLeg === `${i}-driver_asal` ? "✓ Tersalin" : "📍 Driver Asal"}
+                        </button>
+                        <button type="button" onClick={() => copyLegLink(leg, i, "driver_tujuan")} disabled={!tripId}
+                          style={{ ...GHOST_BTN_BLUE, background: copiedLeg === `${i}-driver_tujuan` ? "#2ea043" : "transparent", color: copiedLeg === `${i}-driver_tujuan` ? "#fff" : "#60a5fa" }}>
+                          {copiedLeg === `${i}-driver_tujuan` ? "✓ Tersalin" : "🏁 Driver Tujuan"}
+                        </button>
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                        <button type="button" onClick={() => copyLegLink(leg, i, "pelabuhan_asal")} disabled={!tripId}
+                          style={{ ...GHOST_BTN_BLUE, fontSize: 11, background: copiedLeg === `${i}-pelabuhan_asal` ? "#2ea043" : "transparent", color: copiedLeg === `${i}-pelabuhan_asal` ? "#fff" : "#8b949e" }}>
+                          {copiedLeg === `${i}-pelabuhan_asal` ? "✓" : "⚓ Pelabuhan Asal"}
+                        </button>
+                        <button type="button" onClick={() => copyLegLink(leg, i, "pelabuhan_tujuan")} disabled={!tripId}
+                          style={{ ...GHOST_BTN_BLUE, fontSize: 11, background: copiedLeg === `${i}-pelabuhan_tujuan` ? "#2ea043" : "transparent", color: copiedLeg === `${i}-pelabuhan_tujuan` ? "#fff" : "#8b949e" }}>
+                          {copiedLeg === `${i}-pelabuhan_tujuan` ? "✓" : "⚓ Pelabuhan Tujuan"}
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
@@ -4938,7 +5524,144 @@ function RuteLegTab({ legs, setLeg, addLeg, delLeg, moveLeg, order, tripId, head
           </div>
         );
       })}
-      <button onClick={addLeg} style={{ width: "100%", padding: "10px", border: "1px dashed #30363d", borderRadius: 9, background: "none", color: "#8b949e", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>+ Tambah Leg</button>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <button onClick={addLeg} style={{ padding: "10px", border: "1px dashed #30363d", borderRadius: 9, background: "none", color: "#8b949e", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>+ Tambah Leg</button>
+        <button onClick={nextLeg} disabled={!tripId} title="Bikin tahap berikutnya (asal = tujuan leg terakhir), histori tetap" style={{ padding: "10px", border: "none", borderRadius: 9, background: "#1f6feb", color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 800 }}>➡️ Lanjutkan Tahap Berikutnya</button>
+      </div>
+    </div>
+  );
+}
+
+/* ── Tab: Petugas — Trip → Route Leg → Petugas → Checkpoint → Foto (Fase 3) ──
+   Kartu status link tugas (Fase 2) + tombol Salin/WA/Nonaktifkan/Buat Ulang,
+   plus checkpoint terstruktur per leg (foto + GPS + waktu). */
+function PetugasTaskTab({ tripId, headers }) {
+  const [tasks, setTasks] = useState([]);
+  const [cps, setCps] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState("");
+  const [copied, setCopied] = useState("");
+
+  const load = useCallback(async () => {
+    if (!tripId) { setLoading(false); return; }
+    setLoading(true);
+    try {
+      const [a, b] = await Promise.all([
+        axios.get(`${API}/admin/leg-tasks`, { params: { trip_id: tripId }, headers }),
+        axios.get(`${API}/admin/trips/${tripId}/leg-checkpoints`, { headers }),
+      ]);
+      setTasks(a.data?.items || []);
+      setCps(b.data?.items || []);
+    } catch { /* diamkan */ }
+    setLoading(false);
+  }, [tripId, headers]);
+  useEffect(() => { load(); }, [load]);
+
+  const linkOf = (tk) => `${window.location.origin}/task/${tk}`;
+  const salin = async (tk) => { try { await navigator.clipboard.writeText(linkOf(tk)); setCopied(tk); setTimeout(() => setCopied(""), 1600); } catch {} };
+  const waShare = (t) => {
+    const txt = `Halo ${t.petugas_nama || "Petugas"}, ini link tugas ${t.jenis || ""} Anda:\n${linkOf(t.token)}\n\nBuka lewat HP, ikuti checklist & upload foto. Terima kasih.`;
+    const hp = (t.petugas_hp || "").replace(/\D/g, "").replace(/^0/, "62");
+    window.open(hp ? `https://wa.me/${hp}?text=${encodeURIComponent(txt)}` : `https://wa.me/?text=${encodeURIComponent(txt)}`, "_blank");
+  };
+  const nonaktif = async (tk) => { if (!window.confirm("Nonaktifkan link tugas ini? Petugas nggak bisa buka lagi.")) return; setBusy(tk); try { await axios.post(`${API}/admin/leg-tasks/${tk}/disable`, {}, { headers }); await load(); } catch {} setBusy(""); };
+  const buatUlang = async (tk) => { if (!window.confirm("Buat ulang link? Link lama mati, isi tugas tetap.")) return; setBusy(tk); try { await axios.post(`${API}/admin/leg-tasks/${tk}/regen`, {}, { headers }); await load(); } catch {} setBusy(""); };
+
+  const fmtTs = (s) => { if (!s) return "—"; try { return new Date(s).toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); } catch { return s; } };
+
+  if (loading) return <div style={{ padding: 30, textAlign: "center", color: "#8b949e" }}>Memuat petugas…</div>;
+  if (tasks.length === 0) return (
+    <div style={{ padding: 30, textAlign: "center", color: "#8b949e" }}>
+      Belum ada link tugas petugas.<br /><span style={{ fontSize: 11, color: "#6b7688" }}>Bikin di tab <b>Rute Leg</b> → assign petugas → Salin Link Tugas.</span>
+    </div>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {tasks.map((t) => {
+        const meta = TASK_STATUS_META[t.status] || TASK_STATUS_META.belum_dibuka;
+        const done = (t.checklist || []).filter((c) => c.done).length;
+        const total = (t.checklist || []).length;
+        const legCps = cps.filter((c) => c.leg_index === t.leg_index || (t.route_leg_id && c.route_leg_id === t.route_leg_id));
+        return (
+          <div key={t.token} style={{ background: "#0d1117", border: "1px solid #21262d", borderRadius: 12, overflow: "hidden" }}>
+            {/* header */}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: "#12161c", borderBottom: "1px solid #21262d", flexWrap: "wrap" }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: "#e6edf3" }}>Leg {(t.leg_index ?? 0) + 1} · {t.jenis || "—"}</span>
+                  <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 10, background: meta.bg, color: meta.c }}>{meta.t}</span>
+                </div>
+                <div style={{ fontSize: 11, color: "#8b949e", marginTop: 3 }}>
+                  👷 {t.petugas_nama || "—"}{t.petugas_hp ? ` · ${t.petugas_hp}` : ""}{t.tipe_petugas ? ` · ${t.tipe_petugas}` : ""}
+                </div>
+                <div style={{ fontSize: 10.5, color: "#6b7688", marginTop: 2 }}>Checklist: {done}/{total} · Dibuka: {fmtTs(t.opened_at)}</div>
+              </div>
+            </div>
+            {/* actions */}
+            <div style={{ display: "flex", gap: 6, padding: "10px 14px", flexWrap: "wrap" }}>
+              <button onClick={() => salin(t.token)} disabled={t.disabled} style={{ ...SOLID_BTN_BLUE, flex: "1 1 120px", background: copied === t.token ? "#2ea043" : "#1f6feb", opacity: t.disabled ? 0.5 : 1 }}>{copied === t.token ? "✓ Tersalin" : "🔗 Salin Link"}</button>
+              <button onClick={() => waShare(t)} disabled={t.disabled} style={{ ...GHOST_BTN_BLUE, flex: "1 1 110px", opacity: t.disabled ? 0.5 : 1 }}>💬 WhatsApp</button>
+              {!t.disabled
+                ? <button onClick={() => nonaktif(t.token)} disabled={busy === t.token} style={{ flex: "1 1 120px", padding: "8px", borderRadius: 7, background: "transparent", border: "1px solid #5a1d1d", color: "#f85149", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>{busy === t.token ? "…" : "⛔ Nonaktifkan"}</button>
+                : <button onClick={() => buatUlang(t.token)} disabled={busy === t.token} style={{ flex: "1 1 120px", padding: "8px", borderRadius: 7, background: "transparent", border: "1px solid #7a5c14", color: "#EF9F27", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>{busy === t.token ? "…" : "♻️ Buat Ulang"}</button>}
+            </div>
+            {/* serah terima indikator — leg selesai → admin bisa lanjut aktifkan leg berikutnya (jangan auto) */}
+            {t.status === "selesai" && (
+              <div style={{ margin: "0 14px 10px", padding: "8px 12px", background: "#0d2a10", border: "1px solid #238636", borderRadius: 8, fontSize: 11.5, color: "#3fb950", fontWeight: 700 }}>
+                ✓ Serah terima leg ini SELESAI — silakan aktifkan / buat link leg berikutnya secara manual.
+              </div>
+            )}
+            {/* input dari petugas (kapal/voyage/ETD/ETA/penerima/ttd) */}
+            {(() => {
+              const x = t.extra_inputs || {};
+              const rows = [
+                ["Nama Kapal", x.nama_kapal], ["Voyage", x.voyage],
+                ["Estimasi Berangkat", x.etd], ["Estimasi Tiba", x.eta],
+                ["Nama Penerima", x.penerima_nama], ["No. HP Penerima", x.penerima_hp],
+              ].filter(([, v]) => v);
+              if (!rows.length && !x.penerima_ttd) return null;
+              return (
+                <div style={{ margin: "0 14px 10px", padding: "8px 12px", background: "#12161c", border: "1px solid #21262d", borderRadius: 8 }}>
+                  <div style={{ fontSize: 10, color: "#8b949e", fontWeight: 700, marginBottom: 6, letterSpacing: .5 }}>INPUT PETUGAS</div>
+                  {rows.map(([k, v]) => (
+                    <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 11.5, padding: "2px 0" }}>
+                      <span style={{ color: "#8b949e" }}>{k}</span><span style={{ color: "#e6edf3", fontWeight: 700, textAlign: "right" }}>{v}</span>
+                    </div>
+                  ))}
+                  {x.penerima_ttd && (
+                    <div style={{ marginTop: 6 }}>
+                      <div style={{ fontSize: 10, color: "#8b949e", marginBottom: 3 }}>Tanda Tangan Penerima</div>
+                      <img src={x.penerima_ttd} alt="ttd" style={{ maxWidth: 200, background: "#fff", borderRadius: 6, border: "1px solid #21262d" }} />
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+            {/* checkpoints */}
+            <div style={{ padding: "0 14px 14px" }}>
+              <div style={{ fontSize: 10, color: "#8b949e", fontWeight: 700, marginBottom: 6, letterSpacing: .5 }}>CHECKPOINT ({legCps.length})</div>
+              {legCps.length === 0 ? (
+                <div style={{ fontSize: 11, color: "#484f58" }}>Belum ada foto dari petugas.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {legCps.map((c) => (
+                    <div key={c.checkpoint_id} style={{ display: "flex", gap: 10, alignItems: "flex-start", background: "#12161c", border: "1px solid #21262d", borderRadius: 8, padding: 8 }}>
+                      {c.url && <img src={resolveTripUrl(c.url)} alt="" style={{ width: 54, height: 54, borderRadius: 7, objectFit: "cover", border: "1px solid #21262d", flexShrink: 0 }} />}
+                      <div style={{ flex: 1, minWidth: 0, fontSize: 11 }}>
+                        <div style={{ color: "#c9d1d9" }}>{fmtTs(c.ts)}{c.catatan ? ` · ${c.catatan}` : ""}</div>
+                        {c.lat != null && c.lng != null
+                          ? <a href={`https://www.google.com/maps?q=${c.lat},${c.lng}`} target="_blank" rel="noreferrer" style={{ fontSize: 10, color: "#60a5fa", marginTop: 3, display: "inline-block" }}>📍 {parseFloat(c.lat).toFixed(4)}, {parseFloat(c.lng).toFixed(4)} · Buka Maps</a>
+                          : <div style={{ fontSize: 10, color: "#6b7688", marginTop: 3 }}>📍 Lokasi tidak tersedia</div>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -4958,7 +5681,7 @@ function FotoTab({ detail, loading, onView }) {
             {photos.length === 0 ? (
               <div style={{ fontSize: 11, color: "#484f58" }}>Belum ada foto.</div>
             ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))", gap: 8 }}>
+              <div className="keep-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))", gap: 8 }}>
                 {photos.map((p, i) => (
                   <div key={i} onClick={() => onView(resolveTripUrl(p.url))} style={{ cursor: "pointer" }}>
                     <img src={resolveTripUrl(p.url)} alt="" style={{ width: "100%", aspectRatio: "1", borderRadius: 8, objectFit: "cover", border: "1px solid #21262d" }} />
@@ -5018,7 +5741,7 @@ function DokumenTab({ detail, loading }) {
       <div>
         <div style={{ fontSize: 12, fontWeight: 800, color: "#e6edf3", marginBottom: 8 }}>📄 BASTK <span style={{ color: "#8b949e", fontWeight: 600 }}>({bastk.length})</span></div>
         {bastk.length === 0 ? <div style={{ fontSize: 11, color: "#484f58" }}>Belum ada dokumen BASTK.</div> : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))", gap: 8 }}>
+          <div className="keep-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))", gap: 8 }}>
             {bastk.map((b, i) => {
               const isPdf = /\.pdf$/i.test(b.url || "");
               return (
@@ -5062,7 +5785,7 @@ function RingkasanTab({ legs, detail }) {
   ];
   return (
     <div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10, marginBottom: 18 }}>
+      <div className="keep-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10, marginBottom: 18 }}>
         {stats.map(s => (
           <div key={s.label} style={{ background: "#0d1117", border: "1px solid #21262d", borderRadius: 10, padding: "12px 14px" }}>
             <div style={{ fontSize: 20, fontWeight: 800, color: "#EF9F27" }}>{s.val}</div>

@@ -19,6 +19,7 @@ import KompensasiRingkasan from "@/KompensasiRingkasan";
 import SupplierQuoteFill from "@/SupplierQuoteFill";
 import CustomerGuidePage from "@/CustomerGuidePage";
 import MobileVendorPayment from "@/MobileVendorPayment";
+import TaskPage from "@/TaskPage";
 
 // Resolve path segment: /track/TRIP-XXX -> "TRIP-XXX"
 function pathSegment(pathname, prefix) {
@@ -43,6 +44,7 @@ function App() {
     if (p === "/mobile/vendor-payment") return { route: "mobile-vendor-payment" };
     if (p === "/panduan-kirim")     return { route: "panduan-kirim" };
     if (p.startsWith("/harga/"))     return { route: "harga" };
+    if (p.startsWith("/task/"))     return { route: "task" };
     if (p.startsWith("/track/"))    return { route: "track" };
     if (p.startsWith("/trip/"))     return { route: "driver" };
     if (p.startsWith("/bastk/"))    return { route: "bastk" };
@@ -97,6 +99,7 @@ function App() {
   if (route === "status") return <CustomerOrderStatus />;
   if (route === "bastk")  return <BASTKPage />;
   if (route === "track")  return <CustomerTracking />;
+  if (route === "task")   return <TaskPage />;
   if (route === "driver") return <DriverCheckpoint />;
   if (route === "koordinator") return <KoordinatorPage />;
   if (route === "harga") return <CustomerPricePage />;

@@ -1,8 +1,95 @@
 import { useState, useEffect, useRef } from "react";
 import axios from "axios";
+import { DOC_BASE_CSS, DOC_BRAND, docHeader, docFooter } from "./docTheme";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "";
 const API = `${BACKEND_URL}/api`;
+
+/* Cetak Ringkasan Kompensasi (hutang-piutang 2 arah) sebagai A4 vektor —
+   tajam walau di-screenshot & kirim WhatsApp. itemsKita/itemsMereka = baris yg
+   dicetak (hasil filter centang; kalau kosong dilempar semua dari pemanggil). */
+function printKompensasiA4(rk, itemsKita, itemsMereka) {
+  if (!rk) return;
+  const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const rp = (n) => "Rp " + (Number(n) || 0).toLocaleString("id-ID");
+  const fd = (s) => { if (!s) return "-"; const [y, m, d] = String(s).slice(0, 10).split("-"); return (y && m && d) ? `${d}/${m}/${y}` : s; };
+  const now = new Date();
+  const tgl = now.toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
+  const noDoc = `KMP/AAL/${String(now.getDate()).padStart(2, "0")}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getFullYear()).slice(2)}/${now.getFullYear()}`;
+  const totKita = itemsKita.reduce((s, i) => s + (i.nilai || 0), 0);
+  const totMereka = itemsMereka.reduce((s, i) => s + (i.nilai || 0), 0);
+  const sisa = totKita - totMereka;
+  const sisaTxt = sisa === 0 ? "LUNAS / IMPAS"
+    : sisa > 0 ? `Alyssa Logistik masih wajib bayar ${rp(sisa)} ke ${esc(rk.nama || "-")}`
+              : `${esc(rk.nama || "-")} masih wajib bayar ${rp(-sisa)} ke Alyssa Logistik`;
+  const rowsHtml = (items) => items.length ? items.map((it, i) => {
+    const ket = it.keterangan || it.vehicle_type || "Rincian kompensasi";
+    const unit = it.no_unit ? ` · ${esc(it.no_unit)}` : "";
+    const rute = (it.asal_kota || it.tujuan_kota) ? `${esc(it.asal_kota || "?")} → ${esc(it.tujuan_kota || "?")}` : "-";
+    return `<tr>
+      <td class="c">${i + 1}</td>
+      <td>${fd(it.tanggal)}</td>
+      <td><b>${esc(ket)}</b>${unit}${it.catatan ? `<div class="rp-note">${esc(it.catatan)}</div>` : ""}</td>
+      <td>${rute}</td>
+      <td class="r"><b>${rp(it.nilai)}</b></td>
+    </tr>`;
+  }).join("") : `<tr><td class="c" colspan="5" style="color:${DOC_BRAND.muted};padding:8px">Tidak ada rincian.</td></tr>`;
+  const tableFor = (title, items, tot, accent) => `
+    <div class="kmp-sec-title" style="border-left:3px solid ${accent}">${title}</div>
+    <table class="rps">
+      <thead><tr>
+        <th class="c" style="width:24px">No</th><th style="width:70px">Tanggal</th><th>Keterangan / Unit</th><th style="width:150px">Rute</th><th class="r" style="width:100px">Nilai</th>
+      </tr></thead>
+      <tbody>${rowsHtml(items)}</tbody>
+      <tfoot><tr class="tot"><td class="lbl" colspan="4">TOTAL</td><td class="r">${rp(tot)}</td></tr></tfoot>
+    </table>`;
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${noDoc}</title>
+  <style>
+    ${DOC_BASE_CSS}
+    body { font-size: 11px; }
+    .doc-sheet { padding: 0; max-width: 210mm; }
+    .rps-meta-row { display:flex; justify-content:space-between; gap:24px; margin-bottom:14px; }
+    .rps-billto .lbl { font-size:10px; font-weight:700; text-transform:uppercase; color:${DOC_BRAND.muted}; letter-spacing:.5px; margin-bottom:4px; }
+    .rps-billto .val { font-size:15px; font-weight:800; color:${DOC_BRAND.ink}; }
+    .rps-meta-table { border-collapse:collapse; font-size:11px; }
+    .rps-meta-table td { padding:3px 0; } .rps-meta-table td:first-child { color:${DOC_BRAND.muted}; padding-right:18px; white-space:nowrap; }
+    .rps-meta-table td:last-child { font-weight:700; text-align:right; }
+    .kmp-sec-title { font-size:11px; font-weight:800; color:${DOC_BRAND.ink}; padding:4px 0 4px 8px; margin:6px 0 6px; }
+    table.rps { width:100%; border-collapse:collapse; margin-bottom:14px; }
+    table.rps tr { break-inside:avoid; page-break-inside:avoid; }
+    table.rps th { text-align:left; font-size:8.5px; text-transform:uppercase; letter-spacing:.3px; color:#fff; background:${DOC_BRAND.navy}; font-weight:700; padding:5px 7px; white-space:nowrap; }
+    table.rps th.r { text-align:right; } table.rps th.c { text-align:center; }
+    table.rps td { padding:4px 7px; font-size:9px; line-height:1.35; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; }
+    table.rps tbody tr:nth-child(even) td { background:${DOC_BRAND.paperMist}; }
+    table.rps td.c { text-align:center; } table.rps td.r { text-align:right; white-space:nowrap; }
+    table.rps .rp-note { font-size:8px; color:${DOC_BRAND.muted}; margin-top:2px; }
+    table.rps tfoot .tot td { border-top:2px solid ${DOC_BRAND.navy}; border-bottom:none; padding:7px 7px; font-size:10px; font-weight:800; background:#fff; }
+    table.rps tfoot .tot .lbl { text-align:right; }
+    .kmp-net { border:2px solid ${DOC_BRAND.navy}; border-radius:6px; padding:9px 12px; font-size:12px; font-weight:800; color:${DOC_BRAND.ink}; margin-bottom:12px; }
+    .rps-note { font-size:10px; color:${DOC_BRAND.muted}; line-height:1.7; }
+    @page { size:A4 portrait; margin:8mm; }
+    @media print { @page { size:A4 portrait; margin:8mm; } }
+  </style></head><body>
+  <div class="doc-sheet">
+    ${docHeader({ docTitle: "RINGKASAN KOMPENSASI" })}
+    <div class="rps-meta-row">
+      <div class="rps-billto"><div class="lbl">Rekanan / Supplier</div><div class="val">${esc(rk.nama || "-")}</div></div>
+      <table class="rps-meta-table">
+        <tr><td>No. Dokumen</td><td>${noDoc}</td></tr>
+        <tr><td>Tanggal</td><td>${tgl}</td></tr>
+        <tr><td>Jumlah Rincian</td><td>${itemsKita.length + itemsMereka.length}</td></tr>
+      </table>
+    </div>
+    ${tableFor(`Kewajiban Alyssa Logistik &rarr; ${esc(rk.nama || "-")}`, itemsKita, totKita, DOC_BRAND.navy)}
+    ${tableFor(`Kewajiban ${esc(rk.nama || "-")} &rarr; Alyssa Logistik`, itemsMereka, totMereka, DOC_BRAND.navy)}
+    <div class="kmp-net">SISA KEWAJIBAN: ${sisaTxt}</div>
+    <div class="rps-note"><b>Catatan:</b> Sisa kewajiban = Total kewajiban Alyssa Logistik &minus; Total kewajiban ${esc(rk.nama || "-")}. Konfirmasi: <b>${DOC_BRAND.phone}</b>.</div>
+    ${docFooter({ docNo: `Ringkasan ${noDoc}` })}
+  </div>
+  <script>window.onload=()=>window.print()<\/script>
+  </body></html>`;
+  const w = window.open("", "_blank"); w.document.write(html); w.document.close();
+}
 
 function fRp(n) {
   n = Number(n) || 0;
@@ -35,7 +122,10 @@ export default function KompensasiPage() {
   const [query, setQuery] = useState("");
   const [dropdown, setDropdown] = useState([]);
   const [selected, setSelected] = useState(null); // full rekanan doc w/ items
+  const [sel, setSel] = useState({}); // item id -> bool (buat cetak A4 pilihan)
   const debounceRef = useRef(null);
+  const rkSelectingRef = useRef(false); // lagi klik saran → jangan auto-bikin baru
+  const rkAutoSaveTimer = useRef(null);
   const [toast, setToast] = useState("");
   const [listRefreshTick, setListRefreshTick] = useState(0);
 
@@ -57,10 +147,12 @@ export default function KompensasiPage() {
     try {
       const r = await axios.get(`${API}/admin/kompensasi/${id}`, { headers });
       setSelected(r.data);
+      setSel({}); // reset centang tiap ganti/refresh rekanan
     } catch { flash("Gagal memuat data rekanan"); }
   };
 
   const selectRekanan = async (s) => {
+    clearTimeout(rkAutoSaveTimer.current);
     setDropdown([]);
     setQuery(s.nama);
     await reloadSelected(s.id);
@@ -77,13 +169,19 @@ export default function KompensasiPage() {
     } catch (e) { flash(e?.response?.data?.detail || "Gagal simpan supplier"); }
   };
   // Auto-simpan: selesai ngetik nama baru (blur/Enter) langsung kesimpen.
-  const autoSaveRekanan = () => setTimeout(() => {
-    const nama = query.trim();
-    if (selected || nama.length < 2) return;
-    const exact = dropdown.find((s) => (s.nama || "").trim().toLowerCase() === nama.toLowerCase());
-    if (exact) { selectRekanan(exact); return; }
-    createOrOpenRekanan();
-  }, 250);
+  const autoSaveRekanan = () => {
+    clearTimeout(rkAutoSaveTimer.current);
+    rkAutoSaveTimer.current = setTimeout(() => {
+      if (rkSelectingRef.current) { rkSelectingRef.current = false; return; } // baru klik saran
+      const nama = query.trim();
+      if (selected || nama.length < 2) return;
+      const exact = dropdown.find((s) => (s.nama || "").trim().toLowerCase() === nama.toLowerCase());
+      if (exact) { selectRekanan(exact); return; }
+      // Masih ada saran cocok → jangan bikin nama setengah jadi (tinggal klik saran).
+      if (dropdown.length > 0) return;
+      createOrOpenRekanan();
+    }, 250);
+  };
 
   const deleteRekanan = async () => {
     if (!selected) return;
@@ -283,10 +381,21 @@ export default function KompensasiPage() {
 
   const itemsKita = (selected?.items || []).filter((i) => i.arah === "kita_ke_mereka");
   const itemsMereka = (selected?.items || []).filter((i) => i.arah === "mereka_ke_kita");
+  const allItems = selected?.items || [];
+  const allChecked = allItems.length > 0 && allItems.every((i) => sel[i.id]);
+  const anyChecked = allItems.some((i) => sel[i.id]);
+  const toggleSel = (id) => setSel((s) => ({ ...s, [id]: !s[id] }));
+  const toggleSelAll = () => { if (allChecked) { setSel({}); return; } const n = {}; allItems.forEach((i) => { n[i.id] = true; }); setSel(n); };
+  // Cetak A4: kalau ada yg dicentang → cetak yang dicentang aja; kalau nggak ada → semua.
+  const cetakA4 = () => {
+    const pick = (arr) => anyChecked ? arr.filter((i) => sel[i.id]) : arr;
+    printKompensasiA4(selected, pick(itemsKita), pick(itemsMereka));
+  };
 
   const renderItemRow = (it) => (
     <div key={it.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, fontSize: 12, padding: "8px 0", borderTop: "1px solid #21262d" }} data-testid={`komp-item-${it.id}`}>
-      <div>
+      <input type="checkbox" checked={!!sel[it.id]} onChange={() => toggleSel(it.id)} style={{ width: 16, height: 16, marginTop: 2, flexShrink: 0 }} data-testid={`komp-item-check-${it.id}`} />
+      <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ color: "#e6edf3", fontWeight: 700 }}>
           {it.keterangan || (it.vehicle_type ? it.vehicle_type : "Rincian kompensasi")}
           {it.no_unit && <span style={{ color: "#8b949e", fontWeight: 400 }}> · {it.no_unit}</span>}
@@ -328,7 +437,7 @@ export default function KompensasiPage() {
           {!selected && dropdown.length > 0 && (
             <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#161b22", border: "1px solid #30363d", borderRadius: 8, marginTop: 4, zIndex: 10, maxHeight: 240, overflowY: "auto" }}>
               {dropdown.map((s) => (
-                <div key={s.id} onClick={() => selectRekanan(s)} style={{ padding: "9px 12px", cursor: "pointer", borderBottom: "1px solid #21262d", fontSize: 13, display: "flex", justifyContent: "space-between", gap: 10 }} data-testid={`komp-option-${s.id}`}>
+                <div key={s.id} onMouseDown={(e) => { e.preventDefault(); rkSelectingRef.current = true; selectRekanan(s); }} style={{ padding: "9px 12px", cursor: "pointer", borderBottom: "1px solid #21262d", fontSize: 13, display: "flex", justifyContent: "space-between", gap: 10 }} data-testid={`komp-option-${s.id}`}>
                   <span style={{ fontWeight: 700 }}>{s.nama}</span>
                   <span style={{ color: "#8b949e", fontSize: 11 }}>{s.jumlah_item || 0} rincian · sisa {fRp(s.sisa)}</span>
                 </div>
@@ -483,6 +592,19 @@ export default function KompensasiPage() {
               </button>
             </div>
           </div>
+
+          {/* Bar: pilih semua + cetak A4 (kaya di Supplier) */}
+          {allItems.length > 0 && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", background: "#0d1b2a", border: "1px solid #1f6feb", borderRadius: 8, padding: "8px 12px", marginBottom: 12 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 12, fontWeight: 700, color: "#e6edf3" }}>
+                <input type="checkbox" checked={allChecked} onChange={toggleSelAll} style={{ width: 18, height: 18 }} data-testid="komp-select-all" />
+                Pilih Semua ({allItems.length}){anyChecked ? ` · ${allItems.filter((i) => sel[i.id]).length} dipilih` : ""}
+              </label>
+              <button style={{ ...BTN, fontSize: 12, padding: "8px 14px" }} onClick={cetakA4} data-testid="komp-cetak-a4">
+                🖨️ Cetak A4{anyChecked ? " (yg dicentang)" : " (semua)"}
+              </button>
+            </div>
+          )}
 
           {/* Dua daftar rincian, per arah */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>

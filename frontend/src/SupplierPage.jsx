@@ -120,6 +120,8 @@ export default function SupplierPage() {
   const [dropdown, setDropdown] = useState([]);
   const [selected, setSelected] = useState(null);
   const debounceRef = useRef(null);
+  const selectingRef = useRef(false); // lagi klik saran → jangan auto-bikin baru
+  const autoSaveTimer = useRef(null);
   const [toast, setToast] = useState("");
   const [listRefreshTick, setListRefreshTick] = useState(0);
   const flash = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2400); };
@@ -144,7 +146,7 @@ export default function SupplierPage() {
     try { const r = await axios.get(`${API}/admin/suppliers/${id}`, { headers }); setSelected(r.data); }
     catch { flash("Gagal memuat data supplier"); }
   };
-  const selectSupplier = async (s) => { setDropdown([]); setQuery(s.nama); setPaySel({}); await reloadSelected(s.id); };
+  const selectSupplier = async (s) => { clearTimeout(autoSaveTimer.current); setDropdown([]); setQuery(s.nama); setPaySel({}); await reloadSelected(s.id); };
   const createOrOpenSupplier = async () => {
     if (!query.trim()) { flash("Masukkan nama supplier dulu"); return; }
     try {
@@ -156,13 +158,20 @@ export default function SupplierPage() {
   // nggak perlu klik tombol. Kalau namanya udah ada, langsung dibuka (backend
   // create_supplier balikin yang sudah ada, jadi nggak dobel). Delay biar klik
   // dropdown menang.
-  const autoSaveSupplier = () => setTimeout(() => {
-    const nama = query.trim();
-    if (selected || nama.length < 2) return;
-    const exact = dropdown.find((s) => (s.nama || "").trim().toLowerCase() === nama.toLowerCase());
-    if (exact) { selectSupplier(exact); return; }
-    createOrOpenSupplier();
-  }, 250);
+  const autoSaveSupplier = () => {
+    clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(() => {
+      if (selectingRef.current) { selectingRef.current = false; return; } // baru klik saran
+      const nama = query.trim();
+      if (selected || nama.length < 2) return;
+      const exact = dropdown.find((s) => (s.nama || "").trim().toLowerCase() === nama.toLowerCase());
+      if (exact) { selectSupplier(exact); return; }
+      // Masih ada saran yg cocok → jangan bikin nama setengah jadi. User tinggal
+      // klik saran, atau tekan tombol "+ Buat / Buka" kalau memang mau bikin baru.
+      if (dropdown.length > 0) return;
+      createOrOpenSupplier();
+    }, 250);
+  };
 
   const jobs = useMemo(() => selected?.jobs || [], [selected]);
   const unpaidJobs = useMemo(() => jobs.filter((j) => (j.sisa || 0) > 0), [jobs]);
@@ -260,13 +269,31 @@ export default function SupplierPage() {
       asal_kota: o.asal_kota || "", tujuan_kota: o.tujuan_kota || "", customer: o.customer_nama || "",
     }));
   };
-  const openTarik = async () => {
-    if (!selected) { flash("Pilih supplier dulu"); return; }
-    setTarikOpen(true); setTarikSel({}); setTarikQ(""); setTarikLoading(true);
-    try { const r = await axios.get(`${API}/admin/orders`, { headers }); setTarikOrders(r.data?.items || []); }
-    catch { flash("Gagal memuat order"); setTarikOrders([]); }
+  // Ambil order dari master admin PO. Kirim kata kunci ke server (q) biar
+  // nyari di SELURUH order (bukan cuma 100 terbaru) — cocok no PO, no rangka,
+  // nama pelanggan, asal/tujuan. Server nyari juga di dalam units[].
+  const fetchTarik = async (qStr) => {
+    setTarikLoading(true);
+    try {
+      const params = { limit: 500 };
+      if (qStr && qStr.trim()) params.q = qStr.trim();
+      const r = await axios.get(`${API}/admin/orders`, { headers, params });
+      setTarikOrders(r.data?.items || []);
+    } catch { flash("Gagal memuat order"); setTarikOrders([]); }
     finally { setTarikLoading(false); }
   };
+  const openTarik = async () => {
+    if (!selected) { flash("Pilih supplier dulu"); return; }
+    setTarikOpen(true); setTarikSel({}); setTarikQ("");
+    fetchTarik("");
+  };
+  // Debounce: tiap ketik di search, cari ulang ke server (biar master penuh kepakai).
+  useEffect(() => {
+    if (!tarikOpen) return;
+    const t = setTimeout(() => fetchTarik(tarikQ), 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tarikQ, tarikOpen]);
   const toggleTarik = (row) => setTarikSel((s) => { const n = { ...s }; if (n[row.key]) delete n[row.key]; else n[row.key] = { ...row, total_harga: "" }; return n; });
   const setTarikHarga = (key, val) => setTarikSel((s) => ({ ...s, [key]: { ...s[key], total_harga: val } }));
   const tarikRows = tarikOrders.flatMap(orderUnitsOf).filter((row) => {
@@ -396,7 +423,7 @@ export default function SupplierPage() {
           {!selected && dropdown.length > 0 && (
             <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: C.card, border: `1px solid ${C.inpLine}`, borderRadius: 10, marginTop: 4, zIndex: 30, maxHeight: 300, overflowY: "auto", boxShadow: "0 8px 24px rgba(0,0,0,.4)" }}>
               {dropdown.map((s) => (
-                <div key={s.id} onClick={() => selectSupplier(s)} style={{ padding: "12px 14px", cursor: "pointer", borderBottom: `1px solid ${C.line}`, display: "flex", justifyContent: "space-between", gap: 10 }} data-testid={`sup-option-${s.id}`}>
+                <div key={s.id} onMouseDown={(e) => { e.preventDefault(); selectingRef.current = true; selectSupplier(s); }} style={{ padding: "12px 14px", cursor: "pointer", borderBottom: `1px solid ${C.line}`, display: "flex", justifyContent: "space-between", gap: 10 }} data-testid={`sup-option-${s.id}`}>
                   <span style={{ fontWeight: 700 }}>{s.nama}</span>
                   <span style={{ color: C.mute, fontSize: 12 }}>{s.jumlah_unit || 0} unit · sisa {fRp(s.grand_sisa)}</span>
                 </div>
@@ -473,6 +500,9 @@ export default function SupplierPage() {
                 <div style={{ textAlign: "center", padding: 40, color: C.mute, background: C.card, border: `1px solid ${C.line}`, borderRadius: 14 }}>🎉 Semua tagihan supplier ini sudah lunas.</div>
               ) : (
                 <>
+                  <div style={{ background: "#0d1b2a", border: `1px solid ${C.blue}`, borderRadius: 12, padding: "10px 12px", marginBottom: 12, fontSize: 12, color: C.mute }}>
+                    <b style={{ color: C.ink }}>Bayar borongan</b> — centang beberapa PO, 1 nominal dibagi otomatis. Mau bayar <b style={{ color: C.ink }}>1 PO aja</b>? Ke tab <b style={{ color: C.ink }}>Tagihan</b> → tombol <b style={{ color: C.ink }}>💵 Bayar PO Ini</b> (tanpa centang).
+                  </div>
                   <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
                     <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", marginBottom: 6 }}>
                       <input type="checkbox" checked={allUnpaidChecked} onChange={selectAllUnpaid} style={{ width: 20, height: 20 }} data-testid="sup-pay-all" />
@@ -522,6 +552,12 @@ export default function SupplierPage() {
                     <input style={{ ...I, marginBottom: 10 }} placeholder="Catatan (opsional)" value={payCatatan} onChange={(e) => setPayCatatan(e.target.value)} />
                     <input ref={payFileRef} type="file" accept="image/*,application/pdf" style={{ display: "none" }} onChange={(e) => setPayBukti(e.target.files?.[0] || null)} />
                     <button style={{ ...BTN_GHOST, width: "100%" }} onClick={() => payFileRef.current?.click()}>{payBukti ? `📎 ${payBukti.name.slice(0, 28)}` : "📎 Upload Bukti Transfer"}</button>
+                    {/* Tombol simpan di dalam form (deket) — biar nggak perlu turun ke bar bawah.
+                        Selalu bisa diklik; kalau belum lengkap, doBatchPay kasih pesannya. */}
+                    <button style={{ ...BTN, width: "100%", marginTop: 12, opacity: (selectedPayJobs.length && pNum(payAmount) > 0) ? 1 : 0.6 }} onClick={doBatchPay} disabled={paySaving} data-testid="sup-pay-save-inline">
+                      {paySaving ? "Menyimpan…" : selectedPayJobs.length ? `💾 Simpan Pembayaran · ${selectedPayJobs.length} tagihan` : "💾 Centang tagihan dulu"}
+                    </button>
+                    {!selectedPayJobs.length && <div style={{ fontSize: 11, color: C.mute, textAlign: "center", marginTop: 6 }}>Centang tagihan di atas dulu, terus isi nominal.</div>}
                   </div>
                 </>
               )}
@@ -562,7 +598,8 @@ export default function SupplierPage() {
                       <span style={{ color: C.mute }}>Sisa</span><span style={{ fontWeight: 900, color: j.sisa > 0 ? C.red : C.green }}>{fRp(j.sisa)}</span>
                     </div>
                     <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                      {j.sisa > 0 && <button style={{ ...BTN, flex: 1 }} onClick={() => { setPaySel({ [j.id]: true }); setPayAmount(String(j.sisa)); setTab("pembayaran"); }} data-testid={`sup-bayar-${j.id}`}>Bayar</button>}
+                      {/* Opsi 1: bayar PO ini langsung (tanpa centang) — buka form bayar, jumlah = sisa, tinggal atur tanggal. */}
+                      {j.sisa > 0 && <button style={{ ...BTN, flex: 1 }} onClick={() => { openDetail(j); setDpAmount(String(j.sisa)); }} data-testid={`sup-bayar-${j.id}`}>💵 Bayar PO Ini</button>}
                       <button style={{ ...BTN_GHOST, flex: 1 }} onClick={() => openDetail(j)} data-testid={`sup-detail-${j.id}`}>Lihat Detail</button>
                     </div>
                   </div>
@@ -612,7 +649,7 @@ export default function SupplierPage() {
               <div style={{ fontSize: 11, color: C.mute }}>{selectedPayJobs.length} tagihan · dipilih {fRp(totalSelSisa)}</div>
               <div style={{ fontSize: 20, fontWeight: 900 }}>{fRp(pNum(payAmount))}</div>
             </div>
-            <button style={{ ...BTN, flex: "0 0 auto", minWidth: 170 }} onClick={doBatchPay} disabled={paySaving || !selectedPayJobs.length || pNum(payAmount) <= 0} data-testid="sup-pay-save">
+            <button style={{ ...BTN, flex: "0 0 auto", minWidth: 170, opacity: (selectedPayJobs.length && pNum(payAmount) > 0) ? 1 : 0.6 }} onClick={doBatchPay} disabled={paySaving} data-testid="sup-pay-save">
               {paySaving ? "Menyimpan…" : "💾 Simpan Pembayaran"}
             </button>
           </div>
@@ -624,7 +661,7 @@ export default function SupplierPage() {
         <Modal title="Tarik Unit dari PO" onClose={() => setTarikOpen(false)}
           foot={<><button style={BTN_GHOST} onClick={() => setTarikOpen(false)}>Batal</button><button style={BTN} onClick={doTarik} disabled={tarikSaving} data-testid="sup-tarik-save">{tarikSaving ? "Menarik…" : `Tarik ${tarikSelArr.length} Unit${tarikTotal > 0 ? ` · ${fRp(tarikTotal)}` : ""}`}</button></>}>
           <div style={{ fontSize: 12, color: C.mute, marginBottom: 10 }}>Centang unit, isi HPP (biaya ke supplier ini). Unit, nopol, customer &amp; rute otomatis dari PO.</div>
-          <input style={{ ...I, marginBottom: 10 }} placeholder="🔎 cari nopol / rute / customer…" value={tarikQ} onChange={(e) => setTarikQ(e.target.value)} />
+          <input style={{ ...I, marginBottom: 10 }} placeholder="🔎 cari: no PO / no rangka / nama pelanggan / asal / tujuan" value={tarikQ} onChange={(e) => setTarikQ(e.target.value)} data-testid="sup-tarik-search" />
           {tarikLoading ? <div style={{ padding: 20, textAlign: "center", color: C.mute }}>Memuat…</div> : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {tarikRows.map((row) => {

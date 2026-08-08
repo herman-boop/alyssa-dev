@@ -1334,3 +1334,24 @@
   .adm-dochist-actions{ order:4; width:100%; }
   .adm-dochist-btn{ flex:1; }
 }
+
+/* ═══ MOBILE (≤640px): modal fullscreen + tombol aksi 48px. Desktop tetap. ═══ */
+@media (max-width: 640px) {
+  /* Popup jadi FULLSCREEN (nutup layar penuh, no h-scroll, no popup > layar) */
+  .adm-modal-bg { padding: 0 !important; place-items: stretch !important; }
+  .adm-modal {
+    max-width: 100% !important;
+    width: 100vw !important;
+    max-height: 100vh !important;
+    max-height: 100dvh !important;
+    min-height: 100vh;
+    min-height: 100dvh;
+    border-radius: 0 !important;
+    animation: none;
+  }
+  .adm-modal-head { border-radius: 0 !important; position: sticky; top: 0; z-index: 3; }
+  .adm-modal-foot { position: sticky; bottom: 0; z-index: 3; }
+  /* Tombol aksi utama mudah ditekan 1 tangan */
+  .adm-btn:not(.adm-btn-sm) { min-height: 48px; }
+  .adm-modal-foot .adm-btn { flex: 1; min-height: 50px; }
+}
