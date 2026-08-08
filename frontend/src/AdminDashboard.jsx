@@ -514,7 +514,7 @@ function Dashboard({ pin, onLogout }) {
       )}
 
       {activeTab === "rekap-tagih" && (
-        <TagihanHariIni headers={headers} />
+        <TagihanHariIni headers={headers} onBack={() => setActiveTab("pesanan")} />
       )}
 
       {activeTab === "pesanan" && <>
@@ -536,6 +536,13 @@ function Dashboard({ pin, onLogout }) {
           ))}
         </section>
       )}
+
+      {/* ── Tombol rekap tagihan (di area PO) ── */}
+      <div style={{ marginBottom: 14 }}>
+        <button className="adm-btn adm-btn-gold" onClick={() => setActiveTab("rekap-tagih")} data-testid="adm-po-tagihan">
+          💰 Tagihan Hari Ini
+        </button>
+      </div>
 
       {/* ── Link Form Pesanan (compact card) ── */}
       <LinkCardMini
@@ -801,7 +808,7 @@ function MobileHome({ stats, orders, onNav, onTrip, onSearchSubmit, onOpenSideba
   const QUICK = [
     { ic: "🚚", label: "Pesanan", go: () => onNav("pesanan") },
     { ic: "📦", label: "Trip", go: onTrip },
-    { ic: "🧾", label: "Invoice", go: () => onNav("rekap-tagih") },
+    { ic: "🧾", label: "Invoice", go: () => onNav("histori") },
     { ic: "🔗", label: "Tracking", go: onTrip },
     { ic: "👨‍✈️", label: "Driver", go: () => onNav("drivers") },
     { ic: "🚢", label: "Kapal", go: () => onNav("supplier") },
@@ -974,7 +981,6 @@ const SIDEBAR_PRIMARY = [
   { key: "beranda", label: "Beranda" },
   { key: "pesanan", label: "Dashboard" },
   { key: "pesanan", label: "Pesanan" },
-  { key: "rekap-tagih", label: "Tagihan Hari Ini" },
   { key: "route-leg", label: "Route Leg" },
   { key: "drivers", label: "Driver" },
   { key: "supplier", label: "Supplier" },
@@ -2915,7 +2921,7 @@ const MEKARI_LS_KEY = "aal_mekari_input_v1";
 function loadMekariMarks() { try { return JSON.parse(localStorage.getItem(MEKARI_LS_KEY) || "{}"); } catch { return {}; } }
 function saveMekariMarks(m) { try { localStorage.setItem(MEKARI_LS_KEY, JSON.stringify(m)); } catch {} }
 
-function TagihanHariIni({ headers }) {
+function TagihanHariIni({ headers, onBack }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [day, setDay] = useState(() => new Date().toISOString().slice(0, 10));
@@ -2955,6 +2961,9 @@ function TagihanHariIni({ headers }) {
 
   return (
     <div style={{ maxWidth: 820, margin: "0 auto" }}>
+      {onBack && (
+        <button className="adm-btn adm-btn-sm adm-btn-ghost" onClick={onBack} style={{ marginBottom: 12 }} data-testid="tagih-back">← Kembali ke PO</button>
+      )}
       <div className="adm-card" style={{ padding: 16, marginBottom: 14 }}>
         <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
           <label style={{ flex: "0 0 auto" }}>
