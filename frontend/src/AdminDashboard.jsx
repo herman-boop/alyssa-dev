@@ -2546,6 +2546,7 @@ function InvoiceModal({ order, headers, onClose, onPrint }) {
   const [withPph23, setWithPph23] = useState(true); // potong PPh 23 (2%) dari DPP
   const [jatuhTempo, setJatuhTempo] = useState(todayIso);
   const [metode, setMetode] = useState("Cash on Delivery");
+  const [noInvoiceManual, setNoInvoiceManual] = useState(""); // No. Invoice manual (opsional) — samain dgn faktur pajak yg sudah terbit
   const [pesan, setPesan] = useState("");
   const [ttdNama, setTtdNama] = useState("");
   const [ttdJabatan, setTtdJabatan] = useState("Finance & Accounting Controller");
@@ -2597,7 +2598,7 @@ function InvoiceModal({ order, headers, onClose, onPrint }) {
       .map(({ r, u }) => ({ nama: isCargo ? "Jasa Pengiriman Cargo" : "Jasa Pengiriman", ket: unitKet(u), qty: 1, harga: hargaNum(r.harga) }));
     if (!lines.length) return;
     // Buka jendela cetak DULU di dalam gesture klik (kalau di-await, mobile blokir popup).
-    onPrint(lines, withTax, { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23 });
+    onPrint(lines, withTax, { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23, no_invoice: noInvoiceManual.trim() || undefined });
     // Tandai unit sudah diinvoice di belakang layar (best-effort).
     const ids = rows.filter((r) => r.checked && hargaNum(r.harga) > 0 && r.unit_id !== "legacy" && r.unit_id !== "cargo").map((r) => r.unit_id);
     if (ids.length && headers) {
@@ -2661,6 +2662,11 @@ function InvoiceModal({ order, headers, onClose, onPrint }) {
               </select>
             </label>
           </div>
+          <label style={{ display: "block", marginBottom: 14 }}>
+            <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", marginBottom: 5, fontWeight: 700 }}>No. Invoice / Faktur (manual — opsional)</span>
+            <input type="text" className="adm-input" value={noInvoiceManual} onChange={(e) => setNoInvoiceManual(e.target.value)} placeholder="Kosongkan = nomor otomatis. Isi untuk samakan dgn faktur pajak / revisi." data-testid="adm-invoice-nomanual" />
+            <span style={{ display: "block", fontSize: 10.5, color: "var(--text-mute)", marginTop: 5 }}>Buat revisi / samakan dengan faktur pajak yang sudah terbit, ketik nomornya di sini.</span>
+          </label>
           <label style={{ display: "block", marginBottom: 14 }}>
             <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", marginBottom: 5, fontWeight: 700 }}>Pesan / Catatan (opsional)</span>
             <input type="text" className="adm-input" value={pesan} onChange={(e) => setPesan(e.target.value)} placeholder="contoh: Door to door" data-testid="adm-invoice-pesan" />
@@ -3507,6 +3513,7 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
   const [withPph23, setWithPph23] = useState(true); // potong PPh 23 (2%) dari DPP
   const [jatuhTempo, setJatuhTempo] = useState(todayIso);
   const [metode, setMetode] = useState("Cash on Delivery");
+  const [noInvoiceManual, setNoInvoiceManual] = useState(""); // No. Invoice manual (opsional)
   const [pesan, setPesan] = useState("");
   const [ttdNama, setTtdNama] = useState("");
   const [ttdJabatan, setTtdJabatan] = useState("Finance & Accounting Controller");
@@ -3546,7 +3553,7 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
     if (!lines.length) { alert("Isi harga minimal 1 unit dulu."); return; }
     const orderIds = Array.from(new Set(rows.map((r) => r.order_id).filter(Boolean)));
     const cust = customers.length === 1 ? customers[0] : `${customers.length} customer`;
-    const extra = { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23, customer_nama: cust, order_id: orderIds.join(", ") };
+    const extra = { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23, customer_nama: cust, order_id: orderIds.join(", "), no_invoice: noInvoiceManual.trim() || undefined };
     const noInv = await printInvoiceDoc(lines, withTax, extra); // nomor auto-increment dari server
     saveDocHistory({
       jenis: "invoice", no_dokumen: noInv, customer: cust,
@@ -3610,6 +3617,11 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
               </select>
             </label>
           </div>
+          <label style={{ display: "block", marginBottom: 14 }}>
+            <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", marginBottom: 5, fontWeight: 700 }}>No. Invoice / Faktur (manual — opsional)</span>
+            <input type="text" className="adm-input" value={noInvoiceManual} onChange={(e) => setNoInvoiceManual(e.target.value)} placeholder="Kosongkan = nomor otomatis. Isi untuk samakan dgn faktur pajak / revisi." data-testid="adm-invgab-nomanual" />
+            <span style={{ display: "block", fontSize: 10.5, color: "var(--text-mute)", marginTop: 5 }}>Buat revisi / samakan dengan faktur pajak yang sudah terbit, ketik nomornya di sini.</span>
+          </label>
           <label style={{ display: "block", marginBottom: 14 }}>
             <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", marginBottom: 5, fontWeight: 700 }}>Pesan / Catatan (opsional)</span>
             <input type="text" className="adm-input" value={pesan} onChange={(e) => setPesan(e.target.value)} placeholder="contoh: Door to door" />
