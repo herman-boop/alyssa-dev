@@ -537,13 +537,6 @@ function Dashboard({ pin, onLogout }) {
         </section>
       )}
 
-      {/* ── Tombol rekap tagihan (di area PO) ── */}
-      <div style={{ marginBottom: 14 }}>
-        <button className="adm-btn adm-btn-gold" onClick={() => setActiveTab("rekap-tagih")} data-testid="adm-po-tagihan">
-          💰 Tagihan Hari Ini
-        </button>
-      </div>
-
       {/* ── Link Form Pesanan (compact card) ── */}
       <LinkCardMini
         title="Link Form Pesanan"
@@ -631,9 +624,14 @@ function Dashboard({ pin, onLogout }) {
             <div style={{ fontSize: 12.5, color: "var(--text-mute)", fontWeight: 700 }}>
               {search.trim() ? <>Hasil "{search.trim()}": </> : null}{visibleOrders.length} PO · {total} unit
             </div>
-            <button className="adm-btn adm-btn-sm adm-btn-gold" onClick={() => setAll(!allSel)} data-testid="adm-selectall-units">
-              {allSel ? "✕ Batalkan pilih semua" : `☑️ Pilih semua unit → keranjang jadwal (${total})`}
-            </button>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button className="adm-btn adm-btn-sm adm-btn-gold" onClick={() => setActiveTab("rekap-tagih")} data-testid="adm-po-tagihan">
+                💰 Tagihan Hari Ini
+              </button>
+              <button className="adm-btn adm-btn-sm adm-btn-gold" onClick={() => setAll(!allSel)} data-testid="adm-selectall-units">
+                {allSel ? "✕ Batalkan pilih semua" : `☑️ Pilih semua unit → keranjang jadwal (${total})`}
+              </button>
+            </div>
           </div>
         );
       })()}
