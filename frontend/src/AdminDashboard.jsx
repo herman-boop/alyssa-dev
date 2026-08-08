@@ -209,7 +209,9 @@ function PinScreen({ pin, setPin, doLogin, authing, authError }) {
 function Dashboard({ pin, onLogout }) {
   const headers = useMemo(() => ({ "X-Admin-Pin": pin }), [pin]);
   const [dark, setDark] = useState(() => document.documentElement.getAttribute("data-theme") === "dark");
-  const [activeTab, setActiveTab] = useState("pesanan");
+  // Default: HP → Beranda (home mobile ala aplikasi), desktop → Dashboard/Pesanan.
+  const [activeTab, setActiveTab] = useState(() => (typeof window !== "undefined" && window.innerWidth <= 640) ? "beranda" : "pesanan");
+  const [createSheet, setCreateSheet] = useState(false);
   const [stats, setStats] = useState(null);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -373,6 +375,7 @@ function Dashboard({ pin, onLogout }) {
   const resetFilters = () => { setSearch(""); setStatusFilter(""); setDateFrom(""); setDateTo(""); setDriverFilter(""); setCustFilter(""); };
 
   const SECTION_META = {
+    beranda:      { title: "Beranda", sub: "Ringkasan cepat operasional pengiriman" },
     pesanan:      { title: "Dashboard", sub: "Ringkasan semua aktivitas pengiriman kendaraan" },
     kalkulator:   { title: "Kalkulator HPP", sub: "Hitung harga pokok & margin per rute" },
     drivers:      { title: "Driver", sub: "Kelola data driver & dokumen" },
@@ -400,6 +403,7 @@ function Dashboard({ pin, onLogout }) {
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} open={sidebarOpen} onNavigate={() => setSidebarOpen(false)} />
 
       <div className="adm-main" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+        {activeTab !== "beranda" && (
         <TopHeader
           title={section.title}
           sub={section.sub}
@@ -414,8 +418,25 @@ function Dashboard({ pin, onLogout }) {
           dark={dark}
           onToggleTheme={() => { toggleTheme(); setDark((d) => !d); }}
         />
+        )}
 
-        <div className="adm-content-wrap" style={{ padding: "22px 28px 40px", maxWidth: 1180, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+        {activeTab === "beranda" && (
+          <MobileHome
+            stats={stats}
+            orders={orders}
+            onNav={setActiveTab}
+            onTrip={(st) => { setStatusFilter(st && typeof st === "string" ? st : "ON_TRIP"); setActiveTab("pesanan"); }}
+            onSearchSubmit={(q) => { setSearch(q); setActiveTab("pesanan"); }}
+            onOpenSidebar={() => setSidebarOpen(true)}
+            onOpenJadwalGab={() => setShowJadwalGab(true)}
+            onOpenInvoiceGab={() => setShowInvoiceGab(true)}
+            onOpenOrder={(o) => { setSearch(o.order_id); setActiveTab("pesanan"); }}
+            onOpenSettings={() => setActiveTab("pengaturan")}
+            flash={flash}
+          />
+        )}
+
+        <div className="adm-content-wrap" style={{ padding: "22px 28px 40px", maxWidth: 1180, width: "100%", margin: "0 auto", boxSizing: "border-box", display: activeTab === "beranda" ? "none" : undefined }}>
 
       {activeTab === "kalkulator" && (
         <div style={{ maxWidth: 900, margin: "0 auto" }}>
@@ -713,7 +734,24 @@ function Dashboard({ pin, onLogout }) {
 
       </>}
         </div>
+
+        <BottomNav
+          activeTab={activeTab}
+          onNav={setActiveTab}
+          onCreate={() => setCreateSheet(true)}
+          onTrip={() => { setStatusFilter("ON_TRIP"); setActiveTab("pesanan"); }}
+        />
       </div>
+
+      {createSheet && (
+        <CreateSheet
+          onClose={() => setCreateSheet(false)}
+          onJadwalGab={() => setShowJadwalGab(true)}
+          onInvoiceGab={() => setShowInvoiceGab(true)}
+          onNav={setActiveTab}
+          flash={flash}
+        />
+      )}
     </div>
   );
 }
@@ -731,15 +769,204 @@ const TONE = {
 };
 const STATUS_TONE = { NEW: "orange", DISPATCHED: "blue", ON_TRIP: "purple", DELIVERED: "green", CANCELLED: "red" };
 const SIDEBAR_ICON = {
+  beranda: "🏠",
   pesanan: "▦", "route-leg": "🧭", drivers: "👤", supplier: "🌿", koordinator: "🧑‍💼",
   kendaraan: "🚙", dokumen: "📄", histori: "🗂️", laporan: "📑", kalkulator: "🧮", selisih: "📊",
   kompensasi: "🔄", "minta-harga": "📩", pengaturan: "⚙️", "pembayaran-vendor": "🏢",
 };
 
 /* ════════════════════════════════════════
+   MOBILE HOME (Beranda) — dashboard mobile ala aplikasi logistics premium.
+   HANYA UI/UX baru: semua data dari props existing (stats, orders), semua aksi
+   nyambung ke tab / modal yang sudah ada. Tidak menyentuh backend/logic.
+════════════════════════════════════════ */
+function greetingByHour() {
+  const h = new Date().getHours();
+  if (h < 11) return "Selamat pagi";
+  if (h < 15) return "Selamat siang";
+  if (h < 19) return "Selamat sore";
+  return "Selamat malam";
+}
+
+function MobileHome({ stats, orders, onNav, onTrip, onSearchSubmit, onOpenSidebar, onOpenJadwalGab, onOpenInvoiceGab, onOpenOrder, flash, onOpenSettings }) {
+  const [q, setQ] = useState("");
+  const active = (orders || []).filter((o) => o.status === "ON_TRIP");
+  const activeTop = active.slice(0, 3);
+
+  const QUICK = [
+    { ic: "🚚", label: "Pesanan", go: () => onNav("pesanan") },
+    { ic: "📦", label: "Trip", go: onTrip },
+    { ic: "🧾", label: "Invoice", go: () => onNav("histori") },
+    { ic: "🔗", label: "Tracking", go: onTrip },
+    { ic: "👨‍✈️", label: "Driver", go: () => onNav("drivers") },
+    { ic: "🚢", label: "Kapal", go: () => onNav("supplier") },
+    { ic: "📄", label: "Dokumen", go: () => onNav("dokumen") },
+    { ic: "•••", label: "Lainnya", go: onOpenSidebar },
+  ];
+  const RINGKAS = stats ? [
+    { label: "Total", value: stats.total || 0, tone: "#8b98ab", onClick: () => onNav("pesanan") },
+    { label: "Baru", value: stats.by_status?.NEW || 0, tone: "#EF9F27", onClick: () => onTrip("NEW") },
+    { label: "Dispatched", value: stats.by_status?.DISPATCHED || 0, tone: "#5b8def", onClick: () => onTrip("DISPATCHED") },
+    { label: "On-Trip", value: stats.by_status?.ON_TRIP || 0, tone: "#a371f7", onClick: () => onTrip("ON_TRIP") },
+    { label: "Selesai", value: stats.by_status?.DELIVERED || 0, tone: "#3fb950", onClick: () => onTrip("DELIVERED") },
+    { label: "Batal", value: stats.by_status?.CANCELLED || 0, tone: "#f85149", onClick: () => onTrip("CANCELLED") },
+  ] : [];
+
+  const submitSearch = (e) => { e.preventDefault(); onSearchSubmit(q.trim()); };
+
+  return (
+    <div className="mh">
+      {/* Header */}
+      <div className="mh-header">
+        <div className="mh-head-row">
+          <div className="mh-brand">
+            <Logo size={34} />
+            <div>
+              <div className="mh-brand-name">ALYSSA AUTO LOGISTIK</div>
+              <div className="mh-greet">{greetingByHour()}, Admin</div>
+            </div>
+          </div>
+          <div className="mh-head-icons">
+            <button className="mh-iconbtn" title="Notifikasi" onClick={() => onNav("histori")}>🔔</button>
+            <button className="mh-iconbtn" title="Pengaturan" onClick={onOpenSettings}>⚙️</button>
+          </div>
+        </div>
+        <div className="mh-sub">Kelola pengiriman kendaraan dengan lebih mudah</div>
+        <form className="mh-search" onSubmit={submitSearch}>
+          <span className="mh-search-ico">🔎</span>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cari No. Resi / Customer / Unit / No. Rangka"
+            enterKeyHint="search" data-testid="mh-search" />
+        </form>
+      </div>
+
+      {/* Akses Cepat */}
+      <section className="mh-sec">
+        <div className="mh-sec-hd"><span className="mh-sec-title">Akses Cepat</span>
+          <button className="mh-sec-act" onClick={onOpenSidebar}>Atur</button></div>
+        <div className="mh-quick-grid">
+          {QUICK.map((it) => (
+            <button key={it.label} className="mh-quick" onClick={it.go} data-testid={`mh-quick-${it.label}`}>
+              <span className="mh-quick-ic">{it.ic}</span>
+              <span className="mh-quick-lbl">{it.label}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {/* Ringkasan Pengiriman */}
+      <section className="mh-sec">
+        <div className="mh-sec-hd"><span className="mh-sec-title">Ringkasan Pengiriman</span></div>
+        <div className="mh-ring-grid">
+          {RINGKAS.map((r) => (
+            <button key={r.label} className="mh-ring" onClick={r.onClick}>
+              <span className="mh-ring-val" style={{ color: r.tone }}>{r.value}</span>
+              <span className="mh-ring-lbl">{r.label}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {/* Pengiriman Aktif */}
+      <section className="mh-sec">
+        <div className="mh-sec-hd"><span className="mh-sec-title">Pengiriman Aktif</span>
+          {active.length > 0 && <button className="mh-sec-act" onClick={onTrip} data-testid="mh-see-all">Lihat Semua</button>}</div>
+        {activeTop.length === 0 ? (
+          <div className="mh-empty">🚛 Belum ada pengiriman yang sedang berjalan.</div>
+        ) : activeTop.map((o) => {
+          const veh = `${o.vehicle_type || (o.units?.[0]?.vehicle_type) || "Kendaraan"}${o.tipe_model ? " " + o.tipe_model : ""}`.trim();
+          return (
+            <button key={o.order_id} className="mh-ship" onClick={() => onOpenOrder(o)} data-testid={`mh-ship-${o.order_id}`}>
+              <div className="mh-ship-top">
+                <div className="mh-ship-veh">🚛 {veh}</div>
+                <span className="mh-ship-arrow">›</span>
+              </div>
+              <div className="mh-ship-cust">{o.customer_nama || "-"}</div>
+              <div className="mh-ship-route">{o.asal_kota || "?"} <span className="mh-ship-sep">→</span> {o.tujuan_kota || "?"}</div>
+              <ProgressTimeline order={o} />
+            </button>
+          );
+        })}
+      </section>
+
+      {/* Aksi Operasional */}
+      <section className="mh-sec">
+        <div className="mh-sec-hd"><span className="mh-sec-title">Aksi Operasional</span></div>
+        <button className="mh-act" onClick={async () => { const ok = await copyToClipboard(`${window.location.origin}/order`); flash(ok ? "✓ Link form pesanan disalin" : "Gagal menyalin"); }}>
+          <span className="mh-act-ic">🔗</span>
+          <span className="mh-act-body"><b>Link Form Pesanan</b><small>Bagikan ke customer</small></span>
+          <span className="mh-act-arrow">›</span>
+        </button>
+        <button className="mh-act" onClick={onOpenJadwalGab}>
+          <span className="mh-act-ic">📅</span>
+          <span className="mh-act-body"><b>Jadwal Gabungan</b><small>Atur beberapa unit sekaligus</small></span>
+          <span className="mh-act-arrow">›</span>
+        </button>
+        <button className="mh-act" onClick={onOpenInvoiceGab}>
+          <span className="mh-act-ic">🧾</span>
+          <span className="mh-act-body"><b>Invoice Gabungan</b><small>Tagih beberapa unit dalam 1 invoice</small></span>
+          <span className="mh-act-arrow">›</span>
+        </button>
+      </section>
+    </div>
+  );
+}
+
+/* Bottom navigation mobile — 5 item, tombol tengah "Buat". Desktop di-hide via CSS. */
+function BottomNav({ activeTab, onNav, onCreate, onTrip }) {
+  const items = [
+    { key: "beranda", ic: "🏠", label: "Beranda", go: () => onNav("beranda") },
+    { key: "pesanan", ic: "📦", label: "Pesanan", go: () => onNav("pesanan") },
+    { key: "__buat", ic: "＋", label: "Buat", center: true, go: onCreate },
+    { key: "__trip", ic: "🚚", label: "Trip", go: onTrip },
+    { key: "pengaturan", ic: "👤", label: "Akun", go: () => onNav("pengaturan") },
+  ];
+  return (
+    <nav className="adm-bottomnav" data-testid="adm-bottomnav">
+      {items.map((it) => it.center ? (
+        <button key={it.key} className="adm-bnav-center" onClick={it.go} data-testid="adm-bnav-buat">
+          <span className="adm-bnav-plus">{it.ic}</span>
+          <span className="adm-bnav-lbl">{it.label}</span>
+        </button>
+      ) : (
+        <button key={it.key} className={`adm-bnav-item${activeTab === it.key ? " active" : ""}`} onClick={it.go} data-testid={`adm-bnav-${it.key}`}>
+          <span className="adm-bnav-ic">{it.ic}</span>
+          <span className="adm-bnav-lbl">{it.label}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+/* Bottom-sheet "Buat" — aksi bikin cepat. */
+function CreateSheet({ onClose, onJadwalGab, onInvoiceGab, onNav, flash }) {
+  const items = [
+    { ic: "🔗", t: "Link Form Pesanan", s: "Salin & bagikan ke customer", go: async () => { const ok = await copyToClipboard(`${window.location.origin}/order`); flash(ok ? "✓ Link form pesanan disalin" : "Gagal menyalin"); onClose(); } },
+    { ic: "📅", t: "Jadwal Gabungan", s: "Gabung beberapa unit ke 1 jadwal", go: () => { onClose(); onJadwalGab(); } },
+    { ic: "🧾", t: "Invoice Gabungan", s: "Tagih beberapa unit dalam 1 invoice", go: () => { onClose(); onInvoiceGab(); } },
+    { ic: "📋", t: "Lihat Pesanan Baru", s: "Proses pesanan yang masuk", go: () => { onClose(); onNav("pesanan"); } },
+  ];
+  return createPortal(
+    <div className="adm-sheet-bg" onClick={onClose} data-testid="adm-create-sheet">
+      <div className="adm-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="adm-sheet-grip" />
+        <div className="adm-sheet-title">Buat / Aksi Cepat</div>
+        {items.map((it) => (
+          <button key={it.t} className="adm-sheet-item" onClick={it.go}>
+            <span className="adm-sheet-ic">{it.ic}</span>
+            <span className="adm-sheet-body"><b>{it.t}</b><small>{it.s}</small></span>
+            <span className="adm-act-arrow">›</span>
+          </button>
+        ))}
+        <button className="adm-btn adm-btn-ghost" style={{ width: "100%", marginTop: 8 }} onClick={onClose}>Tutup</button>
+      </div>
+    </div>, document.body);
+}
+
+/* ════════════════════════════════════════
    SIDEBAR
 ════════════════════════════════════════ */
 const SIDEBAR_PRIMARY = [
+  { key: "beranda", label: "Beranda" },
   { key: "pesanan", label: "Dashboard" },
   { key: "pesanan", label: "Pesanan" },
   { key: "route-leg", label: "Route Leg" },

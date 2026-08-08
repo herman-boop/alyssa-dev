@@ -149,3 +149,127 @@ code {
   table:not(.keep-table) { display: block; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 }
+
+/* ══════════════════════════════════════════════════════════════════
+   MOBILE HOME (Beranda) + BOTTOM NAV — dashboard mobile ala aplikasi
+   logistics premium. Identitas Alyssa (dark navy) dipertahankan.
+   ══════════════════════════════════════════════════════════════════ */
+:root {
+  --mh-bg: #0a0e14; --mh-card: #111826; --mh-card2: #0d1117;
+  --mh-line: #1c2433; --mh-ink: #e6edf3; --mh-mute: #7b8698;
+  --mh-gold: #EF9F27; --mh-blue: #5b8def; --mh-navy: #0f2a5c;
+}
+.mh { max-width: 480px; margin: 0 auto; padding: 0 0 100px; color: var(--mh-ink);
+  font-family: system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+
+/* Header */
+.mh-header { background: linear-gradient(160deg,#12233f 0%,#0c1626 60%,var(--mh-bg) 100%);
+  border-bottom: 1px solid var(--mh-line); border-radius: 0 0 20px 20px;
+  padding: calc(env(safe-area-inset-top) + 16px) 16px 18px; }
+.mh-head-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.mh-brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.mh-brand img { width: 34px; height: 34px; object-fit: contain; flex-shrink: 0; }
+.mh-brand-name { font-size: 12px; font-weight: 900; letter-spacing: .4px; color: #fff; }
+.mh-greet { font-size: 13px; color: #cdd7e6; margin-top: 1px; }
+.mh-head-icons { display: flex; gap: 8px; flex-shrink: 0; }
+.mh-iconbtn { width: 40px; height: 40px; border-radius: 12px; border: 1px solid var(--mh-line);
+  background: rgba(255,255,255,.05); color: #e6edf3; font-size: 17px; cursor: pointer; }
+.mh-sub { font-size: 12px; color: #9fb0c6; margin: 10px 2px 12px; }
+.mh-search { display: flex; align-items: center; gap: 8px; background: #0a1220;
+  border: 1px solid #24344d; border-radius: 14px; padding: 0 12px; }
+.mh-search-ico { font-size: 15px; opacity: .8; }
+.mh-search input { flex: 1; min-width: 0; border: none; outline: none; background: transparent;
+  color: #e6edf3; font-size: 15px; padding: 13px 0; }
+.mh-search input::placeholder { color: #6b7688; }
+
+/* Section shell */
+.mh-sec { padding: 16px 16px 4px; }
+.mh-sec-hd { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.mh-sec-title { font-size: 14px; font-weight: 800; color: #f2f5fa; }
+.mh-sec-act { border: none; background: none; color: var(--mh-gold); font-size: 12.5px; font-weight: 700; cursor: pointer; }
+
+/* Akses Cepat grid */
+.mh-quick-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; }
+.mh-quick { display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 12px 4px;
+  background: var(--mh-card); border: 1px solid var(--mh-line); border-radius: 14px; cursor: pointer; color: var(--mh-ink); }
+.mh-quick:active { transform: scale(.96); }
+.mh-quick-ic { font-size: 22px; line-height: 1; }
+.mh-quick-lbl { font-size: 11px; font-weight: 600; color: #c7d0dd; }
+
+/* Ringkasan grid (compact chips, bukan 6 card besar) */
+.mh-ring-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; }
+.mh-ring { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px 12px;
+  background: var(--mh-card); border: 1px solid var(--mh-line); border-radius: 14px; cursor: pointer; }
+.mh-ring-val { font-size: 22px; font-weight: 900; line-height: 1.05; }
+.mh-ring-lbl { font-size: 11px; color: #9aa6b6; font-weight: 600; }
+
+/* Pengiriman aktif — compact shipment card */
+.mh-ship { display: block; width: 100%; text-align: left; padding: 14px; margin-bottom: 10px;
+  background: var(--mh-card); border: 1px solid var(--mh-line); border-radius: 16px; cursor: pointer; color: var(--mh-ink); }
+.mh-ship:active { transform: scale(.99); }
+.mh-ship-top { display: flex; align-items: center; justify-content: space-between; }
+.mh-ship-veh { font-size: 14px; font-weight: 800; color: #f2f5fa; }
+.mh-ship-arrow { font-size: 20px; color: #5b6577; }
+.mh-ship-cust { font-size: 12.5px; color: var(--mh-gold); font-weight: 700; margin-top: 2px; }
+.mh-ship-route { font-size: 12.5px; color: #b9c4d4; margin: 4px 0 12px; }
+.mh-ship-sep { color: #5b8def; }
+.mh-empty { padding: 22px 14px; text-align: center; font-size: 13px; color: #7b8698;
+  background: var(--mh-card2); border: 1px dashed var(--mh-line); border-radius: 14px; }
+
+/* Aksi operasional list */
+.mh-act { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 13px 14px;
+  margin-bottom: 10px; background: var(--mh-card); border: 1px solid var(--mh-line); border-radius: 14px; cursor: pointer; color: var(--mh-ink); }
+.mh-act:active { transform: scale(.99); }
+.mh-act-ic { width: 40px; height: 40px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 18px; border-radius: 11px; background: rgba(91,141,239,.14); }
+.mh-act-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.mh-act-body b { font-size: 13.5px; color: #f2f5fa; }
+.mh-act-body small { font-size: 11.5px; color: #8b98ab; margin-top: 1px; }
+.mh-act-arrow, .adm-act-arrow { font-size: 20px; color: #5b6577; flex-shrink: 0; }
+
+/* ── Bottom navigation (mobile only) ── */
+.adm-bottomnav { display: none; }
+@media (max-width: 640px) {
+  .adm-bottomnav {
+    display: flex; align-items: flex-end; justify-content: space-around;
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 130;
+    background: rgba(12,18,28,.96); backdrop-filter: blur(10px);
+    border-top: 1px solid var(--mh-line);
+    padding: 8px 6px calc(env(safe-area-inset-bottom) + 8px);
+  }
+  .adm-bnav-item { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
+    border: none; background: none; color: #7b8698; cursor: pointer; padding: 4px 0; }
+  .adm-bnav-item.active { color: var(--mh-gold); }
+  .adm-bnav-ic { font-size: 19px; line-height: 1; }
+  .adm-bnav-lbl { font-size: 10px; font-weight: 600; }
+  .adm-bnav-center { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 3px;
+    border: none; background: none; cursor: pointer; margin-top: -18px; }
+  .adm-bnav-plus { width: 52px; height: 52px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-size: 28px; font-weight: 300; color: #10203a; background: linear-gradient(135deg,#f2ad3c,#e0891a);
+    box-shadow: 0 8px 20px rgba(224,137,26,.45); }
+  .adm-bnav-center .adm-bnav-lbl { font-size: 10px; font-weight: 700; color: var(--mh-gold); }
+
+  /* Konten normal (pesanan dll) kasih ruang bawah biar nggak ketutup bottom nav */
+  .adm-content-wrap { padding-bottom: 92px !important; }
+  /* Cartbar "N unit dipilih" naik di atas bottom nav, nggak nutupin */
+  .adm-cartbar { bottom: 84px !important; }
+}
+
+/* Bottom-sheet "Buat" */
+.adm-sheet-bg { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,.55);
+  display: flex; align-items: flex-end; justify-content: center; }
+.adm-sheet { width: 100%; max-width: 480px; background: #0d1420; border: 1px solid var(--mh-line);
+  border-radius: 20px 20px 0 0; padding: 10px 16px calc(env(safe-area-inset-bottom) + 18px);
+  animation: admSheetUp .22s ease; }
+@keyframes admSheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+.adm-sheet-grip { width: 40px; height: 4px; border-radius: 3px; background: #2c3a4f; margin: 4px auto 12px; }
+.adm-sheet-title { font-size: 14px; font-weight: 800; color: #f2f5fa; margin: 0 2px 12px; }
+.adm-sheet-item { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  padding: 12px 12px; margin-bottom: 8px; background: #141d2c; border: 1px solid var(--mh-line);
+  border-radius: 13px; cursor: pointer; color: var(--mh-ink); }
+.adm-sheet-item:active { transform: scale(.99); }
+.adm-sheet-ic { width: 38px; height: 38px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 17px; border-radius: 10px; background: rgba(239,159,39,.16); }
+.adm-sheet-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.adm-sheet-body b { font-size: 13.5px; color: #f2f5fa; }
+.adm-sheet-body small { font-size: 11.5px; color: #8b98ab; margin-top: 1px; }
