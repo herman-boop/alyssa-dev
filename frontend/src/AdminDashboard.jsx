@@ -3632,6 +3632,16 @@ function JadwalGabunganModal({ cart, headers, onClose, onDone }) {
 function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
   const todayIso = new Date().toISOString().slice(0, 10);
   const customers = dedupCustomers(cart.map((c) => c.customer_nama));
+  // Default "Ditagihkan Kepada" = nama customer yang paling sering muncul di
+  // unit terpilih (fallback: customer pertama). Admin bisa edit manual.
+  const custDefault = (() => {
+    if (customers.length <= 1) return customers[0] || "";
+    const cnt = {};
+    cart.forEach((c) => { const n = (c.customer_nama || "").trim(); if (n) cnt[n] = (cnt[n] || 0) + 1; });
+    const best = Object.entries(cnt).sort((a, b) => b[1] - a[1])[0];
+    return best ? best[0] : (customers[0] || "");
+  })();
+  const [billTo, setBillTo] = useState(custDefault);
   const [rows, setRows] = useState(() => cart.map((c) => ({
     order_id: c.order_id, customer_nama: c.customer_nama,
     asal_kota: c.asal_kota, tujuan_kota: c.tujuan_kota, unit: c.unit, harga: "",
@@ -3693,7 +3703,7 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
       .map((r) => ({ nama: "Jasa Pengiriman", ket: unitKet(r), qty: 1, harga: hargaNum(r.harga) }));
     if (!lines.length) { alert("Isi harga minimal 1 unit dulu."); return; }
     const orderIds = Array.from(new Set(rows.map((r) => r.order_id).filter(Boolean)));
-    const cust = customers.length === 1 ? customers[0] : `${customers.length} customer`;
+    const cust = billTo.trim() || (customers.length === 1 ? customers[0] : `${customers.length} customer`);
     const extra = { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23, customer_nama: cust, order_id: orderIds.join(", "), no_invoice: noInvoiceManual.trim() || undefined };
     const noInv = await printInvoiceDoc(lines, withTax, extra); // nomor auto-increment dari server
     saveDocHistory({
@@ -3723,7 +3733,12 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
           <button className="adm-modal-close" onClick={onClose} aria-label="Tutup">✕</button>
         </div>
         <div className="adm-modal-body">
-          {customers.length > 1 && <div className="t360-fin-err" style={{ marginBottom: 12, background: "var(--gold-bg)", borderColor: "var(--gold-bd)", color: "var(--gold-xl)" }}>Catatan: unit dari {customers.length} customer berbeda tercampur di 1 invoice.</div>}
+          {customers.length > 1 && <div className="t360-fin-err" style={{ marginBottom: 12, background: "var(--gold-bg)", borderColor: "var(--gold-bd)", color: "var(--gold-xl)" }}>Catatan: unit dari {customers.length} nama customer berbeda tercampur — pastikan nama "Ditagihkan Kepada" di bawah sudah benar.</div>}
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "block", fontSize: 12, color: "var(--text-3)", fontWeight: 700, marginBottom: 6 }}>Ditagihkan Kepada (nama di invoice)</label>
+            <input type="text" className="adm-input" value={billTo} onChange={(e) => setBillTo(e.target.value)} placeholder="contoh: PT Transkon Jaya, TBK" data-testid="adm-invgab-billto" />
+            <span style={{ display: "block", fontSize: 10.5, color: "var(--text-mute)", marginTop: 5 }}>Nama ini yang tercetak di "Ditagihkan Kepada". Otomatis terisi dari PO — ubah kalau perlu.</span>
+          </div>
           <div style={{ fontSize: 12, color: "var(--text-3)", fontWeight: 700, marginBottom: 8 }}>Unit yang Ditagih &amp; Harga (per unit)</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
             {rows.map((r, i) => {
