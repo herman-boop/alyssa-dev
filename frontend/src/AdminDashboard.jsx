@@ -2908,14 +2908,26 @@ function normName(s) { return String(s || "").toLowerCase().replace(/[.,]/g, "")
 const KONTAK_EMPTY = { nama: "", perusahaan: "", no_hp: "", email: "", alamat: "", catatan: "" };
 
 function KontakBox({ headers }) {
-  const [all, setAll] = useState(() => loadContacts());
+  const [all, setAll] = useState([]);
   const [jenis, setJenis] = useState("pelanggan");
   const [search, setSearch] = useState("");
   const [edit, setEdit] = useState(null); // null | {id?, ...fields}
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
+  const [serverMode, setServerMode] = useState(null); // null=cek, true=server, false=lokal
   const flash = (m) => { setToast(m); setTimeout(() => setToast(""), 2600); };
-  const persist = (next) => { setAll(next); saveContacts(next); };
+  const persistLocal = (next) => { setAll(next); saveContacts(next); };
+
+  // Saat mount: coba server dulu. Kalau backend belum ada → fallback lokal.
+  useEffect(() => {
+    let alive = true;
+    axios.get(`${API}/admin/contacts`, { headers })
+      .then((r) => { if (!alive) return; setServerMode(true); setAll(r.data?.items || []); })
+      .catch(() => { if (!alive) return; setServerMode(false); setAll(loadContacts()); });
+    return () => { alive = false; };
+  }, [headers]);
+
+  const reloadServer = async () => { const r = await axios.get(`${API}/admin/contacts`, { headers }); setAll(r.data?.items || []); };
 
   const list = useMemo(() => {
     const q = normName(search);
@@ -2931,51 +2943,74 @@ function KontakBox({ headers }) {
     return Object.values(map).filter((g) => g.length > 1);
   }, [all, jenis]);
 
-  const saveEdit = () => {
+  const saveEdit = async () => {
     const nama = (edit.nama || "").trim();
     if (!nama) { flash("Nama wajib diisi"); return; }
-    if (edit.id) {
-      persist(all.map((c) => c.id === edit.id ? { ...c, ...edit, nama } : c));
-      flash("✓ Kontak diperbarui");
+    const payload = { nama, jenis: edit.jenis || jenis, perusahaan: edit.perusahaan || "", no_hp: edit.no_hp || "", email: edit.email || "", alamat: edit.alamat || "", catatan: edit.catatan || "" };
+    const dupe = !edit.id && all.some((c) => c.jenis === jenis && normName(c.nama) === normName(nama));
+    if (serverMode) {
+      try {
+        if (edit.id) await axios.patch(`${API}/admin/contacts/${edit.id}`, payload, { headers });
+        else await axios.post(`${API}/admin/contacts`, payload, { headers });
+        await reloadServer();
+        flash(edit.id ? "✓ Kontak diperbarui" : (dupe ? "✓ Ditambah — ⚠️ nama mirip sudah ada" : "✓ Kontak ditambah"));
+      } catch { flash("Gagal menyimpan ke server"); return; }
     } else {
-      const dupe = all.some((c) => c.jenis === jenis && normName(c.nama) === normName(nama));
-      const rec = { id: "CT-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), jenis, ...KONTAK_EMPTY, ...edit, nama };
-      persist([...all, rec]);
-      flash(dupe ? "✓ Ditambah — ⚠️ nama mirip sudah ada" : "✓ Kontak ditambah");
+      if (edit.id) { persistLocal(all.map((c) => c.id === edit.id ? { ...c, ...payload } : c)); flash("✓ Kontak diperbarui"); }
+      else { persistLocal([...all, { id: "CT-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), ...payload }]); flash(dupe ? "✓ Ditambah — ⚠️ nama mirip sudah ada" : "✓ Kontak ditambah"); }
     }
     setEdit(null);
   };
-  const del = (c) => { if (!window.confirm(`Hapus kontak "${c.nama}"?`)) return; persist(all.filter((x) => x.id !== c.id)); flash("🗑️ Kontak dihapus"); };
+
+  const del = async (c) => {
+    if (!window.confirm(`Hapus kontak "${c.nama}"?`)) return;
+    if (serverMode) {
+      try { await axios.delete(`${API}/admin/contacts/${c.id}`, { headers }); await reloadServer(); flash("🗑️ Kontak dihapus"); } catch { flash("Gagal menghapus"); }
+    } else { persistLocal(all.filter((x) => x.id !== c.id)); flash("🗑️ Kontak dihapus"); }
+  };
 
   const importPelanggan = async () => {
     setBusy(true);
     try {
-      const r = await axios.get(`${API}/admin/orders`, { headers, params: { limit: 500 } });
-      const orders = r.data?.items || [];
-      const existing = new Set(all.filter((c) => c.jenis === "pelanggan").map((c) => normName(c.nama)));
-      const seen = {};
-      orders.forEach((o) => {
-        const nm = (o.customer_nama || "").trim(); if (!nm) return;
-        const k = normName(nm); if (!k || existing.has(k)) return;
-        const cur = seen[k];
-        if (!cur) seen[k] = { nama: nm, no_hp: (o.customer_hp || "").trim(), email: (o.customer_email || "").trim() };
-        else { if (nm.length > cur.nama.length) cur.nama = nm; if (!cur.no_hp) cur.no_hp = (o.customer_hp || "").trim(); if (!cur.email) cur.email = (o.customer_email || "").trim(); }
-      });
-      const add = Object.values(seen).map((v) => ({ id: "CT-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), jenis: "pelanggan", ...KONTAK_EMPTY, ...v }));
-      if (add.length) persist([...all, ...add]);
-      flash(add.length ? `✓ ${add.length} pelanggan ditarik dari PO` : "Semua pelanggan sudah ada");
+      if (serverMode) {
+        const r = await axios.post(`${API}/admin/contacts/import-orders`, {}, { headers });
+        await reloadServer();
+        flash(r.data?.imported ? `✓ ${r.data.imported} pelanggan ditarik dari PO` : "Semua pelanggan sudah ada");
+      } else {
+        const r = await axios.get(`${API}/admin/orders`, { headers, params: { limit: 500 } });
+        const orders = r.data?.items || [];
+        const existing = new Set(all.filter((c) => c.jenis === "pelanggan").map((c) => normName(c.nama)));
+        const seen = {};
+        orders.forEach((o) => {
+          const nm = (o.customer_nama || "").trim(); if (!nm) return;
+          const k = normName(nm); if (!k || existing.has(k)) return;
+          const cur = seen[k];
+          if (!cur) seen[k] = { nama: nm, no_hp: (o.customer_hp || "").trim(), email: (o.customer_email || "").trim() };
+          else { if (nm.length > cur.nama.length) cur.nama = nm; if (!cur.no_hp) cur.no_hp = (o.customer_hp || "").trim(); if (!cur.email) cur.email = (o.customer_email || "").trim(); }
+        });
+        const add = Object.values(seen).map((v) => ({ id: "CT-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), jenis: "pelanggan", ...KONTAK_EMPTY, ...v }));
+        if (add.length) persistLocal([...all, ...add]);
+        flash(add.length ? `✓ ${add.length} pelanggan ditarik dari PO` : "Semua pelanggan sudah ada");
+      }
     } catch { flash("Gagal menarik dari PO"); } finally { setBusy(false); }
   };
+
   const importSupplier = async () => {
     setBusy(true);
     try {
-      const r = await axios.get(`${API}/admin/suppliers`, { headers });
-      const sups = r.data?.items || [];
-      const existing = new Set(all.filter((c) => c.jenis === "supplier").map((c) => normName(c.nama)));
-      const add = [];
-      sups.forEach((s) => { const nm = (s.nama || "").trim(); const k = normName(nm); if (!nm || existing.has(k)) return; existing.add(k); add.push({ id: "CT-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), jenis: "supplier", ...KONTAK_EMPTY, nama: nm, no_hp: (s.no_hp || "").trim(), catatan: (s.jenis || "").trim() }); });
-      if (add.length) persist([...all, ...add]);
-      flash(add.length ? `✓ ${add.length} supplier ditarik` : "Semua supplier sudah ada");
+      if (serverMode) {
+        const r = await axios.post(`${API}/admin/contacts/import-suppliers`, {}, { headers });
+        await reloadServer();
+        flash(r.data?.imported ? `✓ ${r.data.imported} supplier ditarik` : "Semua supplier sudah ada");
+      } else {
+        const r = await axios.get(`${API}/admin/suppliers`, { headers });
+        const sups = r.data?.items || [];
+        const existing = new Set(all.filter((c) => c.jenis === "supplier").map((c) => normName(c.nama)));
+        const add = [];
+        sups.forEach((s) => { const nm = (s.nama || "").trim(); const k = normName(nm); if (!nm || existing.has(k)) return; existing.add(k); add.push({ id: "CT-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), jenis: "supplier", ...KONTAK_EMPTY, nama: nm, no_hp: (s.no_hp || "").trim(), catatan: (s.jenis || "").trim() }); });
+        if (add.length) persistLocal([...all, ...add]);
+        flash(add.length ? `✓ ${add.length} supplier ditarik` : "Semua supplier sudah ada");
+      }
     } catch { flash("Gagal menarik supplier"); } finally { setBusy(false); }
   };
 
@@ -2988,6 +3023,9 @@ function KontakBox({ headers }) {
       <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
         <button className={`adm-btn adm-btn-sm ${jenis === "pelanggan" ? "adm-btn-blue" : "adm-btn-ghost"}`} onClick={() => setJenis("pelanggan")} data-testid="kontak-tab-pelanggan">👤 Pelanggan ({countP})</button>
         <button className={`adm-btn adm-btn-sm ${jenis === "supplier" ? "adm-btn-blue" : "adm-btn-ghost"}`} onClick={() => setJenis("supplier")} data-testid="kontak-tab-supplier">🌿 Supplier ({countS})</button>
+        <span style={{ marginLeft: "auto", alignSelf: "center", fontSize: 11, fontWeight: 700, color: serverMode ? "#3fb950" : "var(--text-mute)" }} data-testid="kontak-mode">
+          {serverMode === null ? "…" : serverMode ? "☁️ Tersinkron (server)" : "💾 Lokal (browser ini)"}
+        </span>
       </div>
 
       {/* Toolbar */}

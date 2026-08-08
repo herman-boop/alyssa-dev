@@ -965,6 +965,145 @@ async def delete_doc_history(doc_id: str):
     return {"ok": True, "id": doc_id}
 
 
+# ── Kontak (buku alamat pelanggan & supplier) ────────────────────────────────
+# Buku alamat sederhana, sinkron lintas device. Jenis: pelanggan / supplier.
+CONTACT_JENIS = {"pelanggan", "supplier"}
+
+
+def _norm_contact_name(s: str) -> str:
+    import re as _re
+    return _re.sub(r"\s+", " ", _re.sub(r"[.,]", "", (s or "").lower())).strip()
+
+
+class ContactBody(BaseModel):
+    nama: str
+    jenis: Optional[str] = "pelanggan"
+    perusahaan: Optional[str] = ""
+    no_hp: Optional[str] = ""
+    email: Optional[str] = ""
+    alamat: Optional[str] = ""
+    catatan: Optional[str] = ""
+
+
+def _contact_doc(body: ContactBody) -> dict:
+    jenis = body.jenis if body.jenis in CONTACT_JENIS else "pelanggan"
+    return {
+        "nama": (body.nama or "").strip()[:200],
+        "jenis": jenis,
+        "perusahaan": (body.perusahaan or "").strip()[:200],
+        "no_hp": (body.no_hp or "").strip()[:40],
+        "email": (body.email or "").strip()[:120],
+        "alamat": (body.alamat or "").strip()[:400],
+        "catatan": (body.catatan or "").strip()[:500],
+    }
+
+
+@api_router.get("/admin/contacts", dependencies=[Depends(require_admin_pin)])
+async def list_contacts(jenis: Optional[str] = None, q: Optional[str] = None):
+    """List kontak, urut nama. Filter optional per jenis & pencarian teks."""
+    filt = {}
+    if jenis and jenis in CONTACT_JENIS:
+        filt["jenis"] = jenis
+    if q:
+        import re as _re
+        rx = _re.compile(_re.escape(q.strip()), _re.IGNORECASE)
+        filt["$or"] = [{"nama": rx}, {"perusahaan": rx}, {"no_hp": rx}, {"email": rx}]
+    items = []
+    async for c in db.contacts.find(filt, {"_id": 0}).sort("nama", 1):
+        items.append(c)
+    return {"count": len(items), "items": items}
+
+
+@api_router.post("/admin/contacts", dependencies=[Depends(require_admin_pin)])
+async def create_contact(body: ContactBody):
+    if not (body.nama or "").strip():
+        raise HTTPException(400, "nama wajib diisi")
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {"id": "CT-" + uuid.uuid4().hex[:10], **_contact_doc(body), "created_at": now}
+    await db.contacts.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.patch("/admin/contacts/{contact_id}", dependencies=[Depends(require_admin_pin)])
+async def update_contact(contact_id: str, body: ContactBody):
+    if not (body.nama or "").strip():
+        raise HTTPException(400, "nama wajib diisi")
+    res = await db.contacts.update_one({"id": contact_id}, {"$set": _contact_doc(body)})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Kontak tidak ditemukan")
+    doc = await db.contacts.find_one({"id": contact_id}, {"_id": 0})
+    return doc
+
+
+@api_router.delete("/admin/contacts/{contact_id}", dependencies=[Depends(require_admin_pin)])
+async def delete_contact(contact_id: str):
+    res = await db.contacts.delete_one({"id": contact_id})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Kontak tidak ditemukan")
+    return {"ok": True, "id": contact_id}
+
+
+@api_router.post("/admin/contacts/import-orders", dependencies=[Depends(require_admin_pin)])
+async def import_contacts_from_orders():
+    """Tarik pelanggan unik dari orders ke buku kontak (skip yang sudah ada,
+    dedup by nama ternormalisasi). Ambil varian nama terpanjang + HP/email pertama."""
+    existing = set()
+    async for c in db.contacts.find({"jenis": "pelanggan"}, {"nama": 1}):
+        existing.add(_norm_contact_name(c.get("nama")))
+    seen = {}
+    async for o in db.orders.find({}, {"customer_nama": 1, "customer_hp": 1, "customer_email": 1}):
+        nm = (o.get("customer_nama") or "").strip()
+        if not nm:
+            continue
+        k = _norm_contact_name(nm)
+        if not k or k in existing:
+            continue
+        cur = seen.get(k)
+        if not cur:
+            seen[k] = {"nama": nm, "no_hp": (o.get("customer_hp") or "").strip(), "email": (o.get("customer_email") or "").strip()}
+        else:
+            if len(nm) > len(cur["nama"]):
+                cur["nama"] = nm
+            if not cur["no_hp"]:
+                cur["no_hp"] = (o.get("customer_hp") or "").strip()
+            if not cur["email"]:
+                cur["email"] = (o.get("customer_email") or "").strip()
+    now = datetime.now(timezone.utc).isoformat()
+    docs = [{
+        "id": "CT-" + uuid.uuid4().hex[:10], "nama": v["nama"][:200], "jenis": "pelanggan",
+        "perusahaan": "", "no_hp": v["no_hp"][:40], "email": v["email"][:120], "alamat": "",
+        "catatan": "", "created_at": now,
+    } for v in seen.values()]
+    if docs:
+        await db.contacts.insert_many(docs)
+    return {"imported": len(docs)}
+
+
+@api_router.post("/admin/contacts/import-suppliers", dependencies=[Depends(require_admin_pin)])
+async def import_contacts_from_suppliers():
+    """Tarik supplier dari supplier_profiles ke buku kontak (skip yang sudah ada)."""
+    existing = set()
+    async for c in db.contacts.find({"jenis": "supplier"}, {"nama": 1}):
+        existing.add(_norm_contact_name(c.get("nama")))
+    now = datetime.now(timezone.utc).isoformat()
+    docs = []
+    async for s in db.supplier_profiles.find({}, {"nama": 1, "no_hp": 1, "jenis": 1}):
+        nm = (s.get("nama") or "").strip()
+        k = _norm_contact_name(nm)
+        if not nm or k in existing:
+            continue
+        existing.add(k)
+        docs.append({
+            "id": "CT-" + uuid.uuid4().hex[:10], "nama": nm[:200], "jenis": "supplier",
+            "perusahaan": "", "no_hp": (s.get("no_hp") or "").strip()[:40], "email": "",
+            "alamat": "", "catatan": (s.get("jenis") or "").strip()[:500], "created_at": now,
+        })
+    if docs:
+        await db.contacts.insert_many(docs)
+    return {"imported": len(docs)}
+
+
 class BASTKBody(BaseModel):
     vehicle_type: Optional[str] = None
     damage_marks: Optional[List[Dict[str, Any]]] = None
