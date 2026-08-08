@@ -3438,8 +3438,25 @@ function printJadwalGabungan(meta, units) {
   return noDoc;
 }
 
+// Gabungkan nama customer yang sebenarnya sama tapi beda penulisan (titik,
+// koma, spasi ganda, huruf besar/kecil). Contoh: "PT Transkon Jaya, TBK" &
+// "PT. Transkon Jaya Tbk" dianggap 1 customer. Yang ditampilkan varian
+// terpanjang (paling lengkap). Warning "customer berbeda" hanya muncul kalau
+// memang beda perusahaan.
+function dedupCustomers(names) {
+  const map = new Map();
+  (names || []).forEach((n) => {
+    if (!n) return;
+    const key = String(n).toLowerCase().replace(/[.,]/g, "").replace(/\s+/g, " ").trim();
+    if (!key) return;
+    const prev = map.get(key);
+    if (!prev || String(n).trim().length > prev.length) map.set(key, String(n).trim());
+  });
+  return Array.from(map.values());
+}
+
 function JadwalGabunganModal({ cart, headers, onClose, onDone }) {
-  const customers = Array.from(new Set(cart.map((c) => c.customer_nama).filter(Boolean)));
+  const customers = dedupCustomers(cart.map((c) => c.customer_nama));
   const [pelabuhanAsal, setPelabuhanAsal] = useState(cart[0]?.asal_kota || "");
   const [tanggalSiap, setTanggalSiap] = useState("");
   const [catatan, setCatatan] = useState("");
@@ -3614,7 +3631,7 @@ function JadwalGabunganModal({ cart, headers, onClose, onDone }) {
 ════════════════════════════════════════ */
 function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
   const todayIso = new Date().toISOString().slice(0, 10);
-  const customers = Array.from(new Set(cart.map((c) => c.customer_nama).filter(Boolean)));
+  const customers = dedupCustomers(cart.map((c) => c.customer_nama));
   const [rows, setRows] = useState(() => cart.map((c) => ({
     order_id: c.order_id, customer_nama: c.customer_nama,
     asal_kota: c.asal_kota, tujuan_kota: c.tujuan_kota, unit: c.unit, harga: "",
