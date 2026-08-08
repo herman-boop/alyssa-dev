@@ -1214,6 +1214,17 @@ async def _merge_task_media(trip_id: str, view: dict):
             if u and u not in seen:
                 album.setdefault("dokumen", []).append({"id": d.get("id"), "url": u, "catatan": d.get("doc_type", ""), "uploaded_by": who, "ts": d.get("ts")})
                 seen.add(u)
+        # Foto dari CHECKPOINT (histori GPS) juga ikut masuk album — kalau petugas
+        # cuma cek-point + foto (tanpa upload di tab Foto), fotonya tetap muncul
+        # di tracking pelanggan & admin. Keterangan pakai jenis checkpoint-nya.
+        for cp in (t.get("checkpoints") or []):
+            u = cp.get("url")
+            if u and u not in seen:
+                ket = cp.get("jenis") or "Checkpoint"
+                if cp.get("catatan"):
+                    ket = f"{ket} — {cp.get('catatan')}"
+                album[bucket].append({"id": cp.get("checkpoint_id"), "url": u, "catatan": ket, "uploaded_by": who, "ts": cp.get("ts")})
+                seen.add(u)
     view["album"] = album
 
 
