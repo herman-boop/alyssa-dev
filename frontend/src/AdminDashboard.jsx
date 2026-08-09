@@ -633,6 +633,15 @@ function Dashboard({ pin, onLogout }) {
               <button className="adm-btn adm-btn-sm adm-btn-gold" onClick={() => setActiveTab("rekap-tagih")} data-testid="adm-po-tagihan">
                 💰 Tagihan Hari Ini
               </button>
+              <button className="adm-btn adm-btn-sm adm-btn-blue" onClick={() => {
+                // Tarik SEMUA unit yang lagi tampil (sudah kefilter pelanggan + tanggal) langsung ke Invoice Gabungan.
+                const rows = [];
+                visibleOrders.forEach((o) => (Array.isArray(o.units) ? o.units : []).forEach((unit) =>
+                  rows.push({ order_id: o.order_id, customer_nama: o.customer_nama, asal_kota: o.asal_kota, tujuan_kota: o.tujuan_kota, unit })));
+                if (!rows.length) return;
+                setJadwalCart(rows);
+                setShowInvoiceGab(true);
+              }} data-testid="adm-tarik-invoice">🧾 Tarik ke Invoice ({total})</button>
               <button className="adm-btn adm-btn-sm adm-btn-gold" onClick={() => setAll(!allSel)} data-testid="adm-selectall-units">
                 {allSel ? "✕ Batalkan pilih semua" : `☑️ Pilih semua unit → keranjang jadwal (${total})`}
               </button>
