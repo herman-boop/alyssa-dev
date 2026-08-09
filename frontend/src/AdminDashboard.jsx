@@ -2355,7 +2355,18 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
               saveDocHistory({
                 jenis: "invoice", no_dokumen: noInv, customer: order.customer_nama || "",
                 judul: `${order.customer_nama || "-"} · ${(lines || []).length} baris`,
-                meta: { ...(extra || {}), customer_nama: order.customer_nama, order_id: order.order_id, withTax: !!withTax, no_invoice: noInv },
+                meta: { ...(extra || {}), customer_nama: order.customer_nama, order_id: order.order_id, asal_kota: order.asal_kota, tujuan_kota: order.tujuan_kota, withTax: !!withTax, no_invoice: noInv },
+                lines, order_ids: [order.order_id],
+              }, headers);
+              setShowInvoice(false);
+            }}
+            onSave={async (lines, withTax, extra) => {
+              // Simpan ke Tagihan Hari Ini tanpa cetak (nomor invoice tetap dibuat).
+              const noInv = (extra && extra.no_invoice) || await nextDocNo("invoice", "INV");
+              saveDocHistory({
+                jenis: "invoice", no_dokumen: noInv, customer: order.customer_nama || "",
+                judul: `${order.customer_nama || "-"} · ${(lines || []).length} baris`,
+                meta: { ...(extra || {}), customer_nama: order.customer_nama, order_id: order.order_id, asal_kota: order.asal_kota, tujuan_kota: order.tujuan_kota, withTax: !!withTax, no_invoice: noInv },
                 lines, order_ids: [order.order_id],
               }, headers);
               setShowInvoice(false);
@@ -2539,7 +2550,7 @@ function BonusModal({ tripId, order, headers, onClose, onSave }) {
 /* ════════════════════════════════════════
    INVOICE MODAL
 ════════════════════════════════════════ */
-function InvoiceModal({ order, headers, onClose, onPrint }) {
+function InvoiceModal({ order, headers, onClose, onPrint, onSave }) {
   const todayIso = new Date().toISOString().slice(0, 10);
   // Cargo (barang/kargo umum) vs kendaraan. Cargo dikenali dari isi_kiriman terisi
   // atau shipment_type/jenis_kiriman = cargo → invoice pakai deskripsi cargo, bukan nopol/rangka.
@@ -2608,19 +2619,31 @@ function InvoiceModal({ order, headers, onClose, onPrint }) {
   const checkedCount = rows.filter((r) => r.checked && hargaNum(r.harga) > 0).length;
   const fRp = (n) => "Rp " + n.toLocaleString("id-ID");
 
+  const buildLines = () => rows
+    .map((r, i) => ({ r, u: orderUnits[i] }))
+    .filter(({ r }) => r.checked && hargaNum(r.harga) > 0)
+    .map(({ r, u }) => ({ nama: isCargo ? "Jasa Pengiriman Cargo" : "Jasa Pengiriman", ket: unitKet(u), qty: 1, harga: hargaNum(r.harga) }));
+  const buildExtra = () => ({ jatuhTempo, tanggalInvoice, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23, no_invoice: noInvoiceManual.trim() || undefined });
+  const markInvoiced = () => {
+    const ids = rows.filter((r) => r.checked && hargaNum(r.harga) > 0 && r.unit_id !== "legacy" && r.unit_id !== "cargo").map((r) => r.unit_id);
+    if (ids.length && headers) axios.post(`${API}/admin/orders/${order.order_id}/units/mark-invoiced`, { unit_ids: ids }, { headers }).catch(() => {});
+  };
+
   const submit = () => {
-    const lines = rows
-      .map((r, i) => ({ r, u: orderUnits[i] }))
-      .filter(({ r }) => r.checked && hargaNum(r.harga) > 0)
-      .map(({ r, u }) => ({ nama: isCargo ? "Jasa Pengiriman Cargo" : "Jasa Pengiriman", ket: unitKet(u), qty: 1, harga: hargaNum(r.harga) }));
+    const lines = buildLines();
     if (!lines.length) return;
     // Buka jendela cetak DULU di dalam gesture klik (kalau di-await, mobile blokir popup).
-    onPrint(lines, withTax, { jatuhTempo, tanggalInvoice, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23, no_invoice: noInvoiceManual.trim() || undefined });
-    // Tandai unit sudah diinvoice di belakang layar (best-effort).
-    const ids = rows.filter((r) => r.checked && hargaNum(r.harga) > 0 && r.unit_id !== "legacy" && r.unit_id !== "cargo").map((r) => r.unit_id);
-    if (ids.length && headers) {
-      axios.post(`${API}/admin/orders/${order.order_id}/units/mark-invoiced`, { unit_ids: ids }, { headers }).catch(() => {});
-    }
+    onPrint(lines, withTax, buildExtra());
+    markInvoiced();
+  };
+
+  const [saving, setSaving] = useState(false);
+  const saveOnly = async () => {
+    const lines = buildLines();
+    if (!lines.length) return;
+    setSaving(true);
+    try { await onSave(lines, withTax, buildExtra()); markInvoiced(); }
+    finally { setSaving(false); }
   };
 
   return createPortal((
@@ -2754,6 +2777,9 @@ function InvoiceModal({ order, headers, onClose, onPrint }) {
         </div>
         <div className="adm-modal-foot">
           <button className="adm-btn adm-btn-ghost" onClick={onClose}>Batal</button>
+          <button className="adm-btn adm-btn-green" onClick={saveOnly} disabled={checkedCount === 0 || saving} data-testid="adm-invoice-save">
+            {saving ? "Menyimpan…" : "💾 Simpan"}
+          </button>
           <button className="adm-btn adm-btn-blue" onClick={submit} disabled={checkedCount === 0} data-testid="adm-invoice-submit">
             {`Cetak Invoice${checkedCount > 1 ? ` (${checkedCount} unit)` : ""}`}
           </button>
@@ -3219,7 +3245,8 @@ function TagihanHariIni({ headers, onBack }) {
           <div style={{ flex: "1 1 240px", minWidth: 0 }}>
             <div style={{ fontWeight: 800, fontSize: 14, color: "var(--text)" }}>{r.no_dokumen || "-"}</div>
             <div style={{ fontSize: 12.5, color: "var(--text-2)", marginTop: 2 }}>{r.customer || "-"}</div>
-            <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 2 }}>No. PO: {poOf(r)} · {fmtTs(r.created_at)}</div>
+            <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 2 }}>No. PO: {poOf(r)} · {(r.lines || []).length} unit · {fmtTs(r.created_at)}</div>
+            {(r.meta?.asal_kota || r.meta?.tujuan_kota) && <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 1 }}>Rute: {r.meta.asal_kota || "—"} → {r.meta.tujuan_kota || "—"}</div>}
           </div>
           <div style={{ textAlign: "right", flex: "0 0 auto" }}>
             <div style={{ fontWeight: 900, fontSize: 15, color: "var(--gold-xl)" }}>Rp {t.total.toLocaleString("id-ID")}</div>
@@ -3927,20 +3954,14 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
   const okCount = rows.filter((r) => hargaNum(r.harga) > 0).length;
   const fRp = (n) => "Rp " + n.toLocaleString("id-ID");
 
-  const doPrint = async () => {
-    const lines = rows.filter((r) => hargaNum(r.harga) > 0)
-      .map((r) => ({ nama: "Jasa Pengiriman", ket: unitKet(r), qty: 1, harga: hargaNum(r.harga) }));
-    if (!lines.length) { alert("Isi harga minimal 1 unit dulu."); return; }
-    const orderIds = Array.from(new Set(rows.map((r) => r.order_id).filter(Boolean)));
-    const cust = billTo.trim() || (customers.length === 1 ? customers[0] : `${customers.length} customer`);
-    const extra = { jatuhTempo, tanggalInvoice, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23, customer_nama: cust, order_id: orderIds.join(", "), no_invoice: noInvoiceManual.trim() || undefined };
-    const noInv = await printInvoiceDoc(lines, withTax, extra); // nomor auto-increment dari server
+  const [saving, setSaving] = useState(false);
+  // Simpan arsip + tandai unit diinvoice + tutup. Dipakai baik saat Cetak maupun Simpan.
+  const persistInvoice = (lines, extra, orderIds, cust, noInv) => {
     saveDocHistory({
       jenis: "invoice", no_dokumen: noInv, customer: cust,
       judul: `${cust} · ${lines.length} unit · ${orderIds.length} PO`,
       meta: { ...extra, withTax: !!withTax, no_invoice: noInv }, lines, order_ids: orderIds,
     }, headers);
-    // tandai unit sudah diinvoice (kelompokkan per order) — best-effort
     const byOrder = {};
     rows.filter((r) => hargaNum(r.harga) > 0 && r.unit?.unit_id && r.unit.unit_id !== "legacy")
       .forEach((r) => { (byOrder[r.order_id] = byOrder[r.order_id] || []).push(r.unit.unit_id); });
@@ -3948,6 +3969,27 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
       if (ids.length) axios.post(`${API}/admin/orders/${oid}/units/mark-invoiced`, { unit_ids: ids }, { headers }).catch(() => {});
     });
     onDone();
+  };
+  const buildGab = () => {
+    const lines = rows.filter((r) => hargaNum(r.harga) > 0)
+      .map((r) => ({ nama: "Jasa Pengiriman", ket: unitKet(r), qty: 1, harga: hargaNum(r.harga) }));
+    const orderIds = Array.from(new Set(rows.map((r) => r.order_id).filter(Boolean)));
+    const cust = billTo.trim() || (customers.length === 1 ? customers[0] : `${customers.length} customer`);
+    const extra = { jatuhTempo, tanggalInvoice, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23, customer_nama: cust, order_id: orderIds.join(", "), no_invoice: noInvoiceManual.trim() || undefined };
+    return { lines, orderIds, cust, extra };
+  };
+  const doPrint = async () => {
+    const { lines, orderIds, cust, extra } = buildGab();
+    if (!lines.length) { alert("Isi harga minimal 1 unit dulu."); return; }
+    const noInv = await printInvoiceDoc(lines, withTax, extra); // nomor auto-increment dari server
+    persistInvoice(lines, extra, orderIds, cust, noInv);
+  };
+  const doSave = async () => {
+    const { lines, orderIds, cust, extra } = buildGab();
+    if (!lines.length) { alert("Isi harga minimal 1 unit dulu."); return; }
+    setSaving(true);
+    try { const noInv = extra.no_invoice || await nextDocNo("invoice", "INV"); persistInvoice(lines, extra, orderIds, cust, noInv); }
+    finally { setSaving(false); }
   };
 
   return createPortal((
@@ -4062,6 +4104,7 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
         </div>
         <div className="adm-modal-foot">
           <button className="adm-btn adm-btn-ghost" onClick={onClose}>Batal</button>
+          <button className="adm-btn adm-btn-green" onClick={doSave} disabled={okCount === 0 || saving} data-testid="adm-invgab-save">{saving ? "Menyimpan…" : "💾 Simpan"}</button>
           <button className="adm-btn adm-btn-blue" onClick={doPrint} disabled={okCount === 0} data-testid="adm-invgab-print">🧾 Cetak Invoice ({okCount} unit)</button>
         </div>
       </div>
