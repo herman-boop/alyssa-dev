@@ -132,6 +132,16 @@ logger = logging.getLogger(__name__)
 
 
 @app.on_event("startup")
+async def _ensure_indexes():
+    """Index created_at buat doc_history biar sort terbaru-dulu pakai index
+    (nggak in-memory sort) — hindari error 32MB saat record bawa stempel besar."""
+    try:
+        await db.doc_history.create_index([("created_at", -1)])
+    except Exception as e:
+        logger.warning(f"[startup] gagal bikin index doc_history.created_at: {e}")
+
+
+@app.on_event("startup")
 async def _launch_pdf_browser():
     """Satu instance Chromium headless dipakai bersama untuk semua request
     PDF (page baru per-request, browser tetap hidup) — launch sekali di
@@ -940,7 +950,10 @@ async def list_doc_history(jenis: Optional[str] = None, limit: int = 300):
         "meta.ttdNama": 1, "meta.ttdJabatan": 1,
     }
     items = []
-    async for d in db.doc_history.find(filt, proj).sort("created_at", -1).limit(max(1, min(1000, limit))):
+    # allow_disk_use=True: record lama bawa stempel base64 gede, sort by created_at
+    # bisa lewat batas memori 32MB Mongo (error code 292) -> izinkan sort pakai disk.
+    cur = db.doc_history.find(filt, proj).sort("created_at", -1).allow_disk_use(True).limit(max(1, min(1000, limit)))
+    async for d in cur:
         try:
             items.append(jsonable_encoder(d))  # skip record yg bermasalah, jgn gagalin semua
         except Exception:
