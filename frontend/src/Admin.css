@@ -1355,3 +1355,55 @@
   .adm-btn:not(.adm-btn-sm) { min-height: 48px; }
   .adm-modal-foot .adm-btn { flex: 1; min-height: 50px; }
 }
+
+/* ══════════════════════════════════════════════════════════════
+   TAGIHAN HARI INI — tabel gaya spreadsheet / Excel (dark navy + gold accent)
+   ══════════════════════════════════════════════════════════════ */
+.tg-wrap {
+  overflow-x: auto; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--border); border-radius: 14px; background: var(--surface);
+  max-height: 72vh;
+}
+.tg-table { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 1180px; font-size: 12.5px; color: var(--text-2); }
+.tg-table th, .tg-table td {
+  border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
+  padding: 9px 11px; white-space: nowrap; background: var(--surface); text-align: left; vertical-align: middle;
+}
+.tg-table thead th {
+  position: sticky; top: 0; z-index: 3; background: var(--bg-3); color: var(--text-mute);
+  font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em;
+}
+.tg-table tbody tr { cursor: pointer; }
+.tg-table tbody tr:hover td { background: var(--bg-3); }
+.tg-num { text-align: right; font-variant-numeric: tabular-nums; }
+.tg-center { text-align: center; }
+.tg-total { font-weight: 800; color: var(--gold-xl); }
+/* freeze 3 kolom pertama: checkbox, No, No.Invoice */
+.tg-sticky { position: sticky; z-index: 2; }
+.tg-table thead .tg-sticky { z-index: 5; }
+.tg-table tbody tr:hover .tg-sticky { background: var(--bg-3); }
+.tg-c0 { left: 0; width: 40px; min-width: 40px; text-align: center; }
+.tg-c1 { left: 40px; width: 44px; min-width: 44px; text-align: center; }
+.tg-c2 { left: 84px; width: 148px; min-width: 148px; max-width: 168px; overflow: hidden; text-overflow: ellipsis; box-shadow: 3px 0 0 -1px var(--border-2); }
+.tg-table thead .tg-c2 { box-shadow: 3px 0 0 -1px var(--border-2); }
+.tg-status { font-weight: 700; font-size: 11px; padding: 2px 9px; border-radius: 20px; display: inline-block; white-space: nowrap; }
+.tg-status.belum { background: var(--gold-bg); color: var(--gold-xl); border: 1px solid var(--gold-bd); }
+.tg-status.lunas { background: rgba(63,185,80,.14); color: #3fb950; border: 1px solid rgba(63,185,80,.42); }
+/* summary compact */
+.tg-sum { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.tg-sum .tg-cell { flex: 1 1 auto; min-width: 120px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; }
+.tg-sum .tg-cell b { display: block; font-size: 18px; font-weight: 900; color: var(--text); line-height: 1.15; }
+.tg-sum .tg-cell.gold b { color: var(--gold-xl); }
+.tg-sum .tg-cell span { font-size: 11px; color: var(--text-mute); }
+/* bottom action bar (floating, di atas bottom-nav mobile) */
+.tg-actionbar {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: 16px; z-index: 60;
+  background: var(--bg-3); border: 1px solid var(--border-2); border-radius: 14px;
+  padding: 9px 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  box-shadow: 0 12px 34px rgba(0,0,0,.45); max-width: calc(100vw - 20px);
+}
+.tg-actionbar .tg-selinfo { font-weight: 800; font-size: 12.5px; color: var(--text); margin-right: 4px; }
+@media (max-width: 640px) {
+  .tg-actionbar { bottom: 78px; }
+  .tg-table { min-width: 1080px; }
+}

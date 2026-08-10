@@ -3185,11 +3185,49 @@ const MEKARI_LS_KEY = "aal_mekari_input_v1";
 function loadMekariMarks() { try { return JSON.parse(localStorage.getItem(MEKARI_LS_KEY) || "{}"); } catch { return {}; } }
 function saveMekariMarks(m) { try { localStorage.setItem(MEKARI_LS_KEY, JSON.stringify(m)); } catch {} }
 
+// Status "Lunas" disimpan lokal (localStorage) — tanpa ubah backend.
+const LUNAS_LS_KEY = "aal_lunas_v1";
+function loadLunas() { try { return JSON.parse(localStorage.getItem(LUNAS_LS_KEY) || "{}"); } catch { return {}; } }
+function saveLunas(m) { try { localStorage.setItem(LUNAS_LS_KEY, JSON.stringify(m)); } catch {} }
+
+// Parse keterangan baris invoice (ket) yang tersimpan jadi field terstruktur.
+// Format ket dari sistem: "VEH MODEL NOPOL (ASAL–TUJUAN)<br>No. Rangka: xxx".
+function parseKet(ket) {
+  const raw = String(ket || "").replace(/&amp;/g, "&");
+  const rangkaM = raw.match(/No\.?\s*Rangka:\s*([^<\n]+)/i);
+  const noRangka = rangkaM ? rangkaM[1].trim() : "";
+  let head = raw.split(/<br\s*\/?>/i)[0].replace(/<[^>]+>/g, "").trim();
+  let unit = head, asal = "", tujuan = "", nopol = "";
+  const rute = head.match(/\(([^()]*?)\s*[–\-—]\s*([^()]*?)\)\s*$/);
+  if (rute) { asal = rute[1].trim(); tujuan = rute[2].trim(); unit = head.slice(0, rute.index).trim(); }
+  const plate = unit.match(/\b([A-Z]{1,2}\s?\d{1,4}\s?[A-Z]{1,3})\s*$/);
+  if (plate) { nopol = plate[1].trim(); unit = unit.slice(0, plate.index).trim(); }
+  return { unit: unit || "-", nopol, asal, tujuan, noRangka };
+}
+// Ringkas 1 invoice (bisa multi-unit) jadi 1 baris tabel.
+function rowInfoFromRec(r) {
+  const lines = Array.isArray(r.lines) ? r.lines : [];
+  const first = lines[0] ? parseKet(lines[0].ket) : { unit: "-", nopol: "", asal: "", tujuan: "", noRangka: "" };
+  const extra = lines.length > 1 ? ` +${lines.length - 1}` : "";
+  const qty = lines.reduce((s, l) => s + (Number(l.qty) || 1), 0) || lines.length;
+  return {
+    unit: (first.unit || "-") + extra,
+    nopol: first.nopol || (lines.length > 1 ? "(beragam)" : "—"),
+    asal: r.meta?.asal_kota || first.asal || "—",
+    tujuan: r.meta?.tujuan_kota || first.tujuan || "—",
+    qty,
+    lines,
+  };
+}
+function fmtDMY(iso) { if (!iso || !/^\d{4}-\d{2}-\d{2}/.test(iso)) return "—"; const [y, m, d] = iso.slice(0, 10).split("-"); return `${d}/${m}/${y}`; }
+
 function TagihanHariIni({ headers, onBack }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [day, setDay] = useState(() => new Date().toISOString().slice(0, 10));
-  const [marks, setMarks] = useState(() => loadMekariMarks());
+  const [lunas, setLunas] = useState(() => loadLunas());
+  const [sel, setSel] = useState(() => new Set());
+  const [detail, setDetail] = useState(null);
   const [toast, setToast] = useState("");
   const flash = (m) => { setToast(m); setTimeout(() => setToast(""), 2400); };
 
@@ -3209,78 +3247,192 @@ function TagihanHariIni({ headers, onBack }) {
     const d = new Date(r.created_at);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   };
-  const rows = useMemo(() => items.filter((r) => effDay(r) === day), [items, day]);
+  const rows = useMemo(() => items.filter((r) => effDay(r) === day)
+    .sort((a, b) => (a.no_dokumen || "").localeCompare(b.no_dokumen || "", "id")), [items, day]);
   const poOf = (r) => (Array.isArray(r.order_ids) && r.order_ids.length ? r.order_ids.join(", ") : (r.meta?.order_id || "—"));
   const grand = rows.reduce((s, r) => s + invTotalFromRec(r).total, 0);
-  const doneCount = rows.filter((r) => marks[r.id]).length;
-  const fmtDayLabel = (() => { const [y, m, d] = day.split("-"); return `${d}/${m}/${y}`; })();
+  const custCount = new Set(rows.map((r) => normName(r.customer)).filter(Boolean)).size;
+  const unitCount = rows.reduce((s, r) => s + ((r.lines || []).length), 0);
+  const fmtDayLabel = fmtDMY(day);
+  const statusOf = (r) => (lunas[r.id] ? "Lunas" : "Belum Dibayar");
 
-  const toggleMark = (id) => { setMarks((prev) => { const next = { ...prev, [id]: !prev[id] }; if (!next[id]) delete next[id]; saveMekariMarks(next); return next; }); };
+  // Selection
+  const toggleSel = (id) => setSel((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const allSel = rows.length > 0 && rows.every((r) => sel.has(r.id));
+  const toggleAll = () => setSel(() => allSel ? new Set() : new Set(rows.map((r) => r.id)));
+  const selectedRows = rows.filter((r) => sel.has(r.id));
 
-  const buildRecapText = () => {
-    const head = `REKAP TAGIHAN — ${fmtDayLabel}\nPT Alyssa Auto Logistik\n(untuk diinput ke Mekari)\n`;
-    const body = rows.map((r, i) => {
-      const t = invTotalFromRec(r);
-      return `${i + 1}. ${r.no_dokumen || "-"}\n   Customer: ${r.customer || "-"}\n   No. PO: ${poOf(r)}\n   Total: Rp ${t.total.toLocaleString("id-ID")}${marks[r.id] ? "  ✅ sudah input" : ""}`;
+  const toggleLunas = (id) => setLunas((prev) => { const n = { ...prev }; if (n[id]) delete n[id]; else n[id] = 1; saveLunas(n); return n; });
+
+  const buildRecapText = (list) => {
+    const head = `REKAP TAGIHAN — ${fmtDayLabel}\nPT Alyssa Auto Logistik\n`;
+    const tot = list.reduce((s, r) => s + invTotalFromRec(r).total, 0);
+    const body = list.map((r, i) => {
+      const t = invTotalFromRec(r); const info = rowInfoFromRec(r);
+      return `${i + 1}. ${r.no_dokumen || "-"}\n   Customer: ${r.customer || "-"}\n   No. PO: ${poOf(r)}\n   Rute: ${info.asal} → ${info.tujuan} (${info.qty} unit)\n   Total: Rp ${t.total.toLocaleString("id-ID")} · ${statusOf(r)}`;
     }).join("\n\n");
-    const foot = `\n\nTotal: ${rows.length} invoice · Rp ${grand.toLocaleString("id-ID")}`;
-    return head + "\n" + body + foot;
+    return `${head}\n${body}\n\nTotal: ${list.length} invoice · Rp ${tot.toLocaleString("id-ID")}`;
   };
-  const copyRecap = async () => { const ok = await copyToClipboard(buildRecapText()); flash(ok ? "✓ Rekap disalin" : "Gagal menyalin"); };
-  const waRecap = () => { window.open(`https://wa.me/?text=${encodeURIComponent(buildRecapText())}`, "_blank"); };
+  const copyRecap = async (list) => { if (!list.length) return; const ok = await copyToClipboard(buildRecapText(list)); flash(ok ? "✓ Rekap disalin" : "Gagal menyalin"); };
+  const waRecap = (list) => { if (!list.length) return; window.open(`https://wa.me/?text=${encodeURIComponent(buildRecapText(list))}`, "_blank"); };
   const reprint = (r) => { try { printInvoiceDoc(r.lines, r.meta?.withTax, r.meta || {}); } catch {} };
 
+  const exportExcel = (list) => {
+    if (!list.length) return;
+    const cols = ["No", "Tanggal", "No Invoice", "No PO", "Customer", "Unit", "Nopol", "Asal", "Tujuan", "Qty", "Harga", "PPN", "PPh", "Total Tagihan", "Jatuh Tempo", "Metode Pembayaran", "Status"];
+    const esc = (v) => String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const body = list.map((r, i) => {
+      const t = invTotalFromRec(r); const info = rowInfoFromRec(r);
+      const cells = [i + 1, fmtDMY(effDay(r)), r.no_dokumen || "", poOf(r), r.customer || "", info.unit, info.nopol, info.asal, info.tujuan, info.qty, t.subtotal, t.ppn, t.pph, t.total, fmtDMY(r.meta?.jatuhTempo), r.meta?.metode || "", statusOf(r)];
+      return `<tr>${cells.map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`;
+    }).join("");
+    const html = `<html><head><meta charset="utf-8"></head><body><table border="1"><thead><tr>${cols.map((c) => `<th>${c}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></body></html>`;
+    const blob = new Blob(["﻿" + html], { type: "application/vnd.ms-excel" });
+    const url = URL.createObjectURL(blob); const a = document.createElement("a");
+    a.href = url; a.download = `Tagihan_${day}.xls`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    flash(`✓ ${list.length} baris diexport ke Excel`);
+  };
+
   return (
-    <div style={{ maxWidth: 820, margin: "0 auto" }}>
+    <div style={{ maxWidth: 1120, margin: "0 auto", paddingBottom: sel.size ? 96 : 8 }}>
       {onBack && (
         <button className="adm-btn adm-btn-sm adm-btn-ghost" onClick={onBack} style={{ marginBottom: 12 }} data-testid="tagih-back">← Kembali ke PO</button>
       )}
-      <div className="adm-card" style={{ padding: 16, marginBottom: 14 }}>
-        <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
-          <label style={{ flex: "0 0 auto" }}>
-            <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", marginBottom: 5, fontWeight: 700 }}>Tanggal Tagihan</span>
-            <input type="date" className="adm-input" value={day} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setDay(e.target.value)} data-testid="tagih-date" />
-          </label>
-          <div style={{ flex: 1, minWidth: 160 }}>
-            <div style={{ fontSize: 22, fontWeight: 900, color: "var(--text)" }}>Rp {grand.toLocaleString("id-ID")}</div>
-            <div style={{ fontSize: 12, color: "var(--text-mute)" }}>{rows.length} invoice dicetak · {doneCount} sudah diinput Mekari</div>
-          </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button className="adm-btn adm-btn-sm" onClick={copyRecap} disabled={!rows.length} data-testid="tagih-copy">📋 Salin Rekap</button>
-            <button className="adm-btn adm-btn-sm adm-btn-blue" onClick={waRecap} disabled={!rows.length} data-testid="tagih-wa">💬 Kirim ke Admin (WA)</button>
-          </div>
+
+      {/* Toolbar: tanggal + aksi rekap semua */}
+      <div className="adm-card" style={{ padding: 14, marginBottom: 12, display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <label style={{ flex: "0 0 auto" }}>
+          <span style={{ display: "block", fontSize: 12, color: "var(--text-mute)", marginBottom: 5, fontWeight: 700 }}>Tanggal Tagihan</span>
+          <input type="date" className="adm-input" value={day} max={new Date().toISOString().slice(0, 10)} onChange={(e) => { setDay(e.target.value); setSel(new Set()); }} data-testid="tagih-date" />
+        </label>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button className="adm-btn adm-btn-sm" onClick={() => copyRecap(rows)} disabled={!rows.length} data-testid="tagih-copy">📋 Salin Rekap</button>
+          <button className="adm-btn adm-btn-sm adm-btn-blue" onClick={() => waRecap(rows)} disabled={!rows.length} data-testid="tagih-wa">💬 Kirim WA</button>
+          <button className="adm-btn adm-btn-sm adm-btn-green" onClick={() => exportExcel(rows)} disabled={!rows.length} data-testid="tagih-export">⬇️ Export Excel</button>
         </div>
+      </div>
+
+      {/* Summary compact */}
+      <div className="tg-sum">
+        <div className="tg-cell gold"><b>Rp {grand.toLocaleString("id-ID")}</b><span>Total Tagihan</span></div>
+        <div className="tg-cell"><b>{rows.length}</b><span>Invoice</span></div>
+        <div className="tg-cell"><b>{custCount}</b><span>Customer</span></div>
+        <div className="tg-cell"><b>{unitCount}</b><span>Unit</span></div>
       </div>
 
       {loading ? (
         <div className="adm-card" style={{ padding: 30, textAlign: "center", color: "var(--text-mute)" }}>Memuat…</div>
       ) : rows.length === 0 ? (
         <div className="adm-empty"><div style={{ fontWeight: 700, marginBottom: 6, color: "var(--text-2)" }}>Belum ada invoice</div><div>ber-tanggal {fmtDayLabel}. Simpan / cetak invoice dari kartu PO dulu ya (tanggalnya ikut "Tanggal Invoice" yang diisi).</div></div>
-      ) : rows.map((r) => {
-        const t = invTotalFromRec(r);
-        const done = !!marks[r.id];
-        return (
-          <div key={r.id} className="adm-card" style={{ padding: "12px 14px", marginBottom: 10, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", borderLeft: done ? "3px solid #3fb950" : "3px solid transparent" }} data-testid={`tagih-row-${r.id}`}>
-          <div style={{ flex: "1 1 240px", minWidth: 0 }}>
-            <div style={{ fontWeight: 800, fontSize: 14, color: "var(--text)" }}>{r.no_dokumen || "-"}</div>
-            <div style={{ fontSize: 12.5, color: "var(--text-2)", marginTop: 2 }}>{r.customer || "-"}</div>
-            <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 2 }}>No. PO: {poOf(r)} · {(r.lines || []).length} unit · {fmtTs(r.created_at)}</div>
-            {(r.meta?.asal_kota || r.meta?.tujuan_kota) && <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 1 }}>Rute: {r.meta.asal_kota || "—"} → {r.meta.tujuan_kota || "—"}</div>}
-          </div>
-          <div style={{ textAlign: "right", flex: "0 0 auto" }}>
-            <div style={{ fontWeight: 900, fontSize: 15, color: "var(--gold-xl)" }}>Rp {t.total.toLocaleString("id-ID")}</div>
-            <div style={{ fontSize: 10.5, color: "var(--text-mute)" }}>{r.meta?.withTax ? "+PPN" : "tanpa PPN"}{r.meta?.withPph23 ? " · −PPh23" : ""}</div>
-          </div>
-          <div style={{ display: "flex", gap: 8, flex: "0 0 auto", flexWrap: "wrap" }}>
-            <button className="adm-btn adm-btn-sm adm-btn-ghost" onClick={() => reprint(r)}>🖨️ Cetak ulang</button>
-            <label className={`adm-btn adm-btn-sm ${done ? "adm-btn-green" : ""}`} style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <input type="checkbox" checked={done} onChange={() => toggleMark(r.id)} style={{ width: 15, height: 15 }} data-testid={`tagih-mekari-${r.id}`} />
-              {done ? "Sudah di Mekari" : "Tandai input Mekari"}
-            </label>
-          </div>
+      ) : (
+        <div className="tg-wrap" data-testid="tagih-table">
+          <table className="tg-table">
+            <thead>
+              <tr>
+                <th className="tg-sticky tg-c0"><input type="checkbox" checked={allSel} onChange={toggleAll} data-testid="tagih-selall" /></th>
+                <th className="tg-sticky tg-c1">No</th>
+                <th className="tg-sticky tg-c2">No. Invoice</th>
+                <th className="tg-center">Tanggal</th>
+                <th>Customer</th>
+                <th>Unit</th>
+                <th>Nopol</th>
+                <th>Asal</th>
+                <th>Tujuan</th>
+                <th className="tg-center">Qty</th>
+                <th className="tg-num">Total Tagihan</th>
+                <th className="tg-center">Jatuh Tempo</th>
+                <th className="tg-center">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => {
+                const t = invTotalFromRec(r); const info = rowInfoFromRec(r); const isLunas = !!lunas[r.id];
+                return (
+                  <tr key={r.id} onClick={() => setDetail(r)} data-testid={`tagih-row-${r.id}`}>
+                    <td className="tg-sticky tg-c0" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={sel.has(r.id)} onChange={() => toggleSel(r.id)} data-testid={`tagih-sel-${r.id}`} /></td>
+                    <td className="tg-sticky tg-c1">{i + 1}</td>
+                    <td className="tg-sticky tg-c2" title={r.no_dokumen}>{r.no_dokumen || "-"}</td>
+                    <td className="tg-center">{fmtDMY(effDay(r))}</td>
+                    <td>{r.customer || "-"}</td>
+                    <td>{info.unit}</td>
+                    <td>{info.nopol}</td>
+                    <td>{info.asal}</td>
+                    <td>{info.tujuan}</td>
+                    <td className="tg-center">{info.qty}</td>
+                    <td className="tg-num tg-total">Rp {t.total.toLocaleString("id-ID")}</td>
+                    <td className="tg-center">{fmtDMY(r.meta?.jatuhTempo)}</td>
+                    <td className="tg-center"><span className={`tg-status ${isLunas ? "lunas" : "belum"}`}>{isLunas ? "Lunas" : "Belum Dibayar"}</span></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Bottom action bar saat ada yang dipilih */}
+      {sel.size > 0 && (
+        <div className="tg-actionbar" data-testid="tagih-actionbar">
+          <span className="tg-selinfo">✅ {sel.size} invoice dipilih</span>
+          <button className="adm-btn adm-btn-sm" onClick={() => selectedRows.forEach(reprint)}>🖨️ Cetak</button>
+          <button className="adm-btn adm-btn-sm adm-btn-green" onClick={() => exportExcel(selectedRows)}>⬇️ Export Excel</button>
+          <button className="adm-btn adm-btn-sm" onClick={() => copyRecap(selectedRows)}>📋 Salin Rekap</button>
+          <button className="adm-btn adm-btn-sm adm-btn-blue" onClick={() => waRecap(selectedRows)}>💬 Kirim WA</button>
+          <button className="adm-btn adm-btn-sm adm-btn-ghost" onClick={() => setSel(new Set())}>✕</button>
+        </div>
+      )}
+
+      {/* Detail drawer/modal */}
+      {detail && (() => {
+        const t = invTotalFromRec(detail); const info = rowInfoFromRec(detail); const isLunas = !!lunas[detail.id];
+        const Row = ({ k, v }) => (
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "6px 0", borderBottom: "1px solid var(--border)", fontSize: 13 }}>
+            <span style={{ color: "var(--text-mute)" }}>{k}</span>
+            <span style={{ color: "var(--text)", fontWeight: 600, textAlign: "right" }}>{v}</span>
           </div>
         );
-      })}
+        return (
+          <div className="adm-modal-bg" onClick={() => setDetail(null)} data-testid="tagih-detail">
+            <div className="adm-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
+              <div className="adm-modal-head">
+                <div>
+                  <div className="adm-modal-title">🧾 {detail.no_dokumen || "-"}</div>
+                  <div className="adm-modal-sub">{detail.customer || "-"}</div>
+                </div>
+                <button className="adm-modal-close" onClick={() => setDetail(null)} aria-label="Tutup">✕</button>
+              </div>
+              <div className="adm-modal-body">
+                <Row k="No. Invoice" v={detail.no_dokumen || "-"} />
+                <Row k="No. PO" v={poOf(detail)} />
+                <Row k="Customer" v={detail.customer || "-"} />
+                <div style={{ padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
+                  <div style={{ color: "var(--text-mute)", fontSize: 13, marginBottom: 4 }}>Unit ({info.lines.length})</div>
+                  {info.lines.map((l, idx) => { const p = parseKet(l.ket); return (
+                    <div key={idx} style={{ fontSize: 12.5, color: "var(--text-2)", padding: "2px 0" }}>
+                      • {p.unit}{p.nopol ? ` · ${p.nopol}` : ""} <span style={{ color: "var(--text-mute)" }}>{(p.asal || p.tujuan) ? `(${p.asal || "—"} → ${p.tujuan || "—"})` : ""}</span> — Rp {(Number(l.harga) || 0).toLocaleString("id-ID")}
+                    </div>
+                  ); })}
+                </div>
+                <Row k="Asal → Tujuan" v={`${info.asal} → ${info.tujuan}`} />
+                <Row k="Harga (DPP)" v={`Rp ${t.subtotal.toLocaleString("id-ID")}`} />
+                <Row k="PPN (1.1%)" v={detail.meta?.withTax ? `Rp ${t.ppn.toLocaleString("id-ID")}` : "—"} />
+                <Row k="PPh 23 (2%)" v={detail.meta?.withPph23 ? `− Rp ${t.pph.toLocaleString("id-ID")}` : "—"} />
+                <Row k="Total Tagihan" v={<span style={{ color: "var(--gold-xl)", fontWeight: 900 }}>Rp {t.total.toLocaleString("id-ID")}</span>} />
+                <Row k="Metode Pembayaran" v={detail.meta?.metode || "—"} />
+                <Row k="Jatuh Tempo" v={fmtDMY(detail.meta?.jatuhTempo)} />
+                <Row k="Catatan" v={detail.meta?.pesan || "—"} />
+                <Row k="Status" v={<span className={`tg-status ${isLunas ? "lunas" : "belum"}`}>{isLunas ? "Lunas" : "Belum Dibayar"}</span>} />
+              </div>
+              <div style={{ display: "flex", gap: 8, padding: "12px 16px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                <button className="adm-btn adm-btn-sm adm-btn-ghost" onClick={() => reprint(detail)}>👁️ Lihat / Cetak</button>
+                <button className="adm-btn adm-btn-sm" onClick={() => reprint(detail)}>📄 Download PDF</button>
+                <button className={`adm-btn adm-btn-sm ${isLunas ? "adm-btn-ghost" : "adm-btn-green"}`} onClick={() => toggleLunas(detail.id)} data-testid="tagih-lunas">{isLunas ? "↩️ Tandai Belum" : "✅ Tandai Lunas"}</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {toast && <div className="adm-toast" data-testid="tagih-toast">{toast}</div>}
     </div>
   );
