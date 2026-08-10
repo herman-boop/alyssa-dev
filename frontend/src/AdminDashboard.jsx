@@ -3222,22 +3222,24 @@ function rowInfoFromRec(r) {
 function fmtDMY(iso) { if (!iso || !/^\d{4}-\d{2}-\d{2}/.test(iso)) return "—"; const [y, m, d] = iso.slice(0, 10).split("-"); return `${d}/${m}/${y}`; }
 
 function TagihanHariIni({ headers, onBack }) {
+  const localToday = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [day, setDay] = useState(() => new Date().toISOString().slice(0, 10));
+  const [day, setDay] = useState(localToday);
   const [lunas, setLunas] = useState(() => loadLunas());
   const [sel, setSel] = useState(() => new Set());
   const [detail, setDetail] = useState(null);
   const [toast, setToast] = useState("");
   const flash = (m) => { setToast(m); setTimeout(() => setToast(""), 2400); };
 
-  useEffect(() => {
+  const reload = useCallback(() => {
     setLoading(true);
     axios.get(`${API}/admin/doc-history`, { headers, params: { jenis: "invoice", limit: 1000 } })
       .then((r) => setItems(r.data?.items || []))
       .catch(() => setItems([]))
       .finally(() => setLoading(false));
   }, [headers]);
+  useEffect(() => { reload(); }, [reload]);
 
   // Tanggal efektif = Tanggal Invoice yang diisi (biar samain dgn tgl pajak),
   // fallback ke tanggal dokumen disimpan. Dibandingkan sebagai YYYY-MM-DD.
@@ -3249,6 +3251,12 @@ function TagihanHariIni({ headers, onBack }) {
   };
   const rows = useMemo(() => items.filter((r) => effDay(r) === day)
     .sort((a, b) => (a.no_dokumen || "").localeCompare(b.no_dokumen || "", "id")), [items, day]);
+  // Tanggal-tanggal yang ADA invoicenya (buat bantu cari kalau salah pilih tanggal).
+  const availDates = useMemo(() => {
+    const m = {};
+    items.forEach((r) => { const d = effDay(r); m[d] = (m[d] || 0) + 1; });
+    return Object.entries(m).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 10);
+  }, [items]);
   const poOf = (r) => (Array.isArray(r.order_ids) && r.order_ids.length ? r.order_ids.join(", ") : (r.meta?.order_id || "—"));
   const grand = rows.reduce((s, r) => s + invTotalFromRec(r).total, 0);
   const custCount = new Set(rows.map((r) => normName(r.customer)).filter(Boolean)).size;
@@ -3303,9 +3311,10 @@ function TagihanHariIni({ headers, onBack }) {
       <div className="adm-card" style={{ padding: 14, marginBottom: 12, display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
         <label style={{ flex: "0 0 auto" }}>
           <span style={{ display: "block", fontSize: 12, color: "var(--text-mute)", marginBottom: 5, fontWeight: 700 }}>Tanggal Tagihan</span>
-          <input type="date" className="adm-input" value={day} max={new Date().toISOString().slice(0, 10)} onChange={(e) => { setDay(e.target.value); setSel(new Set()); }} data-testid="tagih-date" />
+          <input type="date" className="adm-input" value={day} max={localToday()} onChange={(e) => { setDay(e.target.value); setSel(new Set()); }} data-testid="tagih-date" />
         </label>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button className="adm-btn adm-btn-sm adm-btn-ghost" onClick={reload} title="Muat ulang" data-testid="tagih-reload">🔄</button>
           <button className="adm-btn adm-btn-sm" onClick={() => copyRecap(rows)} disabled={!rows.length} data-testid="tagih-copy">📋 Salin Rekap</button>
           <button className="adm-btn adm-btn-sm adm-btn-blue" onClick={() => waRecap(rows)} disabled={!rows.length} data-testid="tagih-wa">💬 Kirim WA</button>
           <button className="adm-btn adm-btn-sm adm-btn-green" onClick={() => exportExcel(rows)} disabled={!rows.length} data-testid="tagih-export">⬇️ Export Excel</button>
@@ -3323,7 +3332,20 @@ function TagihanHariIni({ headers, onBack }) {
       {loading ? (
         <div className="adm-card" style={{ padding: 30, textAlign: "center", color: "var(--text-mute)" }}>Memuat…</div>
       ) : rows.length === 0 ? (
-        <div className="adm-empty"><div style={{ fontWeight: 700, marginBottom: 6, color: "var(--text-2)" }}>Belum ada invoice</div><div>ber-tanggal {fmtDayLabel}. Simpan / cetak invoice dari kartu PO dulu ya (tanggalnya ikut "Tanggal Invoice" yang diisi).</div></div>
+        <div className="adm-empty">
+          <div style={{ fontWeight: 700, marginBottom: 6, color: "var(--text-2)" }}>Belum ada invoice ber-tanggal {fmtDayLabel}</div>
+          <div style={{ marginBottom: availDates.length ? 12 : 0 }}>Invoice muncul sesuai "Tanggal Invoice" yang diisi (bukan tanggal simpan).</div>
+          {availDates.length > 0 && (
+            <div>
+              <div style={{ fontSize: 12, color: "var(--text-mute)", marginBottom: 6 }}>Tanggal yang ada invoicenya — klik untuk buka:</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+                {availDates.map(([d, n]) => (
+                  <button key={d} className="adm-btn adm-btn-sm adm-btn-gold" onClick={() => { setDay(d); setSel(new Set()); }} data-testid={`tagih-availdate-${d}`}>{fmtDMY(d)} ({n})</button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       ) : (
         <div className="tg-wrap" data-testid="tagih-table">
           <table className="tg-table">
