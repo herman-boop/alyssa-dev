@@ -5,7 +5,7 @@ import axios from "axios";
 import { VEHICLE_TYPE_LIST } from "@/VehicleSketches";
 import CostCalculator from "@/CostCalculator";
 import DriverData from "@/DriverData";
-import SupplierPage from "@/SupplierPage";
+import SupplierPage, { printSupplierA4 } from "@/SupplierPage";
 import SelisihPage from "@/SelisihPage";
 import KompensasiPage from "@/KompensasiPage";
 import MobileVendorPayment from "@/MobileVendorPayment";
@@ -3467,11 +3467,13 @@ function TagihanHariIni({ headers, onBack }) {
 const DOC_HIST_FILTERS = [
   { key: "", label: "Semua" },
   { key: "invoice", label: "Invoice" },
+  { key: "supplier", label: "Rekap Supplier" },
   { key: "jadwal", label: "Jadwal Pengiriman" },
   { key: "jadwal_gabungan", label: "Jadwal Gabungan" },
 ];
 const DOC_HIST_BADGE = {
   invoice: { txt: "Invoice", bg: "rgba(91,141,239,0.18)", fg: "#9dbcff" },
+  supplier: { txt: "Rekap Supplier", bg: "rgba(201,151,58,0.20)", fg: "#e6c375" },
   jadwal: { txt: "Jadwal", bg: "rgba(51,181,124,0.18)", fg: "#7ee0af" },
   jadwal_gabungan: { txt: "Jadwal Gabungan", bg: "rgba(201,151,58,0.20)", fg: "#e6c375" },
 };
@@ -3501,6 +3503,8 @@ function HistoriDokumen({ headers }) {
     try { const resp = await axios.get(`${API}/admin/doc-history/${rec0.id}`, { headers }); if (resp.data) rec = resp.data; } catch {}
     if (rec.jenis === "invoice") {
       printInvoiceDoc(rec.lines, rec.meta?.withTax, rec.meta || {});
+    } else if (rec.jenis === "supplier") {
+      printSupplierA4({ nama: rec.meta?.supplier_nama || rec.customer || "-", jobs: rec.units || [] }, null, rec.meta?.no_dokumen || rec.no_dokumen);
     } else if (rec.jenis === "jadwal") {
       printJadwalDoc(rec.meta || {}, rec.units || []);
     } else if (rec.jenis === "jadwal_gabungan") {

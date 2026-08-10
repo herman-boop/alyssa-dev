@@ -7,13 +7,17 @@ const API = `${BACKEND_URL}/api`;
 
 /* Cetak Ringkasan Supplier sebagai A4 (teks vektor, kaya Penawaran) — tajam
    walau di-screenshot & kirim WhatsApp, huruf kecil biar muat. */
-function printSupplierA4(sup, jobsOverride) {
+export function supplierAutoDocNo(d) {
+  const now = d ? new Date(d) : new Date();
+  return `RPS/AAL/${String(now.getDate()).padStart(2, "0")}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getFullYear()).slice(2)}/${now.getFullYear()}`;
+}
+export function printSupplierA4(sup, jobsOverride, noDocOverride) {
   if (!sup) return;
   const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const rp = (n) => "Rp " + (Number(n) || 0).toLocaleString("id-ID");
   const now = new Date();
   const tgl = now.toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
-  const noDoc = `RPS/AAL/${String(now.getDate()).padStart(2, "0")}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getFullYear()).slice(2)}/${now.getFullYear()}`;
+  const noDoc = (noDocOverride && String(noDocOverride).trim()) || supplierAutoDocNo();
   // jobsOverride = unit yang dicentang. Kalau kosong -> semua unit. Total selalu
   // dihitung dari unit yang benar-benar dicetak (biar cocok sama isi tabel).
   const jobs = (jobsOverride && jobsOverride.length) ? jobsOverride : (sup.jobs || []);
@@ -129,6 +133,29 @@ export default function SupplierPage() {
   const [tab, setTab] = useState("pembayaran"); // default: Pembayaran (dipakai tiap hari)
   const [filter, setFilter] = useState("semua");
   const [menuOpen, setMenuOpen] = useState(false);
+  // Rekap supplier: No. Dokumen (auto/manual) + cetak / simpan ke Histori Dokumen
+  const [rekapOpen, setRekapOpen] = useState(false);
+  const [rekapNo, setRekapNo] = useState("");
+  const [rekapSaving, setRekapSaving] = useState(false);
+  const openRekap = () => { setMenuOpen(false); setRekapNo(supplierAutoDocNo()); setRekapOpen(true); };
+  const saveRekapHistori = async () => {
+    if (!selected) return;
+    setRekapSaving(true);
+    try {
+      const jobs = selected.jobs || [];
+      const gHarga = jobs.reduce((s, j) => s + (j.total_harga || 0), 0);
+      const gBayar = jobs.reduce((s, j) => s + (j.total_terbayar || 0), 0);
+      const noDoc = (rekapNo.trim() || supplierAutoDocNo());
+      await axios.post(`${API}/admin/doc-history`, {
+        jenis: "supplier", no_dokumen: noDoc, customer: selected.nama || "",
+        judul: `${selected.nama || "-"} · ${jobs.length} unit · Rp ${gHarga.toLocaleString("id-ID")}`,
+        meta: { supplier_nama: selected.nama, no_dokumen: noDoc, total_harga: gHarga, total_terbayar: gBayar, sisa: gHarga - gBayar, jumlah_unit: jobs.length },
+        units: jobs,
+      }, { headers });
+      flash("✓ Rekap supplier disimpan ke Histori Dokumen");
+      setRekapOpen(false);
+    } catch { flash("Gagal menyimpan rekap"); } finally { setRekapSaving(false); }
+  };
 
   // search supplier — instan (internet banking style), tanpa klik Search
   useEffect(() => {
@@ -457,7 +484,7 @@ export default function SupplierPage() {
                 {menuOpen && (
                   <div style={{ position: "absolute", top: "110%", right: 0, background: C.card, border: `1px solid ${C.inpLine}`, borderRadius: 10, minWidth: 180, overflow: "hidden", zIndex: 40, boxShadow: "0 8px 24px rgba(0,0,0,.4)" }}>
                     {[
-                      { t: "🖨️ Cetak Rekap A4", on: () => { setMenuOpen(false); printSupplierA4(selected); }, },
+                      { t: "🧾 Rekap A4 (No. + Simpan)", on: openRekap, },
                       { t: "📁 Projek Baru", on: addProject },
                       { t: "✏️ Edit Supplier", on: openEdit },
                       { t: "🗑️ Hapus Supplier", on: deleteSupplier, danger: true },
@@ -682,6 +709,28 @@ export default function SupplierPage() {
               {tarikRows.length === 0 && <div style={{ padding: 16, textAlign: "center", color: C.mute, fontSize: 12 }}>Tidak ada order.</div>}
             </div>
           )}
+        </Modal>
+      )}
+
+      {/* ── Modal: Rekap A4 (No. Dokumen + Cetak/Simpan) ── */}
+      {rekapOpen && selected && (
+        <Modal title="Rekap Supplier — No. Dokumen" onClose={() => setRekapOpen(false)}
+          foot={<>
+            <button style={BTN_GHOST} onClick={() => setRekapOpen(false)}>Batal</button>
+            <button style={BTN_GHOST} onClick={() => printSupplierA4(selected, null, rekapNo)} data-testid="sup-rekap-print">🖨️ Cetak</button>
+            <button style={BTN} onClick={saveRekapHistori} disabled={rekapSaving} data-testid="sup-rekap-save">{rekapSaving ? "Menyimpan…" : "💾 Simpan ke Histori"}</button>
+          </>}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div>
+              <div style={{ ...L }}>No. Dokumen (otomatis — bisa diubah manual)</div>
+              <input style={I} value={rekapNo} onChange={(e) => setRekapNo(e.target.value)} placeholder="RPS/AAL/..." data-testid="sup-rekap-no" />
+              <div style={{ fontSize: 11, color: C.mute, marginTop: 4 }}>Kosongkan = otomatis ({supplierAutoDocNo()}). Isi manual untuk samakan dengan nomor lain.</div>
+            </div>
+            <div style={{ fontSize: 12.5, color: C.mute }}>
+              Supplier: <b style={{ color: C.ink }}>{selected.nama}</b> · {(selected.jobs || []).length} unit · Total Rp {(selected.grand_total_harga || 0).toLocaleString("id-ID")}
+            </div>
+            <div style={{ fontSize: 11.5, color: C.mute }}>💾 Simpan = masuk ke <b style={{ color: C.ink }}>Histori Dokumen</b> (bisa dicetak ulang). 🖨️ Cetak = langsung print A4.</div>
+          </div>
         </Modal>
       )}
 

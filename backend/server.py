@@ -911,11 +911,12 @@ async def add_custom_vehicle_type(body: VehicleTypeBody):
 # Arsip tiap dokumen yang dicetak admin (Invoice, Jadwal per-PO, Jadwal
 # Gabungan). Menyimpan snapshot lengkap (meta + units/lines) supaya bisa
 # dicetak ulang persis, plus tombol hapus. Fire-and-forget dari frontend.
-DOC_JENIS = {"jadwal_gabungan", "jadwal", "invoice"}
+DOC_JENIS = {"jadwal_gabungan", "jadwal", "invoice", "supplier"}
 DOC_JENIS_LABEL = {
     "jadwal_gabungan": "Jadwal Gabungan",
     "jadwal": "Jadwal Pengiriman",
     "invoice": "Invoice / Faktur",
+    "supplier": "Rekap Supplier",
 }
 
 
