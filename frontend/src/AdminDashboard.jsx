@@ -679,6 +679,7 @@ function Dashboard({ pin, onLogout }) {
             key={o.order_id}
             order={o}
             idx={idx}
+            forceExpand={!!custFilter}
             onConvert={() => setConvertModal(o)}
             onPatch={(body) => patchOrder(o.order_id, body)}
             onOdoo={doOdoo}
@@ -1479,9 +1480,11 @@ function DuplicateVendorModal({ order, headers, onClose }) {
   ), document.body);
 }
 
-function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLegs, onOpenBonus, headers, kordList = [], cartHas = () => false, onToggleCartUnit = () => {}, onCartSetOrderUnits = () => {} }) {
+function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLegs, onOpenBonus, headers, kordList = [], cartHas = () => false, onToggleCartUnit = () => {}, onCartSetOrderUnits = () => {}, forceExpand = false }) {
   const [uploadingStage, setUploadingStage] = useState(null); // stage key lagi upload
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(forceExpand);
+  // Auto-buka kartu saat filter pelanggan aktif (biar semua unit langsung kelihatan).
+  useEffect(() => { setExpanded(forceExpand); }, [forceExpand]);
   const [copiedPo, setCopiedPo] = useState(false);
   const [showInvoice, setShowInvoice] = useState(false);
   const [showJadwal, setShowJadwal] = useState(false);
