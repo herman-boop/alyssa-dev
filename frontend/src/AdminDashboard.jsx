@@ -3198,8 +3198,15 @@ function TagihanHariIni({ headers, onBack }) {
       .finally(() => setLoading(false));
   }, [headers]);
 
-  const sameDay = (iso) => { if (!iso) return false; const d = new Date(iso); const [y, m, dd] = day.split("-"); return d.getFullYear() === +y && d.getMonth() + 1 === +m && d.getDate() === +dd; };
-  const rows = useMemo(() => items.filter((r) => sameDay(r.created_at)), [items, day]);
+  // Tanggal efektif = Tanggal Invoice yang diisi (biar samain dgn tgl pajak),
+  // fallback ke tanggal dokumen disimpan. Dibandingkan sebagai YYYY-MM-DD.
+  const effDay = (r) => {
+    const t = r.meta?.tanggalInvoice;
+    if (t && /^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+    const d = new Date(r.created_at);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  const rows = useMemo(() => items.filter((r) => effDay(r) === day), [items, day]);
   const poOf = (r) => (Array.isArray(r.order_ids) && r.order_ids.length ? r.order_ids.join(", ") : (r.meta?.order_id || "—"));
   const grand = rows.reduce((s, r) => s + invTotalFromRec(r).total, 0);
   const doneCount = rows.filter((r) => marks[r.id]).length;
@@ -3245,7 +3252,7 @@ function TagihanHariIni({ headers, onBack }) {
       {loading ? (
         <div className="adm-card" style={{ padding: 30, textAlign: "center", color: "var(--text-mute)" }}>Memuat…</div>
       ) : rows.length === 0 ? (
-        <div className="adm-empty"><div style={{ fontWeight: 700, marginBottom: 6, color: "var(--text-2)" }}>Belum ada invoice dicetak</div><div>pada tanggal {fmtDayLabel}. Cetak invoice dari kartu PO dulu ya.</div></div>
+        <div className="adm-empty"><div style={{ fontWeight: 700, marginBottom: 6, color: "var(--text-2)" }}>Belum ada invoice</div><div>ber-tanggal {fmtDayLabel}. Simpan / cetak invoice dari kartu PO dulu ya (tanggalnya ikut "Tanggal Invoice" yang diisi).</div></div>
       ) : rows.map((r) => {
         const t = invTotalFromRec(r);
         const done = !!marks[r.id];
