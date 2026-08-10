@@ -923,15 +923,28 @@ class DocHistoryBody(BaseModel):
 @api_router.get("/admin/doc-history", dependencies=[Depends(require_admin_pin)])
 async def list_doc_history(jenis: Optional[str] = None, limit: int = 300):
     """List arsip dokumen, terbaru dulu. Bisa difilter per jenis."""
+    from fastapi.encoders import jsonable_encoder
     filt = {}
     if jenis and jenis in DOC_JENIS:
         filt["jenis"] = jenis
-    # Exclude gambar stempel (base64, bisa MB-an) dari daftar biar response ringan
-    # & nggak timeout. Stempel diambil lewat endpoint detail pas cetak ulang.
-    proj = {"_id": 0, "meta.stempel": 0}
+    # Inclusion projection: HANYA field ringan & pasti aman (tanpa gambar stempel
+    # base64 & tanpa units yang bisa besar) supaya response nggak berat dan nggak
+    # gagal serialisasi. Stempel/units lengkap diambil via endpoint detail pas cetak.
+    proj = {
+        "_id": 0, "id": 1, "jenis": 1, "jenis_label": 1, "no_dokumen": 1,
+        "judul": 1, "customer": 1, "order_ids": 1, "created_at": 1, "lines": 1,
+        "meta.tanggalInvoice": 1, "meta.jatuhTempo": 1, "meta.metode": 1,
+        "meta.withTax": 1, "meta.withPph23": 1, "meta.taxInclusive": 1,
+        "meta.asal_kota": 1, "meta.tujuan_kota": 1, "meta.order_id": 1,
+        "meta.pesan": 1, "meta.no_invoice": 1, "meta.customer_nama": 1,
+        "meta.ttdNama": 1, "meta.ttdJabatan": 1,
+    }
     items = []
     async for d in db.doc_history.find(filt, proj).sort("created_at", -1).limit(max(1, min(1000, limit))):
-        items.append(d)
+        try:
+            items.append(jsonable_encoder(d))  # skip record yg bermasalah, jgn gagalin semua
+        except Exception:
+            continue
     return {"items": items}
 
 
