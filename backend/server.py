@@ -926,10 +926,22 @@ async def list_doc_history(jenis: Optional[str] = None, limit: int = 300):
     filt = {}
     if jenis and jenis in DOC_JENIS:
         filt["jenis"] = jenis
+    # Exclude gambar stempel (base64, bisa MB-an) dari daftar biar response ringan
+    # & nggak timeout. Stempel diambil lewat endpoint detail pas cetak ulang.
+    proj = {"_id": 0, "meta.stempel": 0}
     items = []
-    async for d in db.doc_history.find(filt, {"_id": 0}).sort("created_at", -1).limit(max(1, min(1000, limit))):
+    async for d in db.doc_history.find(filt, proj).sort("created_at", -1).limit(max(1, min(1000, limit))):
         items.append(d)
     return {"items": items}
+
+
+@api_router.get("/admin/doc-history/{doc_id}", dependencies=[Depends(require_admin_pin)])
+async def get_doc_history(doc_id: str):
+    """Ambil 1 record arsip LENGKAP (termasuk stempel) — buat cetak ulang."""
+    d = await db.doc_history.find_one({"id": doc_id}, {"_id": 0})
+    if not d:
+        raise HTTPException(404, "Dokumen tidak ditemukan")
+    return d
 
 
 @api_router.post("/admin/doc-history", dependencies=[Depends(require_admin_pin)])

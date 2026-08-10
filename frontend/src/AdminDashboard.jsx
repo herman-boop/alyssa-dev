@@ -3283,7 +3283,11 @@ function TagihanHariIni({ headers, onBack }) {
   };
   const copyRecap = async (list) => { if (!list.length) return; const ok = await copyToClipboard(buildRecapText(list)); flash(ok ? "✓ Rekap disalin" : "Gagal menyalin"); };
   const waRecap = (list) => { if (!list.length) return; window.open(`https://wa.me/?text=${encodeURIComponent(buildRecapText(list))}`, "_blank"); };
-  const reprint = (r) => { try { printInvoiceDoc(r.lines, r.meta?.withTax, r.meta || {}); } catch {} };
+  const reprint = async (r) => {
+    let rec = r;
+    try { const resp = await axios.get(`${API}/admin/doc-history/${r.id}`, { headers }); if (resp.data) rec = resp.data; } catch {}
+    try { printInvoiceDoc(rec.lines, rec.meta?.withTax, rec.meta || {}); } catch {}
+  };
 
   const exportExcel = (list) => {
     if (!list.length) return;
@@ -3491,7 +3495,10 @@ function HistoriDokumen({ headers }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const reprint = (rec) => {
+  const reprint = async (rec0) => {
+    // Ambil record lengkap (termasuk stempel yang di-exclude dari daftar).
+    let rec = rec0;
+    try { const resp = await axios.get(`${API}/admin/doc-history/${rec0.id}`, { headers }); if (resp.data) rec = resp.data; } catch {}
     if (rec.jenis === "invoice") {
       printInvoiceDoc(rec.lines, rec.meta?.withTax, rec.meta || {});
     } else if (rec.jenis === "jadwal") {
