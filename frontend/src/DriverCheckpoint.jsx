@@ -291,7 +291,15 @@ export function CropModal({ url, file, onCancel, onConfirm }) {
   useEffect(() => {
     let alive = true;
     loadOpenCV()
-      .then(async (cv) => { if (!alive) return; setCvState("ready"); const ok = await autoDetect(cv); if (alive) setHint(ok ? "✓ Tepi dokumen terdeteksi otomatis" : "Geser 4 sudut ke tepi, atau tap Otomatis"); })
+      .then(async (cv) => {
+        if (!alive) return; setCvState("ready");
+        const det = await autoDetect(cv);
+        if (!alive) return;
+        // INSTAN: begitu tepi dokumen ketemu, langsung crop+enhance tanpa nunggu
+        // driver geser sudut. Kalau gagal deteksi, baru fallback ke manual.
+        if (det) { setHint("✓ Tepi terdeteksi — memproses scan…"); doScan(det); }
+        else setHint("Geser 4 sudut ke tepi, atau tap Otomatis");
+      })
       .catch(() => { if (alive) { setCvState("manual"); setHint("Mode manual — geser 4 sudut ke tepi dokumen"); } });
     return () => { alive = false; };
     // eslint-disable-next-line
@@ -299,9 +307,9 @@ export function CropModal({ url, file, onCancel, onConfirm }) {
 
   const DEFAULT_CORNERS = { tl: { x: 0.06, y: 0.06 }, tr: { x: 0.94, y: 0.06 }, br: { x: 0.94, y: 0.94 }, bl: { x: 0.06, y: 0.94 } };
 
-  // return true kalau 4 sudut dokumen ketemu, false kalau gagal
+  // return objek 4-sudut {tl,tr,br,bl} kalau dokumen ketemu, null kalau gagal
   const autoDetect = async (cv) => {
-    let src, gray, edges, k, contours, hier, best = null, found = false;
+    let src, gray, edges, k, contours, hier, best = null, detected = null;
     try {
       const img = await loadImg(work.url);
       const MAXW = 900;
@@ -336,22 +344,21 @@ export function CropModal({ url, file, onCancel, onConfirm }) {
         pts.sort((a, b) => a.y - b.y);
         const top = pts.slice(0, 2).sort((a, b) => a.x - b.x);
         const bot = pts.slice(2, 4).sort((a, b) => a.x - b.x);
-        setCorners({ tl: top[0], tr: top[1], br: bot[1], bl: bot[0] });
-        found = true;
+        detected = { tl: top[0], tr: top[1], br: bot[1], bl: bot[0] };
+        setCorners(detected);
       }
-    } catch { found = false; }
+    } catch { detected = null; }
     try { best && best.delete(); src && src.delete(); gray && gray.delete(); edges && edges.delete(); k && k.delete(); contours && contours.delete(); hier && hier.delete(); } catch {}
-    return found;
+    return detected;
   };
 
   // Tombol "Otomatis": jalankan deteksi instan, fallback ke kotak default kalau gagal
   const runAutoDetect = async () => {
     if (!(window.cv && window.cv.Mat)) { setHint("Auto-scan belum siap, geser manual dulu"); return; }
     setBusy(true); setHint("🔍 Mendeteksi tepi dokumen...");
-    const ok = await autoDetect(window.cv);
-    if (!ok) { setCorners(DEFAULT_CORNERS); setHint("⚠ Tepi tidak jelas — geser 4 sudut manual"); }
-    else setHint("✓ Tepi dokumen terdeteksi");
-    setBusy(false);
+    const det = await autoDetect(window.cv);
+    if (!det) { setCorners(DEFAULT_CORNERS); setHint("⚠ Tepi tidak jelas — geser 4 sudut manual"); setBusy(false); }
+    else { setHint("✓ Terdeteksi — memproses scan…"); await doScan(det); }
   };
 
   const move = (e) => {
@@ -421,14 +428,15 @@ export function CropModal({ url, file, onCancel, onConfirm }) {
     return out;
   };
 
-  const doScan = async () => {
+  const doScan = async (cornersOverride) => {
     setBusy(true);
     try {
+      const cc = cornersOverride || corners;
       const img = await loadImg(work.url);
       const W = img.naturalWidth, H = img.naturalHeight;
       const p = {
-        tl: [corners.tl.x * W, corners.tl.y * H], tr: [corners.tr.x * W, corners.tr.y * H],
-        br: [corners.br.x * W, corners.br.y * H], bl: [corners.bl.x * W, corners.bl.y * H],
+        tl: [cc.tl.x * W, cc.tl.y * H], tr: [cc.tr.x * W, cc.tr.y * H],
+        br: [cc.br.x * W, cc.br.y * H], bl: [cc.bl.x * W, cc.bl.y * H],
       };
       const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
       const outW = Math.round(Math.max(dist(p.tl, p.tr), dist(p.bl, p.br)));
