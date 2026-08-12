@@ -90,7 +90,7 @@ export function printSupplierA4(sup, jobsOverride, noDocOverride) {
   </div>
   <script>window.onload=()=>window.print()<\/script>
   </body></html>`;
-  const w = window.open("", "_blank"); w.document.write(html); w.document.close();
+  const w = window.open("", "aal_print"); w.document.write(html); w.document.close();
 }
 
 /* ── util ── */

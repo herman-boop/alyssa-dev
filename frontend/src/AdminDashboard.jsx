@@ -1741,7 +1741,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
     </div>
     <script>window.onload=()=>window.print()<\/script>
     </body></html>`;
-    const w = window.open("", "_blank"); w.document.write(html); w.document.close();
+    const w = window.open("", "aal_print"); w.document.write(html); w.document.close();
   };
 
   // wrapper tipis: pakai fungsi modul biar bisa dicetak ulang dari Histori
@@ -3596,7 +3596,7 @@ async function printInvoiceDoc(lines, withTax, extra) {
   if (typeof lines === "number") lines = [{ nama: "Jasa Pengiriman", ket: "", qty: 1, harga: lines }];
   lines = (lines || []).filter((l) => (l.harga || 0) > 0);
   if (!lines.length) return "";
-  const w = window.open("", "_blank"); // buka dulu (gesture) biar nggak keblok popup
+  const w = window.open("", "aal_print"); // buka dulu (gesture) biar nggak keblok popup
   const { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23 } = extra;
   const subtotal = lines.reduce((s, l) => s + (l.harga || 0) * (l.qty || 1), 0);
   // taxInclusive: harga SUDAH termasuk 1.1% → pajak dipecah dari dalam (total = subtotal).
@@ -3813,7 +3813,7 @@ function printJadwalDoc(meta, units) {
   </div>
   <script>window.onload=()=>window.print()<\/script>
   </body></html>`;
-  const w = window.open("", "_blank"); w.document.write(html); w.document.close();
+  const w = window.open("", "aal_print"); w.document.write(html); w.document.close();
   return noDoc;
 }
 
@@ -3893,7 +3893,7 @@ function printJadwalGabungan(meta, units) {
   </div>
   <script>window.onload=()=>window.print()<\/script>
   </body></html>`;
-  const w = window.open("", "_blank"); w.document.write(html); w.document.close();
+  const w = window.open("", "aal_print"); w.document.write(html); w.document.close();
   return noDoc;
 }
 
@@ -5658,7 +5658,7 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
     <div class="foot">Pengirim: PT. ALYSSA AUTO LOGISTIK &nbsp;·&nbsp; Hub admin: 0818 631 135 &nbsp;·&nbsp; Siapkan area penerimaan sebelum kapal tiba</div>
     <script>window.onload=()=>window.print()<\/script>
     </body></html>`;
-    const w = window.open("", "_blank"); w.document.write(html); w.document.close();
+    const w = window.open("", "aal_print"); w.document.write(html); w.document.close();
     setMultiUnitModal(null);
   };
 
@@ -5716,7 +5716,7 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
     </div>
     <script>window.onload=()=>window.print()<\/script>
     </body></html>`;
-    const w = window.open("", "_blank"); w.document.write(html); w.document.close();
+    const w = window.open("", "aal_print"); w.document.write(html); w.document.close();
   };
 
   // Bikin LINK TUGAS ber-token (scoped) buat 1 leg, simpan petugas ke master,
