@@ -147,6 +147,93 @@ function loadImg(src, cors) {
   });
 }
 
+/* ══════════════════════════════════════════════════════════════
+   PERSPECTIVE WARP — PURE JS (tanpa OpenCV). Ubah dokumen miring/trapesium
+   jadi persegi lurus (four-point homography), di-render lewat grid segitiga
+   (piecewise-affine) supaya sisi dokumen benar-benar lurus, bukan sekadar crop.
+   Dipakai selalu -> perspektif konsisten walau OpenCV gagal load di lapangan.
+════════════════════════════════════════════════════════════════ */
+function _solve8(A, b) {
+  const n = 8, M = A.map((row, i) => row.concat([b[i]]));
+  for (let col = 0; col < n; col++) {
+    let piv = col;
+    for (let r = col + 1; r < n; r++) if (Math.abs(M[r][col]) > Math.abs(M[piv][col])) piv = r;
+    [M[col], M[piv]] = [M[piv], M[col]];
+    const pv = M[col][col] || 1e-9;
+    for (let c = col; c <= n; c++) M[col][c] /= pv;
+    for (let r = 0; r < n; r++) { if (r === col) continue; const f = M[r][col]; for (let c = col; c <= n; c++) M[r][c] -= f * M[col][c]; }
+  }
+  return M.map((row) => row[n]);
+}
+function _homography(src, dst) {
+  const A = [], b = [];
+  for (let i = 0; i < 4; i++) {
+    const [x, y] = src[i], [u, v] = dst[i];
+    A.push([x, y, 1, 0, 0, 0, -u * x, -u * y]); b.push(u);
+    A.push([0, 0, 0, x, y, 1, -v * x, -v * y]); b.push(v);
+  }
+  const h = _solve8(A, b), H = [h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7], 1];
+  return (x, y) => { const d = H[6] * x + H[7] * y + H[8] || 1e-9; return [(H[0] * x + H[1] * y + H[2]) / d, (H[3] * x + H[4] * y + H[5]) / d]; };
+}
+function _drawTri(ctx, img, s0, s1, s2, d0, d1, d2) {
+  ctx.save();
+  ctx.beginPath(); ctx.moveTo(d0[0], d0[1]); ctx.lineTo(d1[0], d1[1]); ctx.lineTo(d2[0], d2[1]); ctx.closePath();
+  ctx.clip();
+  const [x0, y0] = s0, [x1, y1] = s1, [x2, y2] = s2;
+  const [u0, v0] = d0, [u1, v1] = d1, [u2, v2] = d2;
+  const den = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0) || 1e-9;
+  const a = ((u1 - u0) * (y2 - y0) - (u2 - u0) * (y1 - y0)) / den;
+  const b = ((u2 - u0) * (x1 - x0) - (u1 - u0) * (x2 - x0)) / den;
+  const c = ((v1 - v0) * (y2 - y0) - (v2 - v0) * (y1 - y0)) / den;
+  const d = ((v2 - v0) * (x1 - x0) - (v1 - v0) * (x2 - x0)) / den;
+  ctx.setTransform(a, c, b, d, u0 - a * x0 - b * y0, v0 - c * x0 - d * y0);
+  ctx.drawImage(img, 0, 0);
+  ctx.restore();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+}
+// quad = {tl,tr,br,bl} dalam koordinat pixel sumber. Return canvas outW x outH.
+function warpQuadToRect(img, quad, outW, outH) {
+  const dstC = [[0, 0], [outW, 0], [outW, outH], [0, outH]];
+  const srcC = [quad.tl, quad.tr, quad.br, quad.bl];
+  const mapD2S = _homography(dstC, srcC);
+  const out = document.createElement("canvas"); out.width = outW; out.height = outH;
+  const ctx = out.getContext("2d");
+  const N = 12; // grid halus -> perspektif akurat
+  const gx = (i) => i * outW / N, gy = (j) => j * outH / N;
+  const S = [];
+  for (let j = 0; j <= N; j++) { S[j] = []; for (let i = 0; i <= N; i++) S[j][i] = mapD2S(gx(i), gy(j)); }
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const d00 = [gx(i), gy(j)], d10 = [gx(i + 1), gy(j)], d11 = [gx(i + 1), gy(j + 1)], d01 = [gx(i), gy(j + 1)];
+    _drawTri(ctx, img, S[j][i], S[j][i + 1], S[j + 1][i + 1], d00, d10, d11);
+    _drawTri(ctx, img, S[j][i], S[j + 1][i + 1], S[j + 1][i], d00, d11, d01);
+  }
+  return out;
+}
+// B&W adaptif ala scanner: kertas jadi putih, teks hitam. Illuminasi diasumsikan
+// sudah diratakan (flattenBackground) -> pakai threshold lokal (box mean) biar
+// teks tipis tetap kebaca walau cahaya foto tidak rata.
+function adaptiveBW(canvas) {
+  const ctx = canvas.getContext("2d"), w = canvas.width, h = canvas.height;
+  const id = ctx.getImageData(0, 0, w, h), d = id.data, n = w * h;
+  const g = new Float32Array(n);
+  for (let i = 0, p = 0; p < n; i += 4, p++) g[p] = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+  // integral image utk mean lokal cepat
+  const I = new Float64Array((w + 1) * (h + 1));
+  for (let y = 0; y < h; y++) { let rs = 0; for (let x = 0; x < w; x++) { rs += g[y * w + x]; I[(y + 1) * (w + 1) + (x + 1)] = I[y * (w + 1) + (x + 1)] + rs; } }
+  const rad = Math.max(8, Math.round(Math.min(w, h) / 40)); // radius window
+  const C = 8; // offset
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const x0 = Math.max(0, x - rad), y0 = Math.max(0, y - rad), x1 = Math.min(w - 1, x + rad), y1 = Math.min(h - 1, y + rad);
+    const area = (x1 - x0 + 1) * (y1 - y0 + 1);
+    const s = I[(y1 + 1) * (w + 1) + (x1 + 1)] - I[y0 * (w + 1) + (x1 + 1)] - I[(y1 + 1) * (w + 1) + x0] + I[y0 * (w + 1) + x0];
+    const mean = s / area;
+    const p = y * w + x, v = g[p] > (mean - C) ? 255 : 0, i = p * 4;
+    d[i] = d[i + 1] = d[i + 2] = v;
+  }
+  ctx.putImageData(id, 0, 0);
+  return canvas;
+}
+
 /* jsPDF lazy-loader (UMD dari CDN, cached browser) */
 let _pdfPromise = null;
 function loadJsPDF() {
@@ -439,38 +526,38 @@ export function CropModal({ url, file, onCancel, onConfirm }) {
         br: [cc.br.x * W, cc.br.y * H], bl: [cc.bl.x * W, cc.bl.y * H],
       };
       const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
-      const outW = Math.round(Math.max(dist(p.tl, p.tr), dist(p.bl, p.br)));
-      const outH = Math.round(Math.max(dist(p.tl, p.bl), dist(p.tr, p.br)));
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.max(1, outW); canvas.height = Math.max(1, outH);
-      const ctx = canvas.getContext("2d");
-
-      if (cvState === "ready" && window.cv && window.cv.Mat) {
-        // Perspective transform via OpenCV
-        const cv = window.cv;
-        const cnv0 = document.createElement("canvas"); cnv0.width = W; cnv0.height = H;
-        cnv0.getContext("2d").drawImage(img, 0, 0);
-        const src = cv.imread(cnv0);
-        const srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [p.tl[0], p.tl[1], p.tr[0], p.tr[1], p.br[0], p.br[1], p.bl[0], p.bl[1]]);
-        const dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, outW, 0, outW, outH, 0, outH]);
-        const M = cv.getPerspectiveTransform(srcTri, dstTri);
-        const dst = new cv.Mat();
-        cv.warpPerspective(src, dst, M, new cv.Size(outW, outH), cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar());
-        cv.imshow(canvas, dst);
-        src.delete(); dst.delete(); M.delete(); srcTri.delete(); dstTri.delete();
-      } else {
-        // Fallback manual: crop bounding-box dari 4 sudut
+      let outW = Math.round(Math.max(dist(p.tl, p.tr), dist(p.bl, p.br)));
+      let outH = Math.round(Math.max(dist(p.tl, p.bl), dist(p.tr, p.br)));
+      // Jaga resolusi cukup tinggi tapi tidak kebablasan (target sisi panjang <= 2800px).
+      const MAXSIDE = 2800, longest = Math.max(outW, outH);
+      if (longest > MAXSIDE) { const s = MAXSIDE / longest; outW = Math.round(outW * s); outH = Math.round(outH * s); }
+      outW = Math.max(1, outW); outH = Math.max(1, outH);
+      let canvas;
+      try {
+        // Perspective correction PURE-JS (selalu jalan, tak butuh OpenCV) -> sisi lurus.
+        canvas = warpQuadToRect(img, p, outW, outH);
+      } catch {
+        // Fallback terakhir: crop bounding-box (kalau warp gagal, jangan crash).
+        canvas = document.createElement("canvas");
         const xs = [p.tl[0], p.tr[0], p.br[0], p.bl[0]], ys = [p.tl[1], p.tr[1], p.br[1], p.bl[1]];
         const x0 = Math.min(...xs), y0 = Math.min(...ys), x1 = Math.max(...xs), y1 = Math.max(...ys);
         const cw = Math.max(1, Math.round(x1 - x0)), ch = Math.max(1, Math.round(y1 - y0));
         canvas.width = cw; canvas.height = ch;
-        ctx.drawImage(img, x0, y0, cw, ch, 0, 0, cw, ch);
+        canvas.getContext("2d").drawImage(img, x0, y0, cw, ch, 0, 0, cw, ch);
       }
-      // Ratakan pencahayaan (hilangkan bayangan) + tajamkan teks -- sebelum filter
-      // warna/kontras yang sudah ada, biar hasil akhir kelihatan kayak scanner asli.
+      // Ratakan pencahayaan (hilangkan bayangan) dulu -> baru enhancement per-mode.
       try { flattenBackground(canvas); } catch {}
-      try { unsharpMask(canvas); } catch {}
-      const finalCanvas = applyFilter(canvas);
+      let finalCanvas;
+      if (mode === "bw") {
+        // B&W ala fotokopi: threshold adaptif (kertas putih, teks hitam).
+        try { unsharpMask(canvas, 0.4); } catch {}
+        try { adaptiveBW(canvas); } catch {}
+        finalCanvas = canvas;
+      } else {
+        // Warna / Magic: pertajam + filter kontras/kecerahan (stempel & ttd tetap natural).
+        try { unsharpMask(canvas); } catch {}
+        finalCanvas = applyFilter(canvas);
+      }
 
       // Hasil akhir dokumen scan SELALU PDF (bukan JPG) -- sesuai standar
       // Adobe Scan/MS Lens. Kalau pembuatan PDF gagal (mis. CDN jsPDF gak
@@ -978,11 +1065,12 @@ export default function DriverCheckpoint() {
     if (!file) return;
     if (file.size > 15 * 1024 * 1024) { showToast("File terlalu besar (max 15MB)", "err"); return; }
     setUploadingBastk(true);
-    showToast("Memproses scan dokumen...");
+    showToast("Mengupload dokumen...");
     try {
-      const enhanced = file.type.startsWith("image/") ? await scanEnhance(file) : file;
+      // file SUDAH hasil scanner final (crop+perspektif+enhance dari CropModal).
+      // JANGAN diproses ulang -> biar file di storage PERSIS sama dgn preview.
       const fd = new FormData();
-      fd.append("foto", enhanced);
+      fd.append("foto", file);
       const prevComplete = !!(trip?.handover?.bastk && trip?.handover?.resi);
       const r = await axios.post(`${API}/trips/${trip.trip_id}/photos/handover-bastk`, fd);
       setTrip(r.data);
@@ -1000,11 +1088,11 @@ export default function DriverCheckpoint() {
   const uploadResi = async (file, noResi) => {
     if (!file) return;
     setUploadingResi(true);
-    showToast("Memproses scan dokumen...");
+    showToast("Mengupload dokumen...");
     try {
-      const enhanced = file.type.startsWith("image/") ? await scanEnhance(file) : file;
+      // file sudah final dari scanner -> upload apa adanya (preview === storage).
       const fd = new FormData();
-      fd.append("foto", enhanced);
+      fd.append("foto", file);
       if (noResi && noResi.trim()) fd.append("no_resi", noResi.trim());
       const prevComplete = !!(trip?.handover?.bastk && trip?.handover?.resi);
       const r = await axios.post(`${API}/trips/${trip.trip_id}/photos/handover-resi`, fd);
