@@ -559,17 +559,12 @@ export function CropModal({ url, file, onCancel, onConfirm }) {
         finalCanvas = applyFilter(canvas);
       }
 
-      // Hasil akhir dokumen scan SELALU PDF (bukan JPG) -- sesuai standar
-      // Adobe Scan/MS Lens. Kalau pembuatan PDF gagal (mis. CDN jsPDF gak
-      // kejangkau), fallback ke JPG scan biasa biar driver tetap bisa lanjut.
-      try {
-        const pdfFile = await canvasToPdfFile(finalCanvas, file.name || "dokumen");
-        setReview({ url: URL.createObjectURL(pdfFile), file: pdfFile, isPdf: true });
-      } catch {
-        const blob = await new Promise((r) => finalCanvas.toBlob(r, "image/jpeg", 0.95));
-        const out = blob ? new File([blob], (file.name || "resi").replace(/\.\w+$/, "") + "_scan.jpg", { type: "image/jpeg" }) : file;
-        setReview({ url: URL.createObjectURL(out), file: out, isPdf: false });
-      }
+      // Output GAMBAR JPG (bukan PDF): langsung keliatan inline di preview HP,
+      // gampang dibuka di storage, & nggak butuh library PDF eksternal (jsPDF CDN)
+      // yang sering gagal load di lapangan. Kualitas tinggi biar teks tajam.
+      const blob = await new Promise((r) => finalCanvas.toBlob(r, "image/jpeg", 0.92));
+      const out = blob ? new File([blob], (file.name || "scan").replace(/\.\w+$/, "") + "_scan.jpg", { type: "image/jpeg" }) : file;
+      setReview({ url: URL.createObjectURL(out), file: out, isPdf: false });
       // Jangan langsung upload -- tampilin hasilnya dulu, biar user bisa cek/edit ulang
       // sebelum beneran dikirim (matching Office Lens/CamScanner-style review step).
     } catch { setReview({ url: URL.createObjectURL(file), file, isPdf: false }); }
