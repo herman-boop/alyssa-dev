@@ -649,7 +649,7 @@ export function CropModal({ url, file, onCancel, onConfirm }) {
       <div style={{ display: "flex", gap: 8, padding: "2px 0 4px" }}>
         <button onClick={onCancel} disabled={busy} style={{ flex: 1, padding: "12px", borderRadius: 10, border: "1px solid #555", background: "none", color: "#ccc", fontWeight: 700, fontSize: 13 }}>Batal</button>
         <button onClick={() => onConfirm(file)} disabled={busy} style={{ flex: 1, padding: "12px", borderRadius: 10, border: "1px solid #888", background: "none", color: "#fff", fontWeight: 700, fontSize: 13 }}>Pakai Full</button>
-        <button onClick={doScan} disabled={busy} style={{ flex: 1.5, padding: "12px", borderRadius: 10, border: "none", background: "#EF9F27", color: "#1a1208", fontWeight: 900, fontSize: 13 }}>{busy ? "..." : "✂ Scan & Lanjut"}</button>
+        <button onClick={() => doScan()} disabled={busy} style={{ flex: 1.5, padding: "12px", borderRadius: 10, border: "none", background: "#EF9F27", color: "#1a1208", fontWeight: 900, fontSize: 13 }}>{busy ? "..." : "✂ Scan & Lanjut"}</button>
       </div>
     </div>
   );
