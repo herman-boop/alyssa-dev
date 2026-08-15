@@ -1282,7 +1282,7 @@
 }
 
 /* ── Invoice modal: baris unit (multi-unit) ── */
-.adm-invu{ display:flex; align-items:center; gap:10px; padding:9px 11px; border:1px solid var(--border); border-radius:9px; background:var(--bg-2); }
+.adm-invu{ display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:9px 11px; border:1px solid var(--border); border-radius:9px; background:var(--bg-2); }
 .adm-invu-harga{ display:flex; align-items:center; gap:5px; border:1px solid var(--border-2); background:var(--bg); border-radius:8px; padding:6px 9px; width:150px; flex-shrink:0; }
 .adm-invu-harga span{ font-size:11px; font-weight:700; color:var(--text-mute); }
 .adm-invu-harga input{ flex:1; min-width:0; border:none; background:none; color:var(--text); font-family:var(--mono); font-size:13px; font-weight:700; outline:none; text-align:right; }

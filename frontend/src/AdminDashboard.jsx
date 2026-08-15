@@ -2632,6 +2632,7 @@ function InvoiceModal({ order, headers, onClose, onPrint, onSave }) {
     // unit yang sudah diinvoice default TIDAK dicentang (cegah dobel)
     checked: (u.status_invoice || "Belum Ditagih") === "Belum Ditagih",
     harga: "",
+    po: (u.customer_po_number || "").toString(),  // No. PO Customer per unit (opsional)
   })));
   const [withTax, setWithTax] = useState(true);
   const [taxInclusive, setTaxInclusive] = useState(false); // true = harga SUDAH termasuk 1.1% (pajak dipecah dari dalam)
@@ -2687,7 +2688,7 @@ function InvoiceModal({ order, headers, onClose, onPrint, onSave }) {
   const buildLines = () => rows
     .map((r, i) => ({ r, u: orderUnits[i] }))
     .filter(({ r }) => r.checked && hargaNum(r.harga) > 0)
-    .map(({ r, u }) => ({ nama: isCargo ? "Jasa Pengiriman Cargo" : "Jasa Pengiriman", ket: unitKet(u), qty: 1, harga: hargaNum(r.harga) }));
+    .map(({ r, u }) => ({ nama: isCargo ? "Jasa Pengiriman Cargo" : "Jasa Pengiriman", ket: unitKet(u), qty: 1, harga: hargaNum(r.harga), customer_po_number: (r.po || "").trim() || null }));
   const buildExtra = () => ({ jatuhTempo, tanggalInvoice, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23, no_invoice: noInvoiceManual.trim() || undefined });
   const markInvoiced = () => {
     const ids = rows.filter((r) => r.checked && hargaNum(r.harga) > 0 && r.unit_id !== "legacy" && r.unit_id !== "cargo").map((r) => r.unit_id);
@@ -2750,9 +2751,15 @@ function InvoiceModal({ order, headers, onClose, onPrint, onSave }) {
                     <input inputMode="numeric" value={r.harga ? hargaNum(r.harga).toLocaleString("id-ID") : ""} placeholder="0"
                       onChange={(e) => setRow(i, { harga: e.target.value, checked: hargaNum(e.target.value) > 0 ? true : r.checked })} data-testid={`adm-invu-harga-${i}`} />
                   </div>
+                  <input type="text" className="adm-input" style={{ flexBasis: "100%", fontSize: 12, padding: "7px 9px" }}
+                    value={r.po} onChange={(e) => setRow(i, { po: e.target.value })}
+                    placeholder="No. PO Customer (opsional) — kosongkan jika tanpa PO" data-testid={`adm-invu-po-${i}`} />
                 </div>
               );
             })}
+          </div>
+          <div style={{ fontSize: 10.5, color: "var(--text-mute)", marginTop: -8, marginBottom: 16 }}>
+            💡 Isi <b>No. PO Customer</b> kalau transaksi pakai PO — otomatis muncul di invoice sebagai pengganti "Jasa Pengiriman". Kosongkan kalau tanpa PO. Tak perlu pilih Retail/Corporate.
           </div>
           <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
             <label style={{ flex: 1 }}>
@@ -3732,20 +3739,30 @@ async function printInvoiceDoc(lines, withTax, extra) {
       </table>
     </div>
     <div class="inv-total-bar"><span>Total Tagihan</span><span>Rp ${fRp(total)}</span></div>
-    <table class="inv-items">
-      <thead><tr><th style="width:26px">No</th><th>Nama Barang</th><th>Keterangan</th><th>Qty</th><th>Harga Satuan (Rp)</th><th>Jumlah (Rp)</th></tr></thead>
+    ${(() => {
+      // Kolom ke-2 otomatis dari ADA/TIDAK-nya No. PO per baris (tanpa mode Retail/Corporate):
+      //  - semua baris punya PO  → header "No. PO",   isi = nomor PO
+      //  - tidak ada yg punya PO → header "Nama Barang", isi = nama (Jasa Pengiriman)
+      //  - campuran              → header "Referensi", isi = PO kalau ada, kalau tidak "Jasa Pengiriman"
+      const poOf = (l) => { const v = (l.customer_po_number ?? l.po ?? "").toString().trim(); return v || ""; };
+      const withPO = lines.filter((l) => poOf(l)).length;
+      const col2 = withPO === lines.length ? "No. PO" : withPO === 0 ? "Nama Barang" : "Referensi";
+      const cell2 = (l) => poOf(l) || (l.nama || "Jasa Pengiriman");
+      return `<table class="inv-items">
+      <thead><tr><th style="width:26px">No</th><th>${col2}</th><th>Keterangan</th><th>Qty</th><th>Harga Satuan (Rp)</th><th>Jumlah (Rp)</th></tr></thead>
       <tbody>
         ${lines.map((l, i) => `
         <tr>
           <td class="num">${i + 1}</td>
-          <td>${l.nama || "Jasa Pengiriman"}</td>
+          <td>${cell2(l)}</td>
           <td>${l.ket || "&nbsp;"}</td>
           <td class="num">${l.qty || 1}</td>
           <td class="num">${fRp(l.harga)}</td>
           <td class="num">${fRp((l.harga || 0) * (l.qty || 1))}</td>
         </tr>`).join("")}
       </tbody>
-    </table>
+    </table>`;
+    })()}
     <div class="inv-summary">
       <div class="inv-note">
         ${pesan ? `<b>Pesan:</b> ${pesan}<br>` : ""}
@@ -4157,6 +4174,7 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
   const [rows, setRows] = useState(() => cart.map((c) => ({
     order_id: c.order_id, customer_nama: c.customer_nama,
     asal_kota: c.asal_kota, tujuan_kota: c.tujuan_kota, unit: c.unit, harga: "",
+    po: (c.unit?.customer_po_number || "").toString(),  // No. PO Customer per unit (opsional)
   })));
   // Auto-isi harga dari harga deal PO (cuma PO 1 unit biar akurat) — biar nggak ketik manual
   useEffect(() => {
@@ -4229,7 +4247,7 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
   };
   const buildGab = () => {
     const lines = rows.filter((r) => hargaNum(r.harga) > 0)
-      .map((r) => ({ nama: "Jasa Pengiriman", ket: unitKet(r), qty: 1, harga: hargaNum(r.harga) }));
+      .map((r) => ({ nama: "Jasa Pengiriman", ket: unitKet(r), qty: 1, harga: hargaNum(r.harga), customer_po_number: (r.po || "").trim() || null }));
     const orderIds = Array.from(new Set(rows.map((r) => r.order_id).filter(Boolean)));
     const cust = billTo.trim() || (customers.length === 1 ? customers[0] : `${customers.length} customer`);
     const extra = { jatuhTempo, tanggalInvoice, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23, customer_nama: cust, order_id: orderIds.join(", "), no_invoice: noInvoiceManual.trim() || undefined };
@@ -4284,9 +4302,15 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
                     <input inputMode="numeric" value={r.harga ? hargaNum(r.harga).toLocaleString("id-ID") : ""} placeholder="0"
                       onChange={(e) => setRow(i, { harga: e.target.value })} data-testid={`adm-invgab-harga-${i}`} />
                   </div>
+                  <input type="text" className="adm-input" style={{ flexBasis: "100%", fontSize: 12, padding: "7px 9px" }}
+                    value={r.po} onChange={(e) => setRow(i, { po: e.target.value })}
+                    placeholder="No. PO Customer (opsional) — kosongkan jika tanpa PO" data-testid={`adm-invgab-po-${i}`} />
                 </div>
               );
             })}
+          </div>
+          <div style={{ fontSize: 10.5, color: "var(--text-mute)", marginTop: -8, marginBottom: 16 }}>
+            💡 Isi <b>No. PO Customer</b> per unit kalau pakai PO — otomatis muncul di invoice. Kosongkan kalau tanpa PO.
           </div>
           <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
             <label style={{ flex: 1 }}>
