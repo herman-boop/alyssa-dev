@@ -1348,6 +1348,8 @@ function DuplicateVendorModal({ order, headers, onClose }) {
   })));
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
+  const [newGroup, setNewGroup] = useState(true);   // default: pisah ke grup baru
+  const [groupName, setGroupName] = useState("");
 
   useEffect(() => {
     let alive = true;
@@ -1374,6 +1376,13 @@ function DuplicateVendorModal({ order, headers, onClose }) {
         sid = r.data?.id;
       }
       if (!sid) throw new Error("supplier");
+      // Grup baru: bikin 1 projek dulu, semua unit batch ini masuk ke situ
+      // (biar nggak campur sama pembelian lama vendor). Kalau nggak, ke projek aktif.
+      let projectId = null;
+      if (newGroup) {
+        const pr = await axios.post(`${API}/admin/suppliers/${sid}/projects`, { nama: groupName.trim() || `${order.order_id} · ${new Date().toLocaleDateString("id-ID")}` }, { headers });
+        projectId = pr.data?.id || null;
+      }
       for (const r of checkedRows) {
         await axios.post(`${API}/admin/suppliers/${sid}/jobs`, {
           vehicle_type: r.vehicle_type || "Kendaraan",
@@ -1381,6 +1390,7 @@ function DuplicateVendorModal({ order, headers, onClose }) {
           asal_kota: (r.asal || "").trim(), tujuan_kota: (r.tujuan || "").trim(),
           total_harga: hargaNum(r.harga),
           catatan: (r.catatan || "").trim() || `Duplikat dari ${order.order_id}`, tanggal: "",
+          project_id: projectId || undefined,
         }, { headers });
       }
       setDone(true);
@@ -1434,6 +1444,20 @@ function DuplicateVendorModal({ order, headers, onClose }) {
                       <button className="adm-btn adm-btn-gold adm-btn-xs" style={{ marginTop: 8 }} onClick={() => setSupSel({ id: null, nama: supQ.trim() })}>+ Buat vendor baru "{supQ.trim()}"</button>
                     )}
                   </>
+                )}
+              </div>
+
+              {/* Grup/Projek — biar job baru nggak campur sama pembelian lama vendor */}
+              <div style={{ border: "1px solid #21262d", borderRadius: 10, padding: "10px 12px", margin: "4px 0 14px" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-mute)", marginBottom: 8, textTransform: "uppercase" }}>Masuk ke Grup / Projek</div>
+                <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", marginBottom: newGroup ? 8 : 0 }}>
+                  <input type="checkbox" checked={newGroup} onChange={() => setNewGroup((v) => !v)} style={{ width: 16, height: 16, flexShrink: 0 }} data-testid="adm-dupvendor-newgroup" />
+                  <span style={{ fontSize: 13 }}><b>Buat grup baru</b> (pisah dari pembelian lama vendor)</span>
+                </label>
+                {newGroup ? (
+                  <input className="adm-input" style={{ width: "100%" }} placeholder={`Nama grup (opsional) — default: ${order.order_id}`} value={groupName} onChange={(e) => setGroupName(e.target.value)} data-testid="adm-dupvendor-groupname" />
+                ) : (
+                  <div style={{ fontSize: 11.5, color: "var(--text-mute)" }}>Digabung ke projek aktif vendor (bisa campur dengan yang lama).</div>
                 )}
               </div>
 
