@@ -24,12 +24,33 @@ export function printSupplierA4(sup, jobsOverride, noDocOverride) {
   const gHarga = jobs.reduce((s, j) => s + (j.total_harga || 0), 0);
   const gBayar = jobs.reduce((s, j) => s + (j.total_terbayar || 0), 0);
   const gSisa = gHarga - gBayar;
-  const body = jobs.map((j, i) => {
+  // Kelompokkan per Projek biar laporan nggak nyampur. Urutan grup ikut daftar
+  // projek supplier, sisanya (job tanpa projek) di akhir. Kalau cuma 1 grup,
+  // tampil rata tanpa header (biar nggak nambah baris nggak perlu).
+  const projList = sup.projects || [];
+  const projOrder = projList.map((p) => p.id);
+  const byPid = new Map();
+  jobs.forEach((j) => {
+    const pid = j.project_id || "_none";
+    if (!byPid.has(pid)) byPid.set(pid, []);
+    byPid.get(pid).push(j);
+  });
+  const pids = [
+    ...projOrder.filter((id) => byPid.has(id)),
+    ...[...byPid.keys()].filter((id) => !projOrder.includes(id)),
+  ];
+  const nameOf = (pid) => {
+    if (pid === "_none") return "Tanpa Grup";
+    const p = projList.find((x) => x.id === pid);
+    return p ? p.nama : "Grup";
+  };
+  const multi = pids.length > 1;
+  const rowHtml = (j, i) => {
     const nopol = j.nopol || j.no_rangka || "-";
     const rute = `${j.asal_kota || "-"} → ${j.tujuan_kota || "-"}`;
     const lunas = (j.sisa || 0) <= 0;
     return `<tr>
-      <td class="c">${i + 1}</td>
+      <td class="c">${i}</td>
       <td><b>${esc(nopol)}</b><div class="rp-note">${esc(j.vehicle_type || "Unit")}</div></td>
       <td>${esc(rute)}</td>
       <td class="r">${rp(j.total_harga)}</td>
@@ -37,6 +58,20 @@ export function printSupplierA4(sup, jobsOverride, noDocOverride) {
       <td class="r"><b>${rp(j.sisa)}</b></td>
       <td class="c"><span class="rp-st ${lunas ? "y" : "n"}">${lunas ? "Lunas" : "Sisa"}</span></td>
     </tr>`;
+  };
+  let idx = 0;
+  const body = pids.map((pid) => {
+    const gjobs = byPid.get(pid);
+    const sH = gjobs.reduce((s, j) => s + (j.total_harga || 0), 0);
+    const sB = gjobs.reduce((s, j) => s + (j.total_terbayar || 0), 0);
+    const head = multi
+      ? `<tr class="grp"><td class="c">📁</td><td colspan="2"><b>${esc(nameOf(pid))}</b> · ${gjobs.length} unit</td><td class="r">${rp(sH)}</td><td class="r">${rp(sB)}</td><td class="r"><b>${rp(sH - sB)}</b></td><td></td></tr>`
+      : "";
+    const rows = gjobs.map((j) => { idx++; return rowHtml(j, idx); }).join("");
+    const sub = multi
+      ? `<tr class="grpsub"><td class="lbl" colspan="3">Subtotal ${esc(nameOf(pid))}</td><td class="r">${rp(sH)}</td><td class="r">${rp(sB)}</td><td class="r">${rp(sH - sB)}</td><td></td></tr>`
+      : "";
+    return head + rows + sub;
   }).join("");
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${noDoc}</title>
   <style>
@@ -56,6 +91,10 @@ export function printSupplierA4(sup, jobsOverride, noDocOverride) {
     table.rps th.r { text-align:right; } table.rps th.c { text-align:center; }
     table.rps td { padding:4px 7px; font-size:9px; line-height:1.35; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; }
     table.rps tbody tr:nth-child(even) td { background:${DOC_BRAND.paperMist}; }
+    table.rps tr.grp td { background:${DOC_BRAND.navy} !important; color:#fff; font-size:9.5px; padding:5px 7px; border-bottom:none; }
+    table.rps tr.grp td.r { color:#fff; }
+    table.rps tr.grpsub td { background:#eef3fb !important; font-weight:800; font-size:9px; border-top:1px solid ${DOC_BRAND.navy}; border-bottom:2px solid ${DOC_BRAND.navy}; }
+    table.rps tr.grpsub .lbl { text-align:right; }
     table.rps td.c { text-align:center; } table.rps td.r { text-align:right; white-space:nowrap; }
     table.rps .rp-note { font-size:8px; color:${DOC_BRAND.muted}; margin-top:2px; }
     table.rps tfoot .tot td { border-top:2px solid ${DOC_BRAND.navy}; border-bottom:none; padding:7px 7px; font-size:10px; font-weight:800; background:#fff; }
@@ -136,20 +175,28 @@ export default function SupplierPage() {
   // Rekap supplier: No. Dokumen (auto/manual) + cetak / simpan ke Histori Dokumen
   const [rekapOpen, setRekapOpen] = useState(false);
   const [rekapNo, setRekapNo] = useState("");
+  const [rekapProj, setRekapProj] = useState("all");   // "all" = semua projek (dipisah), atau id projek tertentu
   const [rekapSaving, setRekapSaving] = useState(false);
-  const openRekap = () => { setMenuOpen(false); setRekapNo(supplierAutoDocNo()); setRekapOpen(true); };
+  const openRekap = () => { setMenuOpen(false); setRekapNo(supplierAutoDocNo()); setRekapProj("all"); setRekapOpen(true); };
+  // Job yang dicetak/disimpan sesuai pilihan projek di modal rekap.
+  const rekapJobs = () => {
+    const all = selected?.jobs || [];
+    return rekapProj === "all" ? all : all.filter((j) => (j.project_id || "_none") === rekapProj);
+  };
+  const rekapProjName = () => (selected?.projects || []).find((p) => p.id === rekapProj)?.nama || "";
   const saveRekapHistori = async () => {
     if (!selected) return;
     setRekapSaving(true);
     try {
-      const jobs = selected.jobs || [];
+      const jobs = rekapJobs();
       const gHarga = jobs.reduce((s, j) => s + (j.total_harga || 0), 0);
       const gBayar = jobs.reduce((s, j) => s + (j.total_terbayar || 0), 0);
       const noDoc = (rekapNo.trim() || supplierAutoDocNo());
+      const suffix = rekapProj === "all" ? "" : ` · ${rekapProjName()}`;
       await axios.post(`${API}/admin/doc-history`, {
         jenis: "supplier", no_dokumen: noDoc, customer: selected.nama || "",
-        judul: `${selected.nama || "-"} · ${jobs.length} unit · Rp ${gHarga.toLocaleString("id-ID")}`,
-        meta: { supplier_nama: selected.nama, no_dokumen: noDoc, total_harga: gHarga, total_terbayar: gBayar, sisa: gHarga - gBayar, jumlah_unit: jobs.length },
+        judul: `${selected.nama || "-"}${suffix} · ${jobs.length} unit · Rp ${gHarga.toLocaleString("id-ID")}`,
+        meta: { supplier_nama: selected.nama, no_dokumen: noDoc, total_harga: gHarga, total_terbayar: gBayar, sisa: gHarga - gBayar, jumlah_unit: jobs.length, projek: rekapProj === "all" ? "Semua" : rekapProjName() },
         units: jobs,
       }, { headers });
       flash("✓ Rekap supplier disimpan ke Histori Dokumen");
@@ -741,7 +788,7 @@ export default function SupplierPage() {
         <Modal title="Rekap Supplier — No. Dokumen" onClose={() => setRekapOpen(false)}
           foot={<>
             <button style={BTN_GHOST} onClick={() => setRekapOpen(false)}>Batal</button>
-            <button style={BTN_GHOST} onClick={() => printSupplierA4(selected, null, rekapNo)} data-testid="sup-rekap-print">🖨️ Cetak</button>
+            <button style={BTN_GHOST} onClick={() => printSupplierA4(selected, rekapProj === "all" ? null : rekapJobs(), rekapNo)} data-testid="sup-rekap-print">🖨️ Cetak</button>
             <button style={BTN} onClick={saveRekapHistori} disabled={rekapSaving} data-testid="sup-rekap-save">{rekapSaving ? "Menyimpan…" : "💾 Simpan ke Histori"}</button>
           </>}>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -750,8 +797,20 @@ export default function SupplierPage() {
               <input style={I} value={rekapNo} onChange={(e) => setRekapNo(e.target.value)} placeholder="RPS/AAL/..." data-testid="sup-rekap-no" />
               <div style={{ fontSize: 11, color: C.mute, marginTop: 4 }}>Kosongkan = otomatis ({supplierAutoDocNo()}). Isi manual untuk samakan dengan nomor lain.</div>
             </div>
+            {(selected.projects || []).length > 1 && (
+              <div>
+                <div style={{ ...L }}>Projek yang dicetak</div>
+                <select style={I} value={rekapProj} onChange={(e) => setRekapProj(e.target.value)} data-testid="sup-rekap-proj">
+                  <option value="all">Semua Projek (dipisah per grup)</option>
+                  {(selected.projects || []).map((p) => (
+                    <option key={p.id} value={p.id}>📁 {p.nama}</option>
+                  ))}
+                </select>
+                <div style={{ fontSize: 11, color: C.mute, marginTop: 4 }}>Pilih 1 projek = cetak/simpan unit projek itu aja. "Semua" = 1 laporan, tiap grup ada subtotal.</div>
+              </div>
+            )}
             <div style={{ fontSize: 12.5, color: C.mute }}>
-              Supplier: <b style={{ color: C.ink }}>{selected.nama}</b> · {(selected.jobs || []).length} unit · Total Rp {(selected.grand_total_harga || 0).toLocaleString("id-ID")}
+              Supplier: <b style={{ color: C.ink }}>{selected.nama}</b> · {rekapJobs().length} unit · Total Rp {rekapJobs().reduce((s, j) => s + (j.total_harga || 0), 0).toLocaleString("id-ID")}
             </div>
             <div style={{ fontSize: 11.5, color: C.mute }}>💾 Simpan = masuk ke <b style={{ color: C.ink }}>Histori Dokumen</b> (bisa dicetak ulang). 🖨️ Cetak = langsung print A4.</div>
           </div>
