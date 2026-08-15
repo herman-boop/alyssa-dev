@@ -301,11 +301,36 @@ function flattenBackground(canvas) {
   for (let i = 0; i < d.length; i += 4) {
     for (let c = 0; c < 3; c++) {
       const bgv = Math.max(20, bgData[i + c]);
-      const v = (d[i + c] / bgv) * 205;
+      const v = (d[i + c] / bgv) * 238; // paper -> mendekati putih (bukan abu 205)
       d[i + c] = v < 0 ? 0 : v > 255 ? 255 : v;
     }
   }
   ctx.putImageData(src, 0, 0);
+  return canvas;
+}
+
+/* MAGIC — dokumen bersih ala MS Lens/Adobe Scan: kertas jadi putih, bayangan
+   hilang, teks lebih tegas & tajam, stempel/ttd berwarna tetap natural. */
+function magicEnhance(canvas) {
+  const ctx = canvas.getContext("2d"), w = canvas.width, h = canvas.height;
+  const id = ctx.getImageData(0, 0, w, h), d = id.data, total = d.length / 4;
+  // white-point: ambil ~top 18% luminance sebagai "warna kertas" -> normalkan ke putih
+  const hist = new Uint32Array(256);
+  for (let i = 0; i < d.length; i += 4) { const l = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) | 0; hist[l < 0 ? 0 : l > 255 ? 255 : l]++; }
+  let acc = 0, wp = 200;
+  for (let l = 255; l >= 0; l--) { acc += hist[l]; if (acc > total * 0.18) { wp = l; break; } }
+  const gain = 255 / Math.max(150, wp);
+  for (let i = 0; i < d.length; i += 4) {
+    for (let c = 0; c < 3; c++) {
+      let v = d[i + c] * gain;         // kertas -> putih
+      v /= 255;
+      v = Math.pow(v, 0.80);           // teks lebih gelap (gamma)
+      v = (v - 0.5) * 1.22 + 0.5;      // kontras dinaikkan
+      v *= 255;
+      d[i + c] = v < 0 ? 0 : v > 255 ? 255 : v;
+    }
+  }
+  ctx.putImageData(id, 0, 0);
   return canvas;
 }
 
@@ -553,8 +578,13 @@ export function CropModal({ url, file, onCancel, onConfirm }) {
         try { unsharpMask(canvas, 0.4); } catch {}
         try { adaptiveBW(canvas); } catch {}
         finalCanvas = canvas;
+      } else if (mode === "magic") {
+        // MAGIC (default): kertas putih bersih + teks tegas ala Lens.
+        try { magicEnhance(canvas); } catch {}
+        try { unsharpMask(canvas, 0.7); } catch {}
+        finalCanvas = canvas;
       } else {
-        // Warna / Magic: pertajam + filter kontras/kecerahan (stempel & ttd tetap natural).
+        // Warna: pertahankan warna asli, pertajam + kontras ringan (stempel natural).
         try { unsharpMask(canvas); } catch {}
         finalCanvas = applyFilter(canvas);
       }
