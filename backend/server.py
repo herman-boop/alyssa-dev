@@ -736,6 +736,32 @@ async def upload_resi(trip_id: str, foto: UploadFile = File(...), no_resi: Optio
     return trip_doc_to_public(doc)
 
 
+@api_router.delete("/trips/{trip_id}/handover/bastk/{item_id}")
+async def delete_bastk(trip_id: str, item_id: str):
+    """Hapus 1 lembar BASTK (admin bisa hapus hasil scan)."""
+    res = await db.trips.update_one(
+        {"trip_id": trip_id},
+        {"$pull": {"handover.bastk": {"id": item_id}}, "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    if res.matched_count == 0:
+        raise HTTPException(404, "Trip not found")
+    doc = await db.trips.find_one({"trip_id": trip_id})
+    return trip_doc_to_public(doc)
+
+
+@api_router.delete("/trips/{trip_id}/handover/resi")
+async def delete_resi_doc(trip_id: str):
+    """Hapus foto Resi handover."""
+    res = await db.trips.update_one(
+        {"trip_id": trip_id},
+        {"$set": {"handover.resi": None, "updated_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    if res.matched_count == 0:
+        raise HTTPException(404, "Trip not found")
+    doc = await db.trips.find_one({"trip_id": trip_id})
+    return trip_doc_to_public(doc)
+
+
 @api_router.post("/trips/{trip_id}/cair")
 async def request_cair(trip_id: str, payload: CairBody):
     if payload.tahap not in (1, 2, 3):

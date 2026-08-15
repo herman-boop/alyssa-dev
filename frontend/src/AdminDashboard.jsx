@@ -5600,6 +5600,21 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
     return () => { alive = false; };
   }, [tripId]);
 
+  // Admin hapus hasil scan (album / BASTK / Resi)
+  const reloadDetail = () => axios.get(`${API}/public/trips/${tripId}`).then((r) => setDetail(r.data)).catch(() => {});
+  const delAlbumPhoto = async (stage, id) => {
+    if (!id || !window.confirm("Hapus foto ini?")) return;
+    try { await axios.delete(`${API}/trips/${tripId}/album/${stage}/${id}`, { headers }); await reloadDetail(); } catch { alert("Gagal menghapus"); }
+  };
+  const delBastkDoc = async (id) => {
+    if (!id || !window.confirm("Hapus dokumen BASTK ini?")) return;
+    try { await axios.delete(`${API}/trips/${tripId}/handover/bastk/${id}`, { headers }); await reloadDetail(); } catch { alert("Gagal menghapus"); }
+  };
+  const delResiDoc = async () => {
+    if (!window.confirm("Hapus foto Resi?")) return;
+    try { await axios.delete(`${API}/trips/${tripId}/handover/resi`, { headers }); await reloadDetail(); } catch { alert("Gagal menghapus"); }
+  };
+
   // Load semua orders untuk pilih multi-unit
   const openMultiUnit = async (leg) => {
     try {
@@ -5846,9 +5861,9 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
             />
           )}
           {activeTab === "petugas" && <PetugasTaskTab tripId={tripId} headers={headers} />}
-          {activeTab === "foto" && <FotoTab detail={detail} loading={detailLoading} onView={setLightbox} />}
+          {activeTab === "foto" && <FotoTab detail={detail} loading={detailLoading} onView={setLightbox} onDelete={delAlbumPhoto} />}
           {activeTab === "checkpoint" && <CheckpointTab detail={detail} loading={detailLoading} onView={setLightbox} />}
-          {activeTab === "dokumen" && <DokumenTab detail={detail} loading={detailLoading} />}
+          {activeTab === "dokumen" && <DokumenTab detail={detail} loading={detailLoading} onDeleteBastk={delBastkDoc} onDeleteResi={delResiDoc} />}
           {activeTab === "ringkasan" && <RingkasanTab legs={legs} detail={detail} />}
         </div>
 
@@ -6303,7 +6318,7 @@ function PetugasTaskTab({ tripId, headers }) {
 }
 
 /* ── Tab: Foto — galeri per stage (asal/kapal/tujuan/dokumen) ── */
-function FotoTab({ detail, loading, onView }) {
+function FotoTab({ detail, loading, onView, onDelete }) {
   if (loading) return <TabSkeleton />;
   if (!detail) return <TabEmpty text="Data foto belum tersedia." />;
   const album = detail.album || {};
@@ -6319,8 +6334,9 @@ function FotoTab({ detail, loading, onView }) {
             ) : (
               <div className="keep-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))", gap: 8 }}>
                 {photos.map((p, i) => (
-                  <div key={i} onClick={() => onView(resolveTripUrl(p.url))} style={{ cursor: "pointer" }}>
-                    <img src={resolveTripUrl(p.url)} alt="" style={{ width: "100%", aspectRatio: "1", borderRadius: 8, objectFit: "cover", border: "1px solid #21262d" }} />
+                  <div key={i} style={{ position: "relative" }}>
+                    <img src={resolveTripUrl(p.url)} alt="" onClick={() => onView(resolveTripUrl(p.url))} style={{ width: "100%", aspectRatio: "1", borderRadius: 8, objectFit: "cover", border: "1px solid #21262d", cursor: "pointer" }} />
+                    {onDelete && <button onClick={(e) => { e.stopPropagation(); onDelete(stage.key, p.id); }} title="Hapus foto" style={{ position: "absolute", top: 4, right: 4, width: 24, height: 24, borderRadius: 6, border: "none", background: "rgba(180,30,30,.92)", color: "#fff", fontSize: 12, cursor: "pointer", lineHeight: 1 }}>🗑</button>}
                     {p.catatan && <div style={{ fontSize: 9, color: "#8b949e", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.catatan}</div>}
                   </div>
                 ))}
@@ -6367,7 +6383,7 @@ function CheckpointTab({ detail, loading, onView }) {
 }
 
 /* ── Tab: Dokumen — BASTK + Resi ── */
-function DokumenTab({ detail, loading }) {
+function DokumenTab({ detail, loading, onDeleteBastk, onDeleteResi }) {
   if (loading) return <TabSkeleton />;
   if (!detail) return <TabEmpty text="Data dokumen belum tersedia." />;
   const bastk = detail.handover?.bastk || [];
@@ -6381,13 +6397,16 @@ function DokumenTab({ detail, loading }) {
             {bastk.map((b, i) => {
               const isPdf = /\.pdf$/i.test(b.url || "");
               return (
-                <a key={i} href={resolveTripUrl(b.url)} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
-                  {isPdf ? (
-                    <div style={{ width: "100%", aspectRatio: "1", borderRadius: 8, border: "1px solid #21262d", background: "#0d1117", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>📕</div>
-                  ) : (
-                    <img src={resolveTripUrl(b.url)} alt="" style={{ width: "100%", aspectRatio: "1", borderRadius: 8, objectFit: "cover", border: "1px solid #21262d" }} />
-                  )}
-                </a>
+                <div key={i} style={{ position: "relative" }}>
+                  <a href={resolveTripUrl(b.url)} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
+                    {isPdf ? (
+                      <div style={{ width: "100%", aspectRatio: "1", borderRadius: 8, border: "1px solid #21262d", background: "#0d1117", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>📕</div>
+                    ) : (
+                      <img src={resolveTripUrl(b.url)} alt="" style={{ width: "100%", aspectRatio: "1", borderRadius: 8, objectFit: "cover", border: "1px solid #21262d" }} />
+                    )}
+                  </a>
+                  {onDeleteBastk && <button onClick={(e) => { e.stopPropagation(); e.preventDefault(); onDeleteBastk(b.id); }} title="Hapus BASTK" style={{ position: "absolute", top: 4, right: 4, width: 24, height: 24, borderRadius: 6, border: "none", background: "rgba(180,30,30,.92)", color: "#fff", fontSize: 12, cursor: "pointer", lineHeight: 1 }}>🗑</button>}
+                </div>
               );
             })}
           </div>
@@ -6396,13 +6415,16 @@ function DokumenTab({ detail, loading }) {
       <div>
         <div style={{ fontSize: 12, fontWeight: 800, color: "#e6edf3", marginBottom: 8 }}>🧾 Resi</div>
         {!resi?.url ? <div style={{ fontSize: 11, color: "#484f58" }}>Belum ada foto resi.</div> : (
-          <a href={resolveTripUrl(resi.url)} target="_blank" rel="noreferrer" style={{ display: "inline-flex", gap: 10, alignItems: "center", background: "#0d1117", border: "1px solid #21262d", borderRadius: 10, padding: 10, textDecoration: "none" }}>
-            <img src={resolveTripUrl(resi.url)} alt="" style={{ width: 56, height: 56, borderRadius: 8, objectFit: "cover" }} />
-            <div>
-              <div style={{ fontSize: 11, color: "#e6edf3", fontWeight: 700 }}>{resi.no_resi || "No. resi belum diisi"}</div>
-              <div style={{ fontSize: 10, color: "#8b949e", marginTop: 2 }}>Klik buat lihat foto</div>
-            </div>
-          </a>
+          <div style={{ display: "inline-flex", gap: 10, alignItems: "center", background: "#0d1117", border: "1px solid #21262d", borderRadius: 10, padding: 10 }}>
+            <a href={resolveTripUrl(resi.url)} target="_blank" rel="noreferrer" style={{ display: "inline-flex", gap: 10, alignItems: "center", textDecoration: "none" }}>
+              <img src={resolveTripUrl(resi.url)} alt="" style={{ width: 56, height: 56, borderRadius: 8, objectFit: "cover" }} />
+              <div>
+                <div style={{ fontSize: 11, color: "#e6edf3", fontWeight: 700 }}>{resi.no_resi || "No. resi belum diisi"}</div>
+                <div style={{ fontSize: 10, color: "#8b949e", marginTop: 2 }}>Klik buat lihat foto</div>
+              </div>
+            </a>
+            {onDeleteResi && <button onClick={onDeleteResi} title="Hapus Resi" style={{ width: 28, height: 28, borderRadius: 6, border: "none", background: "rgba(180,30,30,.92)", color: "#fff", fontSize: 13, cursor: "pointer" }}>🗑</button>}
+          </div>
         )}
       </div>
     </div>
