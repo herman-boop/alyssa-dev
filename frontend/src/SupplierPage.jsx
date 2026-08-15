@@ -437,6 +437,18 @@ export default function SupplierPage() {
   }, [jobs]);
 
   const filteredJobs = useMemo(() => filter === "semua" ? jobs : jobs.filter((j) => statusOf(j) === filter), [jobs, filter]);
+  // Kelompokkan tagihan per Grup/Projek biar nggak campur (urut sesuai daftar projek).
+  const jobsGrouped = useMemo(() => {
+    const projs = selected?.projects || [];
+    const map = new Map();
+    projs.forEach((p) => map.set(p.id, { id: p.id, nama: p.nama, status: p.status, jobs: [] }));
+    filteredJobs.forEach((j) => {
+      const pid = j.project_id || "_none";
+      if (!map.has(pid)) map.set(pid, { id: pid, nama: pid === "_none" ? "Tanpa Grup" : "Grup", status: "open", jobs: [] });
+      map.get(pid).jobs.push(j);
+    });
+    return Array.from(map.values()).filter((g) => g.jobs.length > 0);
+  }, [filteredJobs, selected]);
 
   const TABS = [{ k: "pembayaran", t: "Pembayaran" }, { k: "tagihan", t: "Tagihan" }, { k: "riwayat", t: "Riwayat" }, { k: "dokumen", t: "Dokumen" }];
 
@@ -604,8 +616,17 @@ export default function SupplierPage() {
                 ))}
               </div>
               {filteredJobs.length === 0 && <div style={{ textAlign: "center", padding: 30, color: C.mute }}>Tidak ada tagihan.</div>}
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {filteredJobs.map((j) => (
+              {jobsGrouped.map((g) => {
+                const gSisa = g.jobs.reduce((s, j) => s + (j.sisa || 0), 0);
+                const gTotal = g.jobs.reduce((s, j) => s + (j.total_harga || 0), 0);
+                return (
+                <div key={g.id} style={{ marginBottom: 16 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "8px 12px", background: "#1a1f2e", border: `1px solid ${C.line}`, borderRadius: 10, marginBottom: 8 }}>
+                    <div style={{ fontWeight: 800, fontSize: 13, color: C.gold }}>📁 {g.nama} <span style={{ color: C.mute, fontWeight: 600 }}>· {g.jobs.length} unit</span></div>
+                    <div style={{ fontSize: 11, color: C.mute }}>Total {fRp(gTotal)} · Sisa <b style={{ color: gSisa > 0 ? C.red : C.green }}>{fRp(gSisa)}</b></div>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {g.jobs.map((j) => (
                   <div key={j.id} style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 14 }} data-testid={`sup-job-${j.id}`}>
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
                       <div style={{ minWidth: 0 }}>
@@ -632,6 +653,9 @@ export default function SupplierPage() {
                   </div>
                 ))}
               </div>
+                  </div>
+                );
+              })}
             </div>
           )}
 

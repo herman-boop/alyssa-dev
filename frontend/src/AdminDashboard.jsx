@@ -1348,8 +1348,9 @@ function DuplicateVendorModal({ order, headers, onClose }) {
   })));
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
-  const [newGroup, setNewGroup] = useState(true);   // default: pisah ke grup baru
-  const [groupName, setGroupName] = useState("");
+  const [supProjects, setSupProjects] = useState([]);   // projek existing vendor terpilih
+  const [projMode, setProjMode] = useState("new");      // "new" = projek baru, atau id projek existing
+  const [groupName, setGroupName] = useState("");        // nama projek baru (opsional)
 
   useEffect(() => {
     let alive = true;
@@ -1361,6 +1362,23 @@ function DuplicateVendorModal({ order, headers, onClose }) {
     }, 300);
     return () => { alive = false; clearTimeout(t); };
   }, [supQ]); // eslint-disable-line
+
+  // Saat vendor terpilih (yg sudah tersimpan), tarik daftar projek-nya biar bisa dipilih.
+  useEffect(() => {
+    let alive = true;
+    setSupProjects([]); setProjMode("new"); setGroupName("");
+    if (supSel && supSel.id) {
+      (async () => {
+        try {
+          const r = await axios.get(`${API}/admin/suppliers/${supSel.id}`, { headers });
+          if (alive) setSupProjects((r.data?.projects || []).filter((p) => p.status !== "closed"));
+        } catch { if (alive) setSupProjects([]); }
+      })();
+    }
+  }, [supSel]); // eslint-disable-line
+
+  // Nomor projek otomatis untuk default nama grup baru (Projek N).
+  const autoProjName = `Projek ${(supProjects.length || 0) + 1}`;
 
   const setRow = (key, patch) => setRows((rs) => rs.map((r) => r.key === key ? { ...r, ...patch } : r));
   const hargaNum = (s) => parseInt(String(s || "").replace(/[^0-9]/g, ""), 10) || 0;
@@ -1376,12 +1394,14 @@ function DuplicateVendorModal({ order, headers, onClose }) {
         sid = r.data?.id;
       }
       if (!sid) throw new Error("supplier");
-      // Grup baru: bikin 1 projek dulu, semua unit batch ini masuk ke situ
-      // (biar nggak campur sama pembelian lama vendor). Kalau nggak, ke projek aktif.
+      // Pilih projek: kalau "new" bikin projek baru (nomor otomatis / nama isian),
+      // kalau pilih projek existing pakai id-nya langsung. Biar nggak campur.
       let projectId = null;
-      if (newGroup) {
-        const pr = await axios.post(`${API}/admin/suppliers/${sid}/projects`, { nama: groupName.trim() || `${order.order_id} · ${new Date().toLocaleDateString("id-ID")}` }, { headers });
+      if (projMode === "new") {
+        const pr = await axios.post(`${API}/admin/suppliers/${sid}/projects`, { nama: groupName.trim() || autoProjName }, { headers });
         projectId = pr.data?.id || null;
+      } else {
+        projectId = projMode;
       }
       for (const r of checkedRows) {
         await axios.post(`${API}/admin/suppliers/${sid}/jobs`, {
@@ -1447,17 +1467,26 @@ function DuplicateVendorModal({ order, headers, onClose }) {
                 )}
               </div>
 
-              {/* Grup/Projek — biar job baru nggak campur sama pembelian lama vendor */}
+              {/* Grup/Projek — biar job baru nggak campur sama pembelian lama vendor.
+                  Vendor baru / belum punya projek → langsung projek baru (otomatis).
+                  Vendor lama → bisa pilih projek existing dari dropdown, atau bikin baru. */}
               <div style={{ border: "1px solid #21262d", borderRadius: 10, padding: "10px 12px", margin: "4px 0 14px" }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-mute)", marginBottom: 8, textTransform: "uppercase" }}>Masuk ke Grup / Projek</div>
-                <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", marginBottom: newGroup ? 8 : 0 }}>
-                  <input type="checkbox" checked={newGroup} onChange={() => setNewGroup((v) => !v)} style={{ width: 16, height: 16, flexShrink: 0 }} data-testid="adm-dupvendor-newgroup" />
-                  <span style={{ fontSize: 13 }}><b>Buat grup baru</b> (pisah dari pembelian lama vendor)</span>
-                </label>
-                {newGroup ? (
-                  <input className="adm-input" style={{ width: "100%" }} placeholder={`Nama grup (opsional) — default: ${order.order_id}`} value={groupName} onChange={(e) => setGroupName(e.target.value)} data-testid="adm-dupvendor-groupname" />
+                {supProjects.length > 0 && (
+                  <select className="adm-input" style={{ width: "100%", marginBottom: 8 }} value={projMode} onChange={(e) => setProjMode(e.target.value)} data-testid="adm-dupvendor-projsel">
+                    <option value="new">➕ Buat projek baru (otomatis: {autoProjName})</option>
+                    {supProjects.map((p) => (
+                      <option key={p.id} value={p.id}>📁 {p.nama}{p.status === "closed" ? " (tutup)" : ""}</option>
+                    ))}
+                  </select>
+                )}
+                {projMode === "new" ? (
+                  <>
+                    <input className="adm-input" style={{ width: "100%" }} placeholder={`Nama projek (opsional) — default: ${autoProjName}`} value={groupName} onChange={(e) => setGroupName(e.target.value)} data-testid="adm-dupvendor-groupname" />
+                    <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 6 }}>Unit batch ini masuk ke projek baru, terpisah dari pembelian lama vendor.</div>
+                  </>
                 ) : (
-                  <div style={{ fontSize: 11.5, color: "var(--text-mute)" }}>Digabung ke projek aktif vendor (bisa campur dengan yang lama).</div>
+                  <div style={{ fontSize: 11.5, color: "var(--text-mute)" }}>Unit batch ini digabung ke projek <b>{supProjects.find((p) => p.id === projMode)?.nama || "terpilih"}</b>.</div>
                 )}
               </div>
 
