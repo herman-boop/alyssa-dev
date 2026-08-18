@@ -411,6 +411,37 @@ async function canvasToPdfFile(canvas, baseName) {
   return new File([pdfBlob], (baseName || "dokumen").replace(/\.\w+$/, "") + ".pdf", { type: "application/pdf" });
 }
 
+/* Bungkus 1 JPEG (A4-proporsi) jadi PDF A4 1 halaman — MURNI JS, tanpa jsPDF/CDN.
+   JPEG di-embed apa adanya via /DCTDecode, jadi ringan, cepat, & nggak gantung
+   library eksternal yang sering gagal load di lapangan. wPx/hPx = dimensi JPEG. */
+function buildPdfFromJpeg(jpeg, wPx, hPx) {
+  const enc = new TextEncoder();
+  const A4W = 595.28, A4H = 841.89;
+  const chunks = []; let len = 0; const off = [];
+  const put = (s) => { const b = (s instanceof Uint8Array) ? s : enc.encode(s); chunks.push(b); len += b.length; };
+  const startObj = (n) => { off[n] = len; };
+  put("%PDF-1.4\n");
+  put(new Uint8Array([0x25, 0xE2, 0xE3, 0xCF, 0xD3, 0x0A])); // penanda biner
+  startObj(1); put("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+  startObj(2); put("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+  startObj(3); put(`3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${A4W} ${A4H}] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>\nendobj\n`);
+  startObj(4);
+  put(`4 0 obj\n<< /Type /XObject /Subtype /Image /Width ${wPx} /Height ${hPx} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`);
+  put(jpeg);
+  put("\nendstream\nendobj\n");
+  const content = `q\n${A4W} 0 0 ${A4H} 0 0 cm\n/Im0 Do\nQ\n`;
+  startObj(5);
+  put(`5 0 obj\n<< /Length ${enc.encode(content).length} >>\nstream\n${content}endstream\nendobj\n`);
+  const xrefPos = len, n = 6;
+  let xref = `xref\n0 ${n}\n0000000000 65535 f \n`;
+  for (let i = 1; i < n; i++) xref += String(off[i]).padStart(10, "0") + " 00000 n \n";
+  put(xref);
+  put(`trailer\n<< /Size ${n} /Root 1 0 R >>\nstartxref\n${xrefPos}\n%%EOF`);
+  const outArr = new Uint8Array(len); let p = 0;
+  for (const b of chunks) { outArr.set(b, p); p += b.length; }
+  return new Blob([outArr], { type: "application/pdf" });
+}
+
 /* Modal scanner: auto-deteksi 4 sudut (OpenCV) + geser manual + perspective transform + filter. */
 export function CropModal({ url, file, onCancel, onConfirm }) {
   const imgRef = useRef(null);
@@ -626,12 +657,32 @@ export function CropModal({ url, file, onCancel, onConfirm }) {
         finalCanvas = applyFilter(canvas);
       }
 
-      // Output GAMBAR JPG (bukan PDF): langsung keliatan inline di preview HP,
-      // gampang dibuka di storage, & nggak butuh library PDF eksternal (jsPDF CDN)
-      // yang sering gagal load di lapangan. Kualitas tinggi biar teks tajam.
-      const blob = await new Promise((r) => finalCanvas.toBlob(r, "image/jpeg", 0.92));
-      const out = blob ? new File([blob], (file.name || "scan").replace(/\.\w+$/, "") + "_scan.jpg", { type: "image/jpeg" }) : file;
-      setReview({ url: URL.createObjectURL(out), file: out, isPdf: false });
+      // Bungkus hasil scan jadi PDF A4 (MURNI JS, tanpa jsPDF/CDN) supaya dokumen
+      // kebuka LANGSUNG sebagai PDF pas diklik di link driver. Preview tetap pakai
+      // gambar (ringan & pasti tampil di HP); yang diupload = file PDF.
+      const baseName = (file.name || "scan").replace(/\.\w+$/, "");
+      let out, previewUrl, isPdf = false;
+      try {
+        const AW = 2480, AH = 3508, mg = 70; // A4 300dpi + margin
+        const a4 = document.createElement("canvas"); a4.width = AW; a4.height = AH;
+        const actx = a4.getContext("2d");
+        actx.fillStyle = "#fff"; actx.fillRect(0, 0, AW, AH);
+        const sc2 = Math.min((AW - mg * 2) / finalCanvas.width, (AH - mg * 2) / finalCanvas.height);
+        const dw = finalCanvas.width * sc2, dh = finalCanvas.height * sc2;
+        actx.imageSmoothingEnabled = true; actx.imageSmoothingQuality = "high";
+        actx.drawImage(finalCanvas, (AW - dw) / 2, (AH - dh) / 2, dw, dh);
+        const jpgBlob = await new Promise((r) => a4.toBlob(r, "image/jpeg", 0.92));
+        const jpgBytes = new Uint8Array(await jpgBlob.arrayBuffer());
+        const pdfBlob = buildPdfFromJpeg(jpgBytes, AW, AH);
+        out = new File([pdfBlob], baseName + ".pdf", { type: "application/pdf" });
+        previewUrl = URL.createObjectURL(jpgBlob); // preview gambar (bukan iframe PDF yg suka blank di HP)
+      } catch {
+        // Fallback: kalau bungkus PDF gagal, pakai JPG biasa biar user nggak mentok.
+        const blob = await new Promise((r) => finalCanvas.toBlob(r, "image/jpeg", 0.92));
+        out = blob ? new File([blob], baseName + "_scan.jpg", { type: "image/jpeg" }) : file;
+        previewUrl = URL.createObjectURL(out);
+      }
+      setReview({ url: previewUrl, file: out, isPdf });
       // Jangan langsung upload -- tampilin hasilnya dulu, biar user bisa cek/edit ulang
       // sebelum beneran dikirim (matching Office Lens/CamScanner-style review step).
     } catch { setReview({ url: URL.createObjectURL(file), file, isPdf: false }); }
