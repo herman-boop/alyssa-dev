@@ -334,6 +334,41 @@ function magicEnhance(canvas) {
   return canvas;
 }
 
+/* AUTO WHITE-BALANCE — netralin semburat warna (kuning/hangat) dari cahaya/meja
+   biar kertas jadi putih natural TAPI warna asli stempel/TTD/coretan tetap jujur.
+   Caranya: cari "warna kertas" = rata2 per-channel dari piksel paling terang
+   (top ~20% luminance), lalu skala tiap channel supaya kertas -> putih. Karena
+   koreksinya per-channel & seragam, hue elemen berwarna tetap benar (cuma cast
+   global yang hilang). Dipakai khusus mode Warna. */
+function autoWhiteBalance(canvas) {
+  const ctx = canvas.getContext("2d"), w = canvas.width, h = canvas.height;
+  const id = ctx.getImageData(0, 0, w, h), d = id.data, total = d.length / 4;
+  const hist = new Uint32Array(256);
+  for (let i = 0; i < d.length; i += 4) {
+    const l = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) | 0;
+    hist[l < 0 ? 0 : l > 255 ? 255 : l]++;
+  }
+  let acc = 0, thr = 200;
+  for (let l = 255; l >= 0; l--) { acc += hist[l]; if (acc > total * 0.20) { thr = l; break; } }
+  let sr = 0, sg = 0, sb = 0, n = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    const l = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    if (l >= thr) { sr += d[i]; sg += d[i + 1]; sb += d[i + 2]; n++; }
+  }
+  if (n < 10) return canvas; // gagal estimasi -> jangan diapa2in
+  const pr = sr / n, pg = sg / n, pb = sb / n;
+  const T = 244; // target kertas putih (sisakan headroom, bukan 255)
+  const gr = Math.min(1.8, T / Math.max(60, pr));
+  const gg = Math.min(1.8, T / Math.max(60, pg));
+  const gb = Math.min(1.8, T / Math.max(60, pb));
+  for (let i = 0; i < d.length; i += 4) {
+    let r = d[i] * gr, g = d[i + 1] * gg, b = d[i + 2] * gb;
+    d[i] = r > 255 ? 255 : r; d[i + 1] = g > 255 ? 255 : g; d[i + 2] = b > 255 ? 255 : b;
+  }
+  ctx.putImageData(id, 0, 0);
+  return canvas;
+}
+
 /* Pertajam teks -- unsharp mask ringan (orig + amount*(orig-blur)), pure canvas. */
 function unsharpMask(canvas, amount = 0.6) {
   const w = canvas.width, h = canvas.height;
@@ -512,7 +547,7 @@ export function CropModal({ url, file, onCancel, onConfirm }) {
   // contrast 1.0..2.0, brightness 1.0..1.35, saturate per-mode
   const cCon = (1.15 + (sharp / 100) * 0.85).toFixed(3);   // 1.15..2.0
   const cBri = (0.85 + (bright / 100) * 0.5).toFixed(3);   // 0.85..1.35
-  const cSat = mode === "bw" ? 0 : (mode === "magic" ? 1.15 : 1.05);
+  const cSat = mode === "bw" ? 0 : (mode === "magic" ? 1.15 : 1.0); // Warna: saturasi natural (warna asli, tak dilebihkan)
   const filterStr = `contrast(${cCon}) brightness(${cBri}) saturate(${cSat})`;
 
   // Terapkan filter ke canvas -> canvas baru (pakai ctx.filter, sama persis dgn preview).
@@ -584,7 +619,9 @@ export function CropModal({ url, file, onCancel, onConfirm }) {
         try { unsharpMask(canvas, 0.7); } catch {}
         finalCanvas = canvas;
       } else {
-        // Warna: pertahankan warna asli, pertajam + kontras ringan (stempel natural).
+        // Warna: kertas putih natural + WARNA ASLI (stempel/TTD/coretan jujur).
+        // white-balance dulu -> netralin semburat kuning/hangat, baru pertajam ringan.
+        try { autoWhiteBalance(canvas); } catch {}
         try { unsharpMask(canvas); } catch {}
         finalCanvas = applyFilter(canvas);
       }
