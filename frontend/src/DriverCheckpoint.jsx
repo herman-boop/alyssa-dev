@@ -442,6 +442,95 @@ function buildPdfFromJpeg(jpeg, wPx, hPx) {
   return new Blob([outArr], { type: "application/pdf" });
 }
 
+/* dataURL(base64) -> bytes, buat bahan buildPdfFromJpeg. */
+function dataUrlToBytes(dataUrl) {
+  const bin = atob((dataUrl.split(",")[1] || ""));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+/* Viewer dokumen IN-APP (zoom + 📄 Unduh PDF murni-JS + 🖨 Cetak) — sama gaya
+   kayak Live Track. Biar klik BASTK/Resi di link driver buka viewer ini, bukan
+   gambar mentah di browser yang cuma bisa di-zoom/geser. */
+function DriverDocModal({ item, onClose }) {
+  const [zoom, setZoom] = useState(1);
+  const [busy, setBusy] = useState(false);
+  const src = resolveUrl(item.url);
+  const isPdf = /\.pdf$/i.test(src);
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const unduhPDF = async () => {
+    if (isPdf) { window.open(src, "_blank"); return; }
+    setBusy(true);
+    try {
+      const dataUrl = await imageToA4DataUrl(src);                        // A4 jpeg (CORS aman)
+      const pdfBlob = buildPdfFromJpeg(dataUrlToBytes(dataUrl), 2480, 3508); // murni JS, tanpa CDN
+      const url = URL.createObjectURL(pdfBlob);
+      const a = document.createElement("a");
+      a.href = url; a.download = (item.label || "dokumen").replace(/[^\w]+/g, "_") + ".pdf";
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch { window.open(src, "_blank"); }
+    finally { setBusy(false); }
+  };
+
+  const cetak = () => {
+    const w = window.open("", "_blank");
+    if (!w) return;
+    if (isPdf) { w.location.href = src; return; }
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${item.label || "Dokumen"}</title>
+      <style>@page{size:A4 portrait;margin:10mm} html,body{margin:0;padding:0} img{display:block;width:100%;height:auto;max-height:277mm;object-fit:contain}</style></head>
+      <body><img src="${src}" onload="setTimeout(function(){window.print()},250)"/></body></html>`);
+    w.document.close();
+  };
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.92)", zIndex: 10000, display: "flex", flexDirection: "column" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", background: "rgba(0,0,0,.4)" }}>
+        <button onClick={onClose} style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid #666", background: "none", color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>← Kembali</button>
+        <div style={{ color: "#fff", fontWeight: 700, fontSize: 13, flex: 1, textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.label || "Dokumen"}</div>
+        <button onClick={onClose} style={{ width: 36, height: 36, borderRadius: "50%", border: "1px solid #666", background: "none", color: "#fff", fontSize: 18, cursor: "pointer" }}>✕</button>
+      </div>
+      <div onClick={(e) => e.stopPropagation()} style={{ flex: 1, overflow: "auto", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 10 }}>
+        {isPdf
+          ? <iframe title="pdf" src={src} style={{ width: "100%", height: "80vh", border: "none", background: "#fff", borderRadius: 6 }} />
+          : <img src={src} alt={item.label || ""} style={{ width: `${zoom * 100}%`, maxWidth: zoom === 1 ? "100%" : "none", height: "auto", objectFit: "contain", background: "#fff", borderRadius: 6, transition: "width .15s" }} />}
+      </div>
+      <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", gap: 8, padding: "10px 12px", background: "rgba(0,0,0,.5)", flexWrap: "wrap", justifyContent: "center" }}>
+        {!isPdf && (
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <button onClick={() => setZoom((z) => Math.max(1, +(z - 0.5).toFixed(1)))} style={{ width: 40, height: 40, borderRadius: 8, border: "1px solid #666", background: "none", color: "#fff", fontSize: 20, cursor: "pointer" }}>−</button>
+            <span style={{ color: "#ccc", fontSize: 12, minWidth: 42, textAlign: "center" }}>{Math.round(zoom * 100)}%</span>
+            <button onClick={() => setZoom((z) => Math.min(4, +(z + 0.5).toFixed(1)))} style={{ width: 40, height: 40, borderRadius: 8, border: "1px solid #666", background: "none", color: "#fff", fontSize: 20, cursor: "pointer" }}>+</button>
+          </div>
+        )}
+        <button onClick={unduhPDF} disabled={busy} style={{ padding: "10px 16px", borderRadius: 8, border: "none", background: "#EF9F27", color: "#1a1208", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>{busy ? "Membuat..." : "📄 Unduh PDF"}</button>
+        <button onClick={cetak} style={{ padding: "10px 16px", borderRadius: 8, border: "1px solid #888", background: "none", color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>🖨 Cetak</button>
+      </div>
+    </div>
+  );
+}
+
+/* Thumbnail dokumen: klik -> buka DriverDocModal (bukan buka gambar mentah). */
+function DocThumb({ url, label, className, style, pdfNode, imgStyle }) {
+  const [open, setOpen] = useState(false);
+  const isPdf = (url || "").toLowerCase().endsWith(".pdf");
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} className={className}
+        style={{ border: "none", padding: 0, cursor: "pointer", background: "none", ...(style || {}) }}>
+        {isPdf ? (pdfNode || <div className="drv-doc-pdf">PDF</div>) : <img src={resolveUrl(url)} alt={label || "dokumen"} style={imgStyle} />}
+      </button>
+      {open && <DriverDocModal item={{ url, label }} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
 /* Modal scanner: auto-deteksi 4 sudut (OpenCV) + geser manual + perspective transform + filter. */
 export function CropModal({ url, file, onCancel, onConfirm }) {
   const imgRef = useRef(null);
@@ -657,32 +746,13 @@ export function CropModal({ url, file, onCancel, onConfirm }) {
         finalCanvas = applyFilter(canvas);
       }
 
-      // Bungkus hasil scan jadi PDF A4 (MURNI JS, tanpa jsPDF/CDN) supaya dokumen
-      // kebuka LANGSUNG sebagai PDF pas diklik di link driver. Preview tetap pakai
-      // gambar (ringan & pasti tampil di HP); yang diupload = file PDF.
+      // Output GAMBAR (JPG) — gampang di-zoom di viewer & ringan. Pas diklik nanti
+      // dibuka di DocPreviewModal (viewer in-app) yang ada tombol 📄 Unduh PDF (murni
+      // JS, tanpa CDN) + 🖨 Cetak — bukan lagi buka gambar mentah di browser.
       const baseName = (file.name || "scan").replace(/\.\w+$/, "");
-      let out, previewUrl, isPdf = false;
-      try {
-        const AW = 2480, AH = 3508, mg = 70; // A4 300dpi + margin
-        const a4 = document.createElement("canvas"); a4.width = AW; a4.height = AH;
-        const actx = a4.getContext("2d");
-        actx.fillStyle = "#fff"; actx.fillRect(0, 0, AW, AH);
-        const sc2 = Math.min((AW - mg * 2) / finalCanvas.width, (AH - mg * 2) / finalCanvas.height);
-        const dw = finalCanvas.width * sc2, dh = finalCanvas.height * sc2;
-        actx.imageSmoothingEnabled = true; actx.imageSmoothingQuality = "high";
-        actx.drawImage(finalCanvas, (AW - dw) / 2, (AH - dh) / 2, dw, dh);
-        const jpgBlob = await new Promise((r) => a4.toBlob(r, "image/jpeg", 0.92));
-        const jpgBytes = new Uint8Array(await jpgBlob.arrayBuffer());
-        const pdfBlob = buildPdfFromJpeg(jpgBytes, AW, AH);
-        out = new File([pdfBlob], baseName + ".pdf", { type: "application/pdf" });
-        previewUrl = URL.createObjectURL(jpgBlob); // preview gambar (bukan iframe PDF yg suka blank di HP)
-      } catch {
-        // Fallback: kalau bungkus PDF gagal, pakai JPG biasa biar user nggak mentok.
-        const blob = await new Promise((r) => finalCanvas.toBlob(r, "image/jpeg", 0.92));
-        out = blob ? new File([blob], baseName + "_scan.jpg", { type: "image/jpeg" }) : file;
-        previewUrl = URL.createObjectURL(out);
-      }
-      setReview({ url: previewUrl, file: out, isPdf });
+      const blob = await new Promise((r) => finalCanvas.toBlob(r, "image/jpeg", 0.92));
+      const out = blob ? new File([blob], baseName + "_scan.jpg", { type: "image/jpeg" }) : file;
+      setReview({ url: URL.createObjectURL(out), file: out, isPdf: false });
       // Jangan langsung upload -- tampilin hasilnya dulu, biar user bisa cek/edit ulang
       // sebelum beneran dikirim (matching Office Lens/CamScanner-style review step).
     } catch { setReview({ url: URL.createObjectURL(file), file, isPdf: false }); }
@@ -2151,10 +2221,8 @@ export default function DriverCheckpoint() {
                 </div>
               )}
               <div className="drv-doc-grid">
-                {bastkList.map((b) => (
-                  <a key={b.id} href={resolveUrl(b.url)} target="_blank" rel="noreferrer" className="drv-doc-thumb">
-                    {b.url.toLowerCase().endsWith(".pdf") ? <div className="drv-doc-pdf">PDF</div> : <img src={resolveUrl(b.url)} alt="bastk" />}
-                  </a>
+                {bastkList.map((b, i) => (
+                  <DocThumb key={b.id} url={b.url} label={`BASTK ${i + 1}`} className="drv-doc-thumb" />
                 ))}
                 {bastkList.length < 6 && (
                   <>
@@ -2199,9 +2267,8 @@ export default function DriverCheckpoint() {
               />
               {resi ? (
                 <div className="drv-resi-done">
-                  <a href={resolveUrl(resi.url)} target="_blank" rel="noreferrer">
-                    {resi.url.toLowerCase().endsWith(".pdf") ? <div className="drv-doc-pdf">PDF</div> : <img src={resolveUrl(resi.url)} alt="resi" />}
-                  </a>
+                  <DocThumb url={resi.url} label="Resi Pengiriman" />
+
                   <button className="drv-btn drv-btn-ghost" onClick={() => triggerFile("resi")} disabled={uploadingResi} data-testid="btn-replace-resi">
                     {uploadingResi ? "Upload..." : "Ganti Foto"}
                   </button>
@@ -3067,15 +3134,12 @@ function DokumenScreen({ visible, onBack, trip, bastkList, resi, handoverDone, u
               </div>
             </div>
             <div className="keep-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, margin: "16px 0" }} data-testid="dokumen-bastk-gallery">
-              {bastkList.map((b) => {
-                const isPdf = (b.url || "").toLowerCase().endsWith(".pdf");
-                return (
-                  <a key={b.id} href={resolveUrl(b.url)} target="_blank" rel="noreferrer"
-                    style={{ aspectRatio: "1/1", borderRadius: 12, overflow: "hidden", border: "1px solid #1E293B", display: "flex", alignItems: "center", justifyContent: "center", background: "#0E1524" }}>
-                    {isPdf ? <FileText size={20} color="#60A5FA" /> : <img src={resolveUrl(b.url)} alt="bastk" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
-                  </a>
-                );
-              })}
+              {bastkList.map((b, i) => (
+                <DocThumb key={b.id} url={b.url} label={`BASTK ${i + 1}`}
+                  style={{ aspectRatio: "1/1", borderRadius: 12, overflow: "hidden", border: "1px solid #1E293B", display: "flex", alignItems: "center", justifyContent: "center", background: "#0E1524" }}
+                  pdfNode={<FileText size={20} color="#60A5FA" />}
+                  imgStyle={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              ))}
             </div>
             {bastkList.length < 6 && (
               <>
