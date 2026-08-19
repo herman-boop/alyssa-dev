@@ -18,10 +18,12 @@ const gold = "#b8860b";
 
 export async function printPenawaran(rows, meta) {
   const w = window.open("", "_blank"); // buka dulu (dalam gesture klik) biar nggak keblok popup
-  const { nama_pt, ttdNama, ttdJabatan, stempel } = meta || {};
+  const { nama_pt, ttdNama, ttdJabatan, stempel, tanggal } = meta || {};
   const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const fmtTgl = (iso) => (iso ? new Date(iso).toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" }) : "-");
   const now = new Date();
+  // Tanggal penawaran: pakai input manual kalau ada (yyyy-mm-dd), fallback hari ini.
+  const tglPakai = tanggal ? `${tanggal}T00:00:00` : now.toISOString();
   const noDoc = await nextDocNo("penawaran", "PH"); // nomor auto-increment
   // Grand total = jumlah seluruh Harga Satuan semua baris (Asuransi TIDAK dijumlahkan).
   const grandTotal = (rows || []).reduce((s, e) => s + (e.harga_deal || 0), 0);
@@ -92,7 +94,7 @@ export async function printPenawaran(rows, meta) {
       </div>
       <table class="ph-meta-table">
         <tr><td>No. Penawaran</td><td>${noDoc}</td></tr>
-        <tr><td>Tanggal</td><td>${fmtTgl(now.toISOString())}</td></tr>
+        <tr><td>Tanggal</td><td>${fmtTgl(tglPakai)}</td></tr>
         <tr><td>Berlaku</td><td>7 hari sejak tanggal</td></tr>
       </table>
     </div>
@@ -143,6 +145,10 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
   const [ttdNama, setTtdNama] = useState("");
   const [ttdJabatan, setTtdJabatan] = useState("");
   const [stempel, setStempel] = useState("");
+  const [tglPenawaran, setTglPenawaran] = useState(() => {
+    const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    return d.toISOString().slice(0, 10); // hari ini (lokal), yyyy-mm-dd
+  });
   const [selIdx, setSelIdx] = useState(() => new Set());
   const [cari, setCari] = useState("");
 
@@ -207,6 +213,10 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
               {list.length === 0 && <div style={{ padding: 14, textAlign: "center", color: gray, fontSize: 12 }}>Belum ada rute</div>}
             </div>
 
+            <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: gray, marginBottom: 4 }}>TANGGAL PENAWARAN</label>
+            <input type="date" value={tglPenawaran} onChange={(e) => setTglPenawaran(e.target.value)} data-testid="penawaran-tanggal"
+              style={{ width: "100%", boxSizing: "border-box", padding: "9px 12px", borderRadius: 8, border: `1px solid ${border}`, fontSize: 13, marginBottom: 12 }} />
+
             <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: gray, marginBottom: 4 }}>NAMA PENANDA TANGAN</label>
             <input value={ttdNama} onChange={(e) => setTtdNama(e.target.value)} placeholder="mis. Alyssa Herman"
               style={{ width: "100%", boxSizing: "border-box", padding: "9px 12px", borderRadius: 8, border: `1px solid ${border}`, fontSize: 13, marginBottom: 12 }} />
@@ -238,7 +248,7 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
               <button onClick={() => {
                 const sel = list.filter((_, i) => selIdx.has(i));
                 if (!sel.length) { alert("Centang minimal 1 rute dulu bro."); return; }
-                printPenawaran(sel, { nama_pt: namaPt, ttdNama, ttdJabatan, stempel });
+                printPenawaran(sel, { nama_pt: namaPt, ttdNama, ttdJabatan, stempel, tanggal: tglPenawaran });
                 setOpen(false);
               }}
                 style={{ padding: "9px 18px", borderRadius: 8, border: "none", background: gold, color: "#fff", fontSize: 12.5, fontWeight: 800, cursor: "pointer" }}>🖨️ Cetak A4 ({selIdx.size})</button>
