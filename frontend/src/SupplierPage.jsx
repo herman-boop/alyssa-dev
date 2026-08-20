@@ -179,19 +179,35 @@ export default function SupplierPage() {
   const [rekapOpen, setRekapOpen] = useState(false);
   const [rekapNo, setRekapNo] = useState("");
   const [rekapProj, setRekapProj] = useState("all");   // "all" = semua projek (dipisah), atau id projek tertentu
+  const [rekapSel, setRekapSel] = useState(() => new Set()); // id unit yang dicentang utk dicetak/simpan
   const [rekapSaving, setRekapSaving] = useState(false);
-  const openRekap = () => { setMenuOpen(false); setRekapNo(supplierAutoDocNo()); setRekapProj("all"); setRekapOpen(true); };
-  // Job yang dicetak/disimpan sesuai pilihan projek di modal rekap.
+  const openRekap = () => {
+    setMenuOpen(false); setRekapNo(supplierAutoDocNo()); setRekapProj("all");
+    setRekapSel(new Set((selected?.jobs || []).map((j) => j.id))); // default: semua unit dicentang
+    setRekapOpen(true);
+  };
+  // Unit dalam scope projek terpilih (buat ditampilkan di checklist).
   const rekapJobs = () => {
     const all = selected?.jobs || [];
     return rekapProj === "all" ? all : all.filter((j) => (j.project_id || "_none") === rekapProj);
   };
+  // Ganti scope projek -> otomatis centang semua unit di scope baru.
+  const changeRekapProj = (pid) => {
+    setRekapProj(pid);
+    const all = selected?.jobs || [];
+    const scope = pid === "all" ? all : all.filter((j) => (j.project_id || "_none") === pid);
+    setRekapSel(new Set(scope.map((j) => j.id)));
+  };
+  const toggleRekapUnit = (id) => setRekapSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  // Unit final yang benar-benar dicetak/disimpan = scope ∩ dicentang.
+  const chosenJobs = () => rekapJobs().filter((j) => rekapSel.has(j.id));
   const rekapProjName = () => (selected?.projects || []).find((p) => p.id === rekapProj)?.nama || "";
   const saveRekapHistori = async () => {
     if (!selected) return;
+    const jobs = chosenJobs();
+    if (!jobs.length) { flash("Centang minimal 1 unit dulu"); return; }
     setRekapSaving(true);
     try {
-      const jobs = rekapJobs();
       const gHarga = jobs.reduce((s, j) => s + (j.total_harga || 0), 0);
       const gBayar = jobs.reduce((s, j) => s + (j.total_terbayar || 0), 0);
       const noDoc = (rekapNo.trim() || supplierAutoDocNo());
@@ -809,7 +825,7 @@ export default function SupplierPage() {
         <Modal title="Rekap Supplier — No. Dokumen" onClose={() => setRekapOpen(false)}
           foot={<>
             <button style={BTN_GHOST} onClick={() => setRekapOpen(false)}>Batal</button>
-            <button style={BTN_GHOST} onClick={() => printSupplierA4(selected, rekapProj === "all" ? null : rekapJobs(), rekapNo)} data-testid="sup-rekap-print">🖨️ Cetak</button>
+            <button style={BTN_GHOST} onClick={() => { const j = chosenJobs(); if (!j.length) { flash("Centang minimal 1 unit dulu"); return; } printSupplierA4(selected, j, rekapNo); }} data-testid="sup-rekap-print">🖨️ Cetak</button>
             <button style={BTN} onClick={saveRekapHistori} disabled={rekapSaving} data-testid="sup-rekap-save">{rekapSaving ? "Menyimpan…" : "💾 Simpan ke Histori"}</button>
           </>}>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -820,18 +836,43 @@ export default function SupplierPage() {
             </div>
             {(selected.projects || []).length > 1 && (
               <div>
-                <div style={{ ...L }}>Projek yang dicetak</div>
-                <select style={I} value={rekapProj} onChange={(e) => setRekapProj(e.target.value)} data-testid="sup-rekap-proj">
+                <div style={{ ...L }}>Scope Projek</div>
+                <select style={I} value={rekapProj} onChange={(e) => changeRekapProj(e.target.value)} data-testid="sup-rekap-proj">
                   <option value="all">Semua Projek (dipisah per grup)</option>
                   {(selected.projects || []).map((p) => (
                     <option key={p.id} value={p.id}>📁 {p.nama}</option>
                   ))}
                 </select>
-                <div style={{ fontSize: 11, color: C.mute, marginTop: 4 }}>Pilih 1 projek = cetak/simpan unit projek itu aja. "Semua" = 1 laporan, tiap grup ada subtotal.</div>
               </div>
             )}
+            {/* Pilih unit yang mau dicetak — centang berapa aja */}
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <div style={{ ...L, margin: 0 }}>Unit yang dicetak — {chosenJobs().length}/{rekapJobs().length}</div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button style={{ ...BTN_GHOST, padding: "4px 10px", fontSize: 11 }} onClick={() => setRekapSel(new Set(rekapJobs().map((j) => j.id)))}>Semua</button>
+                  <button style={{ ...BTN_GHOST, padding: "4px 10px", fontSize: 11 }} onClick={() => setRekapSel(new Set())}>Kosongkan</button>
+                </div>
+              </div>
+              <div style={{ maxHeight: 220, overflowY: "auto", border: `1px solid ${C.inpLine}`, borderRadius: 10 }}>
+                {rekapJobs().length === 0 && <div style={{ padding: 14, textAlign: "center", color: C.mute, fontSize: 12 }}>Belum ada unit.</div>}
+                {rekapJobs().map((j) => {
+                  const on = rekapSel.has(j.id);
+                  const pname = (selected.projects || []).find((p) => p.id === j.project_id)?.nama;
+                  return (
+                    <label key={j.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 11px", borderBottom: `1px solid ${C.line}`, cursor: "pointer", background: on ? "#12261a" : "transparent" }} data-testid={`sup-rekap-unit-${j.id}`}>
+                      <input type="checkbox" checked={on} onChange={() => toggleRekapUnit(j.id)} style={{ width: 17, height: 17, flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{j.nopol || j.no_rangka || "(tanpa nopol)"} <span style={{ color: C.mute, fontWeight: 500 }}>· {j.vehicle_type || "Unit"}</span></div>
+                        <div style={{ fontSize: 11, color: C.mute }}>{j.asal_kota || "-"} → {j.tujuan_kota || "-"} · {fRp(j.total_harga)}{rekapProj === "all" && pname ? ` · 📁 ${pname}` : ""}</div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
             <div style={{ fontSize: 12.5, color: C.mute }}>
-              Supplier: <b style={{ color: C.ink }}>{selected.nama}</b> · {rekapJobs().length} unit · Total Rp {rekapJobs().reduce((s, j) => s + (j.total_harga || 0), 0).toLocaleString("id-ID")}
+              Supplier: <b style={{ color: C.ink }}>{selected.nama}</b> · {chosenJobs().length} unit dipilih · Total Rp {chosenJobs().reduce((s, j) => s + (j.total_harga || 0), 0).toLocaleString("id-ID")}
             </div>
             <div style={{ fontSize: 11.5, color: C.mute }}>💾 Simpan = masuk ke <b style={{ color: C.ink }}>Histori Dokumen</b> (bisa dicetak ulang). 🖨️ Cetak = langsung print A4.</div>
           </div>
