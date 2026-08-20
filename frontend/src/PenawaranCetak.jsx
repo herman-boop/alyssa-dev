@@ -18,17 +18,28 @@ const gold = "#b8860b";
 
 export async function printPenawaran(rows, meta) {
   const w = window.open("", "_blank"); // buka dulu (dalam gesture klik) biar nggak keblok popup
-  const { nama_pt, ttdNama, ttdJabatan, stempel, tanggal } = meta || {};
+  const { nama_pt, ttdNama, ttdJabatan, stempel, tanggal, insVal, insRate, withPpn, taxIncl, withPph } = meta || {};
   const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const fmtTgl = (iso) => (iso ? new Date(iso).toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" }) : "-");
   const now = new Date();
   // Tanggal penawaran: pakai input manual kalau ada (yyyy-mm-dd), fallback hari ini.
   const tglPakai = tanggal ? `${tanggal}T00:00:00` : now.toISOString();
   const noDoc = await nextDocNo("penawaran", "PH"); // nomor auto-increment
-  // Grand total = jumlah seluruh Harga Satuan semua baris (Asuransi TIDAK dijumlahkan).
-  const grandTotal = (rows || []).reduce((s, e) => s + (e.harga_deal || 0), 0);
+  // Subtotal pengiriman = jumlah seluruh Harga Satuan semua baris.
+  const subtotal = (rows || []).reduce((s, e) => s + (e.harga_deal || 0), 0);
+  // ── Pajak (mirip invoice): PPN 1,1% + toggle "harga sudah termasuk" + potong PPh 23 2% ──
+  const ppnOn = !!withPpn, incl = !!taxIncl, pphOn = !!withPph;
+  const dpp = (ppnOn && incl) ? Math.round(subtotal / 1.011) : subtotal;
+  const ppn = !ppnOn ? 0 : (incl ? subtotal - dpp : Math.round(subtotal * 0.011));
+  const pph = pphOn ? Math.round(dpp * 0.02) : 0;
+  const shipTotal = (incl ? subtotal : subtotal + ppn) - pph;
+  // ── Asuransi (DI LUAR pajak): premi = nilai pertanggungan × rate% ──
+  const insBase = Number(String(insVal ?? "").replace(/[^0-9]/g, "")) || 0;
+  const rate = (insRate === 0 || insRate) ? Number(insRate) : 0.15;
+  const premi = insBase > 0 ? Math.round(insBase * (rate / 100)) : 0;
+  const grandTotal = shipTotal + premi;
+  const hasBreakdown = ppnOn || pph > 0 || premi > 0;
   const body = (rows || []).map((e, i) => {
-    const sudah = e.asuransi && e.asuransi > 0;
     const satuan = e.harga_deal || 0;
     return `<tr>
       <td class="c">${i + 1}</td>
@@ -36,7 +47,6 @@ export async function printPenawaran(rows, meta) {
       <td>${esc(e.moda || "-")}</td>
       <td>${esc(e.tipe_kendaraan || "-")}</td>
       <td class="r">${fRp(satuan)}</td>
-      <td class="c"><span class="ph-ins ${sudah ? "y" : "n"}">${sudah ? "Termasuk" : "Belum"}</span></td>
     </tr>`;
   }).join("");
 
@@ -64,8 +74,13 @@ export async function printPenawaran(rows, meta) {
     table.ph tfoot .ph-total td { border-top:2px solid ${DOC_BRAND.navy}; border-bottom:none; padding:7px 7px; font-size:10px; background:#fff; }
     table.ph tfoot .ph-total .lbl { text-align:right; font-weight:800; letter-spacing:.3px; color:${DOC_BRAND.ink}; }
     table.ph tfoot .ph-total .val { text-align:right; font-weight:800; white-space:nowrap; color:${DOC_BRAND.ink}; }
-    .ph-ins { display:inline-block; font-size:8px; font-weight:800; border-radius:10px; padding:2px 7px; white-space:nowrap; }
-    .ph-ins.y { background:#d1fae5; color:#065f46; } .ph-ins.n { background:#fef2f2; color:#991b1b; }
+    .ph-breakdown { margin:0 0 14px auto; width:320px; max-width:64%; }
+    .ph-breakdown .bd-row { display:flex; justify-content:space-between; gap:14px; font-size:11px; padding:5px 2px; border-bottom:1px solid ${DOC_BRAND.line}; }
+    .ph-breakdown .bd-row span:first-child { color:${DOC_BRAND.muted}; }
+    .ph-breakdown .bd-row span:last-child { font-weight:700; color:${DOC_BRAND.ink}; white-space:nowrap; }
+    .ph-breakdown .bd-row.minus span:last-child { color:#b45309; }
+    .ph-breakdown .bd-row.grand { border-top:2px solid ${DOC_BRAND.navy}; border-bottom:none; margin-top:2px; padding-top:7px; }
+    .ph-breakdown .bd-row.grand span { font-size:13px; font-weight:900; color:${DOC_BRAND.ink}; }
     .ph-pay-box { display:flex; align-items:center; gap:14px; padding:14px 18px; background:${DOC_BRAND.paperMist}; border-radius:8px; margin-bottom:14px; }
     .ph-pay-badge { width:46px; height:46px; border-radius:8px; background:#0054a6; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:900; font-size:13px; flex-shrink:0; }
     .ph-pay-num { font-size:17px; font-weight:900; letter-spacing:1px; color:${DOC_BRAND.ink}; }
@@ -101,17 +116,23 @@ export async function printPenawaran(rows, meta) {
     <table class="ph">
       <thead><tr>
         <th class="c" style="width:24px">No</th><th>Rute</th>
-        <th style="width:96px">Moda</th><th style="width:88px">Tipe Kendaraan</th><th class="r" style="width:118px">Harga Satuan</th><th class="c" style="width:66px">Asuransi</th>
+        <th style="width:100px">Moda</th><th style="width:96px">Tipe Kendaraan</th><th class="r" style="width:132px">Harga Satuan</th>
       </tr></thead>
       <tbody>${body}</tbody>
       <tfoot>
         <tr class="ph-total">
-          <td class="lbl" colspan="4">TOTAL</td>
-          <td class="val">${fRp(grandTotal)}</td>
-          <td></td>
+          <td class="lbl" colspan="4">${hasBreakdown ? "SUBTOTAL PENGIRIMAN" : "TOTAL"}</td>
+          <td class="val">${fRp(subtotal)}</td>
         </tr>
       </tfoot>
     </table>
+    ${hasBreakdown ? `<div class="ph-breakdown">
+      <div class="bd-row"><span>${ppnOn && incl ? "DPP (Dasar Pengenaan Pajak)" : "Subtotal Pengiriman"}</span><span>${fRp(ppnOn && incl ? dpp : subtotal)}</span></div>
+      ${ppnOn ? `<div class="bd-row"><span>PPN 1,1%${incl ? " (sudah termasuk)" : ""}</span><span>${fRp(ppn)}</span></div>` : ""}
+      ${pph ? `<div class="bd-row minus"><span>Potongan PPh 23 (2%)</span><span>- ${fRp(pph)}</span></div>` : ""}
+      ${premi ? `<div class="bd-row"><span>Premi Asuransi (${fRp(insBase)} &times; ${rate}%)</span><span>${fRp(premi)}</span></div>` : ""}
+      <div class="bd-row grand"><span>GRAND TOTAL</span><span>${fRp(grandTotal)}</span></div>
+    </div>` : ""}
     <div class="ph-pay-box">
       <div class="ph-pay-badge">${DOC_BRAND.bank.name}</div>
       <div>
@@ -151,6 +172,12 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
   });
   const [selIdx, setSelIdx] = useState(() => new Set());
   const [cari, setCari] = useState("");
+  // Rincian biaya & pajak (opsional) — mirip invoice
+  const [insVal, setInsVal] = useState("");        // nilai pertanggungan asuransi (angka)
+  const [insRate, setInsRate] = useState("0.15");  // rate asuransi (%)
+  const [withPpn, setWithPpn] = useState(false);   // kenakan PPN 1,1%
+  const [taxIncl, setTaxIncl] = useState(false);   // harga sudah termasuk PPN
+  const [withPph, setWithPph] = useState(false);   // potong PPh 23 (2%)
 
   const list = rows || [];
   const openModal = () => { setSelIdx(new Set(list.map((_, i) => i))); setCari(""); setOpen(true); };
@@ -159,6 +186,19 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
     if (!q) return true;
     return `${e.rute || ""} ${e.moda || ""} ${e.tipe_kendaraan || ""} ${e.catatan || ""}`.toLowerCase().includes(q);
   };
+
+  // Live preview rincian (ikut baris yang dicentang).
+  const onlyDigits = (s) => String(s || "").replace(/[^0-9]/g, "");
+  const pvSub = list.filter((_, i) => selIdx.has(i)).reduce((s, e) => s + (e.harga_deal || 0), 0);
+  const pvDpp = (withPpn && taxIncl) ? Math.round(pvSub / 1.011) : pvSub;
+  const pvPpn = !withPpn ? 0 : (taxIncl ? pvSub - pvDpp : Math.round(pvSub * 0.011));
+  const pvPph = withPph ? Math.round(pvDpp * 0.02) : 0;
+  const pvShip = (taxIncl ? pvSub : pvSub + pvPpn) - pvPph;
+  const pvInsBase = Number(onlyDigits(insVal)) || 0;
+  const pvRate = insRate === "" ? 0 : Number(insRate);
+  const pvPremi = pvInsBase > 0 ? Math.round(pvInsBase * (pvRate / 100)) : 0;
+  const pvGrand = pvShip + pvPremi;
+  const anyBreakdown = withPpn || pvPph > 0 || pvPremi > 0;
 
   return (
     <>
@@ -217,6 +257,48 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
             <input type="date" value={tglPenawaran} onChange={(e) => setTglPenawaran(e.target.value)} data-testid="penawaran-tanggal"
               style={{ width: "100%", boxSizing: "border-box", padding: "9px 12px", borderRadius: 8, border: `1px solid ${border}`, fontSize: 13, marginBottom: 12 }} />
 
+            {/* ── RINCIAN BIAYA & PAJAK (opsional, kaya invoice) ── */}
+            <div style={{ border: `1px solid ${border}`, borderRadius: 10, padding: 12, marginBottom: 12, background: "#fafbfc" }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: navy, marginBottom: 8, letterSpacing: 0.3 }}>RINCIAN BIAYA & PAJAK (opsional)</div>
+
+              <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: gray, marginBottom: 4 }}>Asuransi — Nilai Pertanggungan × Rate</label>
+              <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+                <input inputMode="numeric" value={insVal ? Number(onlyDigits(insVal)).toLocaleString("id-ID") : ""} onChange={(e) => setInsVal(onlyDigits(e.target.value))} placeholder="mis. 300.000.000" data-testid="penawaran-ins-val"
+                  style={{ flex: 2, boxSizing: "border-box", padding: "9px 12px", borderRadius: 8, border: `1px solid ${border}`, fontSize: 13, minWidth: 0 }} />
+                <div style={{ display: "flex", alignItems: "center", gap: 4, flex: 1, minWidth: 90 }}>
+                  <input inputMode="decimal" value={insRate} onChange={(e) => setInsRate(e.target.value.replace(/[^0-9.]/g, ""))} data-testid="penawaran-ins-rate"
+                    style={{ width: "100%", boxSizing: "border-box", padding: "9px 8px", borderRadius: 8, border: `1px solid ${border}`, fontSize: 13, textAlign: "right" }} />
+                  <span style={{ fontSize: 12, color: gray, fontWeight: 700 }}>%</span>
+                </div>
+              </div>
+              <div style={{ fontSize: 10.5, color: gray, marginBottom: 10 }}>Premi = Nilai × rate{pvPremi > 0 ? ` = ${fRp(pvPremi)}` : ""}. Kosongkan Nilai = tanpa asuransi. Asuransi TIDAK kena pajak.</div>
+
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "#111827", marginBottom: 6, cursor: "pointer" }}>
+                <input type="checkbox" checked={withPpn} onChange={(e) => setWithPpn(e.target.checked)} style={{ width: 16, height: 16 }} data-testid="penawaran-ppn" />
+                Kenakan PPN 1,1%
+              </label>
+              {withPpn && (
+                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#374151", margin: "0 0 6px 24px", cursor: "pointer" }}>
+                  <input type="checkbox" checked={taxIncl} onChange={(e) => setTaxIncl(e.target.checked)} style={{ width: 15, height: 15 }} data-testid="penawaran-taxincl" />
+                  Harga sudah termasuk pajak 1,1% (dipecah dari dalam)
+                </label>
+              )}
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "#111827", marginBottom: 8, cursor: "pointer" }}>
+                <input type="checkbox" checked={withPph} onChange={(e) => setWithPph(e.target.checked)} style={{ width: 16, height: 16 }} data-testid="penawaran-pph" />
+                Potong PPh 23 (2%)
+              </label>
+
+              {anyBreakdown && (
+                <div style={{ borderTop: `1px dashed ${border}`, paddingTop: 8, fontSize: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 0", color: gray }}><span>{withPpn && taxIncl ? "DPP" : "Subtotal Pengiriman"}</span><span>{fRp(withPpn && taxIncl ? pvDpp : pvSub)}</span></div>
+                  {withPpn && <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 0", color: gray }}><span>PPN 1,1%{taxIncl ? " (termasuk)" : ""}</span><span>{fRp(pvPpn)}</span></div>}
+                  {pvPph > 0 && <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 0", color: "#b45309" }}><span>Potong PPh 23 (2%)</span><span>- {fRp(pvPph)}</span></div>}
+                  {pvPremi > 0 && <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 0", color: gray }}><span>Premi Asuransi</span><span>{fRp(pvPremi)}</span></div>}
+                  <div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0 0", fontWeight: 900, color: navy, fontSize: 13, borderTop: `1px solid ${border}`, marginTop: 4 }}><span>GRAND TOTAL</span><span>{fRp(pvGrand)}</span></div>
+                </div>
+              )}
+            </div>
+
             <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: gray, marginBottom: 4 }}>NAMA PENANDA TANGAN</label>
             <input value={ttdNama} onChange={(e) => setTtdNama(e.target.value)} placeholder="mis. Alyssa Herman"
               style={{ width: "100%", boxSizing: "border-box", padding: "9px 12px", borderRadius: 8, border: `1px solid ${border}`, fontSize: 13, marginBottom: 12 }} />
@@ -248,7 +330,7 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
               <button onClick={() => {
                 const sel = list.filter((_, i) => selIdx.has(i));
                 if (!sel.length) { alert("Centang minimal 1 rute dulu bro."); return; }
-                printPenawaran(sel, { nama_pt: namaPt, ttdNama, ttdJabatan, stempel, tanggal: tglPenawaran });
+                printPenawaran(sel, { nama_pt: namaPt, ttdNama, ttdJabatan, stempel, tanggal: tglPenawaran, insVal, insRate, withPpn, taxIncl, withPph });
                 setOpen(false);
               }}
                 style={{ padding: "9px 18px", borderRadius: 8, border: "none", background: gold, color: "#fff", fontSize: 12.5, fontWeight: 800, cursor: "pointer" }}>🖨️ Cetak A4 ({selIdx.size})</button>
