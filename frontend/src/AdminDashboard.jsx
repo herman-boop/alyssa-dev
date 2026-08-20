@@ -1398,8 +1398,16 @@ function DuplicateVendorModal({ order, headers, onClose }) {
       // kalau pilih projek existing pakai id-nya langsung. Biar nggak campur.
       let projectId = null;
       if (projMode === "new") {
-        const pr = await axios.post(`${API}/admin/suppliers/${sid}/projects`, { nama: groupName.trim() || autoProjName }, { headers });
-        projectId = pr.data?.id || null;
+        const wanted = groupName.trim() || autoProjName;
+        // Kalau nama projek baru SAMA dgn projek existing (case-insensitive) -> pakai
+        // yang lama, jangan bikin projek dobel bernama sama (unit jadi ngumpul).
+        const existing = supProjects.find((p) => (p.nama || "").trim().toLowerCase() === wanted.toLowerCase());
+        if (existing) {
+          projectId = existing.id;
+        } else {
+          const pr = await axios.post(`${API}/admin/suppliers/${sid}/projects`, { nama: wanted }, { headers });
+          projectId = pr.data?.id || null;
+        }
       } else {
         projectId = projMode;
       }
