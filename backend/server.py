@@ -5325,6 +5325,24 @@ async def reopen_supplier_project(supplier_id: str, project_id: str):
     return {"ok": True}
 
 
+@api_router.patch("/admin/suppliers/{supplier_id}/projects/{project_id}/rename", dependencies=[Depends(require_admin_pin)])
+async def rename_supplier_project(supplier_id: str, project_id: str, body: SupplierProjectBody):
+    """Ganti nama Projek (input manual). Nama kosong -> tolak biar nggak jadi blank."""
+    nama = (body.nama or "").strip()
+    if not nama:
+        raise HTTPException(400, "Nama projek tidak boleh kosong")
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    projects = doc.get("projects") or []
+    idx = next((i for i, p in enumerate(projects) if p.get("id") == project_id), None)
+    if idx is None:
+        raise HTTPException(404, "Projek tidak ditemukan")
+    projects[idx]["nama"] = nama[:80]
+    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"projects": projects}})
+    return projects[idx]
+
+
 @api_router.post("/admin/suppliers/{supplier_id}/jobs/{job_id}/payments", dependencies=[Depends(require_admin_pin)])
 async def add_supplier_payment(
     supplier_id: str, job_id: str,

@@ -87,17 +87,20 @@ export function printSupplierA4(sup, jobsOverride, noDocOverride) {
     table.rps { width:100%; border-collapse:collapse; margin-bottom:14px; }
     table.rps thead { display:table-header-group; } table.rps tfoot { display:table-row-group; }
     table.rps tr { break-inside:avoid; page-break-inside:avoid; }
-    table.rps th { text-align:left; font-size:8.5px; text-transform:uppercase; letter-spacing:.3px; color:#fff; background:${DOC_BRAND.navy}; font-weight:700; padding:5px 7px; white-space:nowrap; }
+    /* Header & blok grup: gaya profesional & samar (bukan blok biru penuh) —
+       warna jadi aksen tipis: background muda + teks navy + garis halus. */
+    table.rps th { text-align:left; font-size:8.5px; text-transform:uppercase; letter-spacing:.3px; color:#334155; background:#f1f5f9; font-weight:700; padding:5px 7px; white-space:nowrap; border-bottom:1.5px solid #cbd5e1; }
     table.rps th.r { text-align:right; } table.rps th.c { text-align:center; }
     table.rps td { padding:4px 7px; font-size:9px; line-height:1.35; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; }
     table.rps tbody tr:nth-child(even) td { background:${DOC_BRAND.paperMist}; }
-    table.rps tr.grp td { background:${DOC_BRAND.navy} !important; color:#fff; font-size:9.5px; padding:5px 7px; border-bottom:none; }
-    table.rps tr.grp td.r { color:#fff; }
-    table.rps tr.grpsub td { background:#eef3fb !important; font-weight:800; font-size:9px; border-top:1px solid ${DOC_BRAND.navy}; border-bottom:2px solid ${DOC_BRAND.navy}; }
+    table.rps tr.grp td { background:#eef2f7 !important; color:#1e3a8a; font-weight:800; font-size:9.5px; padding:5px 7px; border-top:1px solid #cbd5e1; border-bottom:1px solid #cbd5e1; }
+    table.rps tr.grp td:first-child { border-left:3px solid #94a3b8; }
+    table.rps tr.grp td.r { color:#334155; }
+    table.rps tr.grpsub td { background:#f8fafc !important; color:#334155; font-weight:800; font-size:9px; border-top:1px solid #cbd5e1; border-bottom:1.5px solid #94a3b8; }
     table.rps tr.grpsub .lbl { text-align:right; }
     table.rps td.c { text-align:center; } table.rps td.r { text-align:right; white-space:nowrap; }
     table.rps .rp-note { font-size:8px; color:${DOC_BRAND.muted}; margin-top:2px; }
-    table.rps tfoot .tot td { border-top:2px solid ${DOC_BRAND.navy}; border-bottom:none; padding:7px 7px; font-size:10px; font-weight:800; background:#fff; }
+    table.rps tfoot .tot td { border-top:2px solid #334155; border-bottom:none; padding:7px 7px; font-size:10px; font-weight:800; background:#fff; color:#1e293b; }
     table.rps tfoot .tot .lbl { text-align:right; }
     .rps-note { font-size:10px; color:${DOC_BRAND.muted}; line-height:1.7; }
     @page { size:A4 portrait; margin:8mm; }
@@ -455,8 +458,19 @@ export default function SupplierPage() {
   };
   const addProject = async () => {
     setMenuOpen(false);
-    try { await axios.post(`${API}/admin/suppliers/${selected.id}/projects`, {}, { headers }); await reloadSelected(selected.id); flash("Projek baru dibuat"); }
+    const raw = window.prompt("Nama projek baru (mis. Proyek Tambang Berau / PT San Traktor):", "");
+    if (raw === null) return;               // batal
+    const nama = raw.trim();                // kosong -> backend auto "Projek N"
+    try { await axios.post(`${API}/admin/suppliers/${selected.id}/projects`, { nama }, { headers }); await reloadSelected(selected.id); flash(nama ? `Projek "${nama}" dibuat` : "Projek baru dibuat"); }
     catch { flash("Gagal bikin projek"); }
+  };
+  const renameProject = async (g) => {
+    if (!selected || !g || g.id === "_none") return;
+    const nama = window.prompt("Ganti nama projek:", g.nama || "");
+    if (nama === null) return;               // batal
+    if (!nama.trim()) { flash("Nama projek tidak boleh kosong"); return; }
+    try { await axios.patch(`${API}/admin/suppliers/${selected.id}/projects/${g.id}/rename`, { nama: nama.trim() }, { headers }); await reloadSelected(selected.id); flash("Nama projek diperbarui"); }
+    catch (e) { flash(e?.response?.data?.detail || "Gagal ganti nama projek"); }
   };
 
   const resolveUrl = (u) => { if (!u) return ""; if (u.startsWith("http")) return u; return `${BACKEND_URL}${u}`; };
@@ -669,8 +683,15 @@ export default function SupplierPage() {
                 return (
                 <div key={g.id} style={{ marginBottom: 16 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "8px 12px", background: "#1a1f2e", border: `1px solid ${C.line}`, borderRadius: 10, marginBottom: 8 }}>
-                    <div style={{ fontWeight: 800, fontSize: 13, color: C.gold }}>📁 {g.nama} <span style={{ color: C.mute, fontWeight: 600 }}>· {g.jobs.length} unit</span></div>
-                    <div style={{ fontSize: 11, color: C.mute }}>Total {fRp(gTotal)} · Sisa <b style={{ color: gSisa > 0 ? C.red : C.green }}>{fRp(gSisa)}</b></div>
+                    <div style={{ fontWeight: 800, fontSize: 13, color: C.gold, display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>📁 {g.nama}</span>
+                      {g.id !== "_none" && (
+                        <button onClick={() => renameProject(g)} title="Ganti nama projek" data-testid={`sup-rename-proj-${g.id}`}
+                          style={{ background: "none", border: "none", cursor: "pointer", fontSize: 13, padding: "0 2px", lineHeight: 1 }}>✏️</button>
+                      )}
+                      <span style={{ color: C.mute, fontWeight: 600, whiteSpace: "nowrap" }}>· {g.jobs.length} unit</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: C.mute, whiteSpace: "nowrap" }}>Total {fRp(gTotal)} · Sisa <b style={{ color: gSisa > 0 ? C.red : C.green }}>{fRp(gSisa)}</b></div>
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {g.jobs.map((j) => (
