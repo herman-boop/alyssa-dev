@@ -3538,6 +3538,7 @@ const DOC_HIST_FILTERS = [
   { key: "supplier", label: "Rekap Supplier" },
   { key: "jadwal", label: "Jadwal Pengiriman" },
   { key: "jadwal_gabungan", label: "Jadwal Gabungan" },
+  { key: "__pricelist", label: "💰 Daftar Harga" },
 ];
 const DOC_HIST_BADGE = {
   invoice: { txt: "Invoice", bg: "rgba(91,141,239,0.18)", fg: "#9dbcff" },
@@ -3551,15 +3552,24 @@ function HistoriDokumen({ headers }) {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("");
   const [err, setErr] = useState("");
+  const [priceRows, setPriceRows] = useState([]);   // Daftar Harga (job supplier lunas)
+  const [priceQ, setPriceQ] = useState("");         // cari asal/tujuan
+
+  const isPrice = filter === "__pricelist";
 
   const load = useCallback(async () => {
     setLoading(true); setErr("");
     try {
-      const q = filter ? `?jenis=${encodeURIComponent(filter)}` : "";
-      const { data } = await axios.get(`${API}/admin/doc-history${q}`, { headers });
-      setItems(data.items || []);
+      if (filter === "__pricelist") {
+        const { data } = await axios.get(`${API}/admin/suppliers/pricelist`, { headers });
+        setPriceRows(data.items || []);
+      } else {
+        const q = filter ? `?jenis=${encodeURIComponent(filter)}` : "";
+        const { data } = await axios.get(`${API}/admin/doc-history${q}`, { headers });
+        setItems(data.items || []);
+      }
     } catch (e) {
-      setErr("Gagal memuat histori dokumen.");
+      setErr(filter === "__pricelist" ? "Gagal memuat daftar harga." : "Gagal memuat histori dokumen.");
     } finally { setLoading(false); }
   }, [filter, headers]);
 
@@ -3621,6 +3631,41 @@ function HistoriDokumen({ headers }) {
         <div className="adm-dochist-empty">Memuat…</div>
       ) : err ? (
         <div className="adm-dochist-empty" style={{ color: "#e06b6b" }}>{err}</div>
+      ) : isPrice ? (
+        <div>
+          <input value={priceQ} onChange={(e) => setPriceQ(e.target.value)} data-testid="pricelist-search"
+            placeholder="🔎 ketik asal / tujuan (mis. jakarta / berau)…"
+            style={{ width: "100%", boxSizing: "border-box", padding: "10px 14px", borderRadius: 10, border: "1px solid #30363d", background: "#0d1117", color: "#e6edf3", fontSize: 14, marginBottom: 12, outline: "none" }} />
+          {(() => {
+            const pq = priceQ.trim().toLowerCase();
+            let shown = priceRows;
+            if (pq) {
+              shown = priceRows.filter((r) => `${r.asal} ${r.tujuan} ${r.vehicle_type} ${r.supplier_nama} ${r.nopol}`.toLowerCase().includes(pq));
+              shown = shown.slice().sort((a, b) => {
+                const sc = (r) => (((r.asal || "").toLowerCase().startsWith(pq) || (r.tujuan || "").toLowerCase().startsWith(pq)) ? 0 : 1);
+                return sc(a) - sc(b);
+              });
+            }
+            if (!shown.length) return <div className="adm-dochist-empty">{priceRows.length ? "Nggak ada rute yang cocok." : "Belum ada harga supplier yang lunas."}</div>;
+            return (
+              <div className="adm-dochist-list">
+                {shown.map((r, i) => (
+                  <div key={r.job_id || i} className="adm-dochist-row" data-testid="pricelist-row">
+                    <span className="adm-dochist-badge" style={{ background: "rgba(51,181,124,0.18)", color: "#7ee0af" }}>HARGA</span>
+                    <div className="adm-dochist-main">
+                      <div className="adm-dochist-no">{r.rute || "—"}</div>
+                      <div className="adm-dochist-sub">{r.vehicle_type || "-"} · {r.supplier_nama}{r.nopol ? ` · ${r.nopol}` : ""}</div>
+                    </div>
+                    <div className="adm-dochist-when" style={{ textAlign: "right" }}>
+                      <div style={{ fontWeight: 900, color: "#e6edf3", fontSize: 14 }}>Rp {Number(r.harga || 0).toLocaleString("id-ID")}</div>
+                      <div style={{ fontSize: 11, opacity: 0.7 }}>{r.tanggal ? String(r.tanggal).slice(0, 10).split("-").reverse().join("/") : ""}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+        </div>
       ) : items.length === 0 ? (
         <div className="adm-dochist-empty">
           <div style={{ fontSize: 30, marginBottom: 8 }}>🗂️</div>
