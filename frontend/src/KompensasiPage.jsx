@@ -257,6 +257,7 @@ export default function KompensasiPage() {
       key: `${o.order_id}:${u.unit_id || u.nopol || i}`,
       vehicle_type: `${u.vehicle_type || ""}${u.tipe_model ? " " + u.tipe_model : ""}`.trim() || "Kendaraan",
       no_unit: (u.nopol || u.no_rangka || "").toUpperCase(),
+      nopol: (u.nopol || "").toUpperCase(), no_rangka: (u.no_rangka || "").toUpperCase(),
       asal_kota: o.asal_kota || "", tujuan_kota: o.tujuan_kota || "", customer: o.customer_nama || "",
       keterangan: o.order_id || "",
       suggest,
@@ -314,7 +315,7 @@ export default function KompensasiPage() {
   const tarikRows = tarikOrders.flatMap(orderUnitsOf).filter((row) => {
     const q = tarikQ.trim().toLowerCase();
     if (!q) return true;
-    return `${row.no_unit} ${row.vehicle_type} ${row.asal_kota} ${row.tujuan_kota} ${row.customer} ${row.keterangan}`.toLowerCase().includes(q);
+    return `${row.no_unit} ${row.nopol} ${row.no_rangka} ${row.vehicle_type} ${row.asal_kota} ${row.tujuan_kota} ${row.customer} ${row.keterangan}`.toLowerCase().includes(q);
   });
 
   // ── Form catat pembayaran (transfer nyata yang mengurangi sisa) ──
@@ -646,7 +647,7 @@ export default function KompensasiPage() {
                 : <b style={{ color: "#58a6ff" }}>📥 {selected?.nama} → Alyssa Logistik</b>}
               {" "}· ganti arah dulu di form kalau salah.
             </div>
-            <input style={{ ...I, marginBottom: 10 }} placeholder="Cari no unit / tipe / rute / customer…" value={tarikQ} onChange={(e) => setTarikQ(e.target.value)} data-testid="komp-tarik-search" />
+            <input style={{ ...I, marginBottom: 10 }} placeholder="🔎 cari nopol / no rangka / customer / asal / tujuan…" value={tarikQ} onChange={(e) => setTarikQ(e.target.value)} data-testid="komp-tarik-search" />
             <div style={{ maxHeight: 340, overflowY: "auto", border: "1px solid #21262d", borderRadius: 8 }}>
               {tarikLoading && <div style={{ padding: 16, textAlign: "center", color: "#8b949e", fontSize: 12 }}>Memuat order…</div>}
               {!tarikLoading && tarikRows.map((row) => {

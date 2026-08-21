@@ -166,6 +166,7 @@ export default function SelisihPage() {
       key: `${o.order_id}:${u.unit_id || u.nopol || i}`,
       vehicle_type: `${u.vehicle_type || ""}${u.tipe_model ? " " + u.tipe_model : ""}`.trim() || "Kendaraan",
       no_unit: (u.nopol || u.no_rangka || "").toUpperCase(),
+      nopol: (u.nopol || "").toUpperCase(), no_rangka: (u.no_rangka || "").toUpperCase(),
       asal_kota: o.asal_kota || "", tujuan_kota: o.tujuan_kota || "", customer: o.customer_nama || "",
       suggestDeal: suggest,
     }));
@@ -213,7 +214,7 @@ export default function SelisihPage() {
   const tarikRows = tarikOrders.flatMap(orderUnitsOf).filter((row) => {
     const q = tarikQ.trim().toLowerCase();
     if (!q) return true;
-    return `${row.no_unit} ${row.vehicle_type} ${row.asal_kota} ${row.tujuan_kota} ${row.customer}`.toLowerCase().includes(q);
+    return `${row.no_unit} ${row.nopol} ${row.no_rangka} ${row.vehicle_type} ${row.asal_kota} ${row.tujuan_kota} ${row.customer}`.toLowerCase().includes(q);
   });
 
   // ── Payment form (per tagihan) ──
@@ -490,7 +491,7 @@ export default function SelisihPage() {
               <button onClick={() => setTarikOpen(null)} style={{ background: "none", border: "none", color: "#8b949e", fontSize: 18, cursor: "pointer" }}>✕</button>
             </div>
             <div style={{ fontSize: 12, color: "#8b949e", marginBottom: 10 }}>Centang unit, isi Harga Deal &amp; Harga Invoice. Unit &amp; rute otomatis dari order.</div>
-            <input style={I} placeholder="🔎 cari nopol / rute / customer…" value={tarikQ} onChange={(e) => setTarikQ(e.target.value)} />
+            <input style={I} placeholder="🔎 cari nopol / no rangka / customer / asal / tujuan…" value={tarikQ} onChange={(e) => setTarikQ(e.target.value)} />
             {tarikLoading ? <div style={{ padding: 20, textAlign: "center", color: "#8b949e" }}>Memuat…</div> : (
               <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6, maxHeight: "46vh", overflowY: "auto" }}>
                 {tarikRows.map((row) => {
