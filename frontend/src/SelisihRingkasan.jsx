@@ -70,6 +70,15 @@ export default function SelisihRingkasan() {
 
   return (
     <div data-testid="ringkasan-ready" style={{ background: "#f3f4f6", minHeight: "100vh", padding: 24, display: "flex", justifyContent: "center", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
+      <style>{`
+        @page { size: A4; margin: 0; }
+        @media print {
+          [data-testid="ringkasan-ready"]{ background:#fff !important; padding:0 !important; display:block !important; min-height:0 !important; }
+          [data-testid="ringkasan-card"]{ width:100% !important; border-radius:0 !important; padding:8mm 7mm !important; box-shadow:none !important; }
+          table{ page-break-inside:auto; }
+          tr, thead, .avoid-break { page-break-inside:avoid; break-inside:avoid; }
+        }
+      `}</style>
       <div data-testid="ringkasan-card" style={{ width: 600, background: "#fff", borderRadius: 14, padding: 32, color: "#1f2937" }}>
 
         {/* Header */}

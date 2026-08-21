@@ -264,15 +264,15 @@ export default function SelisihPage() {
     if (!selected) return;
     setRingkasanBusy(true);
     try {
-      const r = await axios.get(`${API}/admin/selisih/${selected.id}/ringkasan/image`, { headers, responseType: "blob" });
-      const blob = new Blob([r.data], { type: "image/png" });
+      const r = await axios.get(`${API}/admin/selisih/${selected.id}/ringkasan/pdf`, { headers, responseType: "blob" });
+      const blob = new Blob([r.data], { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `Ringkasan-Selisih-${selected.nama.replace(/[^a-z0-9]+/gi, "-")}.png`;
+      a.download = `Ringkasan-Selisih-${selected.nama.replace(/[^a-z0-9]+/gi, "-")}.pdf`;
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      flash("Ringkasan diunduh — siap dikirim ke WhatsApp");
+      flash("Ringkasan PDF A4 diunduh — siap dikirim / dicetak");
     } catch (e) { flash("Gagal buat ringkasan, coba lagi"); }
     finally { setRingkasanBusy(false); }
   };

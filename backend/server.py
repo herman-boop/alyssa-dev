@@ -5807,6 +5807,47 @@ async def selisih_ringkasan_image(pic_id: str, x_admin_pin: str = Header(..., al
     )
 
 
+@api_router.get("/admin/selisih/{pic_id}/ringkasan/pdf", dependencies=[Depends(require_admin_pin)])
+async def selisih_ringkasan_pdf(pic_id: str, x_admin_pin: str = Header(..., alias="X-Admin-Pin")):
+    """Render Ringkasan Selisih Harga jadi PDF A4 (paginasi rapi, teks vektor) --
+    kaya laporan lain (Penawaran/Supplier), bukan PNG panjang."""
+    doc = await db.selisih_profiles.find_one({"id": pic_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "PIC tidak ditemukan")
+    if not FRONTEND_URL:
+        raise HTTPException(503, "FRONTEND_URL belum diset di backend (Railway -> Variables).")
+    if _browser is None:
+        raise HTTPException(503, "Generator PDF belum siap (Chromium gagal start saat startup).")
+
+    page = await _browser.new_page()
+    try:
+        await page.goto(
+            f"{FRONTEND_URL}/selisih-ringkasan/{pic_id}?pin={x_admin_pin}",
+            wait_until="networkidle", timeout=30_000,
+        )
+        await page.wait_for_selector('[data-testid="ringkasan-ready"]', timeout=15_000)
+        await page.evaluate("document.fonts ? document.fonts.ready : Promise.resolve()")
+        await page.emulate_media(media="print")
+        await page.wait_for_timeout(200)
+        pdf_bytes = await page.pdf(
+            format="A4",
+            print_background=True,
+            margin={"top": "6mm", "bottom": "6mm", "left": "6mm", "right": "6mm"},
+        )
+    except Exception as e:
+        logger.error(f"[selisih-pdf] gagal render PDF untuk PIC {pic_id}: {e}")
+        raise HTTPException(500, "Gagal membuat PDF, coba lagi.")
+    finally:
+        await page.close()
+
+    fname = "".join(c for c in (doc.get("nama") or "pic") if c.isalnum() or c in " -_").strip() or "pic"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="Ringkasan-Selisih-{fname}.pdf"'},
+    )
+
+
 # ══════════════════════════════════════════════════════
 # KOMPENSASI HUTANG PIUTANG SYSTEM (netting utang-piutang 2 arah antara kita
 # & 1 rekanan -- misal saling kirim unit/invoice, lalu diselisihkan jadi 1
