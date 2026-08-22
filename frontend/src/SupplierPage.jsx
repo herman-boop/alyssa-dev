@@ -73,6 +73,24 @@ export function printSupplierA4(sup, jobsOverride, noDocOverride) {
       : "";
     return head + rows + sub;
   }).join("");
+  // ── Riwayat pembayaran (tanggal bukti transfer) dari unit yang dicetak ──
+  const payAll = [];
+  jobs.forEach((j) => (j.payments || []).forEach((p) => payAll.push({
+    tanggal: p.tanggal || "",
+    unit: j.nopol || j.no_rangka || "-",
+    rute: `${j.asal_kota || "-"} → ${j.tujuan_kota || "-"}`,
+    metode: p.metode || (p.tipe === "kompensasi" ? "Kompensasi" : "Transfer"),
+    amount: p.amount || 0,
+  })));
+  payAll.sort((a, b) => String(a.tanggal).localeCompare(String(b.tanggal)));
+  const payBody = payAll.map((p, i) => `<tr>
+      <td class="c">${i + 1}</td>
+      <td>${fDate(p.tanggal) || "-"}</td>
+      <td><b>${esc(p.unit)}</b> <span style="color:${DOC_BRAND.muted}">· ${esc(p.rute)}</span></td>
+      <td>${esc(p.metode)}</td>
+      <td class="r">${rp(p.amount)}</td>
+    </tr>`).join("");
+  const payTotal = payAll.reduce((s, p) => s + (p.amount || 0), 0);
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${noDoc}</title>
   <style>
     ${DOC_BASE_CSS}
@@ -103,6 +121,7 @@ export function printSupplierA4(sup, jobsOverride, noDocOverride) {
     table.rps tfoot .tot td { border-top:2px solid #334155; border-bottom:none; padding:7px 7px; font-size:10px; font-weight:800; background:#fff; color:#1e293b; }
     table.rps tfoot .tot .lbl { text-align:right; }
     .rps-note { font-size:10px; color:${DOC_BRAND.muted}; line-height:1.7; }
+    .rps-paytitle { font-size:11px; font-weight:800; color:${DOC_BRAND.ink}; margin:2px 0 6px; letter-spacing:.3px; }
     @page { size:A4 portrait; margin:8mm; }
     @media print { @page { size:A4 portrait; margin:8mm; } }
   </style></head><body>
@@ -127,7 +146,17 @@ export function printSupplierA4(sup, jobsOverride, noDocOverride) {
         <td class="r">${rp(gHarga)}</td><td class="r">${rp(gBayar)}</td><td class="r">${rp(gSisa)}</td><td></td>
       </tr></tfoot>
     </table>
-    <div class="rps-note"><b>Catatan:</b> Ringkasan pembayaran ke supplier. "Sisa" = Total Harga − Terbayar. Konfirmasi: <b>${DOC_BRAND.phone}</b>.</div>
+    ${payAll.length ? `
+    <div class="rps-paytitle">🧾 Tanggal Pembayaran / Bukti Transfer</div>
+    <table class="rps">
+      <thead><tr>
+        <th class="c" style="width:24px">No</th><th style="width:74px">Tanggal</th><th>Unit / Rute</th>
+        <th style="width:88px">Metode</th><th class="r" style="width:104px">Nominal</th>
+      </tr></thead>
+      <tbody>${payBody}</tbody>
+      <tfoot><tr class="tot"><td class="lbl" colspan="4">TOTAL DIBAYAR</td><td class="r">${rp(payTotal)}</td></tr></tfoot>
+    </table>` : ""}
+    <div class="rps-note"><b>Catatan:</b> Ringkasan pembayaran ke supplier. "Sisa" = Total Harga − Terbayar.${payAll.length ? " Tanggal di atas sesuai bukti transfer." : ""} Konfirmasi: <b>${DOC_BRAND.phone}</b>.</div>
     ${docFooter({ docNo: `Ringkasan ${noDoc}` })}
   </div>
   <script>window.onload=()=>window.print()<\/script>
