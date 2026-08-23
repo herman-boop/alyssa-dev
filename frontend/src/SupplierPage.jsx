@@ -200,11 +200,12 @@ export function printDriverRekapA4(sup, jobsOverride, noDocOverride, tglOverride
     const before = paid; paid += p.amount;
     const isPelunasan = gHarga > 0 && before < gHarga && paid >= gHarga;
     const label = isPelunasan ? "PELUNASAN" : `DP ${++dpNo}`;
-    return `<tr>
-      <td><b class="${isPelunasan ? "dr-pel" : ""}">${label}</b></td>
-      <td>${fDate(p.tanggal) || "-"}</td>
-      <td class="r">${rp(p.amount)}</td>
-    </tr>`;
+    return `<div class="pay-row">
+      <span class="pay-chk">&#10003;</span>
+      <span class="pay-lbl">${label}</span>
+      <span class="pay-date">${fDate(p.tanggal) || "-"}</span>
+      <span class="pay-amt">${rp(p.amount)}</span>
+    </div>`;
   }).join("");
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${noDoc}</title>
@@ -230,6 +231,40 @@ export function printDriverRekapA4(sup, jobsOverride, noDocOverride, tglOverride
     .dr-sum .row.tot span { font-size:15px; font-weight:900; }
     .dr-status { display:inline-block; font-size:11px; font-weight:800; border-radius:6px; padding:3px 12px; }
     .dr-status.y { background:#d1fae5; color:#065f46; } .dr-status.n { background:#fef2f2; color:#991b1b; }
+
+    /* ── Section header dgn gold accent bar ── */
+    .dr-sec2 { display:flex; align-items:center; gap:8px; margin:18px 0 8px; }
+    .dr-sec2 .bar { width:4px; height:15px; background:${DOC_BRAND.gold}; border-radius:2px; flex-shrink:0; }
+    .dr-sec2 .txt { font-size:11px; font-weight:800; color:${DOC_BRAND.ink}; letter-spacing:.5px; text-transform:uppercase; }
+
+    /* ── Riwayat DP / Pembayaran (list transaksi diterima) ── */
+    .pay-box { border:1px solid ${DOC_BRAND.line}; border-radius:9px; overflow:hidden; }
+    .pay-box .pay-head { background:${DOC_BRAND.paperMist}; border-bottom:1px solid ${DOC_BRAND.line}; border-top:3px solid ${DOC_BRAND.gold}; padding:6px 14px; font-size:8.5px; font-weight:700; letter-spacing:.4px; text-transform:uppercase; color:#334155; display:flex; }
+    .pay-box .pay-head .h-lbl { flex:1; } .pay-box .pay-head .h-amt { text-align:right; }
+    .pay-row { display:flex; align-items:center; gap:10px; padding:8px 14px; border-bottom:1px solid #eef0f4; }
+    .pay-row:last-child { border-bottom:none; }
+    .pay-chk { color:${DOC_BRAND.gold}; font-weight:900; font-size:12px; width:13px; flex-shrink:0; text-align:center; }
+    .pay-lbl { font-weight:800; color:${DOC_BRAND.ink}; font-size:11.5px; flex:1; letter-spacing:.2px; }
+    .pay-date { font-size:10px; color:#4b5563; font-weight:500; white-space:nowrap; }
+    .pay-amt { font-weight:800; color:${DOC_BRAND.ink}; font-size:11.5px; text-align:right; white-space:nowrap; min-width:108px; }
+    .pay-empty { padding:12px 14px; color:${DOC_BRAND.muted}; font-size:10px; text-align:center; }
+    .pay-total { display:flex; align-items:center; gap:10px; padding:9px 14px; border-top:2px solid ${DOC_BRAND.navy}; background:${DOC_BRAND.paperMist}; }
+    .pay-total .pay-chk { font-size:13px; }
+    .pay-total-lbl { flex:1; font-weight:900; font-size:11.5px; color:${DOC_BRAND.navy}; letter-spacing:.3px; text-transform:uppercase; }
+    .pay-total-amt { font-weight:900; font-size:13.5px; color:${DOC_BRAND.ink}; white-space:nowrap; }
+
+    /* ── Ringkasan (hierarki jelas, Sisa dominan) ── */
+    .sum2 { width:64%; max-width:348px; margin:10px 0 0 auto; }
+    .sum2-line { display:flex; justify-content:space-between; align-items:baseline; padding:7px 2px; border-bottom:1px solid ${DOC_BRAND.line}; }
+    .sum2-k { font-size:10.5px; color:#333; font-weight:600; letter-spacing:.3px; text-transform:uppercase; }
+    .sum2-v { font-size:12.5px; font-weight:700; color:${DOC_BRAND.ink}; white-space:nowrap; }
+    .sum2-sisa { margin-top:10px; background:${DOC_BRAND.navy}; border-radius:9px; padding:13px 16px; }
+    .sum2-sisa-k { font-size:9.5px; font-weight:700; letter-spacing:.7px; color:#e8c98a; text-transform:uppercase; }
+    .sum2-sisa-v { font-size:23px; font-weight:900; color:#ffffff; margin-top:2px; line-height:1.05; }
+    .sum2-badge { display:inline-block; margin-top:10px; font-size:10px; font-weight:800; border-radius:6px; padding:4px 13px; letter-spacing:.5px; }
+    .sum2-badge.y { background:#e8c98a; color:${DOC_BRAND.navyDeep}; }
+    .sum2-badge.n { background:#ffffff; color:${DOC_BRAND.navy}; }
+
     @page { size:A4 portrait; margin:10mm; }
     @media print { @page { size:A4 portrait; margin:10mm; } }
   </style></head><body>
@@ -245,19 +280,26 @@ export function printDriverRekapA4(sup, jobsOverride, noDocOverride, tglOverride
       <tfoot><tr><td colspan="3" class="r">TOTAL ONGKOS</td><td class="r">${rp(gHarga)}</td></tr></tfoot>
     </table>
 
-    <div class="dr-sec">Riwayat DP / Pembayaran</div>
-    <table class="dr">
-      <thead><tr><th style="width:90px">Keterangan</th><th style="width:120px">Tanggal</th><th class="r">Nominal</th></tr></thead>
-      <tbody>${payRows || `<tr><td colspan="3" class="c" style="color:${DOC_BRAND.muted}">Belum ada pembayaran</td></tr>`}</tbody>
-      <tfoot><tr><td colspan="2" class="r">TOTAL DP / PEMBAYARAN</td><td class="r">${rp(gBayar)}</td></tr></tfoot>
-    </table>
+    <div class="dr-sec2"><span class="bar"></span><span class="txt">Riwayat DP / Pembayaran</span></div>
+    <div class="pay-box">
+      <div class="pay-head"><span class="h-lbl">Pembayaran Diterima</span><span class="h-amt">Nominal</span></div>
+      ${payRows || `<div class="pay-empty">Belum ada pembayaran</div>`}
+      <div class="pay-total">
+        <span class="pay-chk">&#10003;</span>
+        <span class="pay-total-lbl">Total DP / Pembayaran</span>
+        <span class="pay-total-amt">${rp(gBayar)}</span>
+      </div>
+    </div>
 
-    <div class="dr-sec">Ringkasan</div>
-    <div class="dr-sum">
-      <div class="row"><span>Total Ongkos</span><span>${rp(gHarga)}</span></div>
-      <div class="row"><span>Total DP / Pembayaran</span><span>${rp(gBayar)}</span></div>
-      <div class="row tot"><span>Sisa Pembayaran</span><span>${rp(gSisa)}</span></div>
-      <div class="row" style="border-bottom:none; margin-top:6px; align-items:center"><span>Status</span><span class="dr-status ${lunas ? "y" : "n"}">${lunas ? "LUNAS" : "BELUM LUNAS"}</span></div>
+    <div class="dr-sec2"><span class="bar"></span><span class="txt">Ringkasan</span></div>
+    <div class="sum2">
+      <div class="sum2-line"><span class="sum2-k">Total Ongkos</span><span class="sum2-v">${rp(gHarga)}</span></div>
+      <div class="sum2-line"><span class="sum2-k">Sudah Dibayar</span><span class="sum2-v">${rp(gBayar)}</span></div>
+      <div class="sum2-sisa">
+        <div class="sum2-sisa-k">Sisa Pembayaran</div>
+        <div class="sum2-sisa-v">${rp(gSisa)}</div>
+        <span class="sum2-badge ${lunas ? "y" : "n"}">${lunas ? "&#10003; LUNAS" : "BELUM LUNAS"}</span>
+      </div>
     </div>
     ${docFooter({ docNo: `Rekap Driver ${noDoc}` })}
   </div>
