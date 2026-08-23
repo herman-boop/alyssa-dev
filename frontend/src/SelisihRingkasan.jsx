@@ -67,6 +67,16 @@ export default function SelisihRingkasan() {
   const payments = [];
   tagihanList.forEach((tg) => (tg.payments || []).forEach((p) => payments.push({ tanggal: p.tanggal || "", amount: p.amount || 0 })));
   payments.sort((a, b) => String(a.tanggal).localeCompare(String(b.tanggal)));
+  // Group visual per tanggal transfer (data TIDAK di-merge — tiap record tetap 1 baris).
+  // Dipakai buat: subtotal per tanggal + wrapper break-inside:avoid biar 1 tanggal
+  // tidak kepotong antar halaman. TOTAL PEMBAYARAN tetap dari sum record (bukan subtotal).
+  const payByDate = [];
+  const _pm = new Map();
+  payments.forEach((p) => {
+    const d = p.tanggal || "";
+    if (!_pm.has(d)) { _pm.set(d, []); payByDate.push(d); }
+    _pm.get(d).push(p);
+  });
 
   const totalSelisih = data.grand_total_selisih || 0;
   const totalBayar = data.grand_total_terbayar || 0;
@@ -76,17 +86,24 @@ export default function SelisihRingkasan() {
 
   const th = { textAlign: "left", padding: "7px 9px", color: "#334155", fontWeight: 700, fontSize: 9, textTransform: "uppercase", letterSpacing: 0.3, borderBottom: `1.5px solid #cbd5e1`, background: mist };
   const td = { padding: "7px 9px", borderBottom: `1px solid ${border}`, fontSize: 11 };
+  // Gaya compact bank-statement khusus tabel Riwayat Pembayaran (row rapat, font kecil tajam).
+  const thC = { textAlign: "left", padding: "5px 8px", color: "#334155", fontWeight: 700, fontSize: 8, textTransform: "uppercase", letterSpacing: 0.3, borderBottom: `1.2px solid #cbd5e1`, background: mist };
+  const tdC = { padding: "3.5px 8px", borderBottom: `1px solid #eef0f4`, fontSize: 9.5, lineHeight: 1.2 };
+  const subTd = { padding: "3.5px 8px", borderTop: `1px solid ${border}`, borderBottom: `1px solid ${border}`, background: "#fbfcfe", fontSize: 9, color: "#334155" };
 
   return (
     <div data-testid="ringkasan-ready" style={{ background: "#f3f4f6", minHeight: "100vh", padding: 24, display: "flex", justifyContent: "center", fontFamily: "Arial, 'Helvetica Neue', 'Segoe UI', sans-serif" }}>
       <style>{`
-        @page { size: A4; margin: 0; }
+        @page { size: A4 portrait; margin: 10mm; }
         html { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
         @media print {
           [data-testid="ringkasan-ready"]{ background:#fff !important; padding:0 !important; display:block !important; min-height:0 !important; }
-          [data-testid="ringkasan-card"]{ width:100% !important; border-radius:0 !important; padding:8mm 7mm !important; box-shadow:none !important; }
+          [data-testid="ringkasan-card"]{ width:100% !important; border-radius:0 !important; padding:0 !important; box-shadow:none !important; }
+          /* Tabel boleh pecah antar halaman, TAPI thead repeat & tiap grup (tbody/row) utuh */
           table{ page-break-inside:auto; }
-          tr, thead, .avoid-break { page-break-inside:avoid; break-inside:avoid; }
+          thead{ display:table-header-group; }
+          tbody{ page-break-inside:avoid; break-inside:avoid; }
+          tr, .avoid-break { page-break-inside:avoid; break-inside:avoid; }
           * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
         }
       `}</style>
@@ -172,35 +189,58 @@ export default function SelisihRingkasan() {
 
         {/* Section 2: Riwayat Pembayaran (transaksi aktual, tanpa nomor invoice) */}
         <SectionHeader title="Riwayat Pembayaran" />
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
+        <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+          <thead style={{ display: "table-header-group" }}>
             <tr>
-              <th style={{ ...th, width: 34 }}>No.</th>
-              <th style={th}>Tanggal Transfer</th>
-              <th style={{ ...th, textAlign: "right" }}>Nominal</th>
-              <th style={{ ...th, textAlign: "center", width: 90 }}>Status</th>
+              <th style={{ ...thC, width: 30 }}>No.</th>
+              <th style={thC}>Tanggal Transfer</th>
+              <th style={{ ...thC, textAlign: "right", width: 130 }}>Nominal</th>
+              <th style={{ ...thC, textAlign: "center", width: 74 }}>Status</th>
             </tr>
           </thead>
-          <tbody>
-            {payments.length === 0 && (
-              <tr><td colSpan={4} style={{ ...td, textAlign: "center", color: gray }}>Belum ada pembayaran.</td></tr>
-            )}
-            {payments.map((p, i) => (
-              <tr key={i}>
-                <td style={{ ...td, fontWeight: 800, color: navy }}>{String(i + 1).padStart(2, "0")}</td>
-                <td style={{ ...td, fontWeight: 600 }}>{fDate(p.tanggal)}</td>
-                <td style={{ ...td, textAlign: "right", fontWeight: 700 }}>{fRp(p.amount)}</td>
-                <td style={{ ...td, textAlign: "center", color: "#0f7a4d", fontWeight: 700 }}>&#10003; Diterima</td>
-              </tr>
-            ))}
-          </tbody>
+          {payments.length === 0 && (
+            <tbody><tr><td colSpan={4} style={{ ...tdC, textAlign: "center", color: gray }}>Belum ada pembayaran.</td></tr></tbody>
+          )}
+          {(() => {
+            let no = 0;
+            return payByDate.map((d) => {
+              const rows = _pm.get(d);
+              const sub = rows.reduce((s, p) => s + p.amount, 0);
+              // Satu tbody per tanggal + break-inside:avoid -> 1 group tanggal tidak
+              // kepotong antar halaman; thead di atas otomatis repeat tiap halaman.
+              return (
+                <tbody key={d} style={{ breakInside: "avoid", pageBreakInside: "avoid" }}>
+                  {rows.map((p, k) => {
+                    no += 1;
+                    return (
+                      <tr key={k}>
+                        <td style={{ ...tdC, fontWeight: 700, color: navy }}>{String(no).padStart(2, "0")}</td>
+                        <td style={{ ...tdC, fontWeight: 600 }}>{fDate(p.tanggal)}</td>
+                        <td style={{ ...tdC, textAlign: "right", fontWeight: 700 }}>{fRp(p.amount)}</td>
+                        <td style={{ ...tdC, textAlign: "center", color: "#0f7a4d", fontWeight: 700, fontSize: 9 }}>&#10003; Diterima</td>
+                      </tr>
+                    );
+                  })}
+                  {rows.length > 1 && (
+                    <tr>
+                      <td style={subTd}></td>
+                      <td style={{ ...subTd, fontWeight: 700, textAlign: "right" }}>Subtotal {fDate(d)}</td>
+                      <td style={{ ...subTd, textAlign: "right", fontWeight: 800, color: navy }}>{fRp(sub)}</td>
+                      <td style={subTd}></td>
+                    </tr>
+                  )}
+                </tbody>
+              );
+            });
+          })()}
         </table>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: `2px solid ${navy}`, padding: "9px 4px 0", marginTop: 4 }}>
           <span style={{ fontWeight: 900, fontSize: 12.5, color: navy, textTransform: "uppercase", letterSpacing: 0.3 }}>Total Pembayaran</span>
           <span style={{ fontWeight: 900, fontSize: 13.5, color: ink }}>{fRp(totalBayar)}</span>
         </div>
 
-        {/* Section 3: Posisi Akhir — status keseluruhan (dominan) */}
+        {/* Section 3: Posisi Akhir — status keseluruhan (dominan), jangan kepotong */}
+        <div className="avoid-break" style={{ breakInside: "avoid", pageBreakInside: "avoid" }}>
         <SectionHeader title="Posisi Akhir" />
         <div style={{ width: "64%", maxWidth: 360, marginLeft: "auto" }}>
           <div style={{ display: "flex", justifyContent: "space-between", padding: "7px 2px", fontSize: 11.5, borderBottom: `1px solid ${border}` }}>
@@ -221,6 +261,7 @@ export default function SelisihRingkasan() {
               </>
             )}
           </div>
+        </div>
         </div>
 
         <div style={{ textAlign: "center", marginTop: 18, fontSize: 10.5, color: gray }}>Terima kasih atas kerja sama dan kepercayaannya.</div>
