@@ -527,6 +527,15 @@ MIME_TO_EXT = {
     "application/pdf": ".pdf",
 }
 
+# Kebalikan MIME_TO_EXT: dipakai supaya Content-Type yang tersimpan ke Supabase
+# selalu benar (bukan application/octet-stream). Kalau octet-stream, Supabase
+# kirim header nosniff -> browser nolak render gambar -> bukti transfer blank.
+EXT_TO_MIME = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+    ".webp": "image/webp", ".heic": "image/heic", ".heif": "image/heif",
+    ".pdf": "application/pdf",
+}
+
 SUPABASE_URL    = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
 SUPABASE_KEY    = os.environ.get("SUPABASE_SERVICE_KEY", "").strip()
 SUPABASE_BUCKET = os.environ.get("SUPABASE_BUCKET", "fleet-photos").strip()
@@ -594,7 +603,10 @@ def _save_upload(trip_id: str, sub: str, file: UploadFile, allowed: set) -> str:
     if ext not in allowed:
         raise HTTPException(400, f"Format file tidak didukung: {file.content_type or ext}")
 
-    content_type = (file.content_type or "application/octet-stream").split(";")[0].strip()
+    # Content-Type ditentukan dari EKSTENSI (bukan cuma dari browser), supaya
+    # tidak pernah tersimpan sebagai octet-stream. Browser kadang kirim file
+    # tanpa mime type -> kalau dipakai apa adanya, gambar jadi blank pas dibuka.
+    content_type = EXT_TO_MIME.get(ext) or (file.content_type or "application/octet-stream").split(";")[0].strip()
     data = file.file.read()
 
     if _is_heic(ext, content_type):
@@ -605,6 +617,33 @@ def _save_upload(trip_id: str, sub: str, file: UploadFile, allowed: set) -> str:
             logger.warning(f"[heic] gagal convert server-side, simpan HEIC asli: {trip_id}/{sub}: {e}")
 
     return _store_bytes(trip_id, sub, data, ext, content_type)
+
+
+@api_router.get("/media")
+async def media_proxy(u: str):
+    """Proxy gambar/PDF (bukti transfer, dokumen) dari Supabase dengan Content-Type
+    yang benar + inline. Fungsinya: bukti lama yang ke-upload dengan mime type salah
+    (application/octet-stream) tetap TAMPIL di browser, bukan blank. Hanya melayani
+    URL storage milik kita sendiri (anti open-proxy / SSRF)."""
+    if not u:
+        raise HTTPException(400, "url kosong")
+    ok = False
+    if SUPABASE_URL and u.startswith(f"{SUPABASE_URL}/storage/v1/object/public/"):
+        ok = True
+    if not ok:
+        raise HTTPException(400, "url tidak diizinkan")
+    try:
+        resp = _requests.get(u, timeout=30)
+        resp.raise_for_status()
+    except Exception as e:
+        raise HTTPException(502, f"gagal ambil file: {e}")
+    ext = Path(u.split("?", 1)[0]).suffix.lower()
+    ctype = EXT_TO_MIME.get(ext) or "application/octet-stream"
+    return Response(
+        content=resp.content,
+        media_type=ctype,
+        headers={"Content-Disposition": "inline", "Cache-Control": "public, max-age=86400"},
+    )
 
 
 @api_router.post("/trips/{trip_id}/photos/initial")

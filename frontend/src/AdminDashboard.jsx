@@ -4706,7 +4706,12 @@ const GHOST_BTN_BLUE = { padding: "8px", borderRadius: 7, border: "1px solid #1f
 
 function resolveTripUrl(url) {
   if (!url) return "";
-  if (/^https?:\/\//.test(url)) return url;
+  if (/^https?:\/\//.test(url)) {
+    // Bukti/dokumen Supabase kadang ke-serve dgn mime salah -> blank.
+    // Lewatkan proxy backend biar Content-Type dipaksa benar & tampil inline.
+    if (url.includes("/storage/v1/object/public/")) return `${API}/media?u=${encodeURIComponent(url)}`;
+    return url;
+  }
   return `${BACKEND_URL}${url}`;
 }
 

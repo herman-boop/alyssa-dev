@@ -21,7 +21,15 @@ const fmtTgl = (iso) => {
   if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso || "-";
   const [y, m, d] = iso.split("-"); return `${d}-${m}-${y}`;
 };
-const buktiHref = (url) => (!url ? "" : /^https?:\/\//.test(url) ? url : (process.env.REACT_APP_BACKEND_URL || "") + url);
+const buktiHref = (url) => {
+  if (!url) return "";
+  if (/^https?:\/\//.test(url)) {
+    // Bukti Supabase kadang ke-serve dgn mime salah -> blank. Lewatkan proxy backend.
+    if (url.includes("/storage/v1/object/public/")) return `${API}/media?u=${encodeURIComponent(url)}`;
+    return url;
+  }
+  return (process.env.REACT_APP_BACKEND_URL || "") + url;
+};
 
 /* ── Bottom sheet (pilih vendor / jenis biaya) ── */
 function BottomSheet({ open, title, onClose, children }) {

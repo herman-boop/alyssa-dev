@@ -256,7 +256,11 @@ export default function SelisihPage() {
 
   const resolveUrl = (u) => {
     if (!u) return "";
-    if (u.startsWith("http://") || u.startsWith("https://")) return u;
+    if (u.startsWith("http://") || u.startsWith("https://")) {
+      // Bukti Supabase kadang ke-serve dgn mime salah -> blank. Lewatkan proxy backend.
+      if (u.includes("/storage/v1/object/public/")) return `${API}/media?u=${encodeURIComponent(u)}`;
+      return u;
+    }
     return `${BACKEND_URL}${u}`;
   };
 

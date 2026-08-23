@@ -622,7 +622,17 @@ export default function SupplierPage() {
     catch (e) { flash(e?.response?.data?.detail || "Gagal ganti nama projek"); }
   };
 
-  const resolveUrl = (u) => { if (!u) return ""; if (u.startsWith("http")) return u; return `${BACKEND_URL}${u}`; };
+  const resolveUrl = (u) => {
+    if (!u) return "";
+    if (u.startsWith("http")) {
+      // Bukti/dokumen di Supabase kadang ke-serve dgn mime salah (octet-stream)
+      // -> browser nolak render -> blank. Lewatkan proxy backend biar Content-Type
+      // dipaksa benar & tampil inline.
+      if (u.includes("/storage/v1/object/public/")) return `${API}/media?u=${encodeURIComponent(u)}`;
+      return u;
+    }
+    return `${BACKEND_URL}${u}`;
+  };
 
   /* ═══ Riwayat transaksi: group payments by batch_id ═══ */
   const txns = useMemo(() => {
