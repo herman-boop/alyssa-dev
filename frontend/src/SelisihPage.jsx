@@ -228,6 +228,8 @@ export default function SelisihPage() {
 
   const openPay = (tagihanId) => { setPayOpen(tagihanId); setPayAmount(""); setPayCatatan(""); setPayTanggal(todayStr()); setPayFile(null); };
 
+  const [auditOpen, setAuditOpen] = useState(false);
+
   /* ═══ Batch bayar (centang beberapa tagihan → 1 nominal → auto-alokasi) ═══ */
   const [batchSel, setBatchSel] = useState({});     // tagihan_id -> true
   const [batchAmount, setBatchAmount] = useState("");
@@ -366,6 +368,9 @@ export default function SelisihPage() {
               <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
                 <button style={{ ...BTN_GHOST, fontSize: 11, padding: "6px 12px" }} onClick={downloadRingkasan} disabled={ringkasanBusy} data-testid="sel-ringkasan-download">
                   {ringkasanBusy ? "⏳ Membuat..." : "📄 Download Ringkasan"}
+                </button>
+                <button style={{ ...BTN_GHOST, fontSize: 11, padding: "6px 12px" }} onClick={() => setAuditOpen(true)} data-testid="sel-audit-open">
+                  🔍 Audit Riwayat
                 </button>
                 <button style={{ ...BTN_GHOST, fontSize: 11, padding: "6px 12px", color: "#f85149", borderColor: "#f85149" }} onClick={deletePic} data-testid="sel-delete">
                   🗑 Hapus PIC
@@ -600,6 +605,74 @@ export default function SelisihPage() {
           </div>
         </div>
       )}
+
+      {/* ── Audit Riwayat Pembayaran: tiap baris = 1 transaksi bank (batch_id/id), + ref & alokasi ── */}
+      {auditOpen && selected && (() => {
+        const allocs = [];
+        (selected.tagihan || []).forEach((tg) => (tg.payments || []).forEach((p) => allocs.push({ ...p, invoice: tg.no_invoice || "(tanpa nomor)" })));
+        const map = new Map(); const order = [];
+        allocs.forEach((p) => {
+          const key = p.batch_id || p.id;
+          if (!map.has(key)) { map.set(key, { key, isBatch: !!p.batch_id, tanggal: p.tanggal || "", amount: 0, bukti_url: p.bukti_url || "", allocs: [] }); order.push(key); }
+          const b = map.get(key);
+          b.amount += (p.amount || 0);
+          if (!b.tanggal && p.tanggal) b.tanggal = p.tanggal;
+          if (!b.bukti_url && p.bukti_url) b.bukti_url = p.bukti_url;
+          b.allocs.push({ invoice: p.invoice, amount: p.amount || 0 });
+        });
+        const bank = order.map((k) => map.get(k)).sort((a, b) => String(a.tanggal).localeCompare(String(b.tanggal)));
+        bank.forEach((b, i) => { b.no = i + 1; });
+        const dc = {}; bank.forEach((b) => { if (!b.isBatch) dc[b.tanggal] = (dc[b.tanggal] || 0) + 1; });
+        bank.forEach((b) => { b.warn = !b.isBatch && dc[b.tanggal] > 1; });
+        const total = bank.reduce((s, b) => s + b.amount, 0);
+        const anyWarn = bank.some((b) => b.warn);
+        return (
+          <div onClick={() => setAuditOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+            <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 640, maxHeight: "88vh", overflowY: "auto", background: "#161b22", border: "1px solid #21262d", borderRadius: 12, padding: 18, color: "#e6edf3" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                <div style={{ fontWeight: 800, fontSize: 15 }}>🔍 Audit Riwayat Pembayaran</div>
+                <button onClick={() => setAuditOpen(false)} style={{ background: "none", border: "none", color: "#8b949e", fontSize: 20, cursor: "pointer" }}>×</button>
+              </div>
+              <div style={{ fontSize: 12, color: "#8b949e", marginBottom: 12 }}>
+                {bank.length} transaksi bank · {allocs.length} baris alokasi · Total {fRp(total)}. Tiap baris = 1 bukti transfer aktual (bukan pecahan alokasi ke invoice).
+              </div>
+              {anyWarn && (
+                <div style={{ background: "#2a2410", border: "1px solid #6b5a1a", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#e6b450", marginBottom: 12 }}>
+                  ⚠ Ada transfer <b>tunggal</b> dengan tanggal sama. Kalau itu sebenarnya <b>satu</b> transfer di rekening koran, sebaiknya hapus lalu input ulang lewat “Bayar &amp; Alokasi Otomatis” biar jadi satu transaksi.
+                </div>
+              )}
+              {bank.map((b) => (
+                <div key={b.key} style={{ border: `1px solid ${b.warn ? "#6b5a1a" : "#21262d"}`, borderRadius: 10, padding: 12, marginBottom: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+                    <div style={{ fontWeight: 800, fontSize: 14 }}>
+                      No. {String(b.no).padStart(2, "0")} · <span style={{ color: "#8b949e", fontWeight: 600 }}>{fDate(b.tanggal)}</span>
+                    </div>
+                    <div style={{ fontWeight: 900, fontSize: 15 }}>{fRp(b.amount)}</div>
+                  </div>
+                  <div style={{ fontSize: 11, color: "#8b949e", marginTop: 4, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <span>{b.isBatch ? `🔗 Batch alokasi ke ${b.allocs.length} invoice` : "📄 Transfer tunggal"}</span>
+                    <span>Ref: <code style={{ color: "#58a6ff" }}>{b.key}</code></span>
+                    {b.bukti_url && <a href={resolveUrl(b.bukti_url)} target="_blank" rel="noreferrer" style={{ color: "#58a6ff" }}>📎 bukti</a>}
+                  </div>
+                  <div style={{ marginTop: 8, borderTop: "1px solid #21262d", paddingTop: 6 }}>
+                    {b.allocs.map((a, i) => (
+                      <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: "#c9d1d9", padding: "2px 0" }}>
+                        <span style={{ color: "#8b949e" }}>↳ alokasi ke {a.invoice}</span>
+                        <span>{fRp(a.amount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {b.warn && <div style={{ fontSize: 11, color: "#e6b450", marginTop: 6 }}>⚠ Transfer tunggal, tanggal sama dgn transfer lain — cek apa ini harusnya 1 transfer.</div>}
+                </div>
+              ))}
+              {bank.length === 0 && <div style={{ textAlign: "center", color: "#8b949e", fontSize: 13, padding: 16 }}>Belum ada transaksi pembayaran.</div>}
+              <div style={{ display: "flex", justifyContent: "space-between", borderTop: "2px solid #30363d", paddingTop: 10, marginTop: 4, fontWeight: 900, fontSize: 14 }}>
+                <span>TOTAL PEMBAYARAN ({bank.length} transaksi)</span><span>{fRp(total)}</span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {toast && (
         <div style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", background: "#1a2233", border: "1px solid #EF9F27", color: "#EF9F27", padding: "10px 18px", borderRadius: 8, fontSize: 13, fontWeight: 700, zIndex: 999 }}>
