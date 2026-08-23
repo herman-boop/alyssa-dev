@@ -5948,12 +5948,26 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
       try {
         const r = await axios.patch(`${API}/admin/trips/${tripId}/legs`, { legs }, { headers });
         const srv = r.data?.legs;
-        // Sinkron ID (route_leg_id / driver id) dari server sekali, tanpa memicu save ulang.
+        // Sinkron HANYA ID baru (route_leg_id / driver id) ke state TERKINI — JANGAN
+        // replace seluruh array (bisa nimpa ketikan yg masih berjalan). Merge by index,
+        // pertahankan semua field yg diketik user.
         if (Array.isArray(srv)) {
-          const needSync = srv.length !== legs.length || srv.some((l, idx) =>
-            l.route_leg_id !== legs[idx]?.route_leg_id ||
-            (l.drivers || []).some((d, di) => d.id !== legs[idx]?.drivers?.[di]?.id));
-          if (needSync) { skipSaveRef.current = true; setLegs(srv); }
+          setLegs((cur) => {
+            let changed = false;
+            const next = cur.map((l, idx) => {
+              const s = srv[idx]; if (!s) return l;
+              let m = l;
+              if (!l.route_leg_id && s.route_leg_id) { m = { ...m, route_leg_id: s.route_leg_id }; changed = true; }
+              if (Array.isArray(l.drivers) && Array.isArray(s.drivers)) {
+                let dch = false;
+                const nd = l.drivers.map((d, di) => (!d.id && s.drivers[di] && s.drivers[di].id) ? (dch = true, { ...d, id: s.drivers[di].id }) : d);
+                if (dch) { m = { ...m, drivers: nd }; changed = true; }
+              }
+              return m;
+            });
+            if (changed) skipSaveRef.current = true;
+            return changed ? next : cur;
+          });
         }
         setSaveStatus("saved");
       } catch { setSaveStatus("error"); }
@@ -6305,15 +6319,15 @@ function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tri
                       <div>
                         <div style={MINI_LABEL}>Cari / pilih (dari master driver)</div>
                         <DriverAutocomplete
-                          value={(leg.kepala_rombongan && leg.kepala_rombongan.nama) || leg.kord_bayangan || ""}
-                          hp={(leg.kepala_rombongan && leg.kepala_rombongan.hp) || leg.kord_bayangan_hp || ""}
+                          value={leg.kepala_rombongan ? (leg.kepala_rombongan.nama || "") : (leg.kord_bayangan || "")}
+                          hp={leg.kepala_rombongan ? (leg.kepala_rombongan.hp || "") : (leg.kord_bayangan_hp || "")}
                           onChange={(val) => setKepala(i, { nama: val })}
                           onSelect={(nama, hp, id) => setKepala(i, { nama, hp, ref_id: id || null })}
                           headers={headers}
                         />
                       </div>
-                      <label style={MINI_LABEL}>No. HP
-                        <input style={MINI_INPUT} value={(leg.kepala_rombongan && leg.kepala_rombongan.hp) || leg.kord_bayangan_hp || ""} onChange={e => setKepala(i, { hp: e.target.value })} placeholder="08xx-xxxx" />
+                      <label style={MINI_LABEL}>No. HP <span style={{ fontWeight: 400, color: "#6b8f5e" }}>(bisa diedit)</span>
+                        <input style={MINI_INPUT} value={leg.kepala_rombongan ? (leg.kepala_rombongan.hp || "") : (leg.kord_bayangan_hp || "")} onChange={e => setKepala(i, { hp: e.target.value })} placeholder="08xx-xxxx" data-testid={`leg-kepala-hp-${i}`} />
                       </label>
                     </div>
                     <div style={{ fontSize: 9.5, color: "#6b8f5e", marginTop: 6 }}>Link Kepala Rombongan menyusul (Fase 2). Assignment tersimpan per Leg.</div>
