@@ -203,22 +203,27 @@ export function printDriverRekapA4(sup, jobsOverride, noDocOverride, tglOverride
     return baseRow + addRows;
   }).join("");
 
-  // Riwayat pembayaran kronologis -> DP 1, DP 2, ...; label PELUNASAN saat saldo jadi 0.
-  const pays = [];
-  jobs.forEach((j) => (j.payments || []).forEach((p) => pays.push({ tanggal: p.tanggal || "", amount: p.amount || 0 })));
-  pays.sort((a, b) => String(a.tanggal).localeCompare(String(b.tanggal)));
-  let paid = 0, dpNo = 0;
-  const payRows = pays.map((p) => {
-    const before = paid; paid += p.amount;
-    const isPelunasan = gHarga > 0 && before < gHarga && paid >= gHarga;
-    const label = isPelunasan ? "PELUNASAN" : `DP ${++dpNo}`;
-    return `<div class="pay-row">
+  // RIWAYAT PEMBAYARAN = transaksi pembayaran AKTUAL (cocok 1:1 dgn rekening koran).
+  // Sumber = record `payments` existing. 1 transfer ke banyak unit disimpan sbg
+  // beberapa record ber-batch_id sama -> digabung jadi SATU transaksi (dijumlahkan),
+  // JANGAN dipecah per unit & JANGAN diberi label DP. Transaksi beda (walau tanggal
+  // sama) tetap baris terpisah. Urut kronologis by tanggal; tanggal sama -> urutan
+  // pencatatan dipertahankan (encounter order + stable sort).
+  const _txMap = new Map();
+  const _txOrder = [];
+  jobs.forEach((j) => (j.payments || []).forEach((p) => {
+    const key = p.batch_id || p.id;
+    if (!_txMap.has(key)) { _txMap.set(key, { tanggal: p.tanggal || "", amount: 0 }); _txOrder.push(key); }
+    _txMap.get(key).amount += (p.amount || 0);
+  }));
+  const payTx = _txOrder.map((k) => _txMap.get(k));
+  payTx.sort((a, b) => String(a.tanggal).localeCompare(String(b.tanggal)));
+  const payRows = payTx.map((t, i) => `<div class="pay-row">
       <span class="pay-chk">&#10003;</span>
-      <span class="pay-lbl">${label}</span>
-      <span class="pay-date">${fDate(p.tanggal) || "-"}</span>
-      <span class="pay-amt">${rp(p.amount)}</span>
-    </div>`;
-  }).join("");
+      <span class="pay-no">${String(i + 1).padStart(2, "0")}</span>
+      <span class="pay-date2">${fDate(t.tanggal) || "-"}</span>
+      <span class="pay-amt">${rp(t.amount)}</span>
+    </div>`).join("");
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${noDoc}</title>
   <style>
@@ -255,13 +260,13 @@ export function printDriverRekapA4(sup, jobsOverride, noDocOverride, tglOverride
 
     /* ── Riwayat DP / Pembayaran (list transaksi diterima) ── */
     .pay-box { border:1px solid ${DOC_BRAND.line}; border-radius:9px; overflow:hidden; }
-    .pay-box .pay-head { background:${DOC_BRAND.paperMist}; border-bottom:1px solid ${DOC_BRAND.line}; border-top:3px solid ${DOC_BRAND.gold}; padding:6px 14px; font-size:8.5px; font-weight:700; letter-spacing:.4px; text-transform:uppercase; color:#334155; display:flex; }
-    .pay-box .pay-head .h-lbl { flex:1; } .pay-box .pay-head .h-amt { text-align:right; }
+    .pay-box .pay-head { background:${DOC_BRAND.paperMist}; border-bottom:1px solid ${DOC_BRAND.line}; border-top:3px solid ${DOC_BRAND.gold}; padding:6px 14px; display:flex; align-items:center; gap:10px; }
+    .pay-box .pay-head span { font-size:8.5px !important; font-weight:700 !important; color:#334155 !important; letter-spacing:.4px; text-transform:uppercase; }
     .pay-row { display:flex; align-items:center; gap:10px; padding:8px 14px; border-bottom:1px solid #eef0f4; }
     .pay-row:last-child { border-bottom:none; }
     .pay-chk { color:${DOC_BRAND.gold}; font-weight:900; font-size:12px; width:13px; flex-shrink:0; text-align:center; }
-    .pay-lbl { font-weight:800; color:${DOC_BRAND.ink}; font-size:11.5px; flex:1; letter-spacing:.2px; }
-    .pay-date { font-size:10px; color:#4b5563; font-weight:500; white-space:nowrap; }
+    .pay-no { font-weight:800; color:${DOC_BRAND.navy}; font-size:11px; width:26px; flex-shrink:0; }
+    .pay-date2 { font-weight:700; color:${DOC_BRAND.ink}; font-size:11.5px; flex:1; letter-spacing:.2px; white-space:nowrap; }
     .pay-amt { font-weight:800; color:${DOC_BRAND.ink}; font-size:11.5px; text-align:right; white-space:nowrap; min-width:108px; }
     .pay-empty { padding:12px 14px; color:${DOC_BRAND.muted}; font-size:10px; text-align:center; }
     .pay-total { display:flex; align-items:center; gap:10px; padding:9px 14px; border-top:2px solid ${DOC_BRAND.navy}; background:${DOC_BRAND.paperMist}; }
@@ -296,13 +301,13 @@ export function printDriverRekapA4(sup, jobsOverride, noDocOverride, tglOverride
       <tfoot><tr><td colspan="3" class="r">TOTAL ONGKOS</td><td class="r">${rp(gHarga)}</td></tr></tfoot>
     </table>
 
-    <div class="dr-sec2"><span class="bar"></span><span class="txt">Riwayat DP / Pembayaran</span></div>
+    <div class="dr-sec2"><span class="bar"></span><span class="txt">Riwayat Pembayaran</span></div>
     <div class="pay-box">
-      <div class="pay-head"><span class="h-lbl">Pembayaran Diterima</span><span class="h-amt">Nominal</span></div>
+      <div class="pay-head"><span class="pay-chk"></span><span class="pay-no">No.</span><span class="pay-date2">Tanggal Transfer</span><span class="pay-amt">Nominal</span></div>
       ${payRows || `<div class="pay-empty">Belum ada pembayaran</div>`}
       <div class="pay-total">
         <span class="pay-chk">&#10003;</span>
-        <span class="pay-total-lbl">Total DP / Pembayaran</span>
+        <span class="pay-total-lbl">Total Pembayaran</span>
         <span class="pay-total-amt">${rp(gBayar)}</span>
       </div>
     </div>
@@ -310,11 +315,11 @@ export function printDriverRekapA4(sup, jobsOverride, noDocOverride, tglOverride
     <div class="dr-sec2"><span class="bar"></span><span class="txt">Ringkasan</span></div>
     <div class="sum2">
       <div class="sum2-line"><span class="sum2-k">Total Ongkos</span><span class="sum2-v">${rp(gHarga)}</span></div>
-      <div class="sum2-line"><span class="sum2-k">Sudah Dibayar</span><span class="sum2-v">${rp(gBayar)}</span></div>
+      <div class="sum2-line"><span class="sum2-k">Total Pembayaran</span><span class="sum2-v">${rp(gBayar)}</span></div>
       <div class="sum2-sisa">
         <div class="sum2-sisa-k">Sisa Pembayaran</div>
         <div class="sum2-sisa-v">${rp(gSisa)}</div>
-        <span class="sum2-badge ${lunas ? "y" : "n"}">${lunas ? "&#10003; LUNAS" : "BELUM LUNAS"}</span>
+        <span class="sum2-badge ${lunas ? "y" : "n"}">${lunas ? "&#10003; STATUS: LUNAS" : "STATUS: BELUM LUNAS"}</span>
       </div>
     </div>
     ${docFooter({ docNo: `Rekap Driver ${noDoc}` })}
