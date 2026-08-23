@@ -164,6 +164,108 @@ export function printSupplierA4(sup, jobsOverride, noDocOverride) {
   const w = window.open("", "aal_print"); w.document.write(html); w.document.close();
 }
 
+/* FORMAT 2 — KEPALA ROMBONGAN / DRIVER. Sumber data SAMA (jobs + payments),
+   cuma presentation lebih sederhana + riwayat DP/pelunasan kronologis.
+   Total Ongkos / Terbayar / Sisa IDENTIK dengan format Perusahaan. */
+export function printDriverRekapA4(sup, jobsOverride, noDocOverride) {
+  if (!sup) return;
+  const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const rp = (n) => "Rp " + (Number(n) || 0).toLocaleString("id-ID");
+  const now = new Date();
+  const tgl = now.toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
+  const noDoc = (noDocOverride && String(noDocOverride).trim()) || supplierAutoDocNo();
+  const jobs = (jobsOverride && jobsOverride.length) ? jobsOverride : (sup.jobs || []);
+  const gHarga = jobs.reduce((s, j) => s + (j.total_harga || 0), 0);   // Total Ongkos
+  const gBayar = jobs.reduce((s, j) => s + (j.total_terbayar || 0), 0); // Total DP/Pembayaran
+  const gSisa = gHarga - gBayar;
+  const lunas = gSisa <= 0;
+
+  const jobRows = jobs.map((j, i) => {
+    const unit = j.nopol || j.no_rangka || "-";
+    const rute = `${j.asal_kota || "-"} → ${j.tujuan_kota || "-"}`;
+    return `<tr>
+      <td class="c">${i + 1}</td>
+      <td><b>${esc(unit)}</b><div class="dr-note">${esc(j.vehicle_type || "Unit")}</div></td>
+      <td>${esc(rute)}</td>
+      <td class="r">${rp(j.total_harga)}</td>
+    </tr>`;
+  }).join("");
+
+  // Riwayat pembayaran kronologis -> DP 1, DP 2, ...; label PELUNASAN saat saldo jadi 0.
+  const pays = [];
+  jobs.forEach((j) => (j.payments || []).forEach((p) => pays.push({ tanggal: p.tanggal || "", amount: p.amount || 0 })));
+  pays.sort((a, b) => String(a.tanggal).localeCompare(String(b.tanggal)));
+  let paid = 0, dpNo = 0;
+  const payRows = pays.map((p) => {
+    const before = paid; paid += p.amount;
+    const isPelunasan = gHarga > 0 && before < gHarga && paid >= gHarga;
+    const label = isPelunasan ? "PELUNASAN" : `DP ${++dpNo}`;
+    return `<tr>
+      <td><b class="${isPelunasan ? "dr-pel" : ""}">${label}</b></td>
+      <td>${fDate(p.tanggal) || "-"}</td>
+      <td class="r">${rp(p.amount)}</td>
+    </tr>`;
+  }).join("");
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${noDoc}</title>
+  <style>
+    ${DOC_BASE_CSS}
+    body { font-size: 12px; }
+    .doc-sheet { padding: 0; max-width: 210mm; }
+    .dr-kr { margin: 4px 0 10px; font-size: 13px; } .dr-kr b { color:${DOC_BRAND.ink}; }
+    .dr-meta { display:flex; justify-content:space-between; font-size:11px; color:${DOC_BRAND.muted}; margin-bottom:8px; }
+    .dr-sec { font-size:11px; font-weight:800; color:${DOC_BRAND.ink}; letter-spacing:.4px; margin:16px 0 6px; text-transform:uppercase; }
+    table.dr { width:100%; border-collapse:collapse; }
+    table.dr th { text-align:left; font-size:9px; text-transform:uppercase; letter-spacing:.3px; color:#334155; background:#f1f5f9; font-weight:700; padding:6px 8px; border-bottom:1.5px solid #cbd5e1; }
+    table.dr th.r { text-align:right; } table.dr th.c { text-align:center; }
+    table.dr td { padding:6px 8px; font-size:10px; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; }
+    table.dr td.c { text-align:center; } table.dr td.r { text-align:right; white-space:nowrap; }
+    table.dr .dr-note { font-size:8px; color:${DOC_BRAND.muted}; margin-top:2px; }
+    table.dr tfoot td { border-top:2px solid #334155; border-bottom:none; font-weight:800; font-size:11px; padding:7px 8px; }
+    .dr-pel { color:#065f46; }
+    .dr-sum { width:62%; max-width:340px; margin:12px 0 0 auto; }
+    .dr-sum .row { display:flex; justify-content:space-between; padding:6px 2px; font-size:12px; border-bottom:1px solid ${DOC_BRAND.line}; }
+    .dr-sum .row span:last-child { font-weight:700; color:${DOC_BRAND.ink}; }
+    .dr-sum .row.tot { border-top:2px solid ${DOC_BRAND.navy}; border-bottom:none; margin-top:2px; padding-top:8px; }
+    .dr-sum .row.tot span { font-size:15px; font-weight:900; }
+    .dr-status { display:inline-block; font-size:11px; font-weight:800; border-radius:6px; padding:3px 12px; }
+    .dr-status.y { background:#d1fae5; color:#065f46; } .dr-status.n { background:#fef2f2; color:#991b1b; }
+    @page { size:A4 portrait; margin:10mm; }
+    @media print { @page { size:A4 portrait; margin:10mm; } }
+  </style></head><body>
+  <div class="doc-sheet">
+    ${docHeader({ docTitle: "REKAP PEKERJAAN & PEMBAYARAN DRIVER" })}
+    <div class="dr-kr">Kepala Rombongan : <b>${esc(sup.nama || "-")}</b></div>
+    <div class="dr-meta"><span>No. Dokumen: <b>${noDoc}</b></span><span>Tanggal: <b>${tgl}</b> &middot; ${jobs.length} unit</span></div>
+
+    <div class="dr-sec">Rincian Pekerjaan</div>
+    <table class="dr">
+      <thead><tr><th class="c" style="width:26px">No</th><th>Nopol / Unit</th><th>Rute</th><th class="r" style="width:120px">Ongkos</th></tr></thead>
+      <tbody>${jobRows}</tbody>
+      <tfoot><tr><td colspan="3" class="r">TOTAL ONGKOS</td><td class="r">${rp(gHarga)}</td></tr></tfoot>
+    </table>
+
+    <div class="dr-sec">Riwayat DP / Pembayaran</div>
+    <table class="dr">
+      <thead><tr><th style="width:90px">Keterangan</th><th style="width:120px">Tanggal</th><th class="r">Nominal</th></tr></thead>
+      <tbody>${payRows || `<tr><td colspan="3" class="c" style="color:${DOC_BRAND.muted}">Belum ada pembayaran</td></tr>`}</tbody>
+      <tfoot><tr><td colspan="2" class="r">TOTAL DP / PEMBAYARAN</td><td class="r">${rp(gBayar)}</td></tr></tfoot>
+    </table>
+
+    <div class="dr-sec">Ringkasan</div>
+    <div class="dr-sum">
+      <div class="row"><span>Total Ongkos</span><span>${rp(gHarga)}</span></div>
+      <div class="row"><span>Total DP / Pembayaran</span><span>${rp(gBayar)}</span></div>
+      <div class="row tot"><span>Sisa Pembayaran</span><span>${rp(gSisa)}</span></div>
+      <div class="row" style="border-bottom:none; margin-top:6px; align-items:center"><span>Status</span><span class="dr-status ${lunas ? "y" : "n"}">${lunas ? "LUNAS" : "BELUM LUNAS"}</span></div>
+    </div>
+    ${docFooter({ docNo: `Rekap Driver ${noDoc}` })}
+  </div>
+  <script>window.onload=()=>window.print()<\/script>
+  </body></html>`;
+  const w = window.open("", "aal_print"); w.document.write(html); w.document.close();
+}
+
 /* ── util ── */
 function fRp(n) { return "Rp " + (Number(n) || 0).toLocaleString("id-ID"); }
 function pNum(s) { const n = parseInt(String(s || "").replace(/[^0-9]/g, ""), 10); return isNaN(n) ? 0 : n; }
@@ -210,6 +312,7 @@ export default function SupplierPage() {
   const [rekapProj, setRekapProj] = useState("all");   // "all" = semua projek (dipisah), atau id projek tertentu
   const [rekapSel, setRekapSel] = useState(() => new Set()); // id unit yang dicentang utk dicetak/simpan
   const [rekapSaving, setRekapSaving] = useState(false);
+  const [formatChooser, setFormatChooser] = useState(null); // { jobs, noDoc } saat pilih format cetak
   const openRekap = () => {
     setMenuOpen(false); setRekapNo(supplierAutoDocNo()); setRekapProj("all");
     setRekapSel(new Set((selected?.jobs || []).map((j) => j.id))); // default: semua unit dicentang
@@ -854,7 +957,7 @@ export default function SupplierPage() {
         <Modal title="Rekap Supplier — No. Dokumen" onClose={() => setRekapOpen(false)}
           foot={<>
             <button style={BTN_GHOST} onClick={() => setRekapOpen(false)}>Batal</button>
-            <button style={BTN_GHOST} onClick={() => { const j = chosenJobs(); if (!j.length) { flash("Centang minimal 1 unit dulu"); return; } printSupplierA4(selected, j, rekapNo); }} data-testid="sup-rekap-print">🖨️ Cetak</button>
+            <button style={BTN_GHOST} onClick={() => { const j = chosenJobs(); if (!j.length) { flash("Centang minimal 1 unit dulu"); return; } setFormatChooser({ jobs: j, noDoc: rekapNo }); }} data-testid="sup-rekap-print">🖨️ Cetak</button>
             <button style={BTN} onClick={saveRekapHistori} disabled={rekapSaving} data-testid="sup-rekap-save">{rekapSaving ? "Menyimpan…" : "💾 Simpan ke Histori"}</button>
           </>}>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -906,6 +1009,36 @@ export default function SupplierPage() {
             <div style={{ fontSize: 11.5, color: C.mute }}>💾 Simpan = masuk ke <b style={{ color: C.ink }}>Histori Dokumen</b> (bisa dicetak ulang). 🖨️ Cetak = langsung print A4.</div>
           </div>
         </Modal>
+      )}
+
+      {/* ── Bottom sheet: Pilih Format Laporan (muncul saat klik Cetak) ── */}
+      {formatChooser && selected && (
+        <div onClick={() => setFormatChooser(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 10001, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+          <div onClick={(e) => e.stopPropagation()}
+            style={{ width: "100%", maxWidth: 460, background: C.card, borderRadius: "16px 16px 0 0", padding: "16px 16px 22px", boxShadow: "0 -8px 30px rgba(0,0,0,0.5)" }}>
+            <div style={{ width: 40, height: 4, borderRadius: 4, background: C.line, margin: "0 auto 14px" }} />
+            <div style={{ fontWeight: 900, fontSize: 16, color: C.ink, marginBottom: 3 }}>Pilih Format Laporan</div>
+            <div style={{ fontSize: 12, color: C.mute, marginBottom: 16 }}>Data sama persis — cuma tampilan PDF-nya beda.</div>
+
+            <button data-testid="sup-format-perusahaan"
+              onClick={() => { printSupplierA4(selected, formatChooser.jobs, formatChooser.noDoc); setFormatChooser(null); setRekapOpen(false); }}
+              style={{ width: "100%", textAlign: "left", display: "flex", gap: 12, alignItems: "center", padding: "14px 16px", marginBottom: 10, borderRadius: 12, border: `1px solid ${C.line}`, background: C.inpBg, color: C.ink, cursor: "pointer" }}>
+              <span style={{ fontSize: 26, flexShrink: 0 }}>🏢</span>
+              <span><div style={{ fontWeight: 800, fontSize: 14 }}>Perusahaan / Supplier</div><div style={{ fontSize: 11.5, color: C.mute, marginTop: 1 }}>Format formal untuk pelayaran &amp; perusahaan</div></span>
+            </button>
+
+            <button data-testid="sup-format-driver"
+              onClick={() => { printDriverRekapA4(selected, formatChooser.jobs, formatChooser.noDoc); setFormatChooser(null); setRekapOpen(false); }}
+              style={{ width: "100%", textAlign: "left", display: "flex", gap: 12, alignItems: "center", padding: "14px 16px", marginBottom: 14, borderRadius: 12, border: `1px solid ${C.gold}`, background: "#1a1400", color: C.ink, cursor: "pointer" }}>
+              <span style={{ fontSize: 26, flexShrink: 0 }}>🚚</span>
+              <span><div style={{ fontWeight: 800, fontSize: 14, color: C.gold }}>Kepala Rombongan / Driver</div><div style={{ fontSize: 11.5, color: C.mute, marginTop: 1 }}>Format sederhana dengan riwayat DP</div></span>
+            </button>
+
+            <button onClick={() => setFormatChooser(null)}
+              style={{ width: "100%", padding: "11px", borderRadius: 10, border: `1px solid ${C.line}`, background: "none", color: C.mute, fontWeight: 700, cursor: "pointer" }}>Batal</button>
+          </div>
+        </div>
       )}
 
       {/* ── Modal: Tambah Manual ── */}
