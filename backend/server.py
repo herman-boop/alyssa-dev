@@ -5491,6 +5491,39 @@ async def delete_supplier_payment(supplier_id: str, job_id: str, payment_id: str
     return _supplier_job_totals(jobs[job_idx])
 
 
+@api_router.post("/admin/suppliers/{supplier_id}/payments/{txn_key}/bukti", dependencies=[Depends(require_admin_pin)])
+async def attach_supplier_payment_bukti(
+    supplier_id: str, txn_key: str,
+    bukti: UploadFile = File(...),
+):
+    """Tempel / ganti bukti transfer ke pembayaran yang SUDAH tercatat (misal admin
+    telat upload). `txn_key` = batch_id (kalau pembayaran 1 transaksi ke banyak unit)
+    atau id payment tunggal. Bukti dipasang ke SEMUA baris payment yang cocok, biar
+    satu transaksi tetap punya satu bukti yang sama. Data/nominal tidak diubah."""
+    if not bukti or not bukti.filename:
+        raise HTTPException(400, "File bukti wajib diisi")
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    jobs = doc.get("jobs") or []
+    # cari dulu ada nggak payment yang cocok (batch_id atau id == txn_key)
+    matched = any(
+        (p.get("batch_id") == txn_key or p.get("id") == txn_key)
+        for j in jobs for p in (j.get("payments") or [])
+    )
+    if not matched:
+        raise HTTPException(404, "Transaksi pembayaran tidak ditemukan")
+    bukti_url = _save_upload(supplier_id, f"payment/{txn_key}", bukti, ALLOWED_IMG | ALLOWED_DOC)
+    n = 0
+    for j in jobs:
+        for p in (j.get("payments") or []):
+            if p.get("batch_id") == txn_key or p.get("id") == txn_key:
+                p["bukti_url"] = bukti_url
+                n += 1
+    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
+    return {"ok": True, "bukti_url": bukti_url, "updated": n}
+
+
 @api_router.get("/admin/suppliers/{supplier_id}/ringkasan")
 async def supplier_ringkasan_data(supplier_id: str, pin: str = Query(...)):
     """Data buat halaman kartu Ringkasan Pembayaran (dirender Chromium headless

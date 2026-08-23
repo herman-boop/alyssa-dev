@@ -725,6 +725,22 @@ export default function SupplierPage() {
     return Object.values(map).sort((a, b) => (b.tanggal || "").localeCompare(a.tanggal || ""));
   }, [jobs]);
   const [txnDetail, setTxnDetail] = useState(null);
+  const [txnBuktiSaving, setTxnBuktiSaving] = useState(false);
+  const txnBuktiRef = useRef();
+  // Tempel/ganti bukti transfer ke transaksi yang sudah tercatat (telat upload).
+  const uploadTxnBukti = async (file) => {
+    if (!file || !txnDetail || !selected) return;
+    setTxnBuktiSaving(true);
+    try {
+      const fd = new FormData();
+      fd.append("bukti", file);
+      const r = await axios.post(`${API}/admin/suppliers/${selected.id}/payments/${txnDetail.key}/bukti`, fd, { headers });
+      await reloadSelected(selected.id); setListRefreshTick((t) => t + 1);
+      setTxnDetail((t) => (t ? { ...t, bukti_url: r.data?.bukti_url || t.bukti_url } : t));
+      flash("✓ Bukti transfer tersimpan");
+    } catch (e) { flash(e?.response?.data?.detail || "Gagal upload bukti"); }
+    finally { setTxnBuktiSaving(false); if (txnBuktiRef.current) txnBuktiRef.current.value = ""; }
+  };
 
   /* ═══ Dokumen: semua bukti ═══ */
   const dokumens = useMemo(() => {
@@ -1238,6 +1254,11 @@ export default function SupplierPage() {
             </div>
           ))}
           {txnDetail.bukti_url && <a href={resolveUrl(txnDetail.bukti_url)} target="_blank" rel="noreferrer" style={{ ...BTN_GHOST, display: "block", textAlign: "center", marginTop: 12, textDecoration: "none" }}>📎 Lihat Bukti Transfer</a>}
+          <input ref={txnBuktiRef} type="file" accept="image/*,application/pdf" style={{ display: "none" }} onChange={(e) => uploadTxnBukti(e.target.files?.[0] || null)} data-testid="sup-txn-bukti-file" />
+          <button style={{ ...(txnDetail.bukti_url ? BTN_GHOST : BTN), width: "100%", marginTop: txnDetail.bukti_url ? 8 : 12 }} disabled={txnBuktiSaving} onClick={() => txnBuktiRef.current?.click()} data-testid="sup-txn-bukti-upload">
+            {txnBuktiSaving ? "Mengunggah…" : (txnDetail.bukti_url ? "🔄 Ganti Bukti Transfer" : "📎 Upload Bukti Transfer")}
+          </button>
+          {!txnDetail.bukti_url && <div style={{ fontSize: 11.5, color: C.mute, marginTop: 6, textAlign: "center" }}>Belum ada bukti — bisa diupload sekarang biar lengkap.</div>}
         </Modal>
       )}
 
