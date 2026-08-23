@@ -258,7 +258,7 @@ export function printDriverRekapA4(sup, jobsOverride, noDocOverride, tglOverride
     .dr-sec2 .bar { width:4px; height:15px; background:${DOC_BRAND.gold}; border-radius:2px; flex-shrink:0; }
     .dr-sec2 .txt { font-size:11px; font-weight:800; color:${DOC_BRAND.ink}; letter-spacing:.5px; text-transform:uppercase; }
 
-    /* ── Riwayat DP / Pembayaran (list transaksi diterima) ── */
+    /* ── Riwayat Pembayaran (list transaksi aktual, cocok rekening koran) ── */
     .pay-box { border:1px solid ${DOC_BRAND.line}; border-radius:9px; overflow:hidden; }
     .pay-box .pay-head { background:${DOC_BRAND.paperMist}; border-bottom:1px solid ${DOC_BRAND.line}; border-top:3px solid ${DOC_BRAND.gold}; padding:6px 14px; display:flex; align-items:center; gap:10px; }
     .pay-box .pay-head span { font-size:8.5px !important; font-weight:700 !important; color:#334155 !important; letter-spacing:.4px; text-transform:uppercase; }
@@ -1187,7 +1187,7 @@ export default function SupplierPage() {
               onClick={() => { printDriverRekapA4(selected, formatChooser.jobs, formatChooser.noDoc, formatChooser.tgl); setFormatChooser(null); setRekapOpen(false); }}
               style={{ width: "100%", textAlign: "left", display: "flex", gap: 12, alignItems: "center", padding: "14px 16px", marginBottom: 14, borderRadius: 12, border: `1px solid ${C.gold}`, background: "#1a1400", color: C.ink, cursor: "pointer" }}>
               <span style={{ fontSize: 26, flexShrink: 0 }}>🚚</span>
-              <span><div style={{ fontWeight: 800, fontSize: 14, color: C.gold }}>Kepala Rombongan / Driver</div><div style={{ fontSize: 11.5, color: C.mute, marginTop: 1 }}>Format sederhana dengan riwayat DP</div></span>
+              <span><div style={{ fontWeight: 800, fontSize: 14, color: C.gold }}>Kepala Rombongan / Driver</div><div style={{ fontSize: 11.5, color: C.mute, marginTop: 1 }}>Format sederhana dengan riwayat pembayaran</div></span>
             </button>
 
             <button onClick={() => setFormatChooser(null)}
