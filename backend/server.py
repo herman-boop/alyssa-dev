@@ -3045,7 +3045,7 @@ async def admin_get_trip_legs(trip_id: str):
             leg["route_leg_id"] = str(uuid.uuid4()); changed = True
     if changed:
         await db.trips.update_one({"trip_id": trip_id}, {"$set": {"legs": legs}})
-    return {"ok": True, "trip_id": trip_id, "legs": legs}
+    return {"ok": True, "trip_id": trip_id, "legs": legs, "rombongan": trip.get("rombongan") or {}}
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -3426,6 +3426,192 @@ async def add_next_leg(trip_id: str):
     legs.append(new_leg)
     await db.trips.update_one({"trip_id": trip_id}, {"$set": {"legs": legs, "updated_at": datetime.now(timezone.utc).isoformat()}})
     return {"ok": True, "legs": legs, "new_index": len(legs) - 1}
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# KEPALA ROMBONGAN — Command Center (Fase 2)
+# 1 assignment-level token per trip (STABIL sepanjang perjalanan). Route Leg
+# boleh nambah/berubah, token TIDAK berubah. Profile kepala rombongan disiapkan
+# "reward-ready" (driver_id ref master + email/bank) tapi Reward belum dibangun.
+# Tidak menyentuh flow driver/task/checkpoint/foto/dokumen existing.
+# ══════════════════════════════════════════════════════════════════════════
+def _wib_now():
+    return datetime.now(timezone.utc) + timedelta(hours=7)
+
+class RombonganLinkBody(BaseModel):
+    driver_id: Optional[str] = None
+    nama: str = ""
+    no_hp: str = ""
+    email: str = ""
+    bank: str = ""
+    no_rekening: str = ""
+    nama_rekening: str = ""
+    jam_close: Optional[str] = None   # "HH:MM" WIB
+
+@api_router.post("/admin/trips/{trip_id}/rombongan-link", dependencies=[Depends(require_admin_pin)])
+async def create_rombongan_link(trip_id: str, body: RombonganLinkBody):
+    """Buat / ambil link Kepala Rombongan (1 token per trip). Kalau sudah ada &
+    aktif -> token DIPERTAHANKAN (cuma update profil), TIDAK regenerate."""
+    trip = await db.trips.find_one({"trip_id": trip_id})
+    if not trip:
+        raise HTTPException(404, "Trip not found")
+    rb = trip.get("rombongan") or {}
+    prev = rb.get("kepala") or {}
+    token = rb.get("token") if (rb.get("active") and rb.get("token")) else _secrets.token_urlsafe(16)
+    kepala = {
+        "driver_id": body.driver_id or prev.get("driver_id"),
+        "nama": (body.nama or prev.get("nama") or "").strip(),
+        "no_hp": (body.no_hp or prev.get("no_hp") or "").strip(),
+        "email": (body.email or prev.get("email") or "").strip(),
+        "bank": (body.bank or prev.get("bank") or "").strip(),
+        "no_rekening": (body.no_rekening or prev.get("no_rekening") or "").strip(),
+        "nama_rekening": (body.nama_rekening or prev.get("nama_rekening") or "").strip(),
+    }
+    jam_close = (body.jam_close or rb.get("jam_close") or "20:00").strip()
+    new_rb = {**rb, "token": token, "active": True, "kepala": kepala, "jam_close": jam_close,
+              "created_at": rb.get("created_at") or datetime.utcnow().isoformat(),
+              "updated_at": datetime.utcnow().isoformat()}
+    await db.trips.update_one({"trip_id": trip_id}, {"$set": {"rombongan": new_rb}})
+    return {"ok": True, "token": token, "rombongan": new_rb}
+
+@api_router.post("/admin/trips/{trip_id}/rombongan/regen", dependencies=[Depends(require_admin_pin)])
+async def regen_rombongan_link(trip_id: str):
+    """Ganti Kepala Rombongan: token lama mati, token baru dibuat (profil tetap)."""
+    trip = await db.trips.find_one({"trip_id": trip_id})
+    if not trip:
+        raise HTTPException(404, "Trip not found")
+    rb = trip.get("rombongan") or {}
+    old = rb.get("token")
+    disabled = rb.get("disabled_tokens") or []
+    if old:
+        disabled.append(old)
+    rb["token"] = _secrets.token_urlsafe(16)
+    rb["active"] = True
+    rb["disabled_tokens"] = disabled
+    rb["updated_at"] = datetime.utcnow().isoformat()
+    await db.trips.update_one({"trip_id": trip_id}, {"$set": {"rombongan": rb}})
+    return {"ok": True, "token": rb["token"]}
+
+@api_router.post("/admin/trips/{trip_id}/rombongan/disable", dependencies=[Depends(require_admin_pin)])
+async def disable_rombongan_link(trip_id: str):
+    trip = await db.trips.find_one({"trip_id": trip_id})
+    if not trip:
+        raise HTTPException(404, "Trip not found")
+    rb = trip.get("rombongan") or {}
+    rb["active"] = False
+    rb["updated_at"] = datetime.utcnow().isoformat()
+    await db.trips.update_one({"trip_id": trip_id}, {"$set": {"rombongan": rb}})
+    return {"ok": True}
+
+@api_router.patch("/admin/trips/{trip_id}/rombongan/jam-close", dependencies=[Depends(require_admin_pin)])
+async def set_rombongan_jam_close(trip_id: str, body: dict = Body(...)):
+    jam = str(body.get("jam_close") or "20:00").strip()
+    if not re.match(r"^\d{2}:\d{2}$", jam):
+        raise HTTPException(400, "Format jam harus HH:MM")
+    trip = await db.trips.find_one({"trip_id": trip_id})
+    if not trip:
+        raise HTTPException(404, "Trip not found")
+    rb = trip.get("rombongan") or {}
+    rb["jam_close"] = jam
+    await db.trips.update_one({"trip_id": trip_id}, {"$set": {"rombongan": rb}})
+    return {"ok": True, "jam_close": jam}
+
+def _rombongan_units(trip: dict) -> list:
+    """Daftar unit rombongan (finance-free). Ambil dari trip.units kalau ada,
+    fallback ke unit tunggal. Lengkapi driver dari legs.drivers kalau kosong."""
+    src = trip.get("units") or []
+    if not src:
+        src = [{"nopol": trip.get("nopol") or "", "vehicle_type": trip.get("vehicle_type") or trip.get("tipe_kendaraan") or "",
+                "no_rangka": trip.get("no_rangka") or "", "driver": trip.get("nama_driver") or ""}]
+    out = []
+    for u in src:
+        out.append({
+            "nopol": u.get("nopol") or "", "vehicle_type": u.get("vehicle_type") or u.get("tipe_model") or "",
+            "no_rangka": u.get("no_rangka") or "", "driver": u.get("driver") or u.get("nama_driver") or "",
+            "status": u.get("status") or "",
+        })
+    return out
+
+@api_router.get("/public/rombongan/{token}")
+async def public_rombongan(token: str):
+    """Command Center Kepala Rombongan — scope 1 assignment. Semua unit/leg/
+    checkpoint/foto/dokumen, TANPA data finansial (reuse view publik yang memang
+    sudah finance-free). Token stabil: leg baru otomatis muncul di sini."""
+    trip = await db.trips.find_one({"rombongan.token": token})
+    if not trip:
+        raise HTTPException(404, "Link Kepala Rombongan tidak ditemukan")
+    rb = trip.get("rombongan") or {}
+    if not rb.get("active"):
+        raise HTTPException(410, "Link Kepala Rombongan sudah dinonaktifkan")
+    tid = trip.get("trip_id")
+    view = _trip_public_view(trip)
+    await _merge_task_media(tid, view)
+    await _merge_task_checkpoints(tid, view)
+    now = _wib_now()
+    tgl = now.strftime("%Y-%m-%d")
+    reports = await db.rombongan_reports.find({"trip_id": tid, "tanggal": tgl}, {"_id": 0}).to_list(1000)
+    kepala = rb.get("kepala") or {}
+    return {
+        "ok": True, "trip_id": tid,
+        "perusahaan": "PT Alyssa Auto Logistik",
+        "kepala": {"nama": kepala.get("nama", ""), "no_hp": kepala.get("no_hp", "")},  # NO finance
+        "jam_close": rb.get("jam_close", "20:00"),
+        "rute": view.get("route") or f'{trip.get("asal_kota","")} → {trip.get("tujuan_kota","")}'.strip(" →"),
+        "legs": view.get("legs", []),
+        "units": _rombongan_units(trip),
+        "album": view.get("album", {}),
+        "handover": view.get("handover", {}),
+        "daily_checkpoints": view.get("daily_checkpoints", []),
+        "reports_today": reports,
+        "server_wib": now.isoformat(),
+        "today": tgl,
+    }
+
+class RombonganReportBody(BaseModel):
+    unit_nopol: str = ""
+    driver: str = ""
+    status: str = ""
+    lokasi: str = ""
+    catatan: str = ""
+    kendala: str = ""
+
+@api_router.post("/public/rombongan/{token}/report")
+async def submit_rombongan_report(token: str, body: RombonganReportBody):
+    """Daily report Kepala Rombongan per unit. Append-only (history utuh, jadi
+    sumber validasi Point nanti). Tandai `late` kalau lewat jam close WIB."""
+    trip = await db.trips.find_one({"rombongan.token": token})
+    if not trip:
+        raise HTTPException(404, "Link tidak ditemukan")
+    rb = trip.get("rombongan") or {}
+    if not rb.get("active"):
+        raise HTTPException(410, "Link sudah dinonaktifkan")
+    now = _wib_now()
+    tgl = now.strftime("%Y-%m-%d")
+    jam_close = rb.get("jam_close", "20:00")
+    late = now.strftime("%H:%M") > jam_close
+    rec = {
+        "id": str(uuid.uuid4()), "trip_id": trip.get("trip_id"), "token": token,
+        "tanggal": tgl, "unit_nopol": (body.unit_nopol or "").strip(),
+        "driver": (body.driver or "").strip(), "status": (body.status or "").strip(),
+        "lokasi": (body.lokasi or "").strip(), "catatan": (body.catatan or "").strip()[:500],
+        "kendala": (body.kendala or "").strip()[:500],
+        "submitted_at": now.isoformat(), "submitted_hhmm": now.strftime("%H:%M"),
+        "late": late, "by": "kepala_rombongan",
+    }
+    await db.rombongan_reports.insert_one(rec)
+    rec.pop("_id", None)
+    return {"ok": True, "late": late, "tanggal": tgl, "report": rec}
+
+@api_router.get("/public/rombongan/{token}/reports")
+async def list_rombongan_reports(token: str, tanggal: Optional[str] = None):
+    trip = await db.trips.find_one({"rombongan.token": token})
+    if not trip:
+        raise HTTPException(404, "Link tidak ditemukan")
+    q = {"trip_id": trip.get("trip_id")}
+    if tanggal:
+        q["tanggal"] = tanggal
+    items = await db.rombongan_reports.find(q, {"_id": 0}).sort("submitted_at", -1).to_list(2000)
+    return {"ok": True, "items": items}
 
 
 @api_router.get("/public/task/{token}")

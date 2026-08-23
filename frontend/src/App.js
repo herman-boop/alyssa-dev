@@ -20,6 +20,7 @@ import SupplierQuoteFill from "@/SupplierQuoteFill";
 import CustomerGuidePage from "@/CustomerGuidePage";
 import MobileVendorPayment from "@/MobileVendorPayment";
 import TaskPage from "@/TaskPage";
+import RombonganCommandCenter from "@/RombonganCommandCenter";
 
 // Resolve path segment: /track/TRIP-XXX -> "TRIP-XXX"
 function pathSegment(pathname, prefix) {
@@ -45,6 +46,7 @@ function App() {
     if (p === "/panduan-kirim")     return { route: "panduan-kirim" };
     if (p.startsWith("/harga/"))     return { route: "harga" };
     if (p.startsWith("/task/"))     return { route: "task" };
+    if (p.startsWith("/rombongan/")) return { route: "rombongan" };
     if (p.startsWith("/track/"))    return { route: "track" };
     if (p.startsWith("/trip/"))     return { route: "driver" };
     if (p.startsWith("/bastk/"))    return { route: "bastk" };
@@ -100,6 +102,7 @@ function App() {
   if (route === "bastk")  return <BASTKPage />;
   if (route === "track")  return <CustomerTracking />;
   if (route === "task")   return <TaskPage />;
+  if (route === "rombongan") return <RombonganCommandCenter />;
   if (route === "driver") return <DriverCheckpoint />;
   if (route === "koordinator") return <KoordinatorPage />;
   if (route === "harga") return <CustomerPricePage />;

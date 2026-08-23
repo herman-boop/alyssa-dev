@@ -5955,6 +5955,7 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
         if (!alive) return;
         const srv = r.data?.legs;
         if (Array.isArray(srv) && srv.length > 0) { skipSaveRef.current = true; setLegs(srv); }
+        if (r.data?.rombongan && r.data.rombongan.token) setRomb(r.data.rombongan);
         hydratedRef.current = true;
       })
       .catch(() => { hydratedRef.current = true; });
@@ -6030,6 +6031,49 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
   };
 
   const submit = async () => { setSaving(true); await onSave(legs); setSaving(false); };
+
+  // ── Kepala Rombongan: 1 link assignment-level (stabil sepanjang trip) ──
+  const [romb, setRomb] = useState(null);       // {token, active, kepala, jam_close}
+  const [rombBusy, setRombBusy] = useState(false);
+  const [rombCopied, setRombCopied] = useState(false);
+  const ensureRombLink = async (leg) => {
+    if (!tripId) { alert("Simpan trip dulu sebelum buat link Kepala Rombongan."); return null; }
+    const k = (leg && leg.kepala_rombongan) || {};
+    const r = await axios.post(`${API}/admin/trips/${tripId}/rombongan-link`, {
+      driver_id: k.ref_id || null, nama: k.nama || "", no_hp: k.hp || "",
+      jam_close: (romb && romb.jam_close) || "20:00",
+    }, { headers });
+    setRomb(r.data.rombongan); return r.data.token;
+  };
+  const rombLinkUrl = (tok) => `${window.location.origin}/rombongan/${tok}`;
+  const copyRombLink = async (leg) => {
+    setRombBusy(true);
+    try { const tok = await ensureRombLink(leg); if (!tok) return;
+      const ok = await copyToClipboard(rombLinkUrl(tok));
+      if (ok) { setRombCopied(true); setTimeout(() => setRombCopied(false), 2000); }
+    } catch { alert("Gagal buat link Kepala Rombongan."); } finally { setRombBusy(false); }
+  };
+  const waRombLink = async (leg) => {
+    setRombBusy(true);
+    try { const tok = await ensureRombLink(leg); if (!tok) return;
+      const k = (leg && leg.kepala_rombongan) || {};
+      const nUnit = (Array.isArray(order?.units) && order.units.length) || 1;
+      const rute = `${order?.asal_kota || "—"} → ${order?.tujuan_kota || "—"}`;
+      const jc = (romb && romb.jam_close) || "20:00";
+      const txt = `Halo Pak/Bu ${k.nama || ""} 👋\n\nAnda ditugaskan sebagai *Kepala Rombongan* PT Alyssa Auto Logistik.\nRute: ${rute}\nJumlah Unit: ${nUnit}\n\nSilakan buka Command Center berikut untuk monitoring, report harian, checkpoint, foto, dan dokumen:\n🔗 ${rombLinkUrl(tok)}\n\nJam close report harian: ${jc} WIB\nInfo: PT Alyssa Auto Logistik · 0818 631 135`;
+      const hp = (k.hp || "").replace(/[^0-9]/g, "").replace(/^0/, "62");
+      window.open(hp ? `https://wa.me/${hp}?text=${encodeURIComponent(txt)}` : `https://wa.me/?text=${encodeURIComponent(txt)}`, "_blank");
+    } catch { alert("Gagal buat link Kepala Rombongan."); } finally { setRombBusy(false); }
+  };
+  const regenRomb = async () => {
+    if (!tripId || !window.confirm("Ganti Kepala Rombongan? Link lama mati, link baru dibuat.")) return;
+    try { const r = await axios.post(`${API}/admin/trips/${tripId}/rombongan/regen`, {}, { headers }); setRomb((x) => ({ ...(x || {}), token: r.data.token, active: true })); alert("Link baru dibuat. Salin & kirim ulang ke Kepala Rombongan."); } catch { alert("Gagal regenerate."); }
+  };
+  const setJamClose = async (jam) => {
+    setRomb((r) => ({ ...(r || {}), jam_close: jam }));
+    if (!tripId || !/^\d{2}:\d{2}$/.test(jam)) return;
+    try { await axios.patch(`${API}/admin/trips/${tripId}/rombongan/jam-close`, { jam_close: jam }, { headers }); } catch {}
+  };
 
   const routeStops = legs.length ? [
     { label: legs[0].asal || order?.asal_kota || "—", icon: "📍" },
@@ -6351,7 +6395,28 @@ function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tri
                         <SmartText style={MINI_INPUT} value={leg.kepala_rombongan ? (leg.kepala_rombongan.hp || "") : (leg.kord_bayangan_hp || "")} onChange={(v) => setKepala(i, { hp: v })} placeholder="08xx-xxxx" testid={`leg-kepala-hp-${i}`} />
                       </label>
                     </div>
-                    <div style={{ fontSize: 9.5, color: "#6b8f5e", marginTop: 6 }}>Link Kepala Rombongan menyusul (Fase 2). Assignment tersimpan per Leg.</div>
+                    {/* ── Command Center Kepala Rombongan: 1 link untuk seluruh perjalanan ── */}
+                    <div style={{ marginTop: 10, borderTop: "1px solid #2f5a1f", paddingTop: 8 }}>
+                      <div style={{ fontSize: 9.5, color: "#7ee06b", fontWeight: 700, marginBottom: 6 }}>🎯 COMMAND CENTER (1 link utk seluruh perjalanan)</div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 6 }}>
+                        <button type="button" disabled={!tripId || rombBusy} onClick={() => copyRombLink(leg)}
+                          style={{ ...SOLID_BTN_BLUE, background: rombCopied ? "#2ea043" : "#1f6feb", opacity: (!tripId || rombBusy) ? 0.6 : 1 }}>
+                          {rombCopied ? "✓ Tersalin!" : "🔗 Salin Link Kepala Rombongan"}
+                        </button>
+                        <button type="button" disabled={!tripId || rombBusy} onClick={() => waRombLink(leg)}
+                          style={{ ...GHOST_BTN_BLUE, color: "#25d366", borderColor: "#1f6f43", opacity: (!tripId || rombBusy) ? 0.6 : 1 }}>
+                          💬 Kirim WhatsApp
+                        </button>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <label style={{ ...MINI_LABEL, margin: 0 }}>Jam close report harian
+                          <input style={{ ...MINI_INPUT, width: 100 }} type="time" value={(romb && romb.jam_close) || "20:00"} onChange={(e) => setJamClose(e.target.value)} />
+                        </label>
+                        {romb && romb.token && <span style={{ fontSize: 9.5, color: romb.active ? "#3fb950" : "#f85149" }}>{romb.active ? "● Link aktif" : "○ Link nonaktif"}</span>}
+                        {romb && romb.token && <button type="button" onClick={regenRomb} style={{ background: "none", border: "none", color: "#8b949e", fontSize: 9.5, cursor: "pointer", textDecoration: "underline" }}>Ganti kepala / regenerate</button>}
+                      </div>
+                      <div style={{ fontSize: 9, color: "#6b8f5e", marginTop: 5 }}>Link ini stabil sepanjang trip — tambah Leg tidak mengubah link. Driver tetap punya link sendiri. Tidak ada auto-blast; kirim manual.</div>
+                    </div>
                   </div>
 
                   {/* ── DRIVER / UNIT ROMBONGAN (anggota, boleh lebih dari 1) ── */}
