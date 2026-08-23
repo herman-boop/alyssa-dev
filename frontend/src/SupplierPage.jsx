@@ -11,12 +11,12 @@ export function supplierAutoDocNo(d) {
   const now = d ? new Date(d) : new Date();
   return `RPS/AAL/${String(now.getDate()).padStart(2, "0")}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getFullYear()).slice(2)}/${now.getFullYear()}`;
 }
-export function printSupplierA4(sup, jobsOverride, noDocOverride) {
+export function printSupplierA4(sup, jobsOverride, noDocOverride, tglOverride) {
   if (!sup) return;
   const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const rp = (n) => "Rp " + (Number(n) || 0).toLocaleString("id-ID");
   const now = new Date();
-  const tgl = now.toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
+  const tgl = (tglOverride ? new Date(`${tglOverride}T00:00:00`) : now).toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
   const noDoc = (noDocOverride && String(noDocOverride).trim()) || supplierAutoDocNo();
   // jobsOverride = unit yang dicentang. Kalau kosong -> semua unit. Total selalu
   // dihitung dari unit yang benar-benar dicetak (biar cocok sama isi tabel).
@@ -167,12 +167,12 @@ export function printSupplierA4(sup, jobsOverride, noDocOverride) {
 /* FORMAT 2 — KEPALA ROMBONGAN / DRIVER. Sumber data SAMA (jobs + payments),
    cuma presentation lebih sederhana + riwayat DP/pelunasan kronologis.
    Total Ongkos / Terbayar / Sisa IDENTIK dengan format Perusahaan. */
-export function printDriverRekapA4(sup, jobsOverride, noDocOverride) {
+export function printDriverRekapA4(sup, jobsOverride, noDocOverride, tglOverride) {
   if (!sup) return;
   const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const rp = (n) => "Rp " + (Number(n) || 0).toLocaleString("id-ID");
   const now = new Date();
-  const tgl = now.toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
+  const tgl = (tglOverride ? new Date(`${tglOverride}T00:00:00`) : now).toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
   const noDoc = (noDocOverride && String(noDocOverride).trim()) || supplierAutoDocNo();
   const jobs = (jobsOverride && jobsOverride.length) ? jobsOverride : (sup.jobs || []);
   const gHarga = jobs.reduce((s, j) => s + (j.total_harga || 0), 0);   // Total Ongkos
@@ -312,9 +312,10 @@ export default function SupplierPage() {
   const [rekapProj, setRekapProj] = useState("all");   // "all" = semua projek (dipisah), atau id projek tertentu
   const [rekapSel, setRekapSel] = useState(() => new Set()); // id unit yang dicentang utk dicetak/simpan
   const [rekapSaving, setRekapSaving] = useState(false);
-  const [formatChooser, setFormatChooser] = useState(null); // { jobs, noDoc } saat pilih format cetak
+  const [formatChooser, setFormatChooser] = useState(null); // { jobs, noDoc, tgl } saat pilih format cetak
+  const [rekapTgl, setRekapTgl] = useState("");             // tanggal laporan (bisa diubah manual)
   const openRekap = () => {
-    setMenuOpen(false); setRekapNo(supplierAutoDocNo()); setRekapProj("all");
+    setMenuOpen(false); setRekapNo(supplierAutoDocNo()); setRekapProj("all"); setRekapTgl(todayStr());
     setRekapSel(new Set((selected?.jobs || []).map((j) => j.id))); // default: semua unit dicentang
     setRekapOpen(true);
   };
@@ -347,7 +348,7 @@ export default function SupplierPage() {
       await axios.post(`${API}/admin/doc-history`, {
         jenis: "supplier", no_dokumen: noDoc, customer: selected.nama || "",
         judul: `${selected.nama || "-"}${suffix} · ${jobs.length} unit · Rp ${gHarga.toLocaleString("id-ID")}`,
-        meta: { supplier_nama: selected.nama, no_dokumen: noDoc, total_harga: gHarga, total_terbayar: gBayar, sisa: gHarga - gBayar, jumlah_unit: jobs.length, projek: rekapProj === "all" ? "Semua" : rekapProjName() },
+        meta: { supplier_nama: selected.nama, no_dokumen: noDoc, tanggal: rekapTgl, total_harga: gHarga, total_terbayar: gBayar, sisa: gHarga - gBayar, jumlah_unit: jobs.length, projek: rekapProj === "all" ? "Semua" : rekapProjName() },
         units: jobs,
       }, { headers });
       flash("✓ Rekap supplier disimpan ke Histori Dokumen");
@@ -957,7 +958,7 @@ export default function SupplierPage() {
         <Modal title="Rekap Supplier — No. Dokumen" onClose={() => setRekapOpen(false)}
           foot={<>
             <button style={BTN_GHOST} onClick={() => setRekapOpen(false)}>Batal</button>
-            <button style={BTN_GHOST} onClick={() => { const j = chosenJobs(); if (!j.length) { flash("Centang minimal 1 unit dulu"); return; } setFormatChooser({ jobs: j, noDoc: rekapNo }); }} data-testid="sup-rekap-print">🖨️ Cetak</button>
+            <button style={BTN_GHOST} onClick={() => { const j = chosenJobs(); if (!j.length) { flash("Centang minimal 1 unit dulu"); return; } setFormatChooser({ jobs: j, noDoc: rekapNo, tgl: rekapTgl }); }} data-testid="sup-rekap-print">🖨️ Cetak</button>
             <button style={BTN} onClick={saveRekapHistori} disabled={rekapSaving} data-testid="sup-rekap-save">{rekapSaving ? "Menyimpan…" : "💾 Simpan ke Histori"}</button>
           </>}>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -965,6 +966,11 @@ export default function SupplierPage() {
               <div style={{ ...L }}>No. Dokumen (otomatis — bisa diubah manual)</div>
               <input style={I} value={rekapNo} onChange={(e) => setRekapNo(e.target.value)} placeholder="RPS/AAL/..." data-testid="sup-rekap-no" />
               <div style={{ fontSize: 11, color: C.mute, marginTop: 4 }}>Kosongkan = otomatis ({supplierAutoDocNo()}). Isi manual untuk samakan dengan nomor lain.</div>
+            </div>
+            <div>
+              <div style={{ ...L }}>Tanggal Laporan (bisa diubah manual)</div>
+              <input style={I} type="date" value={rekapTgl} onChange={(e) => setRekapTgl(e.target.value)} data-testid="sup-rekap-tgl" />
+              <div style={{ fontSize: 11, color: C.mute, marginTop: 4 }}>Default hari ini. Ubah kalau mau tanggal laporan berbeda.</div>
             </div>
             {(selected.projects || []).length > 1 && (
               <div>
@@ -1022,14 +1028,14 @@ export default function SupplierPage() {
             <div style={{ fontSize: 12, color: C.mute, marginBottom: 16 }}>Data sama persis — cuma tampilan PDF-nya beda.</div>
 
             <button data-testid="sup-format-perusahaan"
-              onClick={() => { printSupplierA4(selected, formatChooser.jobs, formatChooser.noDoc); setFormatChooser(null); setRekapOpen(false); }}
+              onClick={() => { printSupplierA4(selected, formatChooser.jobs, formatChooser.noDoc, formatChooser.tgl); setFormatChooser(null); setRekapOpen(false); }}
               style={{ width: "100%", textAlign: "left", display: "flex", gap: 12, alignItems: "center", padding: "14px 16px", marginBottom: 10, borderRadius: 12, border: `1px solid ${C.line}`, background: C.inpBg, color: C.ink, cursor: "pointer" }}>
               <span style={{ fontSize: 26, flexShrink: 0 }}>🏢</span>
               <span><div style={{ fontWeight: 800, fontSize: 14 }}>Perusahaan / Supplier</div><div style={{ fontSize: 11.5, color: C.mute, marginTop: 1 }}>Format formal untuk pelayaran &amp; perusahaan</div></span>
             </button>
 
             <button data-testid="sup-format-driver"
-              onClick={() => { printDriverRekapA4(selected, formatChooser.jobs, formatChooser.noDoc); setFormatChooser(null); setRekapOpen(false); }}
+              onClick={() => { printDriverRekapA4(selected, formatChooser.jobs, formatChooser.noDoc, formatChooser.tgl); setFormatChooser(null); setRekapOpen(false); }}
               style={{ width: "100%", textAlign: "left", display: "flex", gap: 12, alignItems: "center", padding: "14px 16px", marginBottom: 14, borderRadius: 12, border: `1px solid ${C.gold}`, background: "#1a1400", color: C.ink, cursor: "pointer" }}>
               <span style={{ fontSize: 26, flexShrink: 0 }}>🚚</span>
               <span><div style={{ fontWeight: 800, fontSize: 14, color: C.gold }}>Kepala Rombongan / Driver</div><div style={{ fontSize: 11.5, color: C.mute, marginTop: 1 }}>Format sederhana dengan riwayat DP</div></span>

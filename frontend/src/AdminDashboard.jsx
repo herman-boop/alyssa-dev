@@ -3582,7 +3582,7 @@ function HistoriDokumen({ headers }) {
     if (rec.jenis === "invoice") {
       printInvoiceDoc(rec.lines, rec.meta?.withTax, rec.meta || {});
     } else if (rec.jenis === "supplier") {
-      printSupplierA4({ nama: rec.meta?.supplier_nama || rec.customer || "-", jobs: rec.units || [] }, null, rec.meta?.no_dokumen || rec.no_dokumen);
+      printSupplierA4({ nama: rec.meta?.supplier_nama || rec.customer || "-", jobs: rec.units || [] }, null, rec.meta?.no_dokumen || rec.no_dokumen, rec.meta?.tanggal);
     } else if (rec.jenis === "jadwal") {
       printJadwalDoc(rec.meta || {}, rec.units || []);
     } else if (rec.jenis === "jadwal_gabungan") {
