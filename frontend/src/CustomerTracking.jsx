@@ -397,6 +397,27 @@ function MapFitter({ positions }) {
   return null;
 }
 
+/* Reverse-geocode ringan (nama lokasi dari lat/lng) — buat checkpoint yang
+   belum simpan alamat. Ambil desa/kec/kota + kabupaten + provinsi. */
+async function reverseGeocodeName(lat, lng) {
+  try {
+    const r = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=json&zoom=16&addressdetails=1&accept-language=id&lat=${lat}&lon=${lng}`,
+      { headers: { Accept: "application/json" } }
+    );
+    if (!r.ok) return "";
+    const j = await r.json();
+    const a = j.address || {};
+    const parts = [
+      a.village || a.suburb || a.neighbourhood || a.hamlet || a.road,
+      a.city_district || a.town || a.city || a.municipality || a.county,
+      a.state,
+    ].filter(Boolean);
+    const out = [...new Set(parts)].join(", ");
+    return out || (j.display_name || "").split(",").slice(0, 3).join(",").trim();
+  } catch { return ""; }
+}
+
 /* ── Main ── */
 export default function CustomerTracking() {
   const tripId = useMemo(readTripId, []);
@@ -409,10 +430,30 @@ export default function CustomerTracking() {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedCp, setSelectedCp] = useState(null);
   const [docPreview, setDocPreview] = useState(null);
+  const [geoNames, setGeoNames] = useState({}); // "lat,lng" -> nama lokasi (checkpoint lama tanpa alamat)
+  const geoTriedRef = useRef(new Set());
   const panelRef = useRef(null);
 
   // Daftarkan opener global supaya PhotoCard & thumbnail bisa buka modal
   useEffect(() => { _openDoc = (item) => setDocPreview(item); return () => { _openDoc = null; }; }, []);
+
+  // Ambil nama lokasi buat checkpoint GPS yang belum punya "alamat" (throttle 1.1s/req).
+  useEffect(() => {
+    const pts = (data?.daily_checkpoints || []).filter((cp) => cp.lat != null && cp.lng != null && !cp.alamat);
+    let cancelled = false;
+    (async () => {
+      for (const cp of pts) {
+        const key = `${cp.lat},${cp.lng}`;
+        if (geoTriedRef.current.has(key)) continue;
+        geoTriedRef.current.add(key);
+        const name = await reverseGeocodeName(cp.lat, cp.lng);
+        if (cancelled) return;
+        if (name) setGeoNames((prev) => ({ ...prev, [key]: name }));
+        await new Promise((r) => setTimeout(r, 1100));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [data]);
 
   const fetchData = useCallback(async (showSpinner = false) => {
     if (!tripId) { setError("not_found"); setLoading(false); return; }
@@ -620,6 +661,7 @@ export default function CustomerTracking() {
                         <div className="trk-popup-meta">
                           <div className="trk-popup-time">{fmtTs(cp.ts || cp.timestamp || cp.created_at)}</div>
                           {data.nopol && <div className="trk-popup-nopol" style={{ fontWeight: 700 }}>🚚 {data.nopol}</div>}
+                          {(cp.alamat || geoNames[`${cp.lat},${cp.lng}`]) && <div className="trk-popup-note" style={{ fontWeight: 700 }}>📍 {cp.alamat || geoNames[`${cp.lat},${cp.lng}`]}</div>}
                           {cp.status && <div className="trk-popup-status">{cp.status}</div>}
                           {cp.keterangan && <div className="trk-popup-note">{cp.keterangan}</div>}
                           <a
@@ -714,6 +756,7 @@ export default function CustomerTracking() {
                   const cpNum = arr.length - i;
                   const isLatest = i === 0;
                   const hasGps = cp.lat != null && cp.lng != null;
+                  const locName = cp.alamat || geoNames[`${cp.lat},${cp.lng}`] || "";
                   return (
                     <div
                       key={cp.id || i}
@@ -738,6 +781,9 @@ export default function CustomerTracking() {
                             🚚 {data.nopol}
                           </div>
                         )}
+                        {locName && (
+                          <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--trk-ink, #0f172a)", marginTop: 3, lineHeight: 1.35 }}>📍 {locName}</div>
+                        )}
                         {hasGps ? (
                           <a
                             href={`https://www.google.com/maps?q=${parseFloat(cp.lat)},${parseFloat(cp.lng)}`}
@@ -745,9 +791,9 @@ export default function CustomerTracking() {
                             rel="noreferrer"
                             className="trk-cp-coords"
                             onClick={(e) => e.stopPropagation()}
-                            style={{ display: "inline-flex", alignItems: "center", gap: 4, textDecoration: "underline", cursor: "pointer" }}
+                            style={{ display: "inline-flex", alignItems: "center", gap: 4, textDecoration: "underline", cursor: "pointer", opacity: locName ? 0.75 : 1, fontSize: locName ? 11 : undefined, marginTop: locName ? 1 : 0 }}
                           >
-                            📍 {parseFloat(cp.lat).toFixed(5)}, {parseFloat(cp.lng).toFixed(5)} · Buka Maps
+                            {locName ? "🗺️ Buka di Maps" : `📍 ${parseFloat(cp.lat).toFixed(5)}, ${parseFloat(cp.lng).toFixed(5)} · Buka Maps`}
                           </a>
                         ) : (
                           <div className="trk-cp-coords" style={{ opacity: .7 }}>📍 Lokasi GPS tidak aktif</div>

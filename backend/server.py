@@ -647,6 +647,7 @@ async def upload_daily_photo(
     lng: Optional[float] = Form(None),
     status: Optional[str] = Form(None),  # Berangkat|Checkpoint 1|Checkpoint 2|Checkpoint 3|Tiba Tujuan
     keterangan: Optional[str] = Form(None),
+    alamat: Optional[str] = Form(None),   # nama lokasi (reverse-geocode dari HP)
 ):
     trip = await db.trips.find_one({"trip_id": trip_id})
     if not trip:
@@ -670,6 +671,8 @@ async def upload_daily_photo(
         entry["status"] = status
     if keterangan:
         entry["keterangan"] = keterangan.strip()[:300]
+    if alamat:
+        entry["alamat"] = alamat.strip()[:200]
     await db.trips.update_one(
         {"trip_id": trip_id},
         {"$push": {"daily_checkpoints": entry}, "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}}

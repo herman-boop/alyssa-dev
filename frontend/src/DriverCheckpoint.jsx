@@ -1190,14 +1190,16 @@ export default function DriverCheckpoint() {
     const tgl = now.toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "2-digit", month: "short", year: "numeric" });
     const jam = now.toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", second: "2-digit" }).replace(/[:.]/g, ".");
     const lines = [`${tgl} ${jam} WIB`];
+    let alamat = "";
     if (gps) {
       const addr = await reverseGeocode(gps.lat, gps.lng);
       addr.forEach((l) => lines.push(l));
+      alamat = addr.join(", ");
       if (addr.length === 0) lines.push(`${gps.lat.toFixed(5)}, ${gps.lng.toFixed(5)}`);
     }
     if (trip?.nopol) lines.push(trip.nopol);
     const stamped = await stampPhoto(file, lines);
-    return { file: stamped, gps };
+    return { file: stamped, gps, alamat };
   };
 
   const uploadInitial = async (slot, file) => {
@@ -1224,13 +1226,14 @@ export default function DriverCheckpoint() {
     setUploadingDaily(true);
     try {
       file = await convertHeicIfNeeded(file);
-      const { file: stamped, gps } = await geotagPhoto(file);
+      const { file: stamped, gps, alamat } = await geotagPhoto(file);
       const fd = new FormData();
       fd.append("foto", stamped);
       if (gps) {
         fd.append("lat", String(gps.lat));
         fd.append("lng", String(gps.lng));
       }
+      if (alamat) fd.append("alamat", alamat);
       if (dailyStatus) fd.append("status", dailyStatus);
       if (dailyNote.trim()) fd.append("keterangan", dailyNote.trim());
       const r = await axios.post(`${API}/trips/${trip.trip_id}/photos/daily`, fd);
