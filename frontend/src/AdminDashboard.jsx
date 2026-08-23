@@ -4636,7 +4636,7 @@ function DriverAutocomplete({ value, hp, onChange, onSelect, headers }) {
     setQ(drv.nama);
     setResults([]);
     setOpen(false);
-    onSelect(drv.nama, drv.no_hp || "");
+    onSelect(drv.nama, drv.no_hp || "", drv.driver_id || drv.id || null);
   };
 
   const IL2 = { background: "#0d1117", border: "1px solid #30363d", borderRadius: 5, padding: "5px 8px", color: "#e6edf3", fontSize: 11, outline: "none", width: "100%" };
@@ -5915,14 +5915,76 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
   };
 
   const setLeg = (i, patch) => setLegs(ls => ls.map((l, idx) => idx === i ? { ...l, ...patch } : l));
-  const addLeg = () => setLegs(ls => [...ls, { tipe: "Self Drive", asal: "", tujuan: "", kapal: "", eta: "", status: "Menunggu", catatan: "" }]);
+  const addLeg = () => setLegs(ls => [...ls, { tipe: "Self Drive", asal: "", tujuan: "", kapal: "", eta: "", status: "Menunggu", catatan: "", kepala_rombongan: { nama: "", hp: "", ref_id: null }, drivers: [] }]);
+  // ── Kepala Rombongan + anggota Driver/Unit per Leg (assignment per leg) ──
+  const setKepala = (i, patch) => setLegs(ls => ls.map((l, idx) => idx === i ? { ...l, kepala_rombongan: { ...(l.kepala_rombongan || { nama: "", hp: "", ref_id: null }), ...patch } } : l));
+  const addDriverRow = (i) => setLegs(ls => ls.map((l, idx) => idx === i ? { ...l, drivers: [...(l.drivers || []), { unit: "", driver: "", hp: "", ref_id: null, status: "Menunggu" }] } : l));
+  const setDriverRow = (i, di, patch) => setLegs(ls => ls.map((l, idx) => idx === i ? { ...l, drivers: (l.drivers || []).map((d, x) => x === di ? { ...d, ...patch } : d) } : l));
+  const delDriverRow = (i, di) => setLegs(ls => ls.map((l, idx) => idx === i ? { ...l, drivers: (l.drivers || []).filter((_, x) => x !== di) } : l));
+
+  // ── Autosave + hydrate (persistence Fase 1). Token/link existing TIDAK diregenerate. ──
+  const [saveStatus, setSaveStatus] = useState("idle"); // idle | saving | saved | error
+  const hydratedRef = useRef(false);
+  const skipSaveRef = useRef(false);
+  useEffect(() => {
+    if (!tripId) { hydratedRef.current = true; return; }
+    let alive = true;
+    axios.get(`${API}/admin/trips/${tripId}/legs`, { headers })
+      .then((r) => {
+        if (!alive) return;
+        const srv = r.data?.legs;
+        if (Array.isArray(srv) && srv.length > 0) { skipSaveRef.current = true; setLegs(srv); }
+        hydratedRef.current = true;
+      })
+      .catch(() => { hydratedRef.current = true; });
+    return () => { alive = false; };
+    // eslint-disable-next-line
+  }, [tripId]);
+  useEffect(() => {
+    if (!tripId || !hydratedRef.current) return;
+    if (skipSaveRef.current) { skipSaveRef.current = false; return; }
+    setSaveStatus("saving");
+    const t = setTimeout(async () => {
+      try {
+        const r = await axios.patch(`${API}/admin/trips/${tripId}/legs`, { legs }, { headers });
+        const srv = r.data?.legs;
+        // Sinkron ID (route_leg_id / driver id) dari server sekali, tanpa memicu save ulang.
+        if (Array.isArray(srv)) {
+          const needSync = srv.length !== legs.length || srv.some((l, idx) =>
+            l.route_leg_id !== legs[idx]?.route_leg_id ||
+            (l.drivers || []).some((d, di) => d.id !== legs[idx]?.drivers?.[di]?.id));
+          if (needSync) { skipSaveRef.current = true; setLegs(srv); }
+        }
+        setSaveStatus("saved");
+      } catch { setSaveStatus("error"); }
+    }, 700);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line
+  }, [legs, tripId]);
   // Lanjutkan Tahap Berikutnya: bikin leg baru (asal = tujuan leg terakhir), histori
   // tahap sebelumnya tetap, nggak minta input kendaraan ulang. Persist ke backend.
   const nextLeg = async () => {
+    // Tawarkan pakai rombongan dari Leg terakhir -> jadi assignment BARU utk leg baru
+    // (fresh id, tanpa token) sehingga bisa diedit tanpa merusak leg sebelumnya.
+    const prev = legs[legs.length - 1];
+    const punyaRombongan = prev && ((prev.kepala_rombongan && (prev.kepala_rombongan.nama || prev.kepala_rombongan.hp)) || (prev.drivers || []).length > 0);
+    let pakai = false;
+    if (punyaRombongan) pakai = window.confirm("Gunakan rombongan (Kepala Rombongan + Driver/Unit) dari Leg sebelumnya untuk Leg baru ini?\n\nOK = salin  ·  Batal = kosongkan");
     if (!tripId) { addLeg(); return; }
     try {
       const r = await axios.post(`${API}/admin/trips/${tripId}/next-leg`, {}, { headers });
-      if (r.data?.legs) setLegs(r.data.legs); else addLeg();
+      let arr = (r.data?.legs && r.data.legs.length) ? r.data.legs : null;
+      if (!arr) { addLeg(); return; }
+      if (pakai) {
+        const li = arr.length - 1;
+        arr = arr.map((l, idx) => idx === li ? {
+          ...l,
+          kepala_rombongan: prev.kepala_rombongan ? { ...prev.kepala_rombongan } : { nama: "", hp: "", ref_id: null },
+          drivers: (prev.drivers || []).map((d) => ({ unit: d.unit || "", driver: d.driver || "", hp: d.hp || "", ref_id: d.ref_id || null, status: "Menunggu" })), // id baru distamp server, tanpa token
+        } : l);
+      }
+      skipSaveRef.current = false; // biarkan autosave menstamp id leg/driver baru
+      setLegs(arr);
     } catch { addLeg(); }
   };
   const delLeg = (i) => setLegs(ls => ls.filter((_, idx) => idx !== i));
@@ -5951,7 +6013,11 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
               <span style={{ fontSize: 15, fontWeight: 800, color: "#e6edf3" }}>Detail Pengiriman</span>
               <span style={{ fontSize: 11, fontWeight: 700, color: "#60a5fa", background: "#0d2340", border: "1px solid #1f6feb", borderRadius: 10, padding: "2px 8px" }}>#{order?.order_id}</span>
             </div>
-            <div style={{ fontSize: 11, color: "#8b949e", marginTop: 4 }}>{order?.asal_kota} → {order?.tujuan_kota} · {legs.length} Leg</div>
+            <div style={{ fontSize: 11, color: "#8b949e", marginTop: 4 }}>{order?.asal_kota} → {order?.tujuan_kota} · {legs.length} Leg
+              {tripId && <span style={{ marginLeft: 8, fontWeight: 700, color: saveStatus === "error" ? "#f85149" : saveStatus === "saving" ? "#e6b450" : "#3fb950" }}>
+                {saveStatus === "saving" ? "· Menyimpan…" : saveStatus === "error" ? "· ⚠ Belum tersimpan — coba lagi" : saveStatus === "saved" ? "· ✓ Tersimpan" : ""}
+              </span>}
+            </div>
           </div>
           <button className="adm-modal-close" onClick={onClose}><IcoX /></button>
         </div>
@@ -6232,13 +6298,60 @@ function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tri
                     onSelect={(nama, hp) => setLeg(i, { driver: nama, driver_hp: hp })}
                     headers={headers}
                   />
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, margin: "10px 0 6px" }}>
-                    <label style={MINI_LABEL}>Koordinator Bayangan
-                      <input style={MINI_INPUT} value={leg.kord_bayangan || ""} onChange={e => setLeg(i, { kord_bayangan: e.target.value })} placeholder="Nama · agen/pawang driver" />
-                    </label>
-                    <label style={MINI_LABEL}>HP Koordinator
-                      <input style={MINI_INPUT} value={leg.kord_bayangan_hp || ""} onChange={e => setLeg(i, { kord_bayangan_hp: e.target.value })} placeholder="08xx-xxxx" />
-                    </label>
+                  {/* ── KEPALA ROMBONGAN (assignment per Leg, bukan sekadar teks) ── */}
+                  <div style={{ marginTop: 10, padding: "10px 12px", background: "#12200f", border: "1px solid #2f5a1f", borderRadius: 8 }}>
+                    <div style={{ fontSize: 10, color: "#7ee06b", fontWeight: 800, marginBottom: 8, letterSpacing: .5 }}>🧑‍✈️ KEPALA ROMBONGAN</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 8 }}>
+                      <div>
+                        <div style={MINI_LABEL}>Cari / pilih (dari master driver)</div>
+                        <DriverAutocomplete
+                          value={(leg.kepala_rombongan && leg.kepala_rombongan.nama) || leg.kord_bayangan || ""}
+                          hp={(leg.kepala_rombongan && leg.kepala_rombongan.hp) || leg.kord_bayangan_hp || ""}
+                          onChange={(val) => setKepala(i, { nama: val })}
+                          onSelect={(nama, hp, id) => setKepala(i, { nama, hp, ref_id: id || null })}
+                          headers={headers}
+                        />
+                      </div>
+                      <label style={MINI_LABEL}>No. HP
+                        <input style={MINI_INPUT} value={(leg.kepala_rombongan && leg.kepala_rombongan.hp) || leg.kord_bayangan_hp || ""} onChange={e => setKepala(i, { hp: e.target.value })} placeholder="08xx-xxxx" />
+                      </label>
+                    </div>
+                    <div style={{ fontSize: 9.5, color: "#6b8f5e", marginTop: 6 }}>Link Kepala Rombongan menyusul (Fase 2). Assignment tersimpan per Leg.</div>
+                  </div>
+
+                  {/* ── DRIVER / UNIT ROMBONGAN (anggota, boleh lebih dari 1) ── */}
+                  <div style={{ marginTop: 10, padding: "10px 12px", background: "#0a1628", border: "1px solid #1f3a5a", borderRadius: 8 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                      <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 800, letterSpacing: .5 }}>🚚 DRIVER / UNIT ROMBONGAN {(leg.drivers || []).length > 0 ? `(${leg.drivers.length})` : ""}</div>
+                      <button type="button" onClick={() => addDriverRow(i)} style={{ ...GHOST_BTN_BLUE, fontSize: 11, padding: "4px 10px" }}>+ Tambah Driver / Unit</button>
+                    </div>
+                    {(leg.drivers || []).length === 0 && <div style={{ fontSize: 10.5, color: "#4a6fa5" }}>Buat rombongan multi-unit, tambah anggota di sini. Self drive 1 driver cukup pakai blok 🚗 DRIVER di atas.</div>}
+                    {(leg.drivers || []).map((d, di) => (
+                      <div key={d.id || di} style={{ border: "1px solid #21344d", borderRadius: 7, padding: 8, marginBottom: 6 }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 6 }}>
+                          <label style={MINI_LABEL}>Unit / Nopol
+                            <input style={MINI_INPUT} value={d.unit || ""} onChange={e => setDriverRow(i, di, { unit: e.target.value.toUpperCase() })} placeholder="mis. B 1234 XYZ" />
+                          </label>
+                          <label style={MINI_LABEL}>Status
+                            <select style={MINI_INPUT} value={d.status || "Menunggu"} onChange={e => setDriverRow(i, di, { status: e.target.value })}>
+                              <option>Menunggu</option><option>Berangkat</option><option>Tiba</option><option>Selesai</option>
+                            </select>
+                          </label>
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 6, alignItems: "end" }}>
+                          <div>
+                            <div style={MINI_LABEL}>Driver (master)</div>
+                            <DriverAutocomplete value={d.driver || ""} hp={d.hp || ""} onChange={(val) => setDriverRow(i, di, { driver: val })} onSelect={(nama, hp, id) => setDriverRow(i, di, { driver: nama, hp, ref_id: id || null })} headers={headers} />
+                          </div>
+                          <label style={MINI_LABEL}>HP
+                            <input style={MINI_INPUT} value={d.hp || ""} onChange={e => setDriverRow(i, di, { hp: e.target.value })} placeholder="08xx-xxxx" />
+                          </label>
+                        </div>
+                        <div style={{ textAlign: "right", marginTop: 4 }}>
+                          <button type="button" onClick={() => delDriverRow(i, di)} style={{ background: "none", border: "none", color: "#f85149", fontSize: 10.5, cursor: "pointer", fontWeight: 700 }}>Hapus anggota</button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                   <Checklist items={[
                     { done: !!leg.driver, label: "Driver ditugaskan" },

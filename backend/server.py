@@ -2996,13 +2996,56 @@ class LegsBody(BaseModel):
 
 @api_router.patch("/admin/trips/{trip_id}/legs", dependencies=[Depends(require_admin_pin)])
 async def admin_patch_trip_legs(trip_id: str, body: LegsBody):
-    """Simpan/update array legs pada trip. Tiap leg: {tipe, asal, tujuan, kapal, eta, status}."""
+    """Simpan/update array legs (autosave). Tiap leg boleh bawa field bebas
+    (kepala_rombongan, drivers[], dst). Server:
+    - Stamp `route_leg_id` (DB ID persistent) ke leg yang belum punya.
+    - PRESERVE field token/link existing (task_token, petugas_id, route_leg_id)
+      dari data lama by route_leg_id supaya autosave/reopen TIDAK meregenerate link.
+    Return legs final biar frontend sinkron ID-nya."""
     trip = await db.trips.find_one({"trip_id": trip_id})
     if not trip:
         raise HTTPException(404, "Trip not found")
+    old_by_id = {l.get("route_leg_id"): l for l in (trip.get("legs") or []) if l.get("route_leg_id")}
+    legs = []
+    for leg in (body.legs or []):
+        leg = dict(leg)
+        rid = leg.get("route_leg_id")
+        if not rid:
+            rid = str(uuid.uuid4())
+            leg["route_leg_id"] = rid
+        prev = old_by_id.get(rid) or {}
+        # Jangan biarkan autosave menghapus token/link yang sudah dibuat.
+        for keep in ("task_token", "petugas_id"):
+            if not leg.get(keep) and prev.get(keep):
+                leg[keep] = prev[keep]
+        # stamp id tiap driver member yang belum punya
+        drv = leg.get("drivers")
+        if isinstance(drv, list):
+            for d in drv:
+                if isinstance(d, dict) and not d.get("id"):
+                    d["id"] = str(uuid.uuid4())
+        legs.append(leg)
     now = datetime.utcnow().isoformat()
-    await db.trips.update_one({"trip_id": trip_id}, {"$set": {"legs": body.legs, "updated_at": now}})
-    return {"ok": True, "trip_id": trip_id, "legs_count": len(body.legs)}
+    await db.trips.update_one({"trip_id": trip_id}, {"$set": {"legs": legs, "updated_at": now}})
+    return {"ok": True, "trip_id": trip_id, "legs_count": len(legs), "legs": legs}
+
+
+@api_router.get("/admin/trips/{trip_id}/legs", dependencies=[Depends(require_admin_pin)])
+async def admin_get_trip_legs(trip_id: str):
+    """Ambil legs lengkap (semua field admin) buat hydrate modal Route Leg saat
+    dibuka lagi — reopen = data kembali persis. Stamp route_leg_id kalau ada leg
+    lama yang belum punya (backward-compat), tanpa mengubah token."""
+    trip = await db.trips.find_one({"trip_id": trip_id})
+    if not trip:
+        raise HTTPException(404, "Trip not found")
+    legs = trip.get("legs") or []
+    changed = False
+    for leg in legs:
+        if not leg.get("route_leg_id"):
+            leg["route_leg_id"] = str(uuid.uuid4()); changed = True
+    if changed:
+        await db.trips.update_one({"trip_id": trip_id}, {"$set": {"legs": legs}})
+    return {"ok": True, "trip_id": trip_id, "legs": legs}
 
 
 # ════════════════════════════════════════════════════════════════════
