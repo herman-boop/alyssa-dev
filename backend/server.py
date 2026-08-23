@@ -5113,6 +5113,9 @@ def _supplier_job_totals(job: dict) -> dict:
     job["total_harga"] = base + tambahan_total
     job["total_terbayar"] = terbayar
     job["sisa"] = (base + tambahan_total) - terbayar
+    # Selisih Harga (buat laporan format Supplier) — TERPISAH dari ongkos di atas,
+    # tidak memengaruhi total_harga/sisa. Selisih = Harga Invoice - Harga Deal.
+    job["selisih"] = (job.get("selisih_invoice") or 0) - (job.get("selisih_deal") or 0)
     return job
 
 
@@ -5181,6 +5184,8 @@ class SupplierJobBody(BaseModel):
     project_id: Optional[str] = None
     tanggal: Optional[str] = None   # manual date (YYYY-MM-DD); kosong = hari ini
     tag: str = ""                   # Tag/Judul Kelompok laporan (pembatas visual PDF; TIDAK ikut hitungan)
+    selisih_deal: Optional[int] = None    # Harga Deal (buat laporan Selisih format Supplier)
+    selisih_invoice: Optional[int] = None # Harga Invoice; Selisih = Invoice - Deal (rumus existing)
 
 
 class SupplierProjectBody(BaseModel):
@@ -5310,6 +5315,8 @@ async def add_supplier_job(supplier_id: str, body: SupplierJobBody):
         "catatan": body.catatan.strip(),
         "tanggal": tgl,
         "tag": (body.tag or "").strip()[:60],
+        "selisih_deal": body.selisih_deal if (body.selisih_deal or 0) > 0 else None,
+        "selisih_invoice": body.selisih_invoice if (body.selisih_invoice or 0) > 0 else None,
         "payments": [],
     }
     upd = {"jobs": (doc.get("jobs") or []) + [job]}
@@ -5342,6 +5349,30 @@ async def set_supplier_job_tag(supplier_id: str, job_id: str, body: dict = Body(
     if idx is None:
         raise HTTPException(404, "Unit/job tidak ditemukan")
     jobs[idx]["tag"] = tag
+    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
+    return _supplier_job_totals(jobs[idx])
+
+
+@api_router.patch("/admin/suppliers/{supplier_id}/jobs/{job_id}/selisih", dependencies=[Depends(require_admin_pin)])
+async def set_supplier_job_selisih(supplier_id: str, job_id: str, body: dict = Body(...)):
+    """Set Harga Deal & Harga Invoice per unit (buat laporan Selisih format Supplier).
+    Selisih = Invoice - Deal (rumus existing). TIDAK mengubah ongkos/total_harga/
+    payment/sisa ongkos. Kosong/0 = dihapus (unit tidak masuk hitungan selisih)."""
+    def _num(v):
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            n = 0
+        return n if n > 0 else None
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    jobs = doc.get("jobs") or []
+    idx = next((i for i, j in enumerate(jobs) if j.get("id") == job_id), None)
+    if idx is None:
+        raise HTTPException(404, "Unit/job tidak ditemukan")
+    jobs[idx]["selisih_deal"] = _num(body.get("selisih_deal"))
+    jobs[idx]["selisih_invoice"] = _num(body.get("selisih_invoice"))
     await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
     return _supplier_job_totals(jobs[idx])
 
