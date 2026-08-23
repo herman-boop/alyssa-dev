@@ -461,20 +461,53 @@ export default function SupplierPage() {
   const [manualOpen, setManualOpen] = useState(false);
   const [jobForm, setJobForm] = useState(blankJobForm);
   const [jobSaving, setJobSaving] = useState(false);
+  // Pilihan projek tujuan saat Tarik / Tambah unit. "" = projek aktif (otomatis),
+  // "__new__" = bikin projek baru dgn nama manual, atau id projek yg sudah ada.
+  const [jobProjSel, setJobProjSel] = useState("");
+  const [jobProjNew, setJobProjNew] = useState("");
+  const resetProjPicker = () => { setJobProjSel(""); setJobProjNew(""); };
+  // Kembalikan project_id tujuan. Kalau user pilih "Projek Baru", bikin dulu lalu
+  // pakai id-nya. Throw kalau nama projek baru kosong (biar handler batal).
+  const resolveTargetProjectId = async () => {
+    if (jobProjSel === "__new__") {
+      const nm = jobProjNew.trim();
+      if (!nm) { flash("Isi nama projek baru dulu"); const err = new Error("nama projek kosong"); err.__projErr = true; throw err; }
+      const r = await axios.post(`${API}/admin/suppliers/${selected.id}/projects`, { nama: nm }, { headers });
+      return r.data?.id || null;
+    }
+    return jobProjSel || null; // "" -> backend pilih projek aktif
+  };
+  // Dropdown pilih/ketik projek — dipakai di modal Tarik & Tambah Manual.
+  const renderProjPicker = () => (
+    <div>
+      <div style={{ ...L }}>Masukkan ke Projek</div>
+      <select style={I} value={jobProjSel} onChange={(e) => setJobProjSel(e.target.value)} data-testid="sup-job-proj">
+        <option value="">📂 Projek aktif (otomatis)</option>
+        {(selected?.projects || []).map((p) => <option key={p.id} value={p.id}>📁 {p.nama}</option>)}
+        <option value="__new__">➕ Projek Baru (ketik nama)…</option>
+      </select>
+      {jobProjSel === "__new__" && (
+        <input style={{ ...I, marginTop: 8 }} placeholder="Nama projek baru (mis. Proyek Tambang Berau / PT San Traktor)"
+          value={jobProjNew} onChange={(e) => setJobProjNew(e.target.value)} data-testid="sup-job-proj-new" autoFocus />
+      )}
+    </div>
+  );
   const addJob = async () => {
     if (!selected) return;
     const harga = pNum(jobForm.total_harga);
     if (harga <= 0) { flash("Total harga wajib diisi"); return; }
     setJobSaving(true);
     try {
+      const projectId = await resolveTargetProjectId();
       await axios.post(`${API}/admin/suppliers/${selected.id}/jobs`, {
         vehicle_type: jobForm.vehicle_type.trim(), nopol: jobForm.nopol.trim(), no_rangka: jobForm.no_rangka.trim(),
         asal_kota: jobForm.asal_kota.trim(), tujuan_kota: jobForm.tujuan_kota.trim(),
         total_harga: harga, catatan: jobForm.catatan.trim(), tanggal: jobForm.tanggal || todayStr(),
+        project_id: projectId,
       }, { headers });
-      setJobForm(blankJobForm); setManualOpen(false);
+      setJobForm(blankJobForm); setManualOpen(false); resetProjPicker();
       await reloadSelected(selected.id); setListRefreshTick((t) => t + 1); flash("Unit ditambahkan");
-    } catch (e) { flash(e?.response?.data?.detail || "Gagal tambah unit"); }
+    } catch (e) { if (!e?.__projErr) flash(e?.response?.data?.detail || "Gagal tambah unit"); }
     finally { setJobSaving(false); }
   };
 
@@ -510,7 +543,7 @@ export default function SupplierPage() {
   };
   const openTarik = async () => {
     if (!selected) { flash("Pilih supplier dulu"); return; }
-    setTarikOpen(true); setTarikSel({}); setTarikQ("");
+    setTarikOpen(true); setTarikSel({}); setTarikQ(""); resetProjPicker();
     fetchTarik("");
   };
   // Debounce: tiap ketik di search, cari ulang ke server (biar master penuh kepakai).
@@ -533,15 +566,17 @@ export default function SupplierPage() {
     if (!valid.length) { flash("Centang unit & isi Total Harga (HPP) dulu"); return; }
     setTarikSaving(true);
     try {
+      const projectId = await resolveTargetProjectId(); // bikin projek baru sekali (kalau dipilih)
       for (const r of valid) {
         await axios.post(`${API}/admin/suppliers/${selected.id}/jobs`, {
           vehicle_type: r.vehicle_type, nopol: r.nopol, no_rangka: r.no_rangka,
           asal_kota: r.asal_kota, tujuan_kota: r.tujuan_kota, total_harga: pNum(r.total_harga), catatan: "", tanggal: todayStr(),
+          project_id: projectId,
         }, { headers });
       }
-      setTarikOpen(false); setTarikSel({});
+      setTarikOpen(false); setTarikSel({}); resetProjPicker();
       await reloadSelected(selected.id); setListRefreshTick((t) => t + 1); flash(`${valid.length} unit ditarik dari order`);
-    } catch (e) { flash(e?.response?.data?.detail || "Gagal tarik unit"); }
+    } catch (e) { if (!e?.__projErr) flash(e?.response?.data?.detail || "Gagal tarik unit"); }
     finally { setTarikSaving(false); }
   };
 
@@ -828,7 +863,7 @@ export default function SupplierPage() {
             <div>
               <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
                 <button style={{ ...BTN, flex: 1, minWidth: 150 }} onClick={openTarik} data-testid="sup-tarik-open">+ Tarik Unit dari PO</button>
-                <button style={{ ...BTN_GHOST, flex: 1, minWidth: 130 }} onClick={() => { setJobForm(blankJobForm); setManualOpen(true); }} data-testid="sup-manual-open">+ Tambah Manual</button>
+                <button style={{ ...BTN_GHOST, flex: 1, minWidth: 130 }} onClick={() => { setJobForm(blankJobForm); resetProjPicker(); setManualOpen(true); }} data-testid="sup-manual-open">+ Tambah Manual</button>
               </div>
               <div style={{ display: "flex", gap: 6, marginBottom: 12, overflowX: "auto" }}>
                 {[["semua", "Semua"], ["belum", "Belum Bayar"], ["sebagian", "Sebagian"], ["lunas", "Lunas"]].map(([k, t]) => (
@@ -940,6 +975,7 @@ export default function SupplierPage() {
           foot={<><button style={BTN_GHOST} onClick={() => setTarikOpen(false)}>Batal</button><button style={BTN} onClick={doTarik} disabled={tarikSaving} data-testid="sup-tarik-save">{tarikSaving ? "Menarik…" : `Tarik ${tarikSelArr.length} Unit${tarikTotal > 0 ? ` · ${fRp(tarikTotal)}` : ""}`}</button></>}>
           <div style={{ fontSize: 12, color: C.mute, marginBottom: 10 }}>Centang unit, isi HPP (biaya ke supplier ini). Unit, nopol, customer &amp; rute otomatis dari PO.</div>
           <input style={{ ...I, marginBottom: 10 }} placeholder="🔎 cari: no PO / no rangka / nama pelanggan / asal / tujuan" value={tarikQ} onChange={(e) => setTarikQ(e.target.value)} data-testid="sup-tarik-search" />
+          <div style={{ marginBottom: 12 }}>{renderProjPicker()}</div>
           {tarikLoading ? <div style={{ padding: 20, textAlign: "center", color: C.mute }}>Memuat…</div> : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {tarikRows.map((row) => {
@@ -1062,6 +1098,7 @@ export default function SupplierPage() {
         <Modal title="Tambah Unit Manual" onClose={() => setManualOpen(false)}
           foot={<><button style={BTN_GHOST} onClick={() => setManualOpen(false)}>Batal</button><button style={BTN} onClick={addJob} disabled={jobSaving} data-testid="sup-job-save">{jobSaving ? "Menyimpan…" : "Simpan Unit"}</button></>}>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {renderProjPicker()}
             <input style={I} placeholder="Tipe kendaraan" value={jobForm.vehicle_type} onChange={(e) => setJobForm((f) => ({ ...f, vehicle_type: e.target.value }))} data-testid="sup-job-vehicle" />
             <input style={I} placeholder="No. Polisi (kosongkan kalau mobil baru)" value={jobForm.nopol} onChange={(e) => setJobForm((f) => ({ ...f, nopol: e.target.value.toUpperCase() }))} data-testid="sup-job-nopol" />
             <input style={I} placeholder="No. Rangka" value={jobForm.no_rangka} onChange={(e) => setJobForm((f) => ({ ...f, no_rangka: e.target.value.toUpperCase() }))} />
