@@ -1086,12 +1086,17 @@ export default function SupplierPage() {
               {txns.length === 0 && <div style={{ textAlign: "center", padding: 30, color: C.mute }}>Belum ada pembayaran.</div>}
               {txns.map((tx) => (
                 <button key={tx.key} onClick={() => setTxnDetail(tx)} style={{ textAlign: "left", background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 14, cursor: "pointer", color: C.ink }} data-testid={`sup-txn-${tx.key}`}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                  {/* Card utama = TRANSAKSI BANK: tanggal + nominal + status. Unit cuma helper kecil. */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
                     <div>
                       <div style={{ fontSize: 12, color: C.mute }}>{fDate(tx.tanggal)}</div>
-                      <div style={{ fontSize: 13, fontWeight: 700, marginTop: 2 }}>{tx.metode}{tx.allocs.length > 1 ? ` · ${tx.allocs.length} unit` : ""}{tx.bukti_url ? " · 📎" : ""}</div>
+                      <div style={{ fontSize: 14, fontWeight: 800, marginTop: 2 }}>{(tx.metode === "Kompensasi" ? "Kompensasi" : "Transfer")} diterima</div>
+                      <div style={{ fontSize: 11.5, color: C.mute, marginTop: 3 }}>Dialokasikan ke {tx.allocs.length} unit{tx.bukti_url ? " · 📎 bukti" : ""}</div>
                     </div>
-                    <div style={{ fontSize: 17, fontWeight: 900, color: C.green }}>{fRp(tx.total)}</div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: 17, fontWeight: 900, color: C.green }}>{fRp(tx.total)}</div>
+                      <div style={{ fontSize: 11.5, fontWeight: 800, color: C.green, marginTop: 3 }}>✓ Diterima</div>
+                    </div>
                   </div>
                 </button>
               ))}
@@ -1403,6 +1408,24 @@ export default function SupplierPage() {
               <b>{fRp(a.amount)}</b>
             </div>
           ))}
+          {(() => {
+            const totalAlokasi = txnDetail.allocs.reduce((s, a) => s + (a.amount || 0), 0);
+            const beda = totalAlokasi - (txnDetail.total || 0);
+            return (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "8px 0 4px", fontWeight: 800 }}>
+                  <span>Total Alokasi</span><b>{fRp(totalAlokasi)}</b>
+                </div>
+                {beda === 0 ? (
+                  <div style={{ fontSize: 12, fontWeight: 800, color: C.green }}>✓ Alokasi sesuai</div>
+                ) : (
+                  <div style={{ fontSize: 12, fontWeight: 700, color: C.red, background: "#2d1214", border: `1px solid ${C.red}`, borderRadius: 8, padding: "8px 10px", marginTop: 4 }}>
+                    ⚠ Alokasi tidak sama dengan nominal transfer. Selisih: {fRp(Math.abs(beda))} ({beda > 0 ? "alokasi lebih besar" : "alokasi lebih kecil"}).
+                  </div>
+                )}
+              </>
+            );
+          })()}
           {txnDetail.bukti_url && <a href={resolveUrl(txnDetail.bukti_url)} target="_blank" rel="noreferrer" style={{ ...BTN_GHOST, display: "block", textAlign: "center", marginTop: 12, textDecoration: "none" }}>📎 Lihat Bukti Transfer</a>}
           <input ref={txnBuktiRef} type="file" accept="image/*,application/pdf" style={{ display: "none" }} onChange={(e) => uploadTxnBukti(e.target.files?.[0] || null)} data-testid="sup-txn-bukti-file" />
           <button style={{ ...(txnDetail.bukti_url ? BTN_GHOST : BTN), width: "100%", marginTop: txnDetail.bukti_url ? 8 : 12 }} disabled={txnBuktiSaving} onClick={() => txnBuktiRef.current?.click()} data-testid="sup-txn-bukti-upload">
