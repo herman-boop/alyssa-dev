@@ -28,9 +28,9 @@ const mist = "#f7f8fa";
 
 function SectionHeader({ title }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "22px 0 10px" }}>
-      <div style={{ width: 4, height: 15, background: gold, borderRadius: 2 }} />
-      <div style={{ fontWeight: 800, fontSize: 12.5, color: ink, letterSpacing: 0.5, textTransform: "uppercase" }}>{title}</div>
+    <div style={{ display: "flex", alignItems: "center", gap: 7, margin: "12px 0 6px" }}>
+      <div style={{ width: 3, height: 12, background: gold, borderRadius: 2 }} />
+      <div style={{ fontWeight: 800, fontSize: 10.5, color: ink, letterSpacing: 0.5, textTransform: "uppercase" }}>{title}</div>
     </div>
   );
 }
@@ -104,12 +104,13 @@ export default function SelisihRingkasan() {
   const lunasAll = totalSelisih > 0 && sisa <= 0;
   const todayFmt = new Date().toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
 
-  const th = { textAlign: "left", padding: "7px 9px", color: "#334155", fontWeight: 700, fontSize: 9, textTransform: "uppercase", letterSpacing: 0.3, borderBottom: `1.5px solid #cbd5e1`, background: mist };
-  const td = { padding: "7px 9px", borderBottom: `1px solid ${border}`, fontSize: 11 };
-  // Gaya compact bank-statement khusus tabel Riwayat Pembayaran (row rapat, font kecil tajam).
-  const thC = { textAlign: "left", padding: "5px 8px", color: "#334155", fontWeight: 700, fontSize: 8, textTransform: "uppercase", letterSpacing: 0.3, borderBottom: `1.2px solid #cbd5e1`, background: mist };
-  const tdC = { padding: "3.5px 8px", borderBottom: `1px solid #eef0f4`, fontSize: 9.5, lineHeight: 1.2 };
-  const subTd = { padding: "3.5px 8px", borderTop: `1px solid ${border}`, borderBottom: `1px solid ${border}`, background: "#fbfcfe", fontSize: 9, color: "#334155" };
+  // Compact density (referensi kepadatan rekening koran): font kecil tapi tajam, row pendek.
+  const th = { textAlign: "left", padding: "3.5px 7px", color: "#334155", fontWeight: 700, fontSize: 8, textTransform: "uppercase", letterSpacing: 0.3, borderBottom: `1.2px solid #cbd5e1`, background: mist };
+  const td = { padding: "3.5px 7px", borderBottom: `1px solid ${border}`, fontSize: 9.5, lineHeight: 1.2 };
+  // Gaya compact khusus tabel Riwayat Pembayaran (row rapat, font kecil tajam).
+  const thC = { textAlign: "left", padding: "3px 7px", color: "#334155", fontWeight: 700, fontSize: 7.5, textTransform: "uppercase", letterSpacing: 0.3, borderBottom: `1.2px solid #cbd5e1`, background: mist };
+  const tdC = { padding: "2.5px 7px", borderBottom: `1px solid #eef0f4`, fontSize: 9, lineHeight: 1.15 };
+  const subTd = { padding: "2.5px 7px", borderTop: `1px solid ${border}`, borderBottom: `1px solid ${border}`, background: "#fbfcfe", fontSize: 8.5, color: "#334155" };
 
   return (
     <div data-testid="ringkasan-ready" style={{ background: "#f3f4f6", minHeight: "100vh", padding: 24, display: "flex", justifyContent: "center", fontFamily: "Arial, 'Helvetica Neue', 'Segoe UI', sans-serif" }}>
@@ -127,18 +128,18 @@ export default function SelisihRingkasan() {
           * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
         }
       `}</style>
-      <div data-testid="ringkasan-card" style={{ width: 600, background: "#fff", borderRadius: 14, padding: 32, color: ink }}>
+      <div data-testid="ringkasan-card" style={{ width: 600, background: "#fff", borderRadius: 14, padding: 22, color: ink }}>
 
         {/* Header */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: `2.5px solid ${navy}`, paddingBottom: 14, marginBottom: 6 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: `2.5px solid ${navy}`, paddingBottom: 9, marginBottom: 4 }}>
           <div>
-            <div style={{ fontSize: 21, fontWeight: 900, color: navy, letterSpacing: 0.4 }}>RINGKASAN SELISIH HARGA</div>
-            <div style={{ fontSize: 9, color: gold, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, marginTop: 2 }}>PT Alyssa Auto Logistik</div>
-            <div style={{ fontSize: 12, color: gray, marginTop: 4 }}>PIC Purchasing — <b style={{ color: ink }}>{data.nama}</b></div>
+            <div style={{ fontSize: 17, fontWeight: 900, color: navy, letterSpacing: 0.4 }}>RINGKASAN SELISIH HARGA</div>
+            <div style={{ fontSize: 8, color: gold, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, marginTop: 1 }}>PT Alyssa Auto Logistik</div>
+            <div style={{ fontSize: 10, color: gray, marginTop: 3 }}>PIC Purchasing — <b style={{ color: ink }}>{data.nama}</b></div>
           </div>
-          <div style={{ textAlign: "right", fontSize: 11 }}>
+          <div style={{ textAlign: "right", fontSize: 9.5 }}>
             <div style={{ color: gray }}>Tanggal</div>
-            <div style={{ fontWeight: 700, marginBottom: 8 }}>{todayFmt}</div>
+            <div style={{ fontWeight: 700, marginBottom: 5 }}>{todayFmt}</div>
             <div style={{ color: gray }}>Disusun Oleh</div>
             <div style={{ fontWeight: 700 }}>Admin Keuangan</div>
           </div>
@@ -150,9 +151,9 @@ export default function SelisihRingkasan() {
           <div style={{ padding: 14, textAlign: "center", color: gray, fontSize: 12 }}>Belum ada tagihan.</div>
         )}
         {tagihanList.map((tg) => (
-          <div key={tg.id} style={{ marginBottom: 16 }} className="avoid-break">
+          <div key={tg.id} style={{ marginBottom: 9 }} className="avoid-break">
             {/* Header group: cukup nomor invoice, TANPA badge lunas/belum lunas */}
-            <div style={{ fontWeight: 800, fontSize: 12, color: navy, marginBottom: 5, paddingLeft: 2 }}>
+            <div style={{ fontWeight: 800, fontSize: 10.5, color: navy, marginBottom: 3, paddingLeft: 2 }}>
               {tg.no_invoice || "(tanpa nomor)"}
             </div>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -169,7 +170,7 @@ export default function SelisihRingkasan() {
                 {(tg.items || []).map((it) => (
                   <tr key={it.id}>
                     <td style={td}>
-                      {it.vehicle_type || "—"}{it.no_unit && <div style={{ color: gray, fontSize: 10 }}>{it.no_unit}</div>}
+                      {it.vehicle_type || "—"}{it.no_unit && <div style={{ color: gray, fontSize: 8.5 }}>{it.no_unit}</div>}
                     </td>
                     <td style={td}>{it.asal_kota || "—"} → {it.tujuan_kota || "—"}</td>
                     <td style={{ ...td, textAlign: "right" }}>{fRp(it.harga_deal)}</td>
@@ -180,31 +181,31 @@ export default function SelisihRingkasan() {
               </tbody>
             </table>
             {/* Subtotal group: Selisih / Sudah Dibayar / Sisa + status kecil di akhir */}
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 6 }}>
-              <div style={{ width: 300 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 2px", fontSize: 11 }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}>
+              <div style={{ width: 270 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 2px", fontSize: 9.5 }}>
                   <span style={{ color: gray }}>Subtotal Selisih</span><span style={{ fontWeight: 700 }}>{fRp(tg.total_selisih)}</span>
                 </div>
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 2px", fontSize: 11 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 2px", fontSize: 9.5 }}>
                   <span style={{ color: gray }}>Sudah Dibayar</span><span style={{ fontWeight: 700 }}>{fRp(tg.total_terbayar)}</span>
                 </div>
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "5px 2px", fontSize: 11.5, borderTop: `1px solid ${border}` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 2px", fontSize: 10, borderTop: `1px solid ${border}` }}>
                   <span style={{ fontWeight: 700, color: ink }}>Sisa</span>
                   <span style={{ fontWeight: 800, color: tg.sisa > 0 ? "#b42318" : navy }}>{fRp(tg.sisa)}</span>
                 </div>
-                <div style={{ textAlign: "right", marginTop: 4 }}>
+                <div style={{ textAlign: "right", marginTop: 2 }}>
                   {tg.lunas
-                    ? <span style={{ color: "#0f7a4d", fontWeight: 800, fontSize: 11 }}>&#10003; LUNAS</span>
-                    : <span style={{ color: gray, fontWeight: 600, fontSize: 10 }}>Status: Belum Lunas</span>}
+                    ? <span style={{ color: "#0f7a4d", fontWeight: 800, fontSize: 9.5 }}>&#10003; LUNAS</span>
+                    : <span style={{ color: gray, fontWeight: 600, fontSize: 9 }}>Status: Belum Lunas</span>}
                 </div>
               </div>
             </div>
           </div>
         ))}
         {/* Total selisih keseluruhan — clean bar */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: `2px solid ${navy}`, padding: "9px 4px 0", marginTop: 4 }}>
-          <span style={{ fontWeight: 900, fontSize: 12.5, color: navy, textTransform: "uppercase", letterSpacing: 0.3 }}>Total Selisih</span>
-          <span style={{ fontWeight: 900, fontSize: 13.5, color: ink }}>{fRp(totalSelisih)}</span>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: `2px solid ${navy}`, padding: "6px 3px 0", marginTop: 3 }}>
+          <span style={{ fontWeight: 900, fontSize: 10.5, color: navy, textTransform: "uppercase", letterSpacing: 0.3 }}>Total Selisih</span>
+          <span style={{ fontWeight: 900, fontSize: 11.5, color: ink }}>{fRp(totalSelisih)}</span>
         </div>
 
         {/* Section 2: Riwayat Pembayaran (transaksi aktual, tanpa nomor invoice) */}
@@ -254,37 +255,37 @@ export default function SelisihRingkasan() {
             });
           })()}
         </table>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: `2px solid ${navy}`, padding: "9px 4px 0", marginTop: 4 }}>
-          <span style={{ fontWeight: 900, fontSize: 12.5, color: navy, textTransform: "uppercase", letterSpacing: 0.3 }}>Total Pembayaran</span>
-          <span style={{ fontWeight: 900, fontSize: 13.5, color: ink }}>{fRp(totalBayar)}</span>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: `2px solid ${navy}`, padding: "6px 3px 0", marginTop: 3 }}>
+          <span style={{ fontWeight: 900, fontSize: 10.5, color: navy, textTransform: "uppercase", letterSpacing: 0.3 }}>Total Pembayaran</span>
+          <span style={{ fontWeight: 900, fontSize: 11.5, color: ink }}>{fRp(totalBayar)}</span>
         </div>
 
         {/* Section 3: Posisi Akhir — status keseluruhan (dominan), jangan kepotong */}
         <div className="avoid-break" style={{ breakInside: "avoid", pageBreakInside: "avoid" }}>
         <SectionHeader title="Posisi Akhir" />
-        <div style={{ width: "64%", maxWidth: 360, marginLeft: "auto" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", padding: "7px 2px", fontSize: 11.5, borderBottom: `1px solid ${border}` }}>
-            <span style={{ color: "#333", textTransform: "uppercase", fontSize: 10.5, letterSpacing: 0.3, fontWeight: 600 }}>Total Selisih</span>
+        <div style={{ width: "62%", maxWidth: 340, marginLeft: "auto" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 2px", fontSize: 10, borderBottom: `1px solid ${border}` }}>
+            <span style={{ color: "#333", textTransform: "uppercase", fontSize: 9, letterSpacing: 0.3, fontWeight: 600 }}>Total Selisih</span>
             <span style={{ fontWeight: 700 }}>{fRp(totalSelisih)}</span>
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", padding: "7px 2px", fontSize: 11.5, borderBottom: `1px solid ${border}` }}>
-            <span style={{ color: "#333", textTransform: "uppercase", fontSize: 10.5, letterSpacing: 0.3, fontWeight: 600 }}>Total Pembayaran</span>
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 2px", fontSize: 10, borderBottom: `1px solid ${border}` }}>
+            <span style={{ color: "#333", textTransform: "uppercase", fontSize: 9, letterSpacing: 0.3, fontWeight: 600 }}>Total Pembayaran</span>
             <span style={{ fontWeight: 700 }}>{fRp(totalBayar)}</span>
           </div>
-          <div style={{ marginTop: 10, background: navy, borderRadius: 9, padding: "13px 16px" }}>
+          <div style={{ marginTop: 7, background: navy, borderRadius: 8, padding: "10px 14px" }}>
             {lunasAll ? (
-              <div style={{ color: "#fff", fontWeight: 900, fontSize: 20, letterSpacing: 0.5 }}>&#10003; LUNAS</div>
+              <div style={{ color: "#fff", fontWeight: 900, fontSize: 17, letterSpacing: 0.5 }}>&#10003; LUNAS</div>
             ) : (
               <>
-                <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.7, color: "#e8c98a", textTransform: "uppercase" }}>Sisa Yang Harus Ditransfer</div>
-                <div style={{ fontSize: 23, fontWeight: 900, color: "#fff", marginTop: 2, lineHeight: 1.05 }}>{fRp(sisa)}</div>
+                <div style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: 0.7, color: "#e8c98a", textTransform: "uppercase" }}>Sisa Yang Harus Ditransfer</div>
+                <div style={{ fontSize: 18, fontWeight: 900, color: "#fff", marginTop: 1, lineHeight: 1.05 }}>{fRp(sisa)}</div>
               </>
             )}
           </div>
         </div>
         </div>
 
-        <div style={{ textAlign: "center", marginTop: 18, fontSize: 10.5, color: gray }}>Terima kasih atas kerja sama dan kepercayaannya.</div>
+        <div style={{ textAlign: "center", marginTop: 10, fontSize: 9, color: gray }}>Terima kasih atas kerja sama dan kepercayaannya.</div>
       </div>
     </div>
   );
