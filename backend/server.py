@@ -5180,6 +5180,7 @@ class SupplierJobBody(BaseModel):
     catatan: str = ""
     project_id: Optional[str] = None
     tanggal: Optional[str] = None   # manual date (YYYY-MM-DD); kosong = hari ini
+    tag: str = ""                   # Tag/Judul Kelompok laporan (pembatas visual PDF; TIDAK ikut hitungan)
 
 
 class SupplierProjectBody(BaseModel):
@@ -5308,6 +5309,7 @@ async def add_supplier_job(supplier_id: str, body: SupplierJobBody):
         "total_harga": body.total_harga,
         "catatan": body.catatan.strip(),
         "tanggal": tgl,
+        "tag": (body.tag or "").strip()[:60],
         "payments": [],
     }
     upd = {"jobs": (doc.get("jobs") or []) + [job]}
@@ -5325,6 +5327,23 @@ async def delete_supplier_job(supplier_id: str, job_id: str):
     if result.modified_count == 0:
         raise HTTPException(404, "Unit/job tidak ditemukan")
     return {"ok": True}
+
+
+@api_router.patch("/admin/suppliers/{supplier_id}/jobs/{job_id}/tag", dependencies=[Depends(require_admin_pin)])
+async def set_supplier_job_tag(supplier_id: str, job_id: str, body: dict = Body(...)):
+    """Set/ubah Tag/Judul Kelompok laporan untuk 1 unit. Murni pembatas visual di
+    PDF — TIDAK mengubah harga, total, payment, atau sisa. Kosongkan = tanpa tag."""
+    tag = str(body.get("tag") or "").strip()[:60]
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    jobs = doc.get("jobs") or []
+    idx = next((i for i, j in enumerate(jobs) if j.get("id") == job_id), None)
+    if idx is None:
+        raise HTTPException(404, "Unit/job tidak ditemukan")
+    jobs[idx]["tag"] = tag
+    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
+    return _supplier_job_totals(jobs[idx])
 
 
 @api_router.post("/admin/suppliers/{supplier_id}/projects", dependencies=[Depends(require_admin_pin)])

@@ -183,7 +183,10 @@ export function printDriverRekapA4(sup, jobsOverride, noDocOverride, tglOverride
   const gSisa = gHarga - gBayar;
   const lunas = gSisa <= 0;
 
-  const jobRows = jobs.map((j, i) => {
+  // Render 1 unit -> baris utama + sub-row biaya tambahan. Nomor urut global (rowNo).
+  let rowNo = 0;
+  const renderUnit = (j) => {
+    rowNo += 1;
     const unit = j.nopol || j.no_rangka || "-";
     const rute = `${j.asal_kota || "-"} → ${j.tujuan_kota || "-"}`;
     // Harga deal awal (tanpa tambahan). Fallback: kalau field harga_deal belum ada
@@ -192,7 +195,7 @@ export function printDriverRekapA4(sup, jobsOverride, noDocOverride, tglOverride
     const tbhTotal = tbh.reduce((s, t) => s + (t.amount || 0), 0);
     const base = (j.harga_deal != null) ? j.harga_deal : ((j.total_harga || 0) - tbhTotal);
     const baseRow = `<tr>
-      <td class="c">${i + 1}</td>
+      <td class="c">${rowNo}</td>
       <td><b>${esc(unit)}</b><div class="dr-note">${esc(j.vehicle_type || "Unit")}</div></td>
       <td>${esc(rute)}</td>
       <td class="r">${rp(base)}</td>
@@ -204,6 +207,22 @@ export function printDriverRekapA4(sup, jobsOverride, noDocOverride, tglOverride
       <td class="r">${rp(t.amount)}</td>
     </tr>`).join("");
     return baseRow + addRows;
+  };
+  // TAG / JUDUL KELOMPOK: kelompokkan unit per tag (urutan kemunculan pertama).
+  // Tag = pembatas visual (navy + aksen gold), SATU header per tag, seluruh unit
+  // di bawahnya. Unit tanpa tag -> tampil normal tanpa header. Grouping ini murni
+  // visual: TIDAK mengubah harga/total/ongkos/payment/sisa (itu dari gHarga/gBayar).
+  const _tagOrder = [];
+  const _tagMap = new Map();
+  jobs.forEach((j) => {
+    const tg = (j.tag || "").trim();
+    if (!_tagMap.has(tg)) { _tagMap.set(tg, []); _tagOrder.push(tg); }
+    _tagMap.get(tg).push(j);
+  });
+  const jobRows = _tagOrder.map((tg) => {
+    const rowsHtml = _tagMap.get(tg).map(renderUnit).join("");
+    if (!tg) return rowsHtml; // tanpa tag -> tanpa header
+    return `<tr class="dr-tag"><td colspan="4">${esc(tg)}</td></tr>` + rowsHtml;
   }).join("");
 
   // RIWAYAT PEMBAYARAN = transaksi pembayaran AKTUAL (cocok 1:1 dgn rekening koran).
@@ -243,6 +262,8 @@ export function printDriverRekapA4(sup, jobsOverride, noDocOverride, tglOverride
     table.dr td.c { text-align:center; } table.dr td.r { text-align:right; white-space:nowrap; }
     table.dr .dr-note { font-size:8px; color:${DOC_BRAND.muted}; margin-top:2px; }
     table.dr tfoot td { border-top:2px solid #334155; border-bottom:none; font-weight:800; font-size:11px; padding:7px 8px; }
+    /* Header Tag/Judul Kelompok: pembatas navy + aksen gold (bukan row unit biasa) */
+    table.dr tr.dr-tag td { background:${DOC_BRAND.navy}; color:#ffffff; font-weight:800; font-size:10.5px; letter-spacing:.6px; text-transform:uppercase; padding:8px 11px; border-left:4px solid ${DOC_BRAND.gold}; border-bottom:none; }
     /* Sub-row biaya tambahan: indent + aksen gold tipis, hemat ruang */
     table.dr tr.dr-add td { padding:3px 8px; background:#fbf7ef; border-bottom:1px solid ${DOC_BRAND.line}; }
     table.dr tr.dr-add .dr-add-lbl { padding-left:18px; font-size:9px; font-weight:600; color:#8a6d1f; border-left:2px solid ${DOC_BRAND.gold}; }
@@ -531,7 +552,18 @@ export default function SupplierPage() {
   // "__new__" = bikin projek baru dgn nama manual, atau id projek yg sudah ada.
   const [jobProjSel, setJobProjSel] = useState("");
   const [jobProjNew, setJobProjNew] = useState("");
-  const resetProjPicker = () => { setJobProjSel(""); setJobProjNew(""); };
+  // Tag/Judul Kelompok laporan (pembatas visual PDF) — TERPISAH dari Scope Project.
+  const [jobTag, setJobTag] = useState("");
+  const resetProjPicker = () => { setJobProjSel(""); setJobProjNew(""); setJobTag(""); };
+  // Input Tag/Judul Kelompok — dipakai di modal Tarik & Tambah Manual.
+  const renderTagInput = () => (
+    <div>
+      <div style={{ ...L }}>Tag / Judul Kelompok Laporan <span style={{ textTransform: "none", fontWeight: 400 }}>(opsional)</span></div>
+      <input style={I} value={jobTag} onChange={(e) => setJobTag(e.target.value)} placeholder="mis. Pengiriman Sulawesi 0001 / BL 02/SLS-14B" data-testid="sup-job-tag" list="sup-tag-list" />
+      {(() => { const tags = [...new Set((selected?.jobs || []).map((j) => (j.tag || "").trim()).filter(Boolean))]; return tags.length ? <datalist id="sup-tag-list">{tags.map((t) => <option key={t} value={t} />)}</datalist> : null; })()}
+      <div style={{ fontSize: 11, color: C.mute, marginTop: 4 }}>Cuma pembatas/judul kelompok di PDF. Tidak mengubah harga, total, atau pembayaran.</div>
+    </div>
+  );
   // Kembalikan project_id tujuan. Kalau user pilih "Projek Baru", bikin dulu lalu
   // pakai id-nya. Throw kalau nama projek baru kosong (biar handler batal).
   const resolveTargetProjectId = async () => {
@@ -569,7 +601,7 @@ export default function SupplierPage() {
         vehicle_type: jobForm.vehicle_type.trim(), nopol: jobForm.nopol.trim(), no_rangka: jobForm.no_rangka.trim(),
         asal_kota: jobForm.asal_kota.trim(), tujuan_kota: jobForm.tujuan_kota.trim(),
         total_harga: harga, catatan: jobForm.catatan.trim(), tanggal: jobForm.tanggal || todayStr(),
-        project_id: projectId,
+        project_id: projectId, tag: jobTag.trim(),
       }, { headers });
       setJobForm(blankJobForm); setManualOpen(false); resetProjPicker();
       await reloadSelected(selected.id); setListRefreshTick((t) => t + 1); flash("Unit ditambahkan");
@@ -637,7 +669,7 @@ export default function SupplierPage() {
         await axios.post(`${API}/admin/suppliers/${selected.id}/jobs`, {
           vehicle_type: r.vehicle_type, nopol: r.nopol, no_rangka: r.no_rangka,
           asal_kota: r.asal_kota, tujuan_kota: r.tujuan_kota, total_harga: pNum(r.total_harga), catatan: "", tanggal: todayStr(),
-          project_id: projectId,
+          project_id: projectId, tag: jobTag.trim(),
         }, { headers });
       }
       setTarikOpen(false); setTarikSel({}); resetProjPicker();
@@ -660,6 +692,7 @@ export default function SupplierPage() {
     setDetailJob(job); setDpTipe("transfer"); setDpAmount(""); setDpTanggal(todayStr()); setDpCatatan(""); setDpFile(null);
     setDpKomp({ vehicle: "", nounit: "", asal: "", tujuan: "" });
     setTbhLabel(""); setTbhAmount("");
+    setDetailTag(job.tag || "");
   };
   const detailJobLive = useMemo(() => detailJob && jobs.find((j) => j.id === detailJob.id), [detailJob, jobs]);
   const submitDetailPay = async () => {
@@ -709,6 +742,19 @@ export default function SupplierPage() {
     if (!window.confirm("Hapus biaya tambahan ini?")) return;
     try { await axios.delete(`${API}/admin/suppliers/${selected.id}/jobs/${jobId}/tambahan/${tambahanId}`, { headers }); await reloadSelected(selected.id); setListRefreshTick((t) => t + 1); }
     catch { flash("Gagal hapus biaya tambahan"); }
+  };
+  /* ═══ Tag/Judul Kelompok laporan per unit (pembatas visual PDF) ═══ */
+  const [detailTag, setDetailTag] = useState("");
+  const [tagSaving, setTagSaving] = useState(false);
+  const saveJobTag = async () => {
+    const job = detailJob; if (!job) return;
+    setTagSaving(true);
+    try {
+      await axios.patch(`${API}/admin/suppliers/${selected.id}/jobs/${job.id}/tag`, { tag: detailTag.trim() }, { headers });
+      await reloadSelected(selected.id); setListRefreshTick((t) => t + 1);
+      flash("✓ Tag kelompok tersimpan");
+    } catch (e) { flash(e?.response?.data?.detail || "Gagal simpan tag"); }
+    finally { setTagSaving(false); }
   };
   const deleteJob = async (jobId) => {
     if (!window.confirm("Hapus unit ini beserta semua riwayat pembayarannya?")) return;
@@ -1082,6 +1128,7 @@ export default function SupplierPage() {
           <div style={{ fontSize: 12, color: C.mute, marginBottom: 10 }}>Centang unit, isi HPP (biaya ke supplier ini). Unit, nopol, customer &amp; rute otomatis dari PO.</div>
           <input style={{ ...I, marginBottom: 10 }} placeholder="🔎 cari: no PO / no rangka / nama pelanggan / asal / tujuan" value={tarikQ} onChange={(e) => setTarikQ(e.target.value)} data-testid="sup-tarik-search" />
           <div style={{ marginBottom: 12 }}>{renderProjPicker()}</div>
+          <div style={{ marginBottom: 12 }}>{renderTagInput()}</div>
           {tarikLoading ? <div style={{ padding: 20, textAlign: "center", color: C.mute }}>Memuat…</div> : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {tarikRows.map((row) => {
@@ -1205,6 +1252,7 @@ export default function SupplierPage() {
           foot={<><button style={BTN_GHOST} onClick={() => setManualOpen(false)}>Batal</button><button style={BTN} onClick={addJob} disabled={jobSaving} data-testid="sup-job-save">{jobSaving ? "Menyimpan…" : "Simpan Unit"}</button></>}>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {renderProjPicker()}
+            {renderTagInput()}
             <input style={I} placeholder="Tipe kendaraan" value={jobForm.vehicle_type} onChange={(e) => setJobForm((f) => ({ ...f, vehicle_type: e.target.value }))} data-testid="sup-job-vehicle" />
             <input style={I} placeholder="No. Polisi (kosongkan kalau mobil baru)" value={jobForm.nopol} onChange={(e) => setJobForm((f) => ({ ...f, nopol: e.target.value.toUpperCase() }))} data-testid="sup-job-nopol" />
             <input style={I} placeholder="No. Rangka" value={jobForm.no_rangka} onChange={(e) => setJobForm((f) => ({ ...f, no_rangka: e.target.value.toUpperCase() }))} />
@@ -1251,6 +1299,16 @@ export default function SupplierPage() {
               <button style={{ ...BTN, padding: "0 16px", minWidth: 56 }} disabled={tbhSaving} onClick={addTambahan} data-testid="sup-tbh-add">{tbhSaving ? "…" : "+"}</button>
             </div>
             <div style={{ fontSize: 11, color: C.mute, marginTop: 5 }}>Biaya tambahan nambah Total &amp; Sisa unit ini. Harga deal awal tetap.</div>
+          </div>
+
+          {/* ── Tag / Judul Kelompok laporan (pembatas visual PDF, tidak ikut hitungan) ── */}
+          <div style={{ borderTop: `1px solid ${C.line}`, paddingTop: 10, marginBottom: 12 }}>
+            <div style={{ ...L }}>Tag / Judul Kelompok Laporan</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input style={{ ...I, flex: 1 }} value={detailTag} onChange={(e) => setDetailTag(e.target.value)} placeholder="mis. Pengiriman Sulawesi 0001 / BL 02/SLS-14B" data-testid="sup-detail-tag" list="sup-tag-list" />
+              <button style={{ ...BTN, padding: "0 16px" }} disabled={tagSaving || detailTag.trim() === (detailJobLive.tag || "").trim()} onClick={saveJobTag} data-testid="sup-detail-tag-save">{tagSaving ? "…" : "Simpan"}</button>
+            </div>
+            <div style={{ fontSize: 11, color: C.mute, marginTop: 5 }}>Unit dengan tag sama tampil di bawah satu header di PDF. Kosongkan = tanpa tag. Tidak mengubah hitungan.</div>
           </div>
 
           {(detailJobLive.payments || []).length > 0 && (
