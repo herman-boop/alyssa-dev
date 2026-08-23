@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Form, Header, Depends, Query
+from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Form, Header, Depends, Query, Body
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, Response
 from dotenv import load_dotenv
@@ -5096,11 +5096,23 @@ def _gen_supplier_id() -> str:
 
 def _supplier_job_totals(job: dict) -> dict:
     """Hitung total_terbayar & sisa dari daftar payments — bukan disimpan,
-    dihitung ulang tiap read biar nggak pernah nyimpang dari data payments."""
+    dihitung ulang tiap read biar nggak pernah nyimpang dari data payments.
+
+    Biaya tambahan per unit (job['tambahan'] = [{id,label,amount}]) NAMBAH tagihan:
+    total efektif = harga deal awal + seluruh biaya tambahan. `harga_deal`
+    dipertahankan supaya PDF Driver bisa memisahkan harga awal vs tambahan,
+    sedangkan `total_harga` yang dikembalikan = nilai efektif (dipakai semua
+    total/sisa/kartu supaya angka konsisten di mana-mana)."""
     terbayar = sum((p.get("amount") or 0) for p in (job.get("payments") or []))
     job = dict(job)
+    base = job.get("total_harga") or 0
+    tambahan = job.get("tambahan") or []
+    tambahan_total = sum((t.get("amount") or 0) for t in tambahan)
+    job["harga_deal"] = base
+    job["tambahan_total"] = tambahan_total
+    job["total_harga"] = base + tambahan_total
     job["total_terbayar"] = terbayar
-    job["sisa"] = (job.get("total_harga") or 0) - terbayar
+    job["sisa"] = (base + tambahan_total) - terbayar
     return job
 
 
@@ -5522,6 +5534,51 @@ async def attach_supplier_payment_bukti(
                 n += 1
     await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
     return {"ok": True, "bukti_url": bukti_url, "updated": n}
+
+
+@api_router.post("/admin/suppliers/{supplier_id}/jobs/{job_id}/tambahan", dependencies=[Depends(require_admin_pin)])
+async def add_supplier_job_tambahan(supplier_id: str, job_id: str, body: dict = Body(...)):
+    """Tambah 1 biaya tambahan ke unit (keterangan free-text + nominal). Boleh lebih
+    dari satu per unit. Disimpan TERPISAH dari harga deal (tidak menimpa). Nambah
+    tagihan: total & sisa unit otomatis ikut naik. Histori payment tidak disentuh."""
+    label = str(body.get("label") or "").strip()
+    try:
+        amount = int(body.get("amount") or 0)
+    except (TypeError, ValueError):
+        amount = 0
+    if not label:
+        raise HTTPException(400, "Keterangan biaya tambahan wajib diisi")
+    if amount <= 0:
+        raise HTTPException(400, "Nominal harus lebih dari 0")
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    jobs = doc.get("jobs") or []
+    idx = next((i for i, j in enumerate(jobs) if j.get("id") == job_id), None)
+    if idx is None:
+        raise HTTPException(404, "Unit/job tidak ditemukan")
+    item = {"id": _gen_supplier_id(), "label": label[:80], "amount": amount, "created_at": datetime.utcnow().isoformat()}
+    jobs[idx].setdefault("tambahan", []).append(item)
+    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
+    return _supplier_job_totals(jobs[idx])
+
+
+@api_router.delete("/admin/suppliers/{supplier_id}/jobs/{job_id}/tambahan/{tambahan_id}", dependencies=[Depends(require_admin_pin)])
+async def delete_supplier_job_tambahan(supplier_id: str, job_id: str, tambahan_id: str):
+    """Hapus 1 biaya tambahan dari unit. Harga deal & histori payment tidak berubah."""
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    jobs = doc.get("jobs") or []
+    idx = next((i for i, j in enumerate(jobs) if j.get("id") == job_id), None)
+    if idx is None:
+        raise HTTPException(404, "Unit/job tidak ditemukan")
+    before = len(jobs[idx].get("tambahan") or [])
+    jobs[idx]["tambahan"] = [t for t in (jobs[idx].get("tambahan") or []) if t.get("id") != tambahan_id]
+    if len(jobs[idx]["tambahan"]) == before:
+        raise HTTPException(404, "Biaya tambahan tidak ditemukan")
+    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
+    return _supplier_job_totals(jobs[idx])
 
 
 @api_router.get("/admin/suppliers/{supplier_id}/ringkasan")

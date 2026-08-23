@@ -183,12 +183,24 @@ export function printDriverRekapA4(sup, jobsOverride, noDocOverride, tglOverride
   const jobRows = jobs.map((j, i) => {
     const unit = j.nopol || j.no_rangka || "-";
     const rute = `${j.asal_kota || "-"} → ${j.tujuan_kota || "-"}`;
-    return `<tr>
+    // Harga deal awal (tanpa tambahan). Fallback: kalau field harga_deal belum ada
+    // (data lama), hitung dari total efektif dikurangi total tambahan.
+    const tbh = j.tambahan || [];
+    const tbhTotal = tbh.reduce((s, t) => s + (t.amount || 0), 0);
+    const base = (j.harga_deal != null) ? j.harga_deal : ((j.total_harga || 0) - tbhTotal);
+    const baseRow = `<tr>
       <td class="c">${i + 1}</td>
       <td><b>${esc(unit)}</b><div class="dr-note">${esc(j.vehicle_type || "Unit")}</div></td>
       <td>${esc(rute)}</td>
-      <td class="r">${rp(j.total_harga)}</td>
+      <td class="r">${rp(base)}</td>
     </tr>`;
+    // Sub-row biaya tambahan milik unit di atasnya (indent + ↳ + aksen gold tipis).
+    const addRows = tbh.map((t) => `<tr class="dr-add">
+      <td class="c"></td>
+      <td colspan="2" class="dr-add-lbl">&#8627; ${esc(t.label)}</td>
+      <td class="r">${rp(t.amount)}</td>
+    </tr>`).join("");
+    return baseRow + addRows;
   }).join("");
 
   // Riwayat pembayaran kronologis -> DP 1, DP 2, ...; label PELUNASAN saat saldo jadi 0.
@@ -223,6 +235,10 @@ export function printDriverRekapA4(sup, jobsOverride, noDocOverride, tglOverride
     table.dr td.c { text-align:center; } table.dr td.r { text-align:right; white-space:nowrap; }
     table.dr .dr-note { font-size:8px; color:${DOC_BRAND.muted}; margin-top:2px; }
     table.dr tfoot td { border-top:2px solid #334155; border-bottom:none; font-weight:800; font-size:11px; padding:7px 8px; }
+    /* Sub-row biaya tambahan: indent + aksen gold tipis, hemat ruang */
+    table.dr tr.dr-add td { padding:3px 8px; background:#fbf7ef; border-bottom:1px solid ${DOC_BRAND.line}; }
+    table.dr tr.dr-add .dr-add-lbl { padding-left:18px; font-size:9px; font-weight:600; color:#8a6d1f; border-left:2px solid ${DOC_BRAND.gold}; }
+    table.dr tr.dr-add td.r { font-size:9px; font-weight:700; color:${DOC_BRAND.ink}; }
     .dr-pel { color:#065f46; }
     .dr-sum { width:62%; max-width:340px; margin:12px 0 0 auto; }
     .dr-sum .row { display:flex; justify-content:space-between; padding:6px 2px; font-size:12px; border-bottom:1px solid ${DOC_BRAND.line}; }
@@ -635,6 +651,7 @@ export default function SupplierPage() {
   const openDetail = (job) => {
     setDetailJob(job); setDpTipe("transfer"); setDpAmount(""); setDpTanggal(todayStr()); setDpCatatan(""); setDpFile(null);
     setDpKomp({ vehicle: "", nounit: "", asal: "", tujuan: "" });
+    setTbhLabel(""); setTbhAmount("");
   };
   const detailJobLive = useMemo(() => detailJob && jobs.find((j) => j.id === detailJob.id), [detailJob, jobs]);
   const submitDetailPay = async () => {
@@ -661,6 +678,29 @@ export default function SupplierPage() {
     if (!window.confirm("Hapus catatan pembayaran ini?")) return;
     try { await axios.delete(`${API}/admin/suppliers/${selected.id}/jobs/${jobId}/payments/${paymentId}`, { headers }); await reloadSelected(selected.id); setListRefreshTick((t) => t + 1); }
     catch { flash("Gagal hapus pembayaran"); }
+  };
+  /* ═══ Biaya tambahan per unit (nambah tagihan, terpisah dari harga deal) ═══ */
+  const [tbhLabel, setTbhLabel] = useState("");
+  const [tbhAmount, setTbhAmount] = useState("");
+  const [tbhSaving, setTbhSaving] = useState(false);
+  const addTambahan = async () => {
+    const job = detailJob; if (!job) return;
+    const label = tbhLabel.trim(); const amount = pNum(tbhAmount);
+    if (!label) { flash("Isi keterangan biaya tambahan"); return; }
+    if (amount <= 0) { flash("Isi nominal biaya tambahan"); return; }
+    setTbhSaving(true);
+    try {
+      await axios.post(`${API}/admin/suppliers/${selected.id}/jobs/${job.id}/tambahan`, { label, amount }, { headers });
+      setTbhLabel(""); setTbhAmount("");
+      await reloadSelected(selected.id); setListRefreshTick((t) => t + 1);
+      flash("✓ Biaya tambahan ditambahkan");
+    } catch (e) { flash(e?.response?.data?.detail || "Gagal tambah biaya"); }
+    finally { setTbhSaving(false); }
+  };
+  const deleteTambahan = async (jobId, tambahanId) => {
+    if (!window.confirm("Hapus biaya tambahan ini?")) return;
+    try { await axios.delete(`${API}/admin/suppliers/${selected.id}/jobs/${jobId}/tambahan/${tambahanId}`, { headers }); await reloadSelected(selected.id); setListRefreshTick((t) => t + 1); }
+    catch { flash("Gagal hapus biaya tambahan"); }
   };
   const deleteJob = async (jobId) => {
     if (!window.confirm("Hapus unit ini beserta semua riwayat pembayarannya?")) return;
@@ -1181,6 +1221,29 @@ export default function SupplierPage() {
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: C.mute }}>Total</span><b>{fRp(detailJobLive.total_harga)}</b></div>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: C.mute }}>Terbayar</span><b style={{ color: C.green }}>{fRp(detailJobLive.total_terbayar)}</b></div>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}><span style={{ color: C.mute }}>Sisa</span><b style={{ color: detailJobLive.sisa > 0 ? C.red : C.green }}>{fRp(detailJobLive.sisa)}</b></div>
+
+          {/* ── Biaya tambahan per unit (nambah tagihan, terpisah dari harga deal) ── */}
+          <div style={{ borderTop: `1px solid ${C.line}`, paddingTop: 10, marginBottom: 12 }}>
+            <div style={{ ...L }}>Rincian Ongkos & Biaya Tambahan</div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "5px 0", color: C.ink }}>
+              <span style={{ color: C.mute }}>Harga Deal</span><b>{fRp(detailJobLive.harga_deal != null ? detailJobLive.harga_deal : detailJobLive.total_harga)}</b>
+            </div>
+            {(detailJobLive.tambahan || []).map((t) => (
+              <div key={t.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, padding: "5px 0", borderTop: `1px dashed ${C.line}` }}>
+                <span style={{ color: C.gold }}>↳ {t.label}</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <b>{fRp(t.amount)}</b>
+                  <button onClick={() => deleteTambahan(detailJobLive.id, t.id)} style={{ background: "none", border: "none", color: C.red, cursor: "pointer", fontSize: 12 }}>Hapus</button>
+                </span>
+              </div>
+            ))}
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <input style={{ ...I, flex: 1.4 }} placeholder="Keterangan (mis. Tambahan BBM)" value={tbhLabel} onChange={(e) => setTbhLabel(e.target.value)} data-testid="sup-tbh-label" />
+              <input style={{ ...I, flex: 1 }} inputMode="numeric" placeholder="Nominal" value={fmtRpInput(tbhAmount)} onChange={(e) => setTbhAmount(onlyDigits(e.target.value))} data-testid="sup-tbh-amount" />
+              <button style={{ ...BTN, padding: "0 16px", minWidth: 56 }} disabled={tbhSaving} onClick={addTambahan} data-testid="sup-tbh-add">{tbhSaving ? "…" : "+"}</button>
+            </div>
+            <div style={{ fontSize: 11, color: C.mute, marginTop: 5 }}>Biaya tambahan nambah Total &amp; Sisa unit ini. Harga deal awal tetap.</div>
+          </div>
 
           {(detailJobLive.payments || []).length > 0 && (
             <div style={{ borderTop: `1px solid ${C.line}`, paddingTop: 10, marginBottom: 12 }}>
