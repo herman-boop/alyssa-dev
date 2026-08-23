@@ -228,6 +228,45 @@ export default function SelisihPage() {
 
   const openPay = (tagihanId) => { setPayOpen(tagihanId); setPayAmount(""); setPayCatatan(""); setPayTanggal(todayStr()); setPayFile(null); };
 
+  /* ═══ Batch bayar (centang beberapa tagihan → 1 nominal → auto-alokasi) ═══ */
+  const [batchSel, setBatchSel] = useState({});     // tagihan_id -> true
+  const [batchAmount, setBatchAmount] = useState("");
+  const [batchTanggal, setBatchTanggal] = useState(todayStr());
+  const [batchCatatan, setBatchCatatan] = useState("");
+  const [batchFile, setBatchFile] = useState(null);
+  const [batchSaving, setBatchSaving] = useState(false);
+  const batchFileRef = useRef();
+  const unpaidTagihan = (selected?.tagihan || []).filter((t) => (t.sisa || 0) > 0);
+  const selectedBatch = unpaidTagihan.filter((t) => batchSel[t.id]);
+  const batchTotalSisa = selectedBatch.reduce((s, t) => s + (t.sisa || 0), 0);
+  const allUnpaidChecked = unpaidTagihan.length > 0 && unpaidTagihan.every((t) => batchSel[t.id]);
+  const toggleBatch = (id) => setBatchSel((s) => ({ ...s, [id]: !s[id] }));
+  const toggleBatchAll = () => {
+    if (allUnpaidChecked) { setBatchSel({}); return; }
+    const n = {}; unpaidTagihan.forEach((t) => { n[t.id] = true; }); setBatchSel(n);
+  };
+  const doBatchPay = async () => {
+    const ids = selectedBatch.map((t) => t.id);
+    if (!ids.length) { flash("Centang tagihan yang mau dibayar dulu"); return; }
+    const amt = pNum(batchAmount);
+    if (amt <= 0) { flash("Isi nominal pembayaran dulu"); return; }
+    setBatchSaving(true);
+    try {
+      const fd = new FormData();
+      fd.append("tagihan_ids", ids.join(","));
+      fd.append("amount", String(amt));
+      fd.append("tanggal", batchTanggal || todayStr());
+      fd.append("catatan", batchCatatan.trim());
+      if (batchFile) fd.append("bukti", batchFile);
+      const r = await axios.post(`${API}/admin/selisih/${selected.id}/pay-batch`, fd, { headers });
+      setBatchSel({}); setBatchAmount(""); setBatchCatatan(""); setBatchFile(null); if (batchFileRef.current) batchFileRef.current.value = "";
+      await reloadSelected(selected.id);
+      const n = (r.data?.applied || []).length;
+      flash(`Pembayaran ${fRp(r.data?.total_dibayar || amt)} → ${n} tagihan dikurangi otomatis`);
+    } catch (e) { flash(e?.response?.data?.detail || "Gagal simpan pembayaran"); }
+    finally { setBatchSaving(false); }
+  };
+
   const submitPay = async (tagihanId) => {
     const amt = pNum(payAmount);
     if (amt <= 0) { flash("Jumlah bayar wajib diisi"); return; }
@@ -361,6 +400,34 @@ export default function SelisihPage() {
             </button>
           </div>
 
+          {/* Batch bayar — centang beberapa tagihan, 1 nominal, auto-alokasi (kaya Supplier) */}
+          {unpaidTagihan.length > 0 && (
+            <div style={{ background: "#12261a", border: "1px solid #1f6f43", borderRadius: 10, padding: 14, marginBottom: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+                <div style={{ fontWeight: 800, fontSize: 12.5, color: "#3fb950" }}>💸 Bayar Sekaligus (auto-kurangi)</div>
+                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#c9d1d9", cursor: "pointer" }}>
+                  <input type="checkbox" checked={allUnpaidChecked} onChange={toggleBatchAll} style={{ width: 16, height: 16 }} data-testid="sel-batch-all" />
+                  Centang semua ({unpaidTagihan.length})
+                </label>
+              </div>
+              <div style={{ fontSize: 12, color: "#8b949e", marginBottom: 10 }}>
+                Dipilih <b style={{ color: "#e6edf3" }}>{selectedBatch.length}</b> tagihan · Total sisa <b style={{ color: "#f85149" }}>{fRp(batchTotalSisa)}</b>
+              </div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+                <input style={{ ...I, flex: 1, minWidth: 130 }} inputMode="numeric" placeholder="Nominal transfer (Rp)" value={batchAmount} onChange={(e) => setBatchAmount(e.target.value)} data-testid="sel-batch-amount" />
+                <button style={{ ...BTN_GHOST, fontSize: 12, whiteSpace: "nowrap" }} onClick={() => setBatchAmount(String(batchTotalSisa))} data-testid="sel-batch-lunas">Lunasin semua</button>
+                <input type="date" style={{ ...I, flex: 1, minWidth: 140 }} value={batchTanggal} onChange={(e) => setBatchTanggal(e.target.value)} data-testid="sel-batch-date" />
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <input style={{ ...I, flex: 1, minWidth: 120 }} placeholder="Catatan (opsional)" value={batchCatatan} onChange={(e) => setBatchCatatan(e.target.value)} />
+                <input ref={batchFileRef} type="file" accept="image/*,application/pdf" style={{ display: "none" }} onChange={(e) => setBatchFile(e.target.files?.[0] || null)} />
+                <button style={BTN_GHOST} onClick={() => batchFileRef.current?.click()}>{batchFile ? `📎 ${batchFile.name.slice(0, 18)}` : "📎 Bukti Transfer"}</button>
+                <button style={BTN} onClick={doBatchPay} disabled={batchSaving} data-testid="sel-batch-save">{batchSaving ? "Menyimpan…" : "Bayar & Alokasi Otomatis"}</button>
+              </div>
+              <div style={{ fontSize: 11, color: "#8b949e", marginTop: 8 }}>Nominal dibagi urut ke tagihan tercentang sampai habis (tanpa overpay). Tanggal ikut rekening koran. Satu bukti dipakai untuk semua.</div>
+            </div>
+          )}
+
           {/* Daftar tagihan */}
           {(selected.tagihan || []).length === 0 && (
             <div style={{ textAlign: "center", padding: 20, color: "#8b949e", fontSize: 13 }}>Belum ada tagihan buat PIC ini.</div>
@@ -369,6 +436,9 @@ export default function SelisihPage() {
             <div key={tg.id} style={{ border: "1px solid #21262d", borderRadius: 10, padding: 14, marginBottom: 14 }} data-testid={`sel-tagihan-${tg.id}`}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  {(tg.sisa || 0) > 0 && (
+                    <input type="checkbox" checked={!!batchSel[tg.id]} onChange={() => toggleBatch(tg.id)} style={{ width: 16, height: 16, cursor: "pointer" }} title="Centang buat bayar sekaligus" data-testid={`sel-batch-check-${tg.id}`} />
+                  )}
                   <span style={{ fontWeight: 800, fontSize: 13 }}>🧾 {tg.no_invoice || "(tanpa nomor)"}</span>
                   {tg.lunas ? (
                     <span style={{ background: "#0d2818", color: "#3fb950", borderRadius: 12, padding: "2px 10px", fontSize: 10, fontWeight: 800 }}>✓ Lunas</span>

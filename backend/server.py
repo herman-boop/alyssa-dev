@@ -5907,6 +5907,73 @@ async def add_selisih_payment(
     return _selisih_tagihan_totals(tagihan_list[idx])
 
 
+@api_router.post("/admin/selisih/{pic_id}/pay-batch", dependencies=[Depends(require_admin_pin)])
+async def selisih_pay_batch(
+    pic_id: str,
+    tagihan_ids: str = Form(...),        # id tagihan dipisah koma, urutan = urutan bayar
+    amount: int = Form(...),
+    tanggal: Optional[str] = Form(None),
+    catatan: str = Form(""),
+    bukti: Optional[UploadFile] = File(None),
+):
+    """Bayar beberapa tagihan selisih SATU PIC sekaligus dgn 1 nominal (kaya tools
+    Supplier). Nominal didistribusi berurutan (waterfall): tiap tagihan dibayar
+    min(sisa nominal, sisa tagihan) sampai nominal habis; tidak overpay. Bukti &
+    tanggal sama dipakai utk semua cicilan (ditandai batch_id). Calculation selisih
+    tidak berubah — cuma nambah record payment."""
+    if amount <= 0:
+        raise HTTPException(400, "Nominal harus lebih dari 0")
+    ids = [x.strip() for x in (tagihan_ids or "").split(",") if x.strip()]
+    if not ids:
+        raise HTTPException(400, "Pilih minimal 1 tagihan")
+    doc = await db.selisih_profiles.find_one({"id": pic_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "PIC tidak ditemukan")
+    tagihan_list = doc.get("tagihan") or []
+
+    tgl = (tanggal or "").strip()
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", tgl):
+        tgl = today_wib()
+
+    bukti_url = None
+    if bukti is not None and bukti.filename:
+        bukti_url = _save_upload(pic_id, "selisih/batch", bukti, ALLOWED_IMG | ALLOWED_DOC)
+
+    batch_id = _gen_selisih_id()
+    remaining = int(amount)
+    applied = []
+    for tid in ids:
+        if remaining <= 0:
+            break
+        idx = next((i for i, t in enumerate(tagihan_list) if t.get("id") == tid), None)
+        if idx is None:
+            continue
+        sisa = _selisih_tagihan_totals(tagihan_list[idx]).get("sisa") or 0
+        if sisa <= 0:
+            continue
+        pay_amt = min(remaining, sisa)
+        payment = {
+            "id": _gen_selisih_id(), "amount": int(pay_amt),
+            "catatan": (catatan or "").strip()[:300], "bukti_url": bukti_url,
+            "tanggal": tgl, "batch_id": batch_id, "source": "admin-batch",
+        }
+        tagihan_list[idx].setdefault("payments", []).append(payment)
+        remaining -= pay_amt
+        njt = _selisih_tagihan_totals(tagihan_list[idx])
+        applied.append({
+            "tagihan_id": tid, "no_invoice": tagihan_list[idx].get("no_invoice") or "",
+            "dibayar": int(pay_amt), "sisa": njt.get("sisa") or 0,
+            "lunas": (njt.get("sisa") or 0) <= 0,
+        })
+    if not applied:
+        raise HTTPException(400, "Tidak ada tagihan yang bisa dibayar (mungkin sudah lunas)")
+    await db.selisih_profiles.update_one({"id": pic_id}, {"$set": {"tagihan": tagihan_list}})
+    return {
+        "ok": True, "pic_id": pic_id, "batch_id": batch_id,
+        "total_dibayar": int(amount) - remaining, "sisa_nominal": remaining, "applied": applied,
+    }
+
+
 @api_router.delete("/admin/selisih/{pic_id}/tagihan/{tagihan_id}/payments/{payment_id}", dependencies=[Depends(require_admin_pin)])
 async def delete_selisih_payment(pic_id: str, tagihan_id: str, payment_id: str):
     doc = await db.selisih_profiles.find_one({"id": pic_id}, {"_id": 0})
