@@ -53,41 +53,46 @@ export async function printPenawaran(rows, meta) {
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${noDoc}</title>
   <style>
     ${DOC_BASE_CSS}
-    body { font-size: 12px; }
-    .ph-meta-row { display:flex; justify-content:space-between; gap:24px; margin-bottom:16px; }
+    /* Visual language disamain dgn Ringkasan Selisih Harga: navy divider, section
+       gold-bar, table header mist+teks gelap, row rapat, summary navy box. */
+    body { font-size: 11px; }
+    .doc-sheet { padding: 0; max-width: 210mm; }
+    .ph-meta-row { display:flex; justify-content:space-between; gap:24px; margin-bottom:14px; }
     .ph-billto .lbl { font-size:10px; font-weight:700; text-transform:uppercase; color:${DOC_BRAND.muted}; letter-spacing:.5px; margin-bottom:4px; }
-    .ph-billto .val { font-size:16px; font-weight:800; color:${DOC_BRAND.ink}; }
-    .ph-meta-table { border-collapse:collapse; font-size:11.5px; }
+    .ph-billto .val { font-size:15px; font-weight:800; color:${DOC_BRAND.ink}; }
+    .ph-meta-table { border-collapse:collapse; font-size:11px; }
     .ph-meta-table td { padding:3px 0; }
     .ph-meta-table td:first-child { color:${DOC_BRAND.muted}; padding-right:18px; white-space:nowrap; }
     .ph-meta-table td:last-child { font-weight:700; text-align:right; }
-    table.ph { width:100%; border-collapse:collapse; margin-bottom:14px; }
+    .ph-sec { display:flex; align-items:center; gap:7px; margin:16px 0 6px; }
+    .ph-sec .bar { width:3px; height:13px; background:${DOC_BRAND.gold}; border-radius:2px; }
+    .ph-sec .txt { font-size:10.5px; font-weight:800; color:${DOC_BRAND.ink}; letter-spacing:.5px; text-transform:uppercase; }
+    table.ph { width:100%; border-collapse:collapse; margin-bottom:2px; }
     table.ph thead { display:table-header-group; }        /* header diulang tiap halaman */
-    table.ph tfoot { display:table-row-group; }            /* baris TOTAL muncul sekali di akhir */
-    table.ph tr { break-inside:avoid; page-break-inside:avoid; }  /* baris tidak pecah 2 halaman */
-    table.ph th { text-align:left; font-size:8.5px; text-transform:uppercase; letter-spacing:.3px; color:#fff; background:${DOC_BRAND.navy}; font-weight:700; padding:5px 7px; white-space:nowrap; }
+    table.ph tbody tr { break-inside:avoid; page-break-inside:avoid; }  /* baris tidak pecah 2 halaman */
+    table.ph th { text-align:left; font-size:8px; text-transform:uppercase; letter-spacing:.3px; color:#334155; background:${DOC_BRAND.paperMist}; font-weight:700; padding:4px 7px; white-space:nowrap; border-bottom:1.5px solid #cbd5e1; }
     table.ph th.r { text-align:right; } table.ph th.c { text-align:center; }
-    table.ph td { padding:4px 7px; font-size:9px; line-height:1.35; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; }
-    table.ph tbody tr:nth-child(even) td { background:${DOC_BRAND.paperMist}; }
+    table.ph td { padding:3.5px 7px; font-size:9.5px; line-height:1.2; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; }
     table.ph td.c { text-align:center; } table.ph td.r { text-align:right; white-space:nowrap; }
-    table.ph .ph-note { font-size:8px; color:${DOC_BRAND.muted}; font-style:italic; margin-top:2px; font-weight:400; }
-    table.ph tfoot .ph-total td { border-top:2px solid ${DOC_BRAND.navy}; border-bottom:none; padding:7px 7px; font-size:10px; background:#fff; }
-    table.ph tfoot .ph-total .lbl { text-align:right; font-weight:800; letter-spacing:.3px; color:${DOC_BRAND.ink}; }
-    table.ph tfoot .ph-total .val { text-align:right; font-weight:800; white-space:nowrap; color:${DOC_BRAND.ink}; }
-    .ph-breakdown { margin:0 0 14px auto; width:320px; max-width:64%; }
-    .ph-breakdown .bd-row { display:flex; justify-content:space-between; gap:14px; font-size:11px; padding:5px 2px; border-bottom:1px solid ${DOC_BRAND.line}; }
-    .ph-breakdown .bd-row span:first-child { color:${DOC_BRAND.muted}; }
-    .ph-breakdown .bd-row span:last-child { font-weight:700; color:${DOC_BRAND.ink}; white-space:nowrap; }
-    .ph-breakdown .bd-row.minus span:last-child { color:#b45309; }
-    .ph-breakdown .bd-row.grand { border-top:2px solid ${DOC_BRAND.navy}; border-bottom:none; margin-top:2px; padding-top:7px; }
-    .ph-breakdown .bd-row.grand span { font-size:13px; font-weight:900; color:${DOC_BRAND.ink}; }
-    .ph-pay-box { display:flex; align-items:center; gap:14px; padding:14px 18px; background:${DOC_BRAND.paperMist}; border-radius:8px; margin-bottom:14px; }
-    .ph-pay-badge { width:46px; height:46px; border-radius:8px; background:#0054a6; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:900; font-size:13px; flex-shrink:0; }
-    .ph-pay-num { font-size:17px; font-weight:900; letter-spacing:1px; color:${DOC_BRAND.ink}; }
-    .ph-pay-name { font-size:11px; color:${DOC_BRAND.muted}; margin-top:2px; }
-    .ph-valid { font-size:11px; color:${DOC_BRAND.muted}; line-height:1.7; margin-bottom:8px; }
+    table.ph .ph-note { font-size:8px; color:${DOC_BRAND.muted}; font-style:italic; margin-top:1px; font-weight:400; }
+    .ph-bar { display:flex; justify-content:space-between; align-items:center; border-top:2px solid ${DOC_BRAND.navy}; padding:6px 4px 0; margin-top:2px; }
+    .ph-bar .lbl { font-weight:900; font-size:10.5px; color:${DOC_BRAND.navy}; text-transform:uppercase; letter-spacing:.3px; }
+    .ph-bar .val { font-weight:900; font-size:11.5px; color:${DOC_BRAND.ink}; }
+    .ph-sum { width:62%; max-width:340px; margin:8px 0 0 auto; break-inside:avoid; page-break-inside:avoid; }
+    .ph-sum .row { display:flex; justify-content:space-between; padding:4px 2px; font-size:10px; border-bottom:1px solid ${DOC_BRAND.line}; }
+    .ph-sum .row .k { color:#333; text-transform:uppercase; letter-spacing:.3px; font-weight:600; font-size:9px; }
+    .ph-sum .row .v { font-weight:700; color:${DOC_BRAND.ink}; white-space:nowrap; }
+    .ph-sum .row.minus .v { color:#b45309; }
+    .ph-grand { margin-top:7px; background:${DOC_BRAND.navy}; border-radius:8px; padding:10px 14px; display:flex; justify-content:space-between; align-items:center; }
+    .ph-grand .k { font-size:9px; font-weight:700; letter-spacing:.6px; color:#e8c98a; text-transform:uppercase; }
+    .ph-grand .v { font-size:17px; font-weight:900; color:#fff; white-space:nowrap; }
+    .ph-pay-box { display:flex; align-items:center; gap:14px; padding:12px 16px; background:${DOC_BRAND.paperMist}; border:1px solid ${DOC_BRAND.line}; border-radius:8px; margin:14px 0; break-inside:avoid; }
+    .ph-pay-badge { width:44px; height:44px; border-radius:8px; background:${DOC_BRAND.navy}; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:900; font-size:12px; flex-shrink:0; }
+    .ph-pay-num { font-size:16px; font-weight:900; letter-spacing:1px; color:${DOC_BRAND.ink}; }
+    .ph-pay-name { font-size:10.5px; color:${DOC_BRAND.muted}; margin-top:2px; }
+    .ph-valid { font-size:9.5px; color:${DOC_BRAND.muted}; line-height:1.6; margin-bottom:8px; }
     .ph-valid b { color:${DOC_BRAND.ink}; }
-    .ph-sign-row { display:flex; justify-content:flex-end; margin-top:30px; }
+    .ph-sign-row { display:flex; justify-content:flex-end; margin-top:26px; break-inside:avoid; page-break-inside:avoid; }
     .ph-sign-cell { width:280px; text-align:center; }
     .ph-sign-lbl { font-size:11px; color:${DOC_BRAND.muted}; margin-bottom:6px; }
     .ph-sign-stamp { height:86px; display:flex; align-items:center; justify-content:center; margin-bottom:2px; }
@@ -96,9 +101,8 @@ export async function printPenawaran(rows, meta) {
     .ph-sign-pt { font-size:12.5px; font-weight:800; color:${DOC_BRAND.ink}; }
     .ph-sign-name { font-size:12.5px; font-weight:800; color:${DOC_BRAND.ink}; margin-top:2px; }
     .ph-sign-jab { font-size:10.5px; color:${DOC_BRAND.muted}; margin-top:2px; }
-    .doc-sheet { padding: 0; max-width: 210mm; }
     @page { size: A4 portrait; margin: 8mm; }
-    @media print { @page { size: A4 portrait; margin: 8mm; } }
+    @media print { @page { size: A4 portrait; margin: 8mm; } thead{display:table-header-group;} tbody tr{break-inside:avoid;} .avoid-break{break-inside:avoid;page-break-inside:avoid;} }
   </style></head><body>
   <div class="doc-sheet">
     ${docHeader({ docTitle: "PENAWARAN HARGA" })}
@@ -113,25 +117,23 @@ export async function printPenawaran(rows, meta) {
         <tr><td>Berlaku</td><td>7 hari sejak tanggal</td></tr>
       </table>
     </div>
+    <div class="ph-sec"><span class="bar"></span><span class="txt">Rincian Penawaran</span></div>
     <table class="ph">
       <thead><tr>
         <th class="c" style="width:24px">No</th><th>Rute</th>
         <th style="width:100px">Moda</th><th style="width:96px">Tipe Kendaraan</th><th class="r" style="width:132px">Harga Satuan</th>
       </tr></thead>
       <tbody>${body}</tbody>
-      <tfoot>
-        <tr class="ph-total">
-          <td class="lbl" colspan="4">${hasBreakdown ? "SUBTOTAL PENGIRIMAN" : "TOTAL"}</td>
-          <td class="val">${fRp(subtotal)}</td>
-        </tr>
-      </tfoot>
     </table>
-    ${hasBreakdown ? `<div class="ph-breakdown">
-      <div class="bd-row"><span>${ppnOn && incl ? "DPP (Dasar Pengenaan Pajak)" : "Subtotal Pengiriman"}</span><span>${fRp(ppnOn && incl ? dpp : subtotal)}</span></div>
-      ${ppnOn ? `<div class="bd-row"><span>PPN 1,1%${incl ? " (sudah termasuk)" : ""}</span><span>${fRp(ppn)}</span></div>` : ""}
-      ${pph ? `<div class="bd-row minus"><span>Potongan PPh 23 (2%)</span><span>- ${fRp(pph)}</span></div>` : ""}
-      ${premi ? `<div class="bd-row"><span>Premi Asuransi (${fRp(insBase)} &times; ${rate}%)</span><span>${fRp(premi)}</span></div>` : ""}
-      <div class="bd-row grand"><span>GRAND TOTAL</span><span>${fRp(grandTotal)}</span></div>
+    <div class="ph-bar"><span class="lbl">${hasBreakdown ? "Subtotal Pengiriman" : "Total"}</span><span class="val">${fRp(subtotal)}</span></div>
+    ${hasBreakdown ? `
+    <div class="ph-sec"><span class="bar"></span><span class="txt">Ringkasan Biaya</span></div>
+    <div class="ph-sum">
+      <div class="row"><span class="k">${ppnOn && incl ? "DPP (Dasar Pengenaan Pajak)" : "Subtotal Pengiriman"}</span><span class="v">${fRp(ppnOn && incl ? dpp : subtotal)}</span></div>
+      ${ppnOn ? `<div class="row"><span class="k">PPN 1,1%${incl ? " (sudah termasuk)" : ""}</span><span class="v">${fRp(ppn)}</span></div>` : ""}
+      ${pph ? `<div class="row minus"><span class="k">Potongan PPh 23 (2%)</span><span class="v">- ${fRp(pph)}</span></div>` : ""}
+      ${premi ? `<div class="row"><span class="k">Premi Asuransi (${fRp(insBase)} &times; ${rate}%)</span><span class="v">${fRp(premi)}</span></div>` : ""}
+      <div class="ph-grand"><span class="k">Grand Total</span><span class="v">${fRp(grandTotal)}</span></div>
     </div>` : ""}
     <div class="ph-pay-box">
       <div class="ph-pay-badge">${DOC_BRAND.bank.name}</div>
@@ -210,8 +212,19 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
       {open && (
         <div onClick={() => setOpen(false)}
           style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", zIndex: 10000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-          <div onClick={(e) => e.stopPropagation()}
+          <div onClick={(e) => e.stopPropagation()} className="pnw-modal"
             style={{ width: "100%", maxWidth: 500, maxHeight: "90vh", overflowY: "auto", background: "#fff", borderRadius: 14, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,0.4)", fontFamily: "'Segoe UI',Arial,sans-serif" }}>
+            {/* Paksa teks value input GELAP & jelas (anti pucat) di semua tema/browser,
+                placeholder tetap abu. Override rule global/dark-theme yang bikin value hilang. */}
+            <style>{`
+              .pnw-modal input, .pnw-modal textarea, .pnw-modal select {
+                color:#111827 !important; -webkit-text-fill-color:#111827 !important;
+                opacity:1 !important; background:#fff !important; caret-color:#111827;
+              }
+              .pnw-modal input::placeholder, .pnw-modal textarea::placeholder {
+                color:#9ca3af !important; -webkit-text-fill-color:#9ca3af !important; opacity:1 !important;
+              }
+            `}</style>
             <div style={{ fontSize: 16, fontWeight: 900, color: navy, marginBottom: 3 }}>Cetak Penawaran Resmi</div>
             <div style={{ fontSize: 11.5, color: gray, marginBottom: 16 }}>Centang rute yang mau dicetak (mis. pisahin yang Kalimantan), isi penanda tangan &amp; stempel. Format A4, huruf besar — tajam buat di-screenshot / print.</div>
 
