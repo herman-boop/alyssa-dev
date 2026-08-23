@@ -175,8 +175,11 @@ export function printDriverRekapA4(sup, jobsOverride, noDocOverride, tglOverride
   const tgl = (tglOverride ? new Date(`${tglOverride}T00:00:00`) : now).toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
   const noDoc = (noDocOverride && String(noDocOverride).trim()) || supplierAutoDocNo();
   const jobs = (jobsOverride && jobsOverride.length) ? jobsOverride : (sup.jobs || []);
-  const gHarga = jobs.reduce((s, j) => s + (j.total_harga || 0), 0);   // Total Ongkos
-  const gBayar = jobs.reduce((s, j) => s + (j.total_terbayar || 0), 0); // Total DP/Pembayaran
+  const gHarga = jobs.reduce((s, j) => s + (j.total_harga || 0), 0);   // Total Ongkos (deal + tambahan)
+  // TOTAL PEMBAYARAN = SUM seluruh record payment aktual (= jumlah baris yang
+  // ditampilkan di Riwayat Pembayaran). Dihitung langsung dari payments biar
+  // tidak pernah nyimpang dari transaksi yang tampil.
+  const gBayar = jobs.reduce((s, j) => s + (j.payments || []).reduce((a, p) => a + (p.amount || 0), 0), 0);
   const gSisa = gHarga - gBayar;
   const lunas = gSisa <= 0;
 
