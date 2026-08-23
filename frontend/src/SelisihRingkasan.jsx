@@ -64,12 +64,32 @@ export default function SelisihRingkasan() {
   // RIWAYAT PEMBAYARAN = transaksi aktual (cocok rekening koran). 1 record = 1 baris,
   // TIDAK di-merge walau tanggal sama. Urut kronologis by tanggal (stable -> tanggal
   // sama tetap urutan pencatatan). Tanpa nomor invoice di kolom keterangan.
-  const payments = [];
-  tagihanList.forEach((tg) => (tg.payments || []).forEach((p) => payments.push({ tanggal: p.tanggal || "", amount: p.amount || 0 })));
+  // RIWAYAT PEMBAYARAN = TRANSAKSI BANK AKTUAL, bukan allocation per tagihan.
+  // Payment record di DB = "allocation row": 1 transfer bank yang dibagi ke beberapa
+  // tagihan disimpan sbg beberapa record ber-`batch_id` SAMA (parent bank transaction).
+  //   contoh: transfer Rp6.000.000 -> 4.200.000 (tagihan A) + 1.800.000 (tagihan B)
+  //           = 2 allocation row, batch_id sama -> HARUS tampil 1 baris Rp6.000.000.
+  // Jadi kita group by batch_id (kalau ada) / id (record tunggal = 1 transfer), lalu
+  // jumlahkan nominalnya jadi nominal transfer asli. Terbayar/Sisa per unit tetap
+  // pakai allocation existing (tidak diubah). TOTAL PEMBAYARAN = SUM transaksi bank
+  // (= SUM semua allocation, jadi angkanya identik, cuma jumlah barisnya yang benar).
+  const _bankMap = new Map();
+  const _bankOrder = [];
+  let _allocRows = 0;
+  tagihanList.forEach((tg) => (tg.payments || []).forEach((p) => {
+    _allocRows += 1;
+    const key = p.batch_id || p.id; // batch_id = parent bank transaction; else record tunggal
+    if (!_bankMap.has(key)) { _bankMap.set(key, { key, tanggal: p.tanggal || "", amount: 0, bukti_url: p.bukti_url || "" }); _bankOrder.push(key); }
+    const b = _bankMap.get(key);
+    b.amount += (p.amount || 0);
+    if (!b.tanggal && p.tanggal) b.tanggal = p.tanggal;
+    if (!b.bukti_url && p.bukti_url) b.bukti_url = p.bukti_url;
+  }));
+  const payments = _bankOrder.map((k) => _bankMap.get(k));
   payments.sort((a, b) => String(a.tanggal).localeCompare(String(b.tanggal)));
-  // Group visual per tanggal transfer (data TIDAK di-merge — tiap record tetap 1 baris).
+  // Group visual per tanggal transfer (transaksi bank aktual, sudah tergabung per batch).
   // Dipakai buat: subtotal per tanggal + wrapper break-inside:avoid biar 1 tanggal
-  // tidak kepotong antar halaman. TOTAL PEMBAYARAN tetap dari sum record (bukan subtotal).
+  // tidak kepotong antar halaman. TOTAL PEMBAYARAN tetap dari sum transaksi bank.
   const payByDate = [];
   const _pm = new Map();
   payments.forEach((p) => {
