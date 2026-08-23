@@ -4611,6 +4611,27 @@ function OdooModal({ order, orderId, headers, onClose }) {
 /* ════════════════════════════════════════
    DRIVER AUTOCOMPLETE
 ════════════════════════════════════════ */
+/* Input teks yang "tahan re-render": simpan local state supaya autosave / hydrate
+   tidak pernah nge-reset ketikan saat field sedang difokus. Tetap sinkron dari luar
+   (mis. auto-fill No. HP dari master) ketika TIDAK sedang diketik. */
+function SmartText({ value, onChange, style, placeholder, testid, upper }) {
+  const [local, setLocal] = useState(value == null ? "" : String(value));
+  const focusedRef = useRef(false);
+  useEffect(() => {
+    const v = value == null ? "" : String(value);
+    if (!focusedRef.current && v !== local) setLocal(v);
+    // eslint-disable-next-line
+  }, [value]);
+  return (
+    <input
+      style={style} placeholder={placeholder} data-testid={testid} value={local}
+      onFocus={() => { focusedRef.current = true; }}
+      onBlur={() => { focusedRef.current = false; }}
+      onChange={(e) => { const v = upper ? e.target.value.toUpperCase() : e.target.value; setLocal(v); onChange(v); }}
+    />
+  );
+}
+
 function DriverAutocomplete({ value, hp, onChange, onSelect, headers }) {
   const [q, setQ] = useState(value || "");
   const [results, setResults] = useState([]);
@@ -6327,7 +6348,7 @@ function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tri
                         />
                       </div>
                       <label style={MINI_LABEL}>No. HP <span style={{ fontWeight: 400, color: "#6b8f5e" }}>(bisa diedit)</span>
-                        <input style={MINI_INPUT} value={leg.kepala_rombongan ? (leg.kepala_rombongan.hp || "") : (leg.kord_bayangan_hp || "")} onChange={e => setKepala(i, { hp: e.target.value })} placeholder="08xx-xxxx" data-testid={`leg-kepala-hp-${i}`} />
+                        <SmartText style={MINI_INPUT} value={leg.kepala_rombongan ? (leg.kepala_rombongan.hp || "") : (leg.kord_bayangan_hp || "")} onChange={(v) => setKepala(i, { hp: v })} placeholder="08xx-xxxx" testid={`leg-kepala-hp-${i}`} />
                       </label>
                     </div>
                     <div style={{ fontSize: 9.5, color: "#6b8f5e", marginTop: 6 }}>Link Kepala Rombongan menyusul (Fase 2). Assignment tersimpan per Leg.</div>
@@ -6344,7 +6365,7 @@ function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tri
                       <div key={d.id || di} style={{ border: "1px solid #21344d", borderRadius: 7, padding: 8, marginBottom: 6 }}>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 6 }}>
                           <label style={MINI_LABEL}>Unit / Nopol
-                            <input style={MINI_INPUT} value={d.unit || ""} onChange={e => setDriverRow(i, di, { unit: e.target.value.toUpperCase() })} placeholder="mis. B 1234 XYZ" />
+                            <SmartText style={MINI_INPUT} value={d.unit || ""} onChange={(v) => setDriverRow(i, di, { unit: v })} placeholder="mis. B 1234 XYZ" upper />
                           </label>
                           <label style={MINI_LABEL}>Status
                             <select style={MINI_INPUT} value={d.status || "Menunggu"} onChange={e => setDriverRow(i, di, { status: e.target.value })}>
@@ -6358,7 +6379,7 @@ function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tri
                             <DriverAutocomplete value={d.driver || ""} hp={d.hp || ""} onChange={(val) => setDriverRow(i, di, { driver: val })} onSelect={(nama, hp, id) => setDriverRow(i, di, { driver: nama, hp, ref_id: id || null })} headers={headers} />
                           </div>
                           <label style={MINI_LABEL}>HP
-                            <input style={MINI_INPUT} value={d.hp || ""} onChange={e => setDriverRow(i, di, { hp: e.target.value })} placeholder="08xx-xxxx" />
+                            <SmartText style={MINI_INPUT} value={d.hp || ""} onChange={(v) => setDriverRow(i, di, { hp: v })} placeholder="08xx-xxxx" />
                           </label>
                         </div>
                         <div style={{ textAlign: "right", marginTop: 4 }}>
