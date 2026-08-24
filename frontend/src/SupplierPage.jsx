@@ -18,13 +18,11 @@ export function printSupplierA4(sup, jobsOverride, noDocOverride, tglOverride) {
   const now = new Date();
   const tgl = (tglOverride ? new Date(`${tglOverride}T00:00:00`) : now).toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
   const noDoc = (noDocOverride && String(noDocOverride).trim()) || supplierAutoDocNo();
-  // FORMAT SUPPLIER = laporan SELISIH HARGA (bukan ongkos Driver).
-  // Sumber angka: field selisih per unit (Harga Deal & Harga Invoice) yang di-input
-  // admin. Selisih = Harga Invoice - Harga Deal (rumus existing). Data ongkos & Driver
-  // TIDAK dipakai/diubah di sini.
+  // FORMAT SUPPLIER = laporan TAGIHAN ONGKOS SUPPLIER (source of truth = data
+  // supplier existing: total_harga / terbayar / sisa). BUKAN modul Selisih Harga.
   const jobs = (jobsOverride && jobsOverride.length) ? jobsOverride : (sup.jobs || []);
-  const selOf = (j) => (j.selisih != null ? j.selisih : ((j.selisih_invoice || 0) - (j.selisih_deal || 0)));
-  const gSelisih = jobs.reduce((s, j) => s + selOf(j), 0);   // TOTAL SELISIH
+  const sisaOf = (j) => (j.sisa != null ? j.sisa : ((j.total_harga || 0) - (j.total_terbayar || 0)));
+  const gHarga = jobs.reduce((s, j) => s + (j.total_harga || 0), 0);   // TOTAL TAGIHAN supplier
   // RIWAYAT PEMBAYARAN = transaksi bank AKTUAL. 1 transfer (batch_id) yang dialokasikan
   // ke beberapa unit = 1 baris (nominal transfer asli), JANGAN dipecah per unit.
   const _bankMap = new Map();
@@ -38,22 +36,42 @@ export function printSupplierA4(sup, jobsOverride, noDocOverride, tglOverride) {
   }));
   const payTx = _bankOrder.map((k) => _bankMap.get(k)).sort((a, b) => String(a.tanggal).localeCompare(String(b.tanggal)));
   const gBayar = jobs.reduce((s, j) => s + (j.payments || []).reduce((a, p) => a + (p.amount || 0), 0), 0);
-  const gSisaSel = gSelisih - gBayar;                        // SISA YANG HARUS DITRANSFER
-  const lunas = gSelisih > 0 && gSisaSel <= 0;
+  const gSisa = gHarga - gBayar;          // SISA = Total Tagihan - Total Pembayaran
+  const over = gSisa < 0;                 // pembayaran > tagihan -> Lebih Bayar
+  const lunas = gHarga > 0 && gSisa === 0;
 
+  // Grouping per Projek (existing dipertahankan).
+  const projList = sup.projects || [];
+  const projOrder = projList.map((p) => p.id);
+  const byPid = new Map();
+  jobs.forEach((j) => { const pid = j.project_id || "_none"; if (!byPid.has(pid)) byPid.set(pid, []); byPid.get(pid).push(j); });
+  const pids = [...projOrder.filter((id) => byPid.has(id)), ...[...byPid.keys()].filter((id) => !projOrder.includes(id))];
+  const nameOf = (pid) => pid === "_none" ? "Tanpa Grup" : ((projList.find((x) => x.id === pid) || {}).nama || "Grup");
+  const multi = pids.length > 1;
   let idx = 0;
-  const body = jobs.map((j) => {
+  const rowHtml = (j) => {
     idx++;
     const nopol = j.nopol || j.no_rangka || "-";
     const rute = `${j.asal_kota || "-"} → ${j.tujuan_kota || "-"}`;
+    const jl = sisaOf(j) <= 0;
     return `<tr>
       <td class="c">${idx}</td>
       <td><b>${esc(nopol)}</b><div class="rp-note">${esc(j.vehicle_type || "Unit")}</div></td>
       <td>${esc(rute)}</td>
-      <td class="r">${rp(j.selisih_deal || 0)}</td>
-      <td class="r">${rp(j.selisih_invoice || 0)}</td>
-      <td class="r"><b>${rp(selOf(j))}</b></td>
+      <td class="r">${rp(j.total_harga)}</td>
+      <td class="r">${rp(j.total_terbayar || 0)}</td>
+      <td class="r"><b>${rp(sisaOf(j))}</b></td>
+      <td class="c"><span class="rp-st ${jl ? "y" : "n"}">${jl ? "Lunas" : "Sisa"}</span></td>
     </tr>`;
+  };
+  const body = pids.map((pid) => {
+    const gj = byPid.get(pid);
+    const sH = gj.reduce((s, j) => s + (j.total_harga || 0), 0);
+    const sB = gj.reduce((s, j) => s + (j.total_terbayar || 0), 0);
+    const head = multi ? `<tr class="grp"><td class="c">📁</td><td colspan="2"><b>${esc(nameOf(pid))}</b> · ${gj.length} unit</td><td class="r">${rp(sH)}</td><td class="r">${rp(sB)}</td><td class="r"><b>${rp(sH - sB)}</b></td><td></td></tr>` : "";
+    const rows = gj.map(rowHtml).join("");
+    const sub = multi ? `<tr class="grpsub"><td class="lbl" colspan="3">Subtotal ${esc(nameOf(pid))}</td><td class="r">${rp(sH)}</td><td class="r">${rp(sB)}</td><td class="r">${rp(sH - sB)}</td><td></td></tr>` : "";
+    return head + rows + sub;
   }).join("");
 
   const payBody = payTx.map((p, i) => `<tr>
@@ -86,6 +104,14 @@ export function printSupplierA4(sup, jobsOverride, noDocOverride, tglOverride) {
     table.rps td.c { text-align:center; } table.rps td.r { text-align:right; white-space:nowrap; }
     table.rps td.gd { color:#0f7a4d; font-weight:700; font-size:9px; }
     table.rps .rp-note { font-size:8px; color:${DOC_BRAND.muted}; margin-top:1px; }
+    table.rps .rp-st { font-size:8px; font-weight:800; border-radius:20px; padding:1px 8px; }
+    table.rps .rp-st.y { background:#dcfce7; color:#166534; } table.rps .rp-st.n { background:#fef3c7; color:#92400e; }
+    table.rps tr.grp td { background:#eef2f7; color:${DOC_BRAND.navy}; font-weight:800; font-size:9px; padding:4px 7px; border-top:1px solid #cbd5e1; border-bottom:1px solid #cbd5e1; }
+    table.rps tr.grp td:first-child { border-left:3px solid ${DOC_BRAND.gold}; }
+    table.rps tr.grpsub td { background:#f8fafc; color:#334155; font-weight:800; font-size:8.5px; border-bottom:1.5px solid #94a3b8; }
+    table.rps tr.grpsub .lbl { text-align:right; }
+    table.rps tfoot .tot td { border-top:2px solid ${DOC_BRAND.navy}; border-bottom:none; padding:6px 7px; font-size:10px; font-weight:900; background:#fff; color:${DOC_BRAND.ink}; }
+    table.rps tfoot .tot .lbl { text-align:right; }
     .rps-bar { display:flex; justify-content:space-between; align-items:center; border-top:2px solid ${DOC_BRAND.navy}; padding:6px 4px 0; margin-top:2px; }
     .rps-bar .lbl { font-weight:900; font-size:10.5px; color:${DOC_BRAND.navy}; text-transform:uppercase; letter-spacing:.3px; }
     .rps-bar .val { font-weight:900; font-size:11.5px; color:${DOC_BRAND.ink}; }
@@ -94,7 +120,7 @@ export function printSupplierA4(sup, jobsOverride, noDocOverride, tglOverride) {
     .rps-sum .row { display:flex; justify-content:space-between; padding:4px 2px; font-size:10px; border-bottom:1px solid ${DOC_BRAND.line}; }
     .rps-sum .row .k { color:#333; text-transform:uppercase; letter-spacing:.3px; font-weight:600; font-size:9px; }
     .rps-sum .row .v { font-weight:700; }
-    .rps-sisa { margin-top:7px; background:${DOC_BRAND.navy}; border-radius:8px; padding:10px 14px; }
+    .rps-sisa { margin-top:7px; background:${over ? "#7a3b0f" : DOC_BRAND.navy}; border-radius:8px; padding:10px 14px; }
     .rps-sisa .k { font-size:8.5px; font-weight:700; letter-spacing:.7px; color:#e8c98a; text-transform:uppercase; }
     .rps-sisa .v { font-size:18px; font-weight:900; color:#fff; margin-top:1px; line-height:1.05; }
     .rps-sisa .lunas { font-size:17px; font-weight:900; color:#fff; letter-spacing:.5px; }
@@ -103,7 +129,7 @@ export function printSupplierA4(sup, jobsOverride, noDocOverride, tglOverride) {
     @media print { @page { size:A4 portrait; margin:8mm; } thead{display:table-header-group;} tbody tr{break-inside:avoid;} .avoid-break{break-inside:avoid;page-break-inside:avoid;} }
   </style></head><body>
   <div class="doc-sheet">
-    ${docHeader({ docTitle: "RINGKASAN SELISIH HARGA" })}
+    ${docHeader({ docTitle: "RINGKASAN SUPPLIER" })}
     <div class="rps-meta-row">
       <div class="rps-billto"><div class="lbl">Supplier</div><div class="val">${esc(sup.nama || "-")}</div></div>
       <table class="rps-meta-table">
@@ -113,15 +139,15 @@ export function printSupplierA4(sup, jobsOverride, noDocOverride, tglOverride) {
       </table>
     </div>
 
-    <div class="rps-sec"><span class="bar"></span><span class="txt">Rincian Selisih Harga</span></div>
+    <div class="rps-sec"><span class="bar"></span><span class="txt">Rincian Tagihan Supplier</span></div>
     <table class="rps">
       <thead><tr>
-        <th class="c" style="width:24px">No</th><th>No. Polisi / Unit</th><th>Rute</th>
-        <th class="r" style="width:96px">Harga Deal</th><th class="r" style="width:96px">Harga Invoice</th><th class="r" style="width:96px">Selisih</th>
+        <th class="c" style="width:22px">No</th><th>No. Polisi / Unit</th><th>Rute</th>
+        <th class="r" style="width:86px">Total Harga</th><th class="r" style="width:82px">Terbayar</th><th class="r" style="width:82px">Sisa</th><th class="c" style="width:46px">Status</th>
       </tr></thead>
-      <tbody>${body || `<tr><td colspan="6" class="c" style="color:${DOC_BRAND.muted}">Belum ada unit / harga selisih.</td></tr>`}</tbody>
+      <tbody>${body || `<tr><td colspan="7" class="c" style="color:${DOC_BRAND.muted}">Belum ada unit.</td></tr>`}</tbody>
+      <tfoot><tr class="tot"><td class="lbl" colspan="3">TOTAL</td><td class="r">${rp(gHarga)}</td><td class="r">${rp(gBayar)}</td><td class="r">${rp(gSisa)}</td><td></td></tr></tfoot>
     </table>
-    <div class="rps-bar"><span class="lbl">Total Selisih</span><span class="val">${rp(gSelisih)}</span></div>
 
     <div class="rps-sec"><span class="bar"></span><span class="txt">Riwayat Pembayaran</span></div>
     <table class="rps">
@@ -135,20 +161,22 @@ export function printSupplierA4(sup, jobsOverride, noDocOverride, tglOverride) {
 
     <div class="rps-sec avoid-break"><span class="bar"></span><span class="txt">Ringkasan</span></div>
     <div class="rps-sum avoid-break">
-      <div class="row"><span class="k">Total Selisih</span><span class="v">${rp(gSelisih)}</span></div>
+      <div class="row"><span class="k">Total Tagihan Supplier</span><span class="v">${rp(gHarga)}</span></div>
       <div class="row"><span class="k">Total Pembayaran</span><span class="v">${rp(gBayar)}</span></div>
       <div class="rps-sisa">
-        ${lunas
-          ? `<div class="lunas">&#10003; LUNAS</div>`
-          : `<div class="k">Sisa Yang Harus Ditransfer</div><div class="v">${rp(gSisaSel)}</div>`}
+        ${over
+          ? `<div class="k">Lebih Bayar (Overpayment)</div><div class="v">${rp(Math.abs(gSisa))}</div>`
+          : lunas
+            ? `<div class="lunas">&#10003; LUNAS</div>`
+            : `<div class="k">Sisa Yang Harus Ditransfer</div><div class="v">${rp(gSisa)}</div>`}
       </div>
-      <div style="text-align:right; margin-top:6px; font-size:9.5px; font-weight:700; color:${lunas ? "#0f7a4d" : DOC_BRAND.muted}">
-        Status: ${lunas ? "LUNAS" : "BELUM LUNAS"}
+      <div style="text-align:right; margin-top:6px; font-size:9.5px; font-weight:700; color:${over ? "#b45309" : lunas ? "#0f7a4d" : DOC_BRAND.muted}">
+        Status: ${over ? "OVERPAYMENT" : lunas ? "LUNAS" : "BELUM LUNAS"}
       </div>
     </div>
 
-    <div class="rps-note"><b>Catatan:</b> Selisih = Harga Invoice − Harga Deal. Sisa Yang Harus Ditransfer = Total Selisih − Total Pembayaran. Riwayat pembayaran = transaksi transfer aktual (1 transfer = 1 baris). Konfirmasi: <b>${DOC_BRAND.phone}</b>.</div>
-    ${docFooter({ docNo: `Ringkasan Selisih ${noDoc}` })}
+    <div class="rps-note"><b>Catatan:</b> Ringkasan tagihan ke supplier. Sisa = Total Tagihan Supplier &minus; Total Pembayaran. Riwayat pembayaran = transaksi transfer aktual (1 transfer = 1 baris). Konfirmasi: <b>${DOC_BRAND.phone}</b>.</div>
+    ${docFooter({ docNo: `Ringkasan ${noDoc}` })}
   </div>
   <script>window.onload=()=>window.print()<\/script>
   </body></html>`;
@@ -684,8 +712,6 @@ export default function SupplierPage() {
     setDpKomp({ vehicle: "", nounit: "", asal: "", tujuan: "" });
     setTbhLabel(""); setTbhAmount("");
     setDetailTag(job.tag || "");
-    setDetailDeal(job.selisih_deal ? String(job.selisih_deal) : "");
-    setDetailInvoice(job.selisih_invoice ? String(job.selisih_invoice) : "");
   };
   const detailJobLive = useMemo(() => detailJob && jobs.find((j) => j.id === detailJob.id), [detailJob, jobs]);
   const submitDetailPay = async () => {
@@ -739,20 +765,6 @@ export default function SupplierPage() {
   /* ═══ Tag/Judul Kelompok laporan per unit (pembatas visual PDF) ═══ */
   const [detailTag, setDetailTag] = useState("");
   const [tagSaving, setTagSaving] = useState(false);
-  // Harga Deal & Harga Invoice per unit (buat laporan Selisih format Supplier)
-  const [detailDeal, setDetailDeal] = useState("");
-  const [detailInvoice, setDetailInvoice] = useState("");
-  const [selSaving, setSelSaving] = useState(false);
-  const saveJobSelisih = async () => {
-    const job = detailJob; if (!job) return;
-    setSelSaving(true);
-    try {
-      await axios.patch(`${API}/admin/suppliers/${selected.id}/jobs/${job.id}/selisih`, { selisih_deal: pNum(detailDeal), selisih_invoice: pNum(detailInvoice) }, { headers });
-      await reloadSelected(selected.id); setListRefreshTick((t) => t + 1);
-      flash("✓ Harga Deal & Invoice tersimpan");
-    } catch (e) { flash(e?.response?.data?.detail || "Gagal simpan harga selisih"); }
-    finally { setSelSaving(false); }
-  };
   const saveJobTag = async () => {
     const job = detailJob; if (!job) return;
     setTagSaving(true);
@@ -1311,20 +1323,6 @@ export default function SupplierPage() {
               <button style={{ ...BTN, padding: "0 16px", minWidth: 56 }} disabled={tbhSaving} onClick={addTambahan} data-testid="sup-tbh-add">{tbhSaving ? "…" : "+"}</button>
             </div>
             <div style={{ fontSize: 11, color: C.mute, marginTop: 5 }}>Biaya tambahan nambah Total &amp; Sisa unit ini. Harga deal awal tetap.</div>
-          </div>
-
-          {/* ── Harga Deal & Harga Invoice (laporan Selisih format Supplier) ── */}
-          <div style={{ borderTop: `1px solid ${C.line}`, paddingTop: 10, marginBottom: 12 }}>
-            <div style={{ ...L }}>Selisih Harga (Laporan Supplier)</div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <input style={{ ...I, flex: 1 }} inputMode="numeric" placeholder="Harga Deal" value={fmtRpInput(detailDeal)} onChange={(e) => setDetailDeal(onlyDigits(e.target.value))} data-testid="sup-sel-deal" />
-              <input style={{ ...I, flex: 1 }} inputMode="numeric" placeholder="Harga Invoice" value={fmtRpInput(detailInvoice)} onChange={(e) => setDetailInvoice(onlyDigits(e.target.value))} data-testid="sup-sel-invoice" />
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
-              <div style={{ fontSize: 12.5, color: C.ink }}>Selisih: <b style={{ color: C.gold }}>{fRp(Math.max(0, pNum(detailInvoice) - pNum(detailDeal)))}</b></div>
-              <button style={{ ...BTN, padding: "0 16px" }} disabled={selSaving} onClick={saveJobSelisih} data-testid="sup-sel-save">{selSaving ? "…" : "Simpan"}</button>
-            </div>
-            <div style={{ fontSize: 11, color: C.mute, marginTop: 5 }}>Selisih = Harga Invoice − Harga Deal. Dipakai di PDF format Supplier. Tidak mengubah ongkos/pembayaran.</div>
           </div>
 
           {/* ── Tag / Judul Kelompok laporan (pembatas visual PDF, tidak ikut hitungan) ── */}
