@@ -105,7 +105,7 @@ export default function SupplierQuoteFill() {
             <div key={row.id} style={{ background: "#fff", border: `1px solid ${border}`, borderRadius: 16, padding: "16px 18px" }}>
               <div style={{ fontSize: 11, color: gray, fontWeight: 700, marginBottom: 4 }}>RUTE {idx + 1}</div>
               <div style={{ fontSize: 17, fontWeight: 800, color: "#1f2937", lineHeight: 1.3 }}>{row.asal} <span style={{ color: navy }}>→</span> {row.tujuan}</div>
-              <div style={{ display: "inline-block", marginTop: 6, fontSize: 12, fontWeight: 700, color: navy, background: "#eff6ff", borderRadius: 8, padding: "3px 10px" }}>🚚 {row.tipe_kendaraan}</div>
+              <div style={{ display: "inline-block", marginTop: 6, fontSize: 12, fontWeight: 700, color: navy, background: "#eff6ff", borderRadius: 8, padding: "3px 10px" }}>🚚 {row.tipe_kendaraan}</div>{row.moda ? <div style={{ display: "inline-block", marginTop: 6, marginLeft: 6, fontSize: 12, fontWeight: 700, color: "#0f7a4d", background: "#ecfdf5", borderRadius: 8, padding: "3px 10px" }}>🚢 {row.moda}</div> : null}
 
               <div style={{ marginTop: 14 }}>
                 <label style={{ fontSize: 12, color: gray, fontWeight: 700, display: "block", marginBottom: 6 }}>Harga (Rp)</label>

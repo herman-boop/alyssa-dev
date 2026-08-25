@@ -5197,12 +5197,28 @@ class PermintaanHargaRowBody(BaseModel):
     asal: str
     tujuan: str
     tipe_kendaraan: str
+    moda: str = ""
 
 
 class PermintaanHargaCreateBody(BaseModel):
     nama_supplier: str
     catatan: str = ""
+    supplier_id: Optional[str] = None
     rows: List[PermintaanHargaRowBody]
+
+
+async def _gen_req_no() -> str:
+    """Nomor request REQ-YYMMDD-NNN (urut per hari)."""
+    d = _wib_now().strftime("%y%m%d")
+    cnt = await db.permintaan_harga.count_documents({"req_no": {"$regex": f"^REQ-{d}-"}})
+    return f"REQ-{d}-{cnt + 1:03d}"
+
+async def _match_supplier_id(nama: str) -> Optional[str]:
+    """Link ke master supplier kalau namanya cocok (tanpa bikin master baru)."""
+    if not nama:
+        return None
+    doc = await db.supplier_profiles.find_one({"nama": {"$regex": f"^{re.escape(nama.strip())}$", "$options": "i"}}, {"id": 1})
+    return doc.get("id") if doc else None
 
 
 @api_router.post("/admin/permintaan-harga", dependencies=[Depends(require_admin_pin)])
@@ -5216,7 +5232,9 @@ async def create_permintaan_harga(body: PermintaanHargaCreateBody):
     now = datetime.utcnow().isoformat()
     doc = {
         "id": _gen_permintaan_id(),
+        "req_no": await _gen_req_no(),
         "nama_supplier": nama_supplier,
+        "supplier_id": body.supplier_id or await _match_supplier_id(nama_supplier),
         "catatan": body.catatan.strip(),
         "token": _gen_token(12),
         "created_at": now,
@@ -5228,6 +5246,7 @@ async def create_permintaan_harga(body: PermintaanHargaCreateBody):
                 "asal": r.asal.strip(),
                 "tujuan": r.tujuan.strip(),
                 "tipe_kendaraan": r.tipe_kendaraan.strip(),
+                "moda": (r.moda or "").strip(),
                 "harga": None,
                 "filled_at": None,
             }
@@ -5261,6 +5280,39 @@ async def delete_permintaan_harga(pid: str):
     return {"ok": True}
 
 
+# ── Template Permintaan Harga (route yang sering dipakai, reuse ke supplier lain) ──
+class PermintaanTemplateBody(BaseModel):
+    nama: str
+    catatan: str = ""
+    rows: List[PermintaanHargaRowBody]
+
+@api_router.post("/admin/permintaan-templates", dependencies=[Depends(require_admin_pin)])
+async def create_permintaan_template(body: PermintaanTemplateBody):
+    nama = body.nama.strip()
+    if not nama:
+        raise HTTPException(400, "Nama template tidak boleh kosong")
+    rows = [{"asal": r.asal.strip(), "tujuan": r.tujuan.strip(), "tipe_kendaraan": r.tipe_kendaraan.strip(), "moda": (r.moda or "").strip()}
+            for r in body.rows if r.asal.strip() and r.tujuan.strip() and r.tipe_kendaraan.strip()]
+    if not rows:
+        raise HTTPException(400, "Minimal 1 rute")
+    doc = {"id": _gen_permintaan_id(), "nama": nama, "catatan": body.catatan.strip(), "rows": rows, "created_at": datetime.utcnow().isoformat()}
+    await db.permintaan_templates.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+@api_router.get("/admin/permintaan-templates", dependencies=[Depends(require_admin_pin)])
+async def list_permintaan_templates():
+    items = await db.permintaan_templates.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return {"items": items}
+
+@api_router.delete("/admin/permintaan-templates/{tid}", dependencies=[Depends(require_admin_pin)])
+async def delete_permintaan_template(tid: str):
+    r = await db.permintaan_templates.delete_one({"id": tid})
+    if r.deleted_count == 0:
+        raise HTTPException(404, "Template tidak ditemukan")
+    return {"ok": True}
+
+
 @api_router.get("/minta-harga/{token}")
 async def public_get_permintaan_harga(token: str):
     """Public endpoint (no PIN) -- dibuka perwakilan supplier lewat link."""
@@ -5272,7 +5324,7 @@ async def public_get_permintaan_harga(token: str):
         "catatan": doc.get("catatan", ""),
         "status": doc.get("status", "pending"),
         "rows": [
-            {"id": r["id"], "asal": r["asal"], "tujuan": r["tujuan"], "tipe_kendaraan": r["tipe_kendaraan"], "harga": r.get("harga")}
+            {"id": r["id"], "asal": r["asal"], "tujuan": r["tujuan"], "tipe_kendaraan": r["tipe_kendaraan"], "moda": r.get("moda", ""), "harga": r.get("harga")}
             for r in doc.get("rows", [])
         ],
     }

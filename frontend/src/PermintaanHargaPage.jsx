@@ -62,7 +62,8 @@ const STATUS_META = {
   submitted: { label: "Lengkap", bg: "#1a4a2a", color: "#56d364", border: "#2ea043" },
 };
 
-function blankRow() { return { asal: "", tujuan: "", tipe_kendaraan: "" }; }
+const MODA = ["Self Drive", "Kapal Laut / RORO", "Container", "Car Carrier", "Towing", "Self Loader", "Low Bed"];
+function blankRow() { return { asal: "", tujuan: "", tipe_kendaraan: "", moda: "" }; }
 
 export default function PermintaanHargaPage() {
   const adminPin = typeof window !== "undefined" ? (localStorage.getItem("aal_admin_pin") || "") : "";
@@ -77,6 +78,8 @@ export default function PermintaanHargaPage() {
   const [expanded, setExpanded] = useState(null);
   const [toast, setToast] = useState("");
   const [lastLink, setLastLink] = useState("");
+  const [templates, setTemplates] = useState([]);
+  const [tplPick, setTplPick] = useState("");
 
   const flash = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2500); };
 
@@ -86,10 +89,45 @@ export default function PermintaanHargaPage() {
       const r = await axios.get(`${API}/admin/permintaan-harga`, { headers });
       setItems(r.data.items || []);
     } catch { /* noop */ }
+    try {
+      const t = await axios.get(`${API}/admin/permintaan-templates`, { headers });
+      setTemplates(t.data.items || []);
+    } catch { /* noop */ }
     setLoading(false);
   }, [adminPin]);
 
   useEffect(() => { load(); }, [load]);
+
+  const scrollTop = () => { try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch { window.scrollTo(0, 0); } };
+
+  // COPY PERMINTAAN: salin rute (tanpa harga) ke form, ganti supplier -> buat link baru.
+  const copyRequest = (it) => {
+    setRows((it.rows || []).map((r) => ({ asal: r.asal || "", tujuan: r.tujuan || "", tipe_kendaraan: r.tipe_kendaraan || "", moda: r.moda || "" })));
+    setNamaSupplier(""); setCatatan(it.catatan || ""); setLastLink("");
+    scrollTop();
+    flash(`Rute disalin (${(it.rows || []).length}). Ganti nama supplier lalu Buat Link.`);
+  };
+  const usilTemplate = (tid) => {
+    setTplPick(tid);
+    const t = templates.find((x) => x.id === tid);
+    if (!t) return;
+    setRows((t.rows || []).map((r) => ({ asal: r.asal || "", tujuan: r.tujuan || "", tipe_kendaraan: r.tipe_kendaraan || "", moda: r.moda || "" })));
+    setCatatan(t.catatan || ""); setLastLink("");
+    flash(`Template "${t.nama}" dipakai. Isi nama supplier lalu Buat Link.`);
+  };
+  const saveAsTemplate = async (it) => {
+    const nama = window.prompt("Nama template (mis. Sulawesi — Pickup/Double Cabin):", it ? `${it.nama_supplier} — ${(it.rows || []).length} rute` : "");
+    if (nama === null) return;
+    const src = it ? it.rows : rows;
+    const tplRows = (src || []).filter((r) => r.asal && r.tujuan && r.tipe_kendaraan).map((r) => ({ asal: r.asal, tujuan: r.tujuan, tipe_kendaraan: r.tipe_kendaraan, moda: r.moda || "" }));
+    if (!tplRows.length) { flash("Tidak ada rute untuk template"); return; }
+    try { await axios.post(`${API}/admin/permintaan-templates`, { nama: nama.trim() || "Template", catatan: (it?.catatan || catatan || ""), rows: tplRows }, { headers }); flash("⭐ Template tersimpan"); load(); }
+    catch (e) { flash(e?.response?.data?.detail || "Gagal simpan template"); }
+  };
+  const deleteTemplate = async (tid) => {
+    if (!window.confirm("Hapus template ini?")) return;
+    try { await axios.delete(`${API}/admin/permintaan-templates/${tid}`, { headers }); flash("Template dihapus"); load(); } catch { flash("Gagal hapus template"); }
+  };
 
   const updateRow = (i, field, val) => {
     setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, [field]: val } : r)));
@@ -153,15 +191,30 @@ export default function PermintaanHargaPage() {
           </div>
         </div>
 
+        {templates.length > 0 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, color: "#8b949e", fontWeight: 700 }}>⭐ Template:</span>
+            <select style={{ ...I, width: "auto", minWidth: 200 }} value={tplPick} onChange={(e) => usilTemplate(e.target.value)}>
+              <option value="">— Pakai template —</option>
+              {templates.map((t) => <option key={t.id} value={t.id}>{t.nama} ({(t.rows || []).length} rute)</option>)}
+            </select>
+            {tplPick && <button style={{ ...BTN_GHOST, fontSize: 11, padding: "6px 10px", color: "#f85149", borderColor: "#f85149" }} onClick={() => deleteTemplate(tplPick)}>🗑 Hapus template</button>}
+          </div>
+        )}
+
         <label style={L}>Rute yang Diminta Harga</label>
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
           {rows.map((row, i) => (
-            <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 8, alignItems: "center" }}>
+            <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr auto", gap: 8, alignItems: "center" }}>
               <input style={I} placeholder="Asal (cth: Makassar)" value={row.asal} onChange={(e) => updateRow(i, "asal", e.target.value)} />
               <input style={I} placeholder="Tujuan (cth: Manado)" value={row.tujuan} onChange={(e) => updateRow(i, "tujuan", e.target.value)} />
               <select style={I} value={row.tipe_kendaraan} onChange={(e) => updateRow(i, "tipe_kendaraan", e.target.value)}>
                 <option value="">Tipe Kendaraan...</option>
                 {VEHICLE_TYPE_LIST.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+              <select style={I} value={row.moda || ""} onChange={(e) => updateRow(i, "moda", e.target.value)}>
+                <option value="">Moda...</option>
+                {MODA.map((m) => <option key={m} value={m}>{m}</option>)}
               </select>
               <button onClick={() => removeRow(i)} disabled={rows.length === 1}
                 style={{ ...BTN_GHOST, padding: "9px 12px", color: rows.length === 1 ? "#484f58" : "#f85149", borderColor: rows.length === 1 ? "#30363d" : "#f85149", cursor: rows.length === 1 ? "not-allowed" : "pointer" }}>
@@ -170,8 +223,11 @@ export default function PermintaanHargaPage() {
             </div>
           ))}
         </div>
-        <div style={{ display: "flex", gap: 8, justifyContent: "space-between", alignItems: "center" }}>
-          <button style={BTN_GHOST} onClick={addRow}>+ Tambah Rute</button>
+        <div style={{ display: "flex", gap: 8, justifyContent: "space-between", alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button style={BTN_GHOST} onClick={addRow}>+ Tambah Rute</button>
+            <button style={BTN_GHOST} onClick={() => saveAsTemplate(null)}>⭐ Simpan sbg Template</button>
+          </div>
           <button style={{ ...BTN, opacity: saving ? 0.6 : 1 }} onClick={submit} disabled={saving}>
             {saving ? "Membuat..." : "🔗 Buat Permintaan & Link"}
           </button>
@@ -213,12 +269,15 @@ export default function PermintaanHargaPage() {
             <div key={it.id} style={{ background: "#161b22", border: "1px solid #21262d", borderRadius: 12, overflow: "hidden" }}>
               <div style={{ padding: "12px 16px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                 <div style={{ flex: 1, minWidth: 160 }}>
-                  <div style={{ fontWeight: 800, fontSize: 14, color: "#e6edf3" }}>{it.nama_supplier}</div>
-                  <div style={{ fontSize: 11, color: "#8b949e", marginTop: 2 }}>{fDate(it.created_at)} · {filled}/{total} rute terisi</div>
+                  <div style={{ fontWeight: 800, fontSize: 14, color: "#e6edf3" }}>{it.nama_supplier}{it.supplier_id && <span title="Terhubung ke supplier master" style={{ marginLeft: 6, fontSize: 10, color: "#56d364" }}>● master</span>}</div>
+                  <div style={{ fontSize: 11, color: "#8b949e", marginTop: 2 }}>{it.req_no ? `${it.req_no} · ` : ""}{total} rute · {fDate(it.created_at)} · {filled}/{total} terisi</div>
                 </div>
                 <span style={{ fontSize: 10, fontWeight: 800, padding: "3px 10px", borderRadius: 12, background: meta.bg, color: meta.color, border: `1px solid ${meta.border}` }}>{meta.label}</span>
-                <button style={{ ...BTN_GHOST, fontSize: 11, padding: "6px 12px" }} onClick={() => setExpanded(isOpen ? null : it.id)}>{isOpen ? "Tutup" : "Lihat Detail"}</button>
+                <button style={{ ...BTN_GHOST, fontSize: 11, padding: "6px 12px" }} onClick={() => setExpanded(isOpen ? null : it.id)}>{isOpen ? "Tutup" : "Lihat Harga"}</button>
                 <button style={{ ...BTN_GHOST, fontSize: 11, padding: "6px 12px" }} onClick={() => copyLink(it.token)}>📋 Salin Link</button>
+                <a href={`https://wa.me/?text=${encodeURIComponent(`Mohon isi harga rute berikut ya: ${window.location.origin}/minta-harga/${it.token}`)}`} target="_blank" rel="noreferrer" style={{ ...BTN_GHOST, fontSize: 11, padding: "6px 12px", color: "#56d364", borderColor: "#2ea043", textDecoration: "none" }}>💬 WA</a>
+                <button style={{ ...BTN_GHOST, fontSize: 11, padding: "6px 12px", color: "#EF9F27", borderColor: "#EF9F27" }} onClick={() => copyRequest(it)}>📋 Copy Permintaan</button>
+                <button style={{ ...BTN_GHOST, fontSize: 11, padding: "6px 12px" }} onClick={() => saveAsTemplate(it)}>⭐ Template</button>
                 <button style={{ ...BTN_GHOST, fontSize: 11, padding: "6px 12px", color: "#f85149", borderColor: "#f85149" }} onClick={() => deleteItem(it.id)}>🗑</button>
               </div>
               {isOpen && (
@@ -228,6 +287,7 @@ export default function PermintaanHargaPage() {
                       <tr style={{ color: "#8b949e", textAlign: "left" }}>
                         <th style={{ padding: "6px 4px", fontWeight: 700 }}>Rute</th>
                         <th style={{ padding: "6px 4px", fontWeight: 700 }}>Tipe Kendaraan</th>
+                        <th style={{ padding: "6px 4px", fontWeight: 700 }}>Moda</th>
                         <th style={{ padding: "6px 4px", fontWeight: 700, textAlign: "right" }}>Harga</th>
                       </tr>
                     </thead>
@@ -236,6 +296,7 @@ export default function PermintaanHargaPage() {
                         <tr key={r.id} style={{ borderTop: "1px solid #21262d" }}>
                           <td style={{ padding: "7px 4px", color: "#e6edf3" }}>{r.asal} → {r.tujuan}</td>
                           <td style={{ padding: "7px 4px", color: "#c9d1d9" }}>{r.tipe_kendaraan}</td>
+                          <td style={{ padding: "7px 4px", color: "#8b949e" }}>{r.moda || "—"}</td>
                           <td style={{ padding: "7px 4px", textAlign: "right", fontWeight: 800, color: r.harga ? "#56d364" : "#484f58" }}>{r.harga ? fRp(r.harga) : "Belum diisi"}</td>
                         </tr>
                       ))}
