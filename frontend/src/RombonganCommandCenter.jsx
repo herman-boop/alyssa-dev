@@ -12,6 +12,13 @@ const C = {
   mute: "#8ea0c4", gold: "#e8c98a", navy: "#0f2a5c", green: "#3fb950", amber: "#e6b450", red: "#f87171", blue: "#5b9dff",
 };
 const fDate = (s) => { if (!s) return "—"; const d = String(s).slice(0, 10).split("-"); return d.length === 3 ? `${d[2]}/${d[1]}/${d[0]}` : s; };
+// Bukti Supabase kadang ke-serve dgn mime salah → blank. Lewatkan proxy backend.
+const resolveUrl = (u) => {
+  if (!u) return "";
+  if (/^https?:\/\//.test(u)) return u.includes("/storage/v1/object/public/") ? `${API}/media?u=${encodeURIComponent(u)}` : u;
+  return BACKEND_URL + u;
+};
+const upNopol = (s) => (s || "").toUpperCase().trim();
 
 // SOP per fase — checklist visual (statis, P1 tapi ringan)
 const SOP = [
@@ -27,13 +34,26 @@ export default function RombonganCommandCenter() {
   const token = useMemo(() => window.location.pathname.replace(/^\/rombongan\//, "").split("?")[0].replace(/\/$/, ""), []);
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
-  const [tab, setTab] = useState("home"); // home | sop | report
+  const [tab, setTab] = useState("home"); // home | report | sop | dokumen
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({ unit_nopol: "", driver: "", status: "Dalam Perjalanan", lokasi: "", catatan: "", kendala: "" });
   const [flash, setFlash] = useState("");
+  const [detailUnit, setDetailUnit] = useState(null); // unit terpilih → drill-down (P1)
+  const [allReports, setAllReports] = useState(null);  // null = belum di-load; [] = kosong
+  const [repBusy, setRepBusy] = useState(false);
 
   const load = () => axios.get(`${API}/public/rombongan/${token}`).then((r) => setData(r.data)).catch((e) => setErr(e?.response?.data?.detail || "Link tidak valid / dinonaktifkan"));
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [token]);
+
+  // Ambil SEMUA report (histori lintas hari) sekali — buat drill-down per unit.
+  const ensureReports = async () => {
+    if (allReports !== null || repBusy) return;
+    setRepBusy(true);
+    try { const r = await axios.get(`${API}/public/rombongan/${token}/reports`); setAllReports(r.data.items || []); }
+    catch { setAllReports([]); }
+    finally { setRepBusy(false); }
+  };
+  const openDetail = (u) => { setDetailUnit(u); ensureReports(); };
 
   if (err) return <Shell><div style={{ padding: 30, textAlign: "center", color: C.red, fontWeight: 700 }}>{err}</div></Shell>;
   if (!data) return <Shell><div style={{ padding: 30, textAlign: "center", color: C.mute }}>Memuat Command Center…</div></Shell>;
@@ -72,6 +92,7 @@ export default function RombonganCommandCenter() {
       const r = await axios.post(`${API}/public/rombongan/${token}/report`, form);
       setFlash(r.data?.late ? "✓ Report tersimpan (Terlambat)" : "✓ Report tersimpan");
       setForm({ unit_nopol: "", driver: "", status: "Dalam Perjalanan", lokasi: "", catatan: "", kendala: "" });
+      setAllReports(null); // reset histori → di-load ulang saat buka detail
       await load(); setTab("home");
     } catch (e) { setFlash(e?.response?.data?.detail || "Gagal simpan report"); }
     finally { setBusy(false); setTimeout(() => setFlash(""), 2500); }
@@ -123,8 +144,8 @@ export default function RombonganCommandCenter() {
 
       {/* Tabs */}
       <div style={{ display: "flex", borderBottom: `1px solid ${C.line}`, position: "sticky", top: 0, background: C.bg, zIndex: 2 }}>
-        {[["home", "🏠 Home"], ["report", "📝 Report Hari Ini"], ["sop", "✅ SOP Kerja"]].map(([k, l]) => (
-          <button key={k} onClick={() => setTab(k)} style={{ flex: 1, padding: "11px 6px", border: "none", background: "none", cursor: "pointer", fontSize: 12, fontWeight: 800, color: tab === k ? C.gold : C.mute, borderBottom: tab === k ? `2px solid ${C.gold}` : "2px solid transparent" }}>{l}</button>
+        {[["home", "🏠 Home"], ["report", "📝 Report"], ["dokumen", "📄 Dokumen"], ["sop", "✅ SOP"]].map(([k, l]) => (
+          <button key={k} onClick={() => setTab(k)} style={{ flex: 1, padding: "11px 4px", border: "none", background: "none", cursor: "pointer", fontSize: 11.5, fontWeight: 800, color: tab === k ? C.gold : C.mute, borderBottom: tab === k ? `2px solid ${C.gold}` : "2px solid transparent" }}>{l}</button>
         ))}
       </div>
 
@@ -171,10 +192,16 @@ export default function RombonganCommandCenter() {
                         <span style={{ display: "block", marginTop: 2, color: C.mute }}>jam {rep.submitted_hhmm || ""}</span>
                       </div>
                     )}
-                    <button onClick={() => { setForm((f) => ({ ...f, unit_nopol: u.nopol || "", driver: u.driver || "" })); setTab("report"); }}
-                      style={{ marginTop: 8, width: "100%", padding: "7px", borderRadius: 8, border: `1px solid ${C.blue}`, background: "transparent", color: C.blue, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-                      📝 Report unit ini
-                    </button>
+                    <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                      <button onClick={() => openDetail(u)}
+                        style={{ flex: 1, padding: "7px", borderRadius: 8, border: `1px solid ${C.line}`, background: "transparent", color: C.ink, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                        🔎 Detail
+                      </button>
+                      <button onClick={() => { setForm((f) => ({ ...f, unit_nopol: u.nopol || "", driver: u.driver || "" })); setTab("report"); }}
+                        style={{ flex: 1, padding: "7px", borderRadius: 8, border: `1px solid ${C.blue}`, background: "transparent", color: C.blue, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                        📝 Report
+                      </button>
+                    </div>
                   </div>
                 );
               })}
@@ -208,6 +235,10 @@ export default function RombonganCommandCenter() {
           </>
         )}
 
+        {tab === "dokumen" && (
+          <DokumenTab bastk={handover.bastk || []} resi={handover.resi} dokumen={album.dokumen || []} />
+        )}
+
         {tab === "sop" && (
           <>
             <SectionTitle>SOP Kerja (per fase)</SectionTitle>
@@ -227,9 +258,120 @@ export default function RombonganCommandCenter() {
         )}
       </div>
 
+      {detailUnit && (
+        <UnitDetail
+          unit={detailUnit}
+          reports={(allReports || []).filter((r) => upNopol(r.unit_nopol) === upNopol(detailUnit.nopol))}
+          loading={repBusy && allReports === null}
+          onReport={() => { setForm((f) => ({ ...f, unit_nopol: detailUnit.nopol || "", driver: detailUnit.driver || "" })); setDetailUnit(null); setTab("report"); }}
+          onClose={() => setDetailUnit(null)}
+        />
+      )}
+
       {flash && <div style={{ position: "fixed", bottom: 18, left: "50%", transform: "translateX(-50%)", background: C.navy, color: C.gold, border: `1px solid ${C.gold}`, borderRadius: 10, padding: "10px 18px", fontSize: 13, fontWeight: 700, zIndex: 50 }}>{flash}</div>}
       <div style={{ textAlign: "center", padding: "18px 16px 26px", fontSize: 10.5, color: C.mute }}>PT Alyssa Auto Logistik · Command Center Kepala Rombongan</div>
     </Shell>
+  );
+}
+
+// Thumbnail bukti (buka penuh di tab baru lewat proxy media biar ga blank).
+function Thumb({ url, catatan }) {
+  const src = resolveUrl(url);
+  const isImg = !/\.pdf($|\?)/i.test(url || "");
+  return (
+    <a href={src} target="_blank" rel="noreferrer" title={catatan || "Lihat"}
+      style={{ display: "block", width: 64, height: 64, borderRadius: 8, overflow: "hidden", border: `1px solid ${C.line}`, background: C.card2, flexShrink: 0, textDecoration: "none" }}>
+      {isImg
+        ? <img src={src} alt={catatan || "bukti"} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>📄</div>}
+    </a>
+  );
+}
+
+function DocRow({ label, ok, count, items }) {
+  return (
+    <div style={{ background: C.card2, border: `1px solid ${C.line}`, borderRadius: 10, padding: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 800, color: C.ink }}>{label}</div>
+        <span style={{ fontSize: 10.5, fontWeight: 800, padding: "3px 9px", borderRadius: 20, whiteSpace: "nowrap",
+          background: ok ? "#0d2818" : "#2a2410", color: ok ? C.green : C.amber }}>
+          {ok ? `✓ Diterima${count ? ` · ${count}` : ""}` : "⏳ Belum"}
+        </span>
+      </div>
+      {items && items.length > 0 && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+          {items.map((it, i) => <Thumb key={it.id || i} url={it.url} catatan={it.catatan} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DokumenTab({ bastk, resi, dokumen }) {
+  const resiItems = resi ? [resi] : [];
+  const allBack = bastk.length > 0 && !!resi; // BASTK + Resi/PoD lengkap = dokumen inti kembali
+  return (
+    <>
+      <SectionTitle>Dokumen Kembali</SectionTitle>
+      <div style={{ background: allBack ? "#0d2818" : C.card2, border: `1px solid ${allBack ? C.green + "66" : C.line}`, borderRadius: 10, padding: "11px 13px", marginBottom: 12, fontSize: 12.5, fontWeight: 700, color: allBack ? C.green : C.amber }}>
+        {allBack ? "✓ Dokumen inti sudah kembali (BASTK + Resi/PoD)" : "⏳ Dokumen inti belum lengkap"}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <DocRow label="BASTK (Berita Acara Serah Terima)" ok={bastk.length > 0} count={bastk.length} items={bastk} />
+        <DocRow label="Resi / PoD (Proof of Delivery)" ok={!!resi} count={resiItems.length} items={resiItems} />
+        <DocRow label="Dokumen Tambahan" ok={dokumen.length > 0} count={dokumen.length} items={dokumen} />
+      </div>
+      <div style={{ fontSize: 11, color: C.mute, marginTop: 12, lineHeight: 1.5 }}>
+        Bukti dokumen di-upload oleh petugas/driver lewat link tugas masing-masing. Halaman ini menampilkan statusnya secara read-only.
+      </div>
+    </>
+  );
+}
+
+// Drill-down 1 unit: info unit + riwayat report lintas hari (P1).
+function UnitDetail({ unit, reports, loading, onReport, onClose }) {
+  const sorted = [...reports].sort((a, b) => String(b.submitted_at || "").localeCompare(String(a.submitted_at || "")));
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(3,7,15,.72)", zIndex: 60, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 480, maxHeight: "88vh", overflowY: "auto", background: C.card, borderTop: `2px solid ${C.gold}`, borderRadius: "16px 16px 0 0", padding: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+          <div>
+            <div style={{ fontSize: 17, fontWeight: 900, color: C.ink }}>{unit.nopol || "(tanpa nopol)"}</div>
+            <div style={{ fontSize: 12, color: C.mute, marginTop: 2 }}>{unit.vehicle_type || "Unit"}{unit.no_rangka ? ` · Rangka ${unit.no_rangka}` : ""}</div>
+            <div style={{ fontSize: 12, color: C.mute, marginTop: 2 }}>Driver: <b style={{ color: C.ink }}>{unit.driver || "—"}</b></div>
+          </div>
+          <button onClick={onClose} style={{ width: 32, height: 32, borderRadius: "50%", border: `1px solid ${C.line}`, background: C.card2, color: C.ink, fontSize: 15, cursor: "pointer", flexShrink: 0 }}>✕</button>
+        </div>
+
+        <div style={{ margin: "14px 0 10px", fontSize: 12, fontWeight: 900, color: C.gold, textTransform: "uppercase", letterSpacing: .5 }}>
+          Riwayat Report ({sorted.length})
+        </div>
+
+        {loading && <div style={{ color: C.mute, fontSize: 12, padding: 12, textAlign: "center" }}>Memuat riwayat…</div>}
+        {!loading && sorted.length === 0 && <div style={{ color: C.mute, fontSize: 12, padding: 12, textAlign: "center" }}>Belum ada report untuk unit ini.</div>}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {sorted.map((r, i) => (
+            <div key={r.id || i} style={{ background: C.card2, border: `1px solid ${C.line}`, borderLeft: `3px solid ${r.late ? C.amber : C.green}`, borderRadius: 8, padding: "9px 11px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 800, color: C.ink }}>{fDate(r.tanggal)} · {r.submitted_hhmm || ""}</span>
+                {r.late && <span style={{ fontSize: 10, fontWeight: 800, color: C.amber, background: "#2a2410", padding: "2px 7px", borderRadius: 20 }}>Telat</span>}
+              </div>
+              <div style={{ fontSize: 12, color: C.ink, marginTop: 4 }}>
+                {r.status && <div>Status: <b>{r.status}</b></div>}
+                {r.lokasi && <div style={{ color: C.mute }}>Lokasi: {r.lokasi}</div>}
+                {r.catatan && <div style={{ color: C.mute }}>Catatan: {r.catatan}</div>}
+                {r.kendala && <div style={{ color: C.amber }}>Kendala: {r.kendala}</div>}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <button onClick={onReport} style={{ marginTop: 14, width: "100%", padding: "12px", borderRadius: 10, border: "none", background: C.gold, color: C.navy, fontWeight: 900, fontSize: 13.5, cursor: "pointer" }}>
+          📝 Report Unit Ini
+        </button>
+      </div>
+    </div>
   );
 }
 
