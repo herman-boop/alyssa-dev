@@ -31,6 +31,216 @@ const buktiHref = (url) => {
   return (process.env.REACT_APP_BACKEND_URL || "") + url;
 };
 
+const fmtDateTime = () => {
+  try {
+    return new Date().toLocaleString("id-ID", {
+      day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit",
+    });
+  } catch (_) { return new Date().toLocaleString(); }
+};
+
+/* Buat gambar bukti pembayaran (PNG super-sampling → tajam, tidak blur).
+   Return: Promise<{ blob, filename }>. Semua ukuran "logis", di-scale SC× biar
+   render-nya tajam di layar HP retina. */
+function makeReceiptBlob(receipt) {
+  return new Promise((resolve, reject) => {
+    try {
+      const {
+        title = "BUKTI PEMBAYARAN VENDOR",
+        amount = 0,
+        amountLabel = "Nominal Pembayaran",
+        rows = [],
+        listTitle = "",
+        listItems = [],
+        footnote = "",
+        filename = "bukti-pembayaran",
+      } = receipt || {};
+
+      const SC = 4;                 // super-sampling → tajam / anti-blur
+      const W = 430;                // lebar logis
+      const PAD = 26;
+      const CW = W - PAD * 2;
+      const FF = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif";
+      const NAVY = "#0f2a5c", NAVY2 = "#0a1e42", GOLD = "#c9973a",
+            INK = "#1f2430", MUTE = "#6b7280", LINE = "#e6e8ee", BG = "#ffffff";
+
+      const mc = document.createElement("canvas");
+      const m = mc.getContext("2d");
+      const wrap = (text, maxW, w, s) => {
+        m.font = `${w} ${s}px ${FF}`;
+        const words = String(text == null ? "" : text).split(/\s+/);
+        const lines = []; let cur = "";
+        for (const word of words) {
+          const t = cur ? cur + " " + word : word;
+          if (m.measureText(t).width > maxW && cur) { lines.push(cur); cur = word; }
+          else cur = t;
+        }
+        if (cur) lines.push(cur);
+        return lines.length ? lines : [""];
+      };
+
+      const valW = CW - 130;
+      const rowLays = rows.map((r) => {
+        const lines = wrap(r.v, valW, "700", 13.5);
+        return { k: r.k, lines, h: Math.max(28, lines.length * 18 + 10) };
+      });
+      const listLays = listItems.map((r) => {
+        const lines = wrap(r.v, valW, "700", 12.5);
+        return { k: r.k, lines, h: Math.max(24, lines.length * 17 + 8) };
+      });
+
+      const HEADER = 96;
+      let H = HEADER + 22;
+      H += 16 + 42 + 16;            // amount label + amount + gap
+      H += 1 + 14;                  // divider
+      rowLays.forEach((r) => (H += r.h));
+      if (listLays.length) {
+        H += 14 + 22;
+        listLays.forEach((r) => (H += r.h));
+      }
+      H += 14;
+      if (footnote) H += 28;
+      H += 20;
+
+      const cv = document.createElement("canvas");
+      cv.width = Math.round(W * SC);
+      cv.height = Math.round(H * SC);
+      const c = cv.getContext("2d");
+      c.scale(SC, SC);
+      c.textBaseline = "alphabetic";
+      c.fillStyle = BG; c.fillRect(0, 0, W, H);
+
+      // header
+      const grad = c.createLinearGradient(0, 0, W, HEADER);
+      grad.addColorStop(0, NAVY); grad.addColorStop(1, NAVY2);
+      c.fillStyle = grad; c.fillRect(0, 0, W, HEADER);
+      c.fillStyle = GOLD; c.fillRect(0, HEADER - 4, W, 4);
+      c.textAlign = "left"; c.fillStyle = "#fff";
+      c.font = `800 17px ${FF}`;
+      c.fillText("PT ALYSSA AUTO LOGISTIK", PAD, 40);
+      c.fillStyle = "rgba(255,255,255,.85)";
+      c.font = `700 11.5px ${FF}`;
+      c.fillText(title, PAD, 62);
+      // badge cek
+      c.fillStyle = GOLD; c.font = `900 12px ${FF}`;
+      c.textAlign = "right"; c.fillText("✓ LUNAS/CATAT", W - PAD, 40);
+      c.textAlign = "left";
+
+      let y = HEADER + 22;
+
+      // nominal besar
+      c.fillStyle = MUTE; c.font = `700 11px ${FF}`;
+      c.fillText(String(amountLabel).toUpperCase(), PAD, y);
+      y += 16;
+      c.fillStyle = NAVY; c.font = `900 32px ${FF}`;
+      c.fillText("Rp " + (Number(amount) || 0).toLocaleString("id-ID"), PAD, y + 26);
+      y += 42 + 16;
+
+      // divider
+      c.strokeStyle = LINE; c.lineWidth = 1;
+      c.beginPath(); c.moveTo(PAD, y); c.lineTo(W - PAD, y); c.stroke();
+      y += 14;
+
+      // rows
+      rowLays.forEach((r) => {
+        c.textAlign = "left"; c.fillStyle = MUTE; c.font = `600 12.5px ${FF}`;
+        c.fillText(r.k, PAD, y + 16);
+        c.textAlign = "right"; c.fillStyle = INK; c.font = `700 13.5px ${FF}`;
+        let ly = y + 16;
+        r.lines.forEach((ln) => { c.fillText(ln, W - PAD, ly); ly += 18; });
+        y += r.h;
+      });
+      c.textAlign = "left";
+
+      // list rincian PO (opsional)
+      if (listLays.length) {
+        y += 4;
+        c.fillStyle = GOLD; c.fillRect(PAD, y, 3, 14);
+        c.fillStyle = INK; c.font = `800 12px ${FF}`;
+        c.fillText(String(listTitle || "RINCIAN").toUpperCase(), PAD + 10, y + 12);
+        y += 22;
+        listLays.forEach((r) => {
+          c.textAlign = "left"; c.fillStyle = MUTE; c.font = `600 12px ${FF}`;
+          c.fillText(r.k, PAD, y + 15);
+          c.textAlign = "right"; c.fillStyle = INK; c.font = `700 12.5px ${FF}`;
+          let ly = y + 15;
+          r.lines.forEach((ln) => { c.fillText(ln, W - PAD, ly); ly += 17; });
+          y += r.h;
+        });
+        c.textAlign = "left";
+      }
+
+      // footnote
+      if (footnote) {
+        y += 8;
+        c.strokeStyle = LINE; c.beginPath(); c.moveTo(PAD, y); c.lineTo(W - PAD, y); c.stroke();
+        y += 16;
+        c.fillStyle = MUTE; c.font = `400 10.5px ${FF}`;
+        c.fillText(footnote, PAD, y);
+      }
+
+      cv.toBlob((blob) => {
+        if (!blob) { reject(new Error("blob null")); return; }
+        resolve({ blob, filename: filename + ".png" });
+      }, "image/png");
+    } catch (e) { reject(e); }
+  });
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+/* Tombol: 1 klik → share gambar bukti ke WhatsApp (Web Share API + file).
+   Fallback (device tidak support share file): unduh gambar + buka WhatsApp. */
+function ReceiptActions({ receipt, flash }) {
+  const [busy, setBusy] = useState(false);
+  const share = async () => {
+    setBusy(true);
+    try {
+      const { blob, filename } = await makeReceiptBlob(receipt);
+      const file = new File([blob], filename, { type: blob.type });
+      if (typeof navigator !== "undefined" && navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file], title: "Bukti Pembayaran", text: receipt.shareText || "" });
+          setBusy(false); return;
+        } catch (e) {
+          if (e && e.name === "AbortError") { setBusy(false); return; } // dibatalkan user
+          // lanjut ke fallback
+        }
+      }
+      downloadBlob(blob, filename);
+      if (flash) flash("Gambar bukti tersimpan. Lampirkan ke chat WhatsApp ya.");
+      const wa = "https://wa.me/?text=" + encodeURIComponent(receipt.shareText || "Bukti pembayaran vendor");
+      window.open(wa, "_blank");
+    } catch (e) {
+      if (flash) flash("Gagal membuat gambar bukti");
+    } finally { setBusy(false); }
+  };
+  const saveImg = async () => {
+    setBusy(true);
+    try {
+      const { blob, filename } = await makeReceiptBlob(receipt);
+      downloadBlob(blob, filename);
+      if (flash) flash("Gambar bukti tersimpan.");
+    } catch (e) {
+      if (flash) flash("Gagal menyimpan gambar");
+    } finally { setBusy(false); }
+  };
+  return (
+    <>
+      <button className="vp-btn vp-btn-wa" disabled={busy} onClick={share}>
+        {busy ? "Menyiapkan…" : "💬 Kirim Bukti ke WhatsApp"}
+      </button>
+      <button className="vp-btn vp-btn-ghost" disabled={busy} onClick={saveImg}>🖼️ Simpan Gambar</button>
+    </>
+  );
+}
+
 /* ── Bottom sheet (pilih vendor / jenis biaya) ── */
 function BottomSheet({ open, title, onClose, children }) {
   if (!open) return null;
@@ -137,7 +347,7 @@ export default function MobileVendorPayment({ embedded = false }) {
         <HistoryScreen headers={headers} onBack={() => setScreen("home")} setLoading={setLoading} flash={flash} />
       )}
       {screen === "success" && (
-        <SuccessScreen data={lastSuccess} onAgain={() => setScreen("form")} onHome={() => setScreen("home")} />
+        <SuccessScreen data={lastSuccess} flash={flash} onAgain={() => setScreen("form")} onHome={() => setScreen("home")} />
       )}
     </div>
   );
@@ -753,6 +963,36 @@ function VendorsScreen({ headers, onBack, setLoading, flash }) {
 
   /* ── SUCCESS ── */
   const r = result || {};
+  const applied = r.applied || [];
+  const receipt = {
+    title: "BUKTI PEMBAYARAN VENDOR",
+    amount: r.total_dibayar,
+    amountLabel: "Total Dibayar",
+    rows: [
+      { k: "Vendor", v: r._vendor || "-" },
+      { k: "Jumlah PO", v: `${applied.length} PO` },
+      { k: "Tanggal", v: fmtTgl(r._tanggal) },
+      { k: "Metode", v: r._metode || "-" },
+      ...(r.sisa_nominal > 0 ? [{ k: "Kelebihan Nominal", v: fmtRp(r.sisa_nominal) + " (tidak terpakai)" }] : []),
+    ],
+    listTitle: "Rincian PO",
+    listItems: applied.map((a) => ({
+      k: a.nopol || "PO",
+      v: `${fmtRp(a.dibayar)} · ${a.status === "lunas" ? "LUNAS" : "sebagian"}`,
+    })),
+    footnote: "Dibuat otomatis · " + fmtDateTime(),
+    filename: "bukti-" + String(r._vendor || "vendor").replace(/[^a-zA-Z0-9]+/g, "-"),
+    shareText:
+      "*BUKTI PEMBAYARAN VENDOR*\nPT Alyssa Auto Logistik\n\n" +
+      "Vendor: " + (r._vendor || "-") + "\n" +
+      "Total Dibayar: " + fmtRp(r.total_dibayar) + "\n" +
+      "Jumlah PO: " + applied.length + " PO\n" +
+      "Tanggal: " + fmtTgl(r._tanggal) + "\n" +
+      "Metode: " + (r._metode || "-") +
+      (applied.length
+        ? "\n\nRincian:\n" + applied.map((a) => "• " + (a.nopol || "PO") + ": " + fmtRp(a.dibayar) + (a.status === "lunas" ? " (LUNAS)" : " (sebagian)")).join("\n")
+        : ""),
+  };
   return (
     <div className="vp-screen vp-center">
       <div className="vp-success">
@@ -763,11 +1003,13 @@ function VendorsScreen({ headers, onBack, setLoading, flash }) {
           <Row k="Vendor" v={r._vendor || "-"} />
           <Row k="Tanggal" v={fmtTgl(r._tanggal)} />
           <Row k="Metode" v={r._metode || "-"} />
-          {(r.applied || []).map((a) => (
+          {applied.map((a) => (
             <Row key={a.job_id} k={a.nopol || "PO"} v={`${fmtRp(a.dibayar)} · ${a.status === "lunas" ? "LUNAS ✅" : "sebagian"}`} />
           ))}
           {r.sisa_nominal > 0 && <Row k="Kelebihan nominal" v={fmtRp(r.sisa_nominal) + " (tidak terpakai)"} />}
         </div>
+        <ReceiptActions receipt={receipt} flash={flash} />
+        <div style={{ height: 10 }} />
         <button className="vp-btn vp-btn-primary" onClick={() => { setResult(null); setSel({}); setMode("list"); }}>➕ Bayar Vendor Lain</button>
         <button className="vp-btn vp-btn-ghost" onClick={onBack}>Kembali ke Menu</button>
       </div>
@@ -776,8 +1018,34 @@ function VendorsScreen({ headers, onBack, setLoading, flash }) {
 }
 
 /* ══════════════ SUCCESS ══════════════ */
-function SuccessScreen({ data, onAgain, onHome }) {
+function SuccessScreen({ data, flash, onAgain, onHome }) {
   const d = data || {};
+  const sisaTxt = typeof d.sisa === "number" ? (d.sisa > 0 ? fmtRp(d.sisa) : "LUNAS") : null;
+  const receipt = {
+    title: "BUKTI PEMBAYARAN VENDOR",
+    amount: d._nominal,
+    amountLabel: "Nominal Pembayaran",
+    rows: [
+      { k: "Vendor", v: d._vendor || "-" },
+      { k: "Nopol", v: d._nopol || "-" },
+      { k: "Jenis Biaya", v: d._kategori || "-" },
+      { k: "Tanggal", v: fmtTgl(d._tanggal) },
+      { k: "Metode", v: d._metode || "-" },
+      ...(d._catatan ? [{ k: "Catatan", v: d._catatan }] : []),
+      ...(sisaTxt ? [{ k: "Sisa Tagihan", v: sisaTxt }] : []),
+    ],
+    footnote: "Dibuat otomatis · " + fmtDateTime(),
+    filename: "bukti-" + String(d._nopol || d._vendor || "vendor").replace(/[^a-zA-Z0-9]+/g, "-"),
+    shareText:
+      "*BUKTI PEMBAYARAN VENDOR*\nPT Alyssa Auto Logistik\n\n" +
+      "Vendor: " + (d._vendor || "-") + "\n" +
+      "Nopol: " + (d._nopol || "-") + "\n" +
+      "Jenis Biaya: " + (d._kategori || "-") + "\n" +
+      "Nominal: " + fmtRp(d._nominal) + "\n" +
+      "Tanggal: " + fmtTgl(d._tanggal) + "\n" +
+      "Metode: " + (d._metode || "-") +
+      (sisaTxt ? "\nSisa Tagihan: " + sisaTxt : ""),
+  };
   return (
     <div className="vp-screen vp-center">
       <div className="vp-success">
@@ -792,6 +1060,8 @@ function SuccessScreen({ data, onAgain, onHome }) {
           <Row k="Metode" v={d._metode || "-"} />
           {typeof d.sisa === "number" && <Row k="Sisa Tagihan" v={d.sisa > 0 ? fmtRp(d.sisa) : "LUNAS ✅"} />}
         </div>
+        <ReceiptActions receipt={receipt} flash={flash} />
+        <div style={{ height: 10 }} />
         <button className="vp-btn vp-btn-primary" onClick={onAgain}>➕ Catat Pembayaran Lagi</button>
         <button className="vp-btn vp-btn-ghost" onClick={onHome}>Kembali ke Menu</button>
       </div>
