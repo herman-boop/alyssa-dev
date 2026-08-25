@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
-import { VEHICLE_TYPE_LIST } from "@/VehicleSketches";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "";
 const API = `${BACKEND_URL}/api`;
@@ -203,14 +202,12 @@ export default function PermintaanHargaPage() {
         )}
 
         <label style={L}>Rute yang Diminta Harga</label>
-        {/* saran tipe kendaraan (boleh diketik manual, TIDAK terhubung ke input pesanan) */}
-        <datalist id="pnw-veh-list">{VEHICLE_TYPE_LIST.map((t) => <option key={t} value={t} />)}</datalist>
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
           {rows.map((row, i) => (
             <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr auto", gap: 8, alignItems: "center" }}>
               <input style={I} placeholder="Asal (cth: Makassar)" value={row.asal} onChange={(e) => updateRow(i, "asal", e.target.value)} />
               <input style={I} placeholder="Tujuan (cth: Manado)" value={row.tujuan} onChange={(e) => updateRow(i, "tujuan", e.target.value)} />
-              <input style={I} list="pnw-veh-list" placeholder="Tipe kendaraan (ketik/pilih)" value={row.tipe_kendaraan} onChange={(e) => updateRow(i, "tipe_kendaraan", e.target.value)} />
+              <input style={I} placeholder="Tipe kendaraan (ketik manual)" value={row.tipe_kendaraan} onChange={(e) => updateRow(i, "tipe_kendaraan", e.target.value)} />
               <select style={I} value={row.moda || ""} onChange={(e) => updateRow(i, "moda", e.target.value)}>
                 <option value="">Moda...</option>
                 {MODA.map((m) => <option key={m} value={m}>{m}</option>)}
