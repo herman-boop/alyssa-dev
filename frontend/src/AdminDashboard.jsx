@@ -6138,6 +6138,9 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
               detail={detail}
               copiedLeg={copiedLeg} copyLegLink={copyLegLink}
               openMultiUnit={openMultiUnit} printKartuMuat={printKartuMuat}
+              setKepala={setKepala} addDriverRow={addDriverRow} setDriverRow={setDriverRow} delDriverRow={delDriverRow}
+              romb={romb} rombBusy={rombBusy} rombCopied={rombCopied}
+              copyRombLink={copyRombLink} waRombLink={waRombLink} regenRomb={regenRomb} setJamClose={setJamClose}
             />
           )}
           {activeTab === "petugas" && <PetugasTaskTab tripId={tripId} headers={headers} />}
@@ -6262,10 +6265,24 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
 }
 
 /* ── Tab: Rute Leg — kartu workflow per leg ── */
-function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tripId, headers, detail, copiedLeg, copyLegLink, openMultiUnit, printKartuMuat }) {
+function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tripId, headers, detail, copiedLeg, copyLegLink, openMultiUnit, printKartuMuat,
+  setKepala, addDriverRow, setDriverRow, delDriverRow, romb, rombBusy, rombCopied, copyRombLink, waRombLink, regenRomb, setJamClose }) {
+  // Defensive: legacy/trip baru bisa punya legs undefined/null; jangan sampai crash → white screen.
+  const legList = Array.isArray(legs) ? legs : [];
+  // Fallback aman kalau ada handler yang belum ke-pass (harusnya tidak, tapi biar tab tak pernah blank).
+  const noop = () => {};
+  setKepala = setKepala || noop; addDriverRow = addDriverRow || noop; setDriverRow = setDriverRow || noop; delDriverRow = delDriverRow || noop;
+  copyRombLink = copyRombLink || noop; waRombLink = waRombLink || noop; regenRomb = regenRomb || noop; setJamClose = setJamClose || noop;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      {legs.map((leg, i) => {
+      {legList.length === 0 && (
+        <div style={{ textAlign: "center", padding: "28px 16px", border: "1px dashed #30363d", borderRadius: 12, color: "#8b949e" }}>
+          <div style={{ fontSize: 26, marginBottom: 6 }}>🧭</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#e6edf3" }}>Belum ada Route Leg</div>
+          <div style={{ fontSize: 11, marginTop: 4 }}>Tambahkan leg pertama untuk mulai mengatur rute pengiriman.</div>
+        </div>
+      )}
+      {legList.map((leg, i) => {
         const isKapal = leg.tipe && leg.tipe.startsWith("Kapal");
         const statusColor = LEG_STATUS_COLOR[leg.status] || LEG_STATUS_COLOR["Menunggu"];
         const albumStage = isKapal ? "kapal" : (i === 0 ? "asal" : (i === legs.length - 1 ? "tujuan" : null));
