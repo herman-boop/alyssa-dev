@@ -4633,10 +4633,20 @@ function SmartText({ value, onChange, style, placeholder, testid, upper }) {
 }
 
 function DriverAutocomplete({ value, hp, onChange, onSelect, headers }) {
-  const [q, setQ] = useState(value || "");
+  const [q, setQ] = useState(value == null ? "" : String(value));
   const [results, setResults] = useState([]);
   const [open, setOpen] = useState(false);
   const [timer, setTimer] = useState(null);
+  const focusedRef = useRef(false);
+  // Sinkron nilai dari luar (hydrate/reopen/autosave) saat input TIDAK sedang
+  // diketik — biar nama Kepala Rombongan/Driver muncul lagi setelah modal
+  // dibuka ulang. (Bug: sebelumnya q cuma di-set sekali saat mount → nama
+  // hilang saat reopen walau tersimpan di DB.)
+  useEffect(() => {
+    const v = value == null ? "" : String(value);
+    if (!focusedRef.current && v !== q) setQ(v);
+    // eslint-disable-next-line
+  }, [value]);
 
   const search = (val) => {
     setQ(val);
@@ -4666,8 +4676,9 @@ function DriverAutocomplete({ value, hp, onChange, onSelect, headers }) {
       <input
         style={IL2}
         value={q}
+        onFocus={() => { focusedRef.current = true; }}
         onChange={e => search(e.target.value)}
-        onBlur={() => setTimeout(() => setOpen(false), 200)}
+        onBlur={() => { focusedRef.current = false; setTimeout(() => setOpen(false), 200); }}
         placeholder="Cari nama driver..."
       />
       {hp && <div style={{ fontSize: 10, color: "#60a5fa", marginTop: 3 }}>HP: {hp}</div>}
@@ -4734,6 +4745,16 @@ function resolveTripUrl(url) {
     return url;
   }
   return `${BACKEND_URL}${url}`;
+}
+
+// Normalize nomor HP Indonesia untuk wa.me: 08xx/+62xx/62xx/8xx → 628xxxx.
+function waNormalizeId(raw) {
+  let d = String(raw == null ? "" : raw).replace(/[^0-9]/g, "");
+  if (!d) return "";
+  if (d.startsWith("0")) d = "62" + d.slice(1);          // 08xxxx → 628xxxx
+  else if (d.startsWith("62")) { /* sudah benar */ }      // (+)62xxxx → 62xxxx
+  else if (d.startsWith("8")) d = "62" + d;               // 8xxxx → 628xxxx
+  return d;
 }
 
 function fmtTs(s) {
@@ -6054,16 +6075,25 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
     } catch { alert("Gagal buat link Kepala Rombongan."); } finally { setRombBusy(false); }
   };
   const waRombLink = async (leg) => {
+    const k = (leg && leg.kepala_rombongan) || {};
+    const hp = waNormalizeId(k.hp);
+    if (!hp) { alert("Isi No. HP Kepala Rombongan dulu sebelum kirim WhatsApp."); return; }
+    // Buka tab SINKRON saat klik (masih dalam user-gesture) supaya TIDAK diblok
+    // popup blocker. URL diisi setelah token siap. (Bug: sebelumnya window.open
+    // dipanggil setelah await → diblokir browser → WhatsApp tak terbuka.)
+    const win = window.open("about:blank", "_blank");
     setRombBusy(true);
-    try { const tok = await ensureRombLink(leg); if (!tok) return;
-      const k = (leg && leg.kepala_rombongan) || {};
+    try {
+      const tok = await ensureRombLink(leg);
+      if (!tok) { if (win) win.close(); alert("Link Command Center belum siap. Coba lagi."); return; }
       const nUnit = (Array.isArray(order?.units) && order.units.length) || 1;
       const rute = `${order?.asal_kota || "—"} → ${order?.tujuan_kota || "—"}`;
       const jc = (romb && romb.jam_close) || "20:00";
       const txt = `Halo Pak/Bu ${k.nama || ""} 👋\n\nAnda ditugaskan sebagai *Kepala Rombongan* PT Alyssa Auto Logistik.\nRute: ${rute}\nJumlah Unit: ${nUnit}\n\nSilakan buka Command Center berikut untuk monitoring, report harian, checkpoint, foto, dan dokumen:\n🔗 ${rombLinkUrl(tok)}\n\nJam close report harian: ${jc} WIB\nInfo: PT Alyssa Auto Logistik · 0818 631 135`;
-      const hp = (k.hp || "").replace(/[^0-9]/g, "").replace(/^0/, "62");
-      window.open(hp ? `https://wa.me/${hp}?text=${encodeURIComponent(txt)}` : `https://wa.me/?text=${encodeURIComponent(txt)}`, "_blank");
-    } catch { alert("Gagal buat link Kepala Rombongan."); } finally { setRombBusy(false); }
+      const url = `https://wa.me/${hp}?text=${encodeURIComponent(txt)}`;
+      if (win) win.location.href = url; else window.open(url, "_blank");
+    } catch { if (win) win.close(); alert("Gagal buat link Kepala Rombongan."); }
+    finally { setRombBusy(false); }
   };
   const regenRomb = async () => {
     if (!tripId || !window.confirm("Ganti Kepala Rombongan? Link lama mati, link baru dibuat.")) return;
@@ -6141,6 +6171,7 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
               setKepala={setKepala} addDriverRow={addDriverRow} setDriverRow={setDriverRow} delDriverRow={delDriverRow}
               romb={romb} rombBusy={rombBusy} rombCopied={rombCopied}
               copyRombLink={copyRombLink} waRombLink={waRombLink} regenRomb={regenRomb} setJamClose={setJamClose}
+              saveStatus={saveStatus}
             />
           )}
           {activeTab === "petugas" && <PetugasTaskTab tripId={tripId} headers={headers} />}
@@ -6266,7 +6297,16 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
 
 /* ── Tab: Rute Leg — kartu workflow per leg ── */
 function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tripId, headers, detail, copiedLeg, copyLegLink, openMultiUnit, printKartuMuat,
-  setKepala, addDriverRow, setDriverRow, delDriverRow, romb, rombBusy, rombCopied, copyRombLink, waRombLink, regenRomb, setJamClose }) {
+  setKepala, addDriverRow, setDriverRow, delDriverRow, romb, rombBusy, rombCopied, copyRombLink, waRombLink, regenRomb, setJamClose, saveStatus }) {
+  // Status simpan (dari autosave backend) — jangan pernah bilang "tersimpan"
+  // kalau backend gagal (saveStatus === "error").
+  const savedChip = saveStatus === "saving"
+    ? { t: "· menyimpan…", c: "#e6b450" }
+    : saveStatus === "error"
+    ? { t: "· ⚠ belum tersimpan", c: "#f85149" }
+    : saveStatus === "saved"
+    ? { t: "· ✓ tersimpan", c: "#3fb950" }
+    : null;
   // Defensive: legacy/trip baru bisa punya legs undefined/null; jangan sampai crash → white screen.
   const legList = Array.isArray(legs) ? legs : [];
   // Fallback aman kalau ada handler yang belum ke-pass (harusnya tidak, tapi biar tab tak pernah blank).
@@ -6396,7 +6436,9 @@ function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tri
                   />
                   {/* ── KEPALA ROMBONGAN (assignment per Leg, bukan sekadar teks) ── */}
                   <div style={{ marginTop: 10, padding: "10px 12px", background: "#12200f", border: "1px solid #2f5a1f", borderRadius: 8 }}>
-                    <div style={{ fontSize: 10, color: "#7ee06b", fontWeight: 800, marginBottom: 8, letterSpacing: .5 }}>🧑‍✈️ KEPALA ROMBONGAN</div>
+                    <div style={{ fontSize: 10, color: "#7ee06b", fontWeight: 800, marginBottom: 8, letterSpacing: .5 }}>🧑‍✈️ KEPALA ROMBONGAN
+                      {savedChip && <span style={{ marginLeft: 8, color: savedChip.c, fontWeight: 700 }}>{savedChip.t}</span>}
+                    </div>
                     <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 8 }}>
                       <div>
                         <div style={MINI_LABEL}>Cari / pilih (dari master driver)</div>
@@ -6439,7 +6481,9 @@ function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tri
                   {/* ── DRIVER / UNIT ROMBONGAN (anggota, boleh lebih dari 1) ── */}
                   <div style={{ marginTop: 10, padding: "10px 12px", background: "#0a1628", border: "1px solid #1f3a5a", borderRadius: 8 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                      <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 800, letterSpacing: .5 }}>🚚 DRIVER / UNIT ROMBONGAN {(leg.drivers || []).length > 0 ? `(${leg.drivers.length})` : ""}</div>
+                      <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 800, letterSpacing: .5 }}>🚚 DRIVER / UNIT ROMBONGAN {(leg.drivers || []).length > 0 ? `(${leg.drivers.length})` : ""}
+                        {savedChip && <span style={{ marginLeft: 6, color: savedChip.c, fontWeight: 700 }}>{savedChip.t}</span>}
+                      </div>
                       <button type="button" onClick={() => addDriverRow(i)} style={{ ...GHOST_BTN_BLUE, fontSize: 11, padding: "4px 10px" }}>+ Tambah Driver / Unit</button>
                     </div>
                     {(leg.drivers || []).length === 0 && <div style={{ fontSize: 10.5, color: "#4a6fa5" }}>Buat rombongan multi-unit, tambah anggota di sini. Self drive 1 driver cukup pakai blok 🚗 DRIVER di atas.</div>}
