@@ -5426,7 +5426,21 @@ def _supplier_job_totals(job: dict) -> dict:
     job["total_invoice"] = total_invoice
     job["net_transfer"] = net_transfer
     job["total_terbayar"] = terbayar
-    job["sisa"] = net_transfer - terbayar
+    # ── DUA SALDO BERBEDA (jangan pakai satu "sisa" untuk semuanya) ──
+    # 1) SISA TRANSFER SUPPLIER = Net Transfer − pembayaran bank ke supplier.
+    #    Ini yang masih harus ditransfer tunai ke supplier.
+    sisa_transfer = net_transfer - terbayar
+    # 2) SISA KEWAJIBAN INVOICE (buat status CLOSE) = Total Invoice − pembayaran
+    #    − PPh23 yang sudah diakui/dipotong. PPh23 BUKAN diskon: nilai invoice
+    #    diselesaikan oleh pembayaran supplier + PPh23 dipotong.
+    #    PPh23 diakui "dipotong" saat net supplier sudah lunas (withholding
+    #    terealisasi saat transfer selesai); administrasi bukti potong menyusul Fase 3.
+    pph_recognized = pph23 if (pph23 > 0 and net_transfer > 0 and terbayar >= net_transfer) else 0
+    sisa_kewajiban = total_invoice - terbayar - pph_recognized
+    job["sisa_transfer"] = sisa_transfer
+    job["sisa"] = sisa_transfer          # alias backward-compat (kode lama pakai "sisa")
+    job["pph23_recognized"] = pph_recognized
+    job["sisa_kewajiban"] = sisa_kewajiban
     # Status pembayaran supplier (basis NET TRANSFER). Status pajak/CLOSED penuh
     # menyusul di Fase 3; ini status dasar yang aman & backward-compatible.
     if dpp <= 0:
@@ -5437,6 +5451,25 @@ def _supplier_job_totals(job: dict) -> dict:
         job["pay_status"] = "sebagian"
     else:
         job["pay_status"] = "lunas"        # supplier terbayar (net selesai)
+    # Status pajak: none (tanpa PPh23) | pending (belum dipotong/net belum lunas)
+    #             | dipotong (sudah dipotong; administrasi bukti potong = Fase 3)
+    if not pph_on:
+        job["pph23_status"] = "none"
+    elif pph_recognized > 0:
+        job["pph23_status"] = "dipotong"
+    else:
+        job["pph23_status"] = "pending"
+    # Status operasional gabungan (Fase 3 lengkapi CLOSED utk yg kena pajak via bukti potong).
+    if dpp <= 0:
+        job["status"] = "draft"
+    elif terbayar <= 0:
+        job["status"] = "belum"
+    elif sisa_transfer > 0:
+        job["status"] = "sebagian"
+    elif pph_on:
+        job["status"] = "supplier_terbayar"   # net beres, pajak belum selesai (bukti potong Fase 3)
+    else:
+        job["status"] = "closed"              # tanpa pajak: kewajiban selesai
     # Selisih Harga (buat laporan format Supplier) — TERPISAH dari ongkos di atas,
     # tidak memengaruhi total_harga/sisa. Selisih = Harga Invoice - Harga Deal.
     job["selisih"] = (job.get("selisih_invoice") or 0) - (job.get("selisih_deal") or 0)
@@ -5727,6 +5760,78 @@ async def set_supplier_job_pajak(supplier_id: str, job_id: str, body: SupplierJo
         jobs[idx]["pph23_rate"] = body.pph23_rate
     await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
     return _supplier_job_totals(jobs[idx])
+
+
+@api_router.post("/admin/suppliers/{supplier_id}/pay-batch", dependencies=[Depends(require_admin_pin)])
+async def supplier_admin_pay_batch(
+    supplier_id: str,
+    job_ids: str = Form(...),            # id job dipisah koma; urutan = urutan alokasi
+    amount: int = Form(...),
+    tanggal: Optional[str] = Form(None),
+    bank: str = Form(""),
+    no_referensi: str = Form(""),
+    metode: str = Form("Transfer"),
+    catatan: str = Form(""),
+    bukti: Optional[UploadFile] = File(None),
+):
+    """Bayar Supplier (admin): 1 TRANSFER BANK = 1 transaksi (batch_id sama),
+    dialokasikan ke beberapa tagihan/unit secara waterfall terhadap SISA TRANSFER
+    (net). Riwayat menampilkan 1 baris per batch_id; alokasi per unit muncul saat
+    detail. Nominal lebih dari total sisa dikembalikan di sisa_nominal (tidak overpay)."""
+    if amount <= 0:
+        raise HTTPException(400, "Nominal harus lebih dari 0")
+    ids = [x.strip() for x in (job_ids or "").split(",") if x.strip()]
+    if not ids:
+        raise HTTPException(400, "Pilih minimal 1 tagihan")
+    sup = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not sup:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    jobs = sup.get("jobs") or []
+    tgl = (tanggal or "").strip()
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", tgl):
+        tgl = today_wib()
+    bukti_url = None
+    if bukti is not None and bukti.filename:
+        bukti_url = _save_upload(supplier_id, "payment/batch", bukti, ALLOWED_IMG | ALLOWED_DOC)
+    batch_id = _gen_supplier_id()
+    remaining = int(amount)
+    applied = []
+    for jid in ids:
+        if remaining <= 0:
+            break
+        idx = next((i for i, j in enumerate(jobs) if j.get("id") == jid), None)
+        if idx is None:
+            continue
+        sisa = _supplier_job_totals(jobs[idx]).get("sisa_transfer") or 0
+        if sisa <= 0:
+            continue
+        pay_amt = min(remaining, sisa)
+        payment = {
+            "id": _gen_supplier_id(), "amount": int(pay_amt),
+            "catatan": (catatan or "").strip()[:300], "bukti_url": bukti_url,
+            "tanggal": tgl, "tipe": "transfer",
+            "metode": (metode or "Transfer").strip()[:40],
+            "bank": (bank or "").strip()[:60], "no_referensi": (no_referensi or "").strip()[:60],
+            "source": "supplier-admin-batch", "batch_id": batch_id,
+        }
+        jobs[idx].setdefault("payments", []).append(payment)
+        remaining -= pay_amt
+        njt = _supplier_job_totals(jobs[idx])
+        applied.append({
+            "job_id": jid, "nopol": jobs[idx].get("nopol") or "",
+            "vehicle_type": jobs[idx].get("vehicle_type") or "",
+            "dibayar": int(pay_amt), "sisa_transfer": njt.get("sisa_transfer") or 0,
+            "status": njt.get("status"),
+        })
+    if not applied:
+        raise HTTPException(400, "Tidak ada tagihan yang bisa dibayar (mungkin sisa transfer sudah 0)")
+    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
+    return {
+        "ok": True, "supplier_id": supplier_id, "supplier_nama": sup.get("nama"),
+        "batch_id": batch_id, "total_dibayar": int(amount) - remaining,
+        "sisa_nominal": remaining, "bank": (bank or "").strip(), "no_referensi": (no_referensi or "").strip(),
+        "tanggal": tgl, "applied": applied,
+    }
 
 
 @api_router.patch("/admin/suppliers/{supplier_id}/jobs/{job_id}/selisih", dependencies=[Depends(require_admin_pin)])

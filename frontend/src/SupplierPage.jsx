@@ -395,6 +395,19 @@ function Badge({ status }) {
   return <span style={{ fontSize: 11, fontWeight: 800, color: m.c, background: m.bg, borderRadius: 20, padding: "3px 10px", whiteSpace: "nowrap" }}>{m.t}</span>;
 }
 
+// Status operasional dari backend (draft/belum/sebagian/supplier_terbayar/closed).
+const ST_OPS = {
+  draft: { t: "Draft · Harga Belum Lengkap", c: C.mute, bg: "#1a1f2e" },
+  belum: { t: "Belum Dibayar", c: C.red, bg: "#2d1214" },
+  sebagian: { t: "Sebagian Dibayar", c: C.yellow, bg: "#2a2410" },
+  supplier_terbayar: { t: "Supplier Terbayar · Pajak Belum Selesai", c: C.gold, bg: "#2a1f0d" },
+  closed: { t: "CLOSED", c: C.green, bg: "#0d2818" },
+};
+function StatusPill({ job }) {
+  const m = ST_OPS[job.status] || ST_OPS[statusOf(job)] || ST_OPS.belum;
+  return <span style={{ fontSize: 10.5, fontWeight: 800, color: m.c, background: m.bg, borderRadius: 20, padding: "3px 9px", whiteSpace: "nowrap" }}>{m.t}</span>;
+}
+
 export default function SupplierPage() {
   const adminPin = typeof window !== "undefined" ? (localStorage.getItem("aal_admin_pin") || "") : "";
   const headers = { "x-admin-pin": adminPin };
@@ -518,10 +531,39 @@ export default function SupplierPage() {
   const [payAmount, setPayAmount] = useState("");
   const [payTanggal, setPayTanggal] = useState(todayStr());
   const [payMetode, setPayMetode] = useState("Transfer");
+  const [payBank, setPayBank] = useState("");
+  const [payRef, setPayRef] = useState("");
   const [payCatatan, setPayCatatan] = useState("");
   const [payBukti, setPayBukti] = useState(null);
   const [paySaving, setPaySaving] = useState(false);
   const payFileRef = useRef();
+
+  // Toggle/set pajak per tagihan → langsung persist (backend recompute), lalu
+  // reload supaya summary & angka update live. Fase 1 backend yang hitung.
+  const [pajakBusy, setPajakBusy] = useState("");
+  const toggleJobPajak = async (jobId, patch) => {
+    if (!selected) return;
+    setPajakBusy(jobId);
+    try {
+      await axios.patch(`${API}/admin/suppliers/${selected.id}/jobs/${jobId}/pajak`, patch, { headers });
+      await reloadSelected(selected.id); setListRefreshTick((t) => t + 1);
+    } catch (e) { flash(e?.response?.data?.detail || "Gagal ubah pajak"); }
+    finally { setPajakBusy(""); }
+  };
+
+  // Grand total pajak-aware (client-side dari jobs; tiap job sudah bawa field
+  // total_invoice/pph23/net_transfer dari backend Fase 1).
+  const grandTax = useMemo(() => {
+    const g = { invoice: 0, pph23: 0, net: 0, terbayar: 0, sisa_transfer: 0 };
+    (selected?.jobs || []).forEach((j) => {
+      g.invoice += j.total_invoice != null ? j.total_invoice : (j.total_harga || 0);
+      g.pph23 += j.pph23 || 0;
+      g.net += j.net_transfer != null ? j.net_transfer : (j.total_harga || 0);
+      g.terbayar += j.total_terbayar || 0;
+      g.sisa_transfer += j.sisa_transfer != null ? j.sisa_transfer : (j.sisa || 0);
+    });
+    return g;
+  }, [selected]);
 
   const selectedPayJobs = useMemo(() => unpaidJobs.filter((j) => paySel[j.id]), [unpaidJobs, paySel]);
   const totalSelSisa = useMemo(() => selectedPayJobs.reduce((s, j) => s + (j.sisa || 0), 0), [selectedPayJobs]);
@@ -545,15 +587,17 @@ export default function SupplierPage() {
     setPaySaving(true);
     try {
       const fd = new FormData();
-      fd.append("supplier_id", selected.id);
       fd.append("job_ids", ids.join(","));
       fd.append("amount", String(amt));
       fd.append("tanggal", payTanggal || todayStr());
       fd.append("metode", payMetode);
+      fd.append("bank", payBank.trim());
+      fd.append("no_referensi", payRef.trim());
       fd.append("catatan", payCatatan.trim());
       if (payBukti) fd.append("bukti", payBukti);
-      const r = await axios.post(`${API}/vendor-mobile/pay-batch`, fd, { headers });
-      setPaySel({}); setPayAmount(""); setPayCatatan(""); setPayBukti(null); if (payFileRef.current) payFileRef.current.value = "";
+      // 1 transfer bank = 1 transaksi (batch_id) → dialokasikan ke tagihan terpilih (waterfall thd Sisa Transfer)
+      const r = await axios.post(`${API}/admin/suppliers/${selected.id}/pay-batch`, fd, { headers });
+      setPaySel({}); setPayAmount(""); setPayBank(""); setPayRef(""); setPayCatatan(""); setPayBukti(null); if (payFileRef.current) payFileRef.current.value = "";
       await reloadSelected(selected.id);   // update total/sisa/status tanpa refresh halaman
       setListRefreshTick((t) => t + 1);
       const applied = (r.data?.applied || []).length;
@@ -829,8 +873,10 @@ export default function SupplierPage() {
     const map = {};
     jobs.forEach((job) => (job.payments || []).forEach((p) => {
       const key = p.batch_id || p.id;
-      if (!map[key]) map[key] = { key, tanggal: p.tanggal || "", metode: p.metode || (p.tipe === "kompensasi" ? "Kompensasi" : "Transfer"), catatan: p.catatan || "", bukti_url: p.bukti_url || "", total: 0, allocs: [] };
+      if (!map[key]) map[key] = { key, tanggal: p.tanggal || "", metode: p.metode || (p.tipe === "kompensasi" ? "Kompensasi" : "Transfer"), bank: p.bank || "", no_referensi: p.no_referensi || "", catatan: p.catatan || "", bukti_url: p.bukti_url || "", total: 0, allocs: [] };
       map[key].total += p.amount || 0;
+      if (p.bank && !map[key].bank) map[key].bank = p.bank;
+      if (p.no_referensi && !map[key].no_referensi) map[key].no_referensi = p.no_referensi;
       if (p.bukti_url && !map[key].bukti_url) map[key].bukti_url = p.bukti_url;
       if (p.catatan && !map[key].catatan) map[key].catatan = p.catatan;
       map[key].allocs.push({ jobId: job.id, nopol: job.nopol || job.no_rangka || "-", vehicle: job.vehicle_type || "Unit", rute: `${job.asal_kota || "-"} → ${job.tujuan_kota || "-"}`, amount: p.amount || 0, tipe: p.tipe });
@@ -876,7 +922,8 @@ export default function SupplierPage() {
     return Array.from(map.values()).filter((g) => g.jobs.length > 0);
   }, [filteredJobs, selected]);
 
-  const TABS = [{ k: "pembayaran", t: "Pembayaran" }, { k: "tagihan", t: "Tagihan" }, { k: "riwayat", t: "Riwayat" }, { k: "dokumen", t: "Dokumen" }];
+  const TABS = [{ k: "tagihan", t: "Tagihan" }, { k: "pembayaran", t: "Pembayaran" }, { k: "pajak", t: "Pajak" }, { k: "riwayat", t: "Riwayat" }, { k: "dokumen", t: "Dokumen" }];
+  const pajakJobs = useMemo(() => (selected?.jobs || []).filter((j) => j.pph23_enabled), [selected]);
 
   return (
     <div style={{ maxWidth: 760, margin: "0 auto", padding: "0 12px 120px", color: C.ink }}>
@@ -933,16 +980,19 @@ export default function SupplierPage() {
                 )}
               </div>
             </div>
-            {/* 3 summary card sejajar */}
+            {/* Summary pajak-aware: Invoice · PPh23 · Net Transfer · Sudah Transfer · Sisa Transfer.
+                PPh23 BUKAN diskon; Sisa Transfer = yang masih harus ditransfer tunai ke supplier. */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 14 }}>
               {[
-                { lbl: "Total Tagihan", val: selected.grand_total_harga, c: C.ink },
-                { lbl: "Terbayar", val: selected.grand_total_terbayar, c: C.green },
-                { lbl: "Sisa", val: selected.grand_sisa, c: (selected.grand_sisa > 0 ? C.red : C.green) },
+                { lbl: "Total Invoice", val: grandTax.invoice, c: C.ink },
+                { lbl: "PPh 23 Dipotong", val: grandTax.pph23, c: C.gold },
+                { lbl: "Net Transfer", val: grandTax.net, c: C.ink },
+                { lbl: "Sudah Transfer", val: grandTax.terbayar, c: C.green },
+                { lbl: "Sisa Transfer", val: grandTax.sisa_transfer, c: (grandTax.sisa_transfer > 0 ? C.red : C.green) },
               ].map((s, i) => (
-                <div key={i} style={{ background: C.inpBg, border: `1px solid ${C.line}`, borderRadius: 12, padding: "12px 10px" }}>
-                  <div style={{ fontSize: 10, color: C.mute, textTransform: "uppercase", letterSpacing: ".4px", fontWeight: 700 }}>{s.lbl}</div>
-                  <div style={{ fontSize: 15, fontWeight: 900, color: s.c, marginTop: 4, textAlign: "right", wordBreak: "break-word" }}>{fRp(s.val)}</div>
+                <div key={i} style={{ background: C.inpBg, border: `1px solid ${C.line}`, borderRadius: 12, padding: "10px 10px" }}>
+                  <div style={{ fontSize: 9.5, color: C.mute, textTransform: "uppercase", letterSpacing: ".3px", fontWeight: 700 }}>{s.lbl}</div>
+                  <div style={{ fontSize: 14, fontWeight: 900, color: s.c, marginTop: 3, textAlign: "right", wordBreak: "break-word" }}>{fRp(s.val)}</div>
                 </div>
               ))}
             </div>
@@ -1014,6 +1064,10 @@ export default function SupplierPage() {
                         </select>
                       </div>
                     </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+                      <div><label style={L}>Bank</label><input style={I} placeholder="mis. BCA / Mandiri" value={payBank} onChange={(e) => setPayBank(e.target.value)} data-testid="sup-pay-bank" /></div>
+                      <div><label style={L}>No. Referensi</label><input style={I} placeholder="No. ref / bukti transfer" value={payRef} onChange={(e) => setPayRef(e.target.value)} data-testid="sup-pay-ref" /></div>
+                    </div>
                     <input style={{ ...I, marginBottom: 10 }} placeholder="Catatan (opsional)" value={payCatatan} onChange={(e) => setPayCatatan(e.target.value)} />
                     <input ref={payFileRef} type="file" accept="image/*,application/pdf" style={{ display: "none" }} onChange={(e) => setPayBukti(e.target.files?.[0] || null)} />
                     <button style={{ ...BTN_GHOST, width: "100%" }} onClick={() => payFileRef.current?.click()}>{payBukti ? `📎 ${payBukti.name.slice(0, 28)}` : "📎 Upload Bukti Transfer"}</button>
@@ -1067,16 +1121,43 @@ export default function SupplierPage() {
                         <div style={{ fontSize: 12, color: C.mute }}>{j.vehicle_type || "Unit"} · {j.asal_kota || "-"} → {j.tujuan_kota || "-"}</div>
                         {j.catatan && <div style={{ fontSize: 11, color: C.mute, marginTop: 2 }}>{j.catatan}</div>}
                       </div>
-                      <Badge status={statusOf(j)} />
+                      <StatusPill job={j} />
                     </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, fontSize: 12 }}>
-                      <span style={{ color: C.mute }}>Total</span><span style={{ fontWeight: 700 }}>{fRp(j.total_harga)}</span>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-                      <span style={{ color: C.mute }}>Terbayar</span><span style={{ color: C.green, fontWeight: 700 }}>{fRp(j.total_terbayar)}</span>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, marginTop: 2 }}>
-                      <span style={{ color: C.mute }}>Sisa</span><span style={{ fontWeight: 900, color: j.sisa > 0 ? C.red : C.green }}>{fRp(j.sisa)}</span>
+                    {/* Rincian pajak — PPh23 TERPISAH dari harga (bukan diskon) */}
+                    {(() => {
+                      const row = (k, v, opt = {}) => (
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: opt.big ? 14 : 12, marginTop: opt.mt || 0 }}>
+                          <span style={{ color: C.mute }}>{k}</span>
+                          <span style={{ fontWeight: opt.big ? 900 : 700, color: opt.c || C.ink }}>{fRp(v)}</span>
+                        </div>
+                      );
+                      return (
+                        <div style={{ marginTop: 10, borderTop: `1px solid ${C.line}`, paddingTop: 8 }}>
+                          {row("DPP (harga jasa)", j.dpp != null ? j.dpp : j.total_harga)}
+                          {j.ppn_enabled && row(`PPN (${j.ppn_rate ?? ""}%)`, j.ppn || 0, { c: C.blue })}
+                          {row("Total Invoice", j.total_invoice != null ? j.total_invoice : j.total_harga, { big: true, mt: 2 })}
+                          {j.pph23_enabled && row(`(−) PPh 23 (${j.pph23_rate ?? ""}%)`, j.pph23 || 0, { c: C.gold })}
+                          {(j.ppn_enabled || j.pph23_enabled) && row("Net Transfer", j.net_transfer != null ? j.net_transfer : j.total_harga, { big: true, mt: 2 })}
+                          {row("Sudah Transfer", j.total_terbayar || 0, { c: C.green })}
+                          {row("Sisa Transfer", j.sisa_transfer != null ? j.sisa_transfer : (j.sisa || 0), { big: true, mt: 2, c: (j.sisa_transfer ?? j.sisa) > 0 ? C.red : C.green })}
+                        </div>
+                      );
+                    })()}
+                    {/* Toggle pajak — update live (langsung persist ke backend) */}
+                    <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                      {[["ppn_enabled", "Supplier kena PPN"], ["pph23_enabled", "Potong PPh 23"]].map(([key, lbl]) => {
+                        const on = !!j[key];
+                        return (
+                          <button key={key} disabled={pajakBusy === j.id}
+                            onClick={() => toggleJobPajak(j.id, { [key]: !on })}
+                            data-testid={`sup-tax-${key}-${j.id}`}
+                            style={{ flex: 1, minWidth: 130, padding: "8px 10px", borderRadius: 9, cursor: "pointer",
+                              border: `1px solid ${on ? C.gold : C.line}`, background: on ? "#2a1f0d" : C.inpBg,
+                              color: on ? C.gold : C.mute, fontSize: 12, fontWeight: 700, opacity: pajakBusy === j.id ? 0.6 : 1 }}>
+                            {on ? "☑" : "☐"} {lbl}
+                          </button>
+                        );
+                      })}
                     </div>
                     <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
                       {/* Opsi 1: bayar PO ini langsung (tanpa centang) — buka form bayar, jumlah = sisa, tinggal atur tanggal. */}
@@ -1092,6 +1173,35 @@ export default function SupplierPage() {
             </div>
           )}
 
+          {/* ═══ TAB PAJAK (Fase 2: ringkas read-only; workflow bukti potong = Fase 3) ═══ */}
+          {tab === "pajak" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ background: "#0d1b2a", border: `1px solid ${C.blue}`, borderRadius: 12, padding: "10px 12px", fontSize: 12, color: C.mute }}>
+                Daftar tagihan yang <b style={{ color: C.ink }}>dipotong PPh 23</b>. Administrasi bukti potong (buat/setor, no & tanggal, upload) menyusul di <b style={{ color: C.ink }}>Fase 3</b>.
+              </div>
+              {pajakJobs.length === 0 && <div style={{ textAlign: "center", padding: 30, color: C.mute }}>Belum ada tagihan yang dipotong PPh 23.</div>}
+              {pajakJobs.map((j) => (
+                <div key={j.id} style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 14 }} data-testid={`sup-pajak-${j.id}`}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                    <div style={{ fontWeight: 800, fontSize: 14 }}>{j.nopol || j.no_rangka || "(tanpa nopol)"} <span style={{ color: C.mute, fontWeight: 400 }}>· {j.vehicle_type || "Unit"}</span></div>
+                    <span style={{ fontSize: 10.5, fontWeight: 800, whiteSpace: "nowrap", borderRadius: 20, padding: "3px 9px",
+                      color: j.pph23_status === "dipotong" ? C.green : C.yellow, background: j.pph23_status === "dipotong" ? "#0d2818" : "#2a2410" }}>
+                      {j.pph23_status === "dipotong" ? "PPh23 Dipotong" : "PPh23 Pending"}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginTop: 8 }}><span style={{ color: C.mute }}>DPP</span><b>{fRp(j.dpp != null ? j.dpp : j.total_harga)}</b></div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}><span style={{ color: C.mute }}>PPh 23 ({j.pph23_rate ?? ""}%)</span><b style={{ color: C.gold }}>{fRp(j.pph23 || 0)}</b></div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}><span style={{ color: C.mute }}>Bukti Potong</span><b style={{ color: C.mute }}>Belum dibuat</b></div>
+                </div>
+              ))}
+              {pajakJobs.length > 0 && (
+                <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 14, display: "flex", justifyContent: "space-between" }}>
+                  <b>Total PPh 23 Dipotong</b><b style={{ color: C.gold, fontSize: 16 }}>{fRp(pajakJobs.reduce((s, j) => s + (j.pph23 || 0), 0))}</b>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* ═══ TAB RIWAYAT (timeline) ═══ */}
           {tab === "riwayat" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -1102,8 +1212,8 @@ export default function SupplierPage() {
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
                     <div>
                       <div style={{ fontSize: 12, color: C.mute }}>{fDate(tx.tanggal)}</div>
-                      <div style={{ fontSize: 14, fontWeight: 800, marginTop: 2 }}>{(tx.metode === "Kompensasi" ? "Kompensasi" : "Transfer")} diterima</div>
-                      <div style={{ fontSize: 11.5, color: C.mute, marginTop: 3 }}>Dialokasikan ke {tx.allocs.length} unit{tx.bukti_url ? " · 📎 bukti" : ""}</div>
+                      <div style={{ fontSize: 14, fontWeight: 800, marginTop: 2 }}>{tx.metode || "Transfer"}{tx.bank ? ` · ${tx.bank}` : ""}</div>
+                      <div style={{ fontSize: 11.5, color: C.mute, marginTop: 3 }}>{tx.no_referensi ? `Ref ${tx.no_referensi} · ` : ""}Dialokasikan ke {tx.allocs.length} unit{tx.bukti_url ? " · 📎 bukti" : ""}</div>
                     </div>
                     <div style={{ textAlign: "right" }}>
                       <div style={{ fontSize: 17, fontWeight: 900, color: C.green }}>{fRp(tx.total)}</div>
@@ -1397,6 +1507,8 @@ export default function SupplierPage() {
           foot={<button style={BTN_GHOST} onClick={() => setTxnDetail(null)}>Tutup</button>}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: C.mute }}>Tanggal</span><b>{fDate(txnDetail.tanggal)}</b></div>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: C.mute }}>Metode</span><b>{txnDetail.metode}</b></div>
+          {txnDetail.bank && <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: C.mute }}>Bank</span><b>{txnDetail.bank}</b></div>}
+          {txnDetail.no_referensi && <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: C.mute }}>No. Referensi</span><b>{txnDetail.no_referensi}</b></div>}
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}><span style={{ color: C.mute }}>Total</span><b style={{ color: C.green, fontSize: 17 }}>{fRp(txnDetail.total)}</b></div>
           {txnDetail.catatan && <div style={{ fontSize: 12, color: C.mute, marginBottom: 10 }}>Catatan: {txnDetail.catatan}</div>}
           <div style={{ ...L }}>Dialokasikan ke ({txnDetail.allocs.length} unit)</div>
