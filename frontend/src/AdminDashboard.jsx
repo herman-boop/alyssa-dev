@@ -1419,6 +1419,9 @@ function DuplicateVendorModal({ order, headers, onClose }) {
           total_harga: hargaNum(r.harga),
           catatan: (r.catatan || "").trim() || `Duplikat dari ${order.order_id}`, tanggal: "",
           project_id: projectId || undefined,
+          // Referensi order/customer dibawa otomatis (ledger tetap terpisah dari Invoice Customer)
+          order_id: order.order_id || undefined,
+          customer_ref: order.customer_nama || "",
         }, { headers });
       }
       setDone(true);

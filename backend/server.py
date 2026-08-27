@@ -5375,6 +5375,11 @@ def _gen_supplier_id() -> str:
     return uuid.uuid4().hex[:8]
 
 
+# Default tarif pajak (bisa dioverride per tagihan; jangan hard-code di UI).
+PPN_RATE_DEFAULT = 1.1    # % dari DPP (PPN yang ditagih supplier, on top harga)
+PPH23_RATE_DEFAULT = 2.0  # % dari DPP (PPh 23 dipotong dari transfer supplier)
+
+
 def _supplier_job_totals(job: dict) -> dict:
     """Hitung total_terbayar & sisa dari daftar payments — bukan disimpan,
     dihitung ulang tiap read biar nggak pernah nyimpang dari data payments.
@@ -5383,17 +5388,55 @@ def _supplier_job_totals(job: dict) -> dict:
     total efektif = harga deal awal + seluruh biaya tambahan. `harga_deal`
     dipertahankan supaya PDF Driver bisa memisahkan harga awal vs tambahan,
     sedangkan `total_harga` yang dikembalikan = nilai efektif (dipakai semua
-    total/sisa/kartu supaya angka konsisten di mana-mana)."""
+    total/sisa/kartu supaya angka konsisten di mana-mana).
+
+    PAJAK (Fase 1) — TERPISAH dari harga jasa, TIDAK menganggap PPh23 sbg diskon:
+      DPP           = harga jasa (harga_deal + tambahan)  = total_harga
+      PPN           = DPP × ppn_rate%      (kalau ppn_enabled) — ditagih supplier
+      TOTAL INVOICE = DPP + PPN            — nilai invoice supplier
+      PPh 23        = DPP × pph23_rate%    (kalau pph23_enabled) — dipotong, jadi utang pajak
+      NET TRANSFER  = TOTAL INVOICE − PPh23 — yang benar-benar ditransfer ke supplier
+    Sisa dihitung terhadap NET TRANSFER. Kalau tanpa pajak → net = DPP, jadi
+    angka lama TIDAK berubah (backward-compatible)."""
     terbayar = sum((p.get("amount") or 0) for p in (job.get("payments") or []))
     job = dict(job)
     base = job.get("total_harga") or 0
     tambahan = job.get("tambahan") or []
     tambahan_total = sum((t.get("amount") or 0) for t in tambahan)
+    dpp = base + tambahan_total
     job["harga_deal"] = base
     job["tambahan_total"] = tambahan_total
-    job["total_harga"] = base + tambahan_total
+    job["total_harga"] = dpp
+    # ── Pajak ──
+    ppn_on = bool(job.get("ppn_enabled"))
+    pph_on = bool(job.get("pph23_enabled"))
+    ppn_rate = job.get("ppn_rate") if job.get("ppn_rate") is not None else PPN_RATE_DEFAULT
+    pph_rate = job.get("pph23_rate") if job.get("pph23_rate") is not None else PPH23_RATE_DEFAULT
+    ppn = int(round(dpp * (ppn_rate or 0) / 100.0)) if ppn_on else 0
+    pph23 = int(round(dpp * (pph_rate or 0) / 100.0)) if pph_on else 0
+    total_invoice = dpp + ppn
+    net_transfer = total_invoice - pph23
+    job["dpp"] = dpp
+    job["ppn_enabled"] = ppn_on
+    job["pph23_enabled"] = pph_on
+    job["ppn_rate"] = ppn_rate
+    job["pph23_rate"] = pph_rate
+    job["ppn"] = ppn
+    job["pph23"] = pph23
+    job["total_invoice"] = total_invoice
+    job["net_transfer"] = net_transfer
     job["total_terbayar"] = terbayar
-    job["sisa"] = (base + tambahan_total) - terbayar
+    job["sisa"] = net_transfer - terbayar
+    # Status pembayaran supplier (basis NET TRANSFER). Status pajak/CLOSED penuh
+    # menyusul di Fase 3; ini status dasar yang aman & backward-compatible.
+    if dpp <= 0:
+        job["pay_status"] = "draft"        # Harga Belum Lengkap
+    elif terbayar <= 0:
+        job["pay_status"] = "belum"
+    elif terbayar < net_transfer:
+        job["pay_status"] = "sebagian"
+    else:
+        job["pay_status"] = "lunas"        # supplier terbayar (net selesai)
     # Selisih Harga (buat laporan format Supplier) — TERPISAH dari ongkos di atas,
     # tidak memengaruhi total_harga/sisa. Selisih = Harga Invoice - Harga Deal.
     job["selisih"] = (job.get("selisih_invoice") or 0) - (job.get("selisih_deal") or 0)
@@ -5460,13 +5503,22 @@ class SupplierJobBody(BaseModel):
     no_rangka: str = ""
     asal_kota: str = ""
     tujuan_kota: str = ""
-    total_harga: int
+    total_harga: int = 0            # DPP / harga jasa. Boleh 0 = Draft (Harga Belum Lengkap)
     catatan: str = ""
     project_id: Optional[str] = None
     tanggal: Optional[str] = None   # manual date (YYYY-MM-DD); kosong = hari ini
     tag: str = ""                   # Tag/Judul Kelompok laporan (pembatas visual PDF; TIDAK ikut hitungan)
     selisih_deal: Optional[int] = None    # Harga Deal (buat laporan Selisih format Supplier)
     selisih_invoice: Optional[int] = None # Harga Invoice; Selisih = Invoice - Deal (rumus existing)
+    # Referensi order/customer (dibawa otomatis dari Duplikat ke Vendor) — link ke
+    # Order yang sama, TAPI ledger tetap terpisah dari Invoice Customer.
+    order_id: Optional[str] = None
+    customer_ref: str = ""
+    # Pajak supplier (terpisah dari harga). Default: tanpa pajak (backward-compatible).
+    ppn_enabled: bool = False
+    ppn_rate: Optional[float] = None      # % dari DPP; None = pakai default
+    pph23_enabled: bool = False
+    pph23_rate: Optional[float] = None    # % dari DPP; None = pakai default
 
 
 class SupplierProjectBody(BaseModel):
@@ -5598,6 +5650,14 @@ async def add_supplier_job(supplier_id: str, body: SupplierJobBody):
         "tag": (body.tag or "").strip()[:60],
         "selisih_deal": body.selisih_deal if (body.selisih_deal or 0) > 0 else None,
         "selisih_invoice": body.selisih_invoice if (body.selisih_invoice or 0) > 0 else None,
+        # Referensi order/customer (dibawa dari Duplikat ke Vendor)
+        "order_id": (body.order_id or "").strip() or None,
+        "customer_ref": (body.customer_ref or "").strip(),
+        # Pajak supplier
+        "ppn_enabled": bool(body.ppn_enabled),
+        "ppn_rate": body.ppn_rate if body.ppn_rate is not None else None,
+        "pph23_enabled": bool(body.pph23_enabled),
+        "pph23_rate": body.pph23_rate if body.pph23_rate is not None else None,
         "payments": [],
     }
     upd = {"jobs": (doc.get("jobs") or []) + [job]}
@@ -5630,6 +5690,41 @@ async def set_supplier_job_tag(supplier_id: str, job_id: str, body: dict = Body(
     if idx is None:
         raise HTTPException(404, "Unit/job tidak ditemukan")
     jobs[idx]["tag"] = tag
+    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
+    return _supplier_job_totals(jobs[idx])
+
+
+class SupplierJobPajakBody(BaseModel):
+    ppn_enabled: Optional[bool] = None
+    ppn_rate: Optional[float] = None
+    pph23_enabled: Optional[bool] = None
+    pph23_rate: Optional[float] = None
+
+
+@api_router.patch("/admin/suppliers/{supplier_id}/jobs/{job_id}/pajak", dependencies=[Depends(require_admin_pin)])
+async def set_supplier_job_pajak(supplier_id: str, job_id: str, body: SupplierJobPajakBody):
+    """Set konfigurasi pajak 1 tagihan (PPN ditagih supplier / potong PPh23).
+    Pajak TERPISAH dari harga jasa — tidak mengubah DPP/total_harga/payments.
+    Hanya field yang dikirim yang diubah (partial). Rate None = pakai default."""
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    jobs = doc.get("jobs") or []
+    idx = next((i for i, j in enumerate(jobs) if j.get("id") == job_id), None)
+    if idx is None:
+        raise HTTPException(404, "Unit/job tidak ditemukan")
+    for rk in ("ppn_rate", "pph23_rate"):
+        v = getattr(body, rk)
+        if v is not None and (v < 0 or v > 100):
+            raise HTTPException(400, f"{rk} harus 0–100")
+    if body.ppn_enabled is not None:
+        jobs[idx]["ppn_enabled"] = bool(body.ppn_enabled)
+    if body.ppn_rate is not None:
+        jobs[idx]["ppn_rate"] = body.ppn_rate
+    if body.pph23_enabled is not None:
+        jobs[idx]["pph23_enabled"] = bool(body.pph23_enabled)
+    if body.pph23_rate is not None:
+        jobs[idx]["pph23_rate"] = body.pph23_rate
     await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
     return _supplier_job_totals(jobs[idx])
 
