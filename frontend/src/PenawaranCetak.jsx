@@ -16,15 +16,27 @@ const gray = "#6b7280";
 const border = "#e5e7eb";
 const gold = "#b8860b";
 
-// Pilihan metode/komponen harga per rute (breakdown multi-moda).
+// Opsi harga/metode per rute. PENTING: opsi = ALTERNATIF (customer pilih salah
+// satu), BUKAN komponen yang dijumlahkan. Tidak ada SUM antar-opsi.
 const METODE_LIST = ["Self Drive", "Kapal Laut", "Container", "Car Carrier", "Towing", "Self Loader", "Low Bed", "Handling / Pelabuhan", "Lainnya"];
-// Total 1 rute = SUM komponen kalau ada breakdown, else harga_deal biasa (mode simple).
-function routeKomponen(e) {
-  return Array.isArray(e && e.komponen) ? e.komponen.filter((k) => (String(k.metode || "").trim() || (Number(k.harga) || 0) > 0)) : [];
+function routeOptions(e) {
+  return Array.isArray(e && e.options) ? e.options.filter((o) => (String(o.metode || "").trim() || (Number(o.harga) || 0) > 0)) : [];
 }
-function routeTotalOf(e) {
-  const k = routeKomponen(e);
-  return k.length ? k.reduce((s, x) => s + (Number(x.harga) || 0), 0) : (e.harga_deal || 0);
+// Nilai FINAL 1 rute = harga opsi terpilih (kalau ada opsi) atau harga_deal (simple).
+// Tidak pernah menjumlahkan antar-opsi.
+function routeFinalOption(e) {
+  const opts = routeOptions(e);
+  if (!opts.length) return null;
+  const idx = (typeof e.selected === "number" && e.selected >= 0 && e.selected < opts.length) ? e.selected : 0;
+  return opts[idx];
+}
+function routeFinalHarga(e) {
+  const sel = routeFinalOption(e);
+  return sel ? (Number(sel.harga) || 0) : (e.harga_deal || 0);
+}
+function routeFinalMetode(e) {
+  const sel = routeFinalOption(e);
+  return sel ? (sel.metode || "-") : (e.moda || "-");
 }
 
 export async function printPenawaran(rows, meta) {
@@ -36,8 +48,12 @@ export async function printPenawaran(rows, meta) {
   // Tanggal penawaran: pakai input manual kalau ada (yyyy-mm-dd), fallback hari ini.
   const tglPakai = tanggal ? `${tanggal}T00:00:00` : now.toISOString();
   const noDoc = await nextDocNo("penawaran", "PH"); // nomor auto-increment
-  // Subtotal pengiriman = jumlah seluruh TOTAL RUTE (breakdown → SUM komponen, else harga_deal).
-  const subtotal = (rows || []).reduce((s, e) => s + routeTotalOf(e), 0);
+  // Mode: "draft" = Opsi Harga (alternatif per rute, TANPA total gabungan) ·
+  //       "final" = Resmi (1 opsi terpilih per rute → baru total dihitung).
+  const isDraft = (meta && meta.mode) === "draft";
+  // Subtotal (hanya FINAL) = jumlah HARGA FINAL tiap rute (opsi terpilih / simple).
+  // Tidak pernah menjumlahkan antar-opsi.
+  const subtotal = isDraft ? 0 : (rows || []).reduce((s, e) => s + routeFinalHarga(e), 0);
   // ── Pajak (mirip invoice): PPN 1,1% + toggle "harga sudah termasuk" + potong PPh 23 2% ──
   const ppnOn = !!withPpn, incl = !!taxIncl, pphOn = !!withPph;
   const dpp = (ppnOn && incl) ? Math.round(subtotal / 1.011) : subtotal;
@@ -50,30 +66,37 @@ export async function printPenawaran(rows, meta) {
   const premi = insBase > 0 ? Math.round(insBase * (rate / 100)) : 0;
   const grandTotal = shipTotal + premi;
   const hasBreakdown = ppnOn || pph > 0 || premi > 0;
-  // Tiap rute = 1 <tbody> (main row + sub-row komponen + Total Rute) supaya
-  // 1 rute tidak pecah antar-halaman & tetap 1 item (bukan nomor baru per metode).
+  // Tiap rute = 1 <tbody> supaya 1 rute tidak pecah antar-halaman & tetap 1 item.
   const body = (rows || []).map((e, i) => {
-    const komp = routeKomponen(e);
-    const hasKomp = komp.length > 0;
-    const total = routeTotalOf(e);
-    const modaLabel = hasKomp ? (komp.length > 1 ? "Multi-Moda" : (komp[0].metode || "-")) : (e.moda || "-");
-    const main = `<tr class="ph-main">
-      <td class="c">${i + 1}</td>
-      <td><b>${esc(e.rute || "-")}</b>${e.catatan ? `<div class="ph-note">${esc(e.catatan)}</div>` : ""}</td>
-      <td>${esc(modaLabel)}</td>
-      <td>${esc(e.tipe_kendaraan || "-")}</td>
-      <td class="r">${fRp(total)}</td>
-    </tr>`;
-    let subs = "";
-    if (hasKomp) {
-      subs = komp.map((k) => `<tr class="ph-sub">
+    const opts = routeOptions(e);
+    const catatanHtml = e.catatan ? `<div class="ph-note">${esc(e.catatan)}</div>` : "";
+    // DRAFT + punya opsi → listing alternatif (○), TANPA Total Rute (customer pilih 1).
+    if (isDraft && opts.length) {
+      const main = `<tr class="ph-main">
+        <td class="c">${i + 1}</td>
+        <td><b>${esc(e.rute || "-")}</b>${catatanHtml}</td>
+        <td>${opts.length > 1 ? "Opsi Pengiriman" : esc(opts[0].metode || "-")}</td>
+        <td>${esc(e.tipe_kendaraan || "-")}</td>
+        <td class="r ph-opt-hint">pilih salah satu</td>
+      </tr>`;
+      const subs = opts.map((o) => `<tr class="ph-sub">
         <td></td>
-        <td colspan="3" class="ph-sub-k">↳ ${esc(k.metode || "-")}${k.catatan ? ` <span class="ph-sub-note">(${esc(k.catatan)})</span>` : ""}</td>
-        <td class="r ph-sub-v">${fRp(k.harga || 0)}</td>
-      </tr>`).join("")
-      + `<tr class="ph-subtotal"><td></td><td colspan="3" class="ph-subtotal-k">Total Rute</td><td class="r ph-subtotal-v">${fRp(total)}</td></tr>`;
+        <td colspan="3" class="ph-sub-k">○ ${esc(o.metode || "-")}${o.catatan ? ` <span class="ph-sub-note">(${esc(o.catatan)})</span>` : ""}</td>
+        <td class="r ph-sub-v">${fRp(o.harga || 0)}</td>
+      </tr>`).join("");
+      return `<tbody class="ph-route">${main}${subs}</tbody>`;
     }
-    return `<tbody class="ph-route">${main}${subs}</tbody>`;
+    // FINAL (atau simple / 1 opsi) → 1 baris: metode + harga terpilih.
+    const harga = isDraft ? (e.harga_deal || 0) : routeFinalHarga(e);
+    const metode = isDraft ? (e.moda || "-") : routeFinalMetode(e);
+    const main = `<tr class="ph-main-single">
+      <td class="c">${i + 1}</td>
+      <td><b>${esc(e.rute || "-")}</b>${catatanHtml}</td>
+      <td>${esc(metode)}</td>
+      <td>${esc(e.tipe_kendaraan || "-")}</td>
+      <td class="r">${fRp(harga)}</td>
+    </tr>`;
+    return `<tbody class="ph-route">${main}</tbody>`;
   }).join("");
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${noDoc}</title>
@@ -111,6 +134,9 @@ export async function printPenawaran(rows, meta) {
     table.ph tr.ph-subtotal td { border-bottom:1px solid ${DOC_BRAND.line}; padding-top:2px; padding-bottom:4px; }
     table.ph .ph-subtotal-k { text-align:right; font-size:8.5px; font-weight:700; color:${DOC_BRAND.ink}; letter-spacing:.2px; text-transform:uppercase; }
     table.ph .ph-subtotal-v { font-weight:800; font-size:9.5px; color:${DOC_BRAND.ink}; white-space:nowrap; }
+    table.ph .ph-opt-hint { font-size:8px; font-style:italic; color:${DOC_BRAND.muted}; font-weight:400; }
+    .ph-draft-note { font-size:9.5px; color:${DOC_BRAND.muted}; line-height:1.6; background:${DOC_BRAND.paperMist}; border:1px solid ${DOC_BRAND.line}; border-left:3px solid ${DOC_BRAND.gold}; border-radius:6px; padding:8px 12px; margin:8px 0 2px; }
+    .ph-draft-note b { color:${DOC_BRAND.ink}; }
     .ph-bar { display:flex; justify-content:space-between; align-items:center; border-top:2px solid ${DOC_BRAND.navy}; padding:6px 4px 0; margin-top:2px; }
     .ph-bar .lbl { font-weight:900; font-size:10.5px; color:${DOC_BRAND.navy}; text-transform:uppercase; letter-spacing:.3px; }
     .ph-bar .val { font-weight:900; font-size:11.5px; color:${DOC_BRAND.ink}; }
@@ -141,7 +167,7 @@ export async function printPenawaran(rows, meta) {
     @media print { @page { size: A4 portrait; margin: 8mm; } thead{display:table-header-group;} tbody tr{break-inside:avoid;} .avoid-break{break-inside:avoid;page-break-inside:avoid;} }
   </style></head><body>
   <div class="doc-sheet">
-    ${docHeader({ docTitle: "PENAWARAN HARGA" })}
+    ${docHeader({ docTitle: isDraft ? "PENAWARAN HARGA (OPSI)" : "PENAWARAN HARGA" })}
     <div class="ph-meta-row">
       <div class="ph-billto">
         <div class="lbl">Kepada Yth.</div>
@@ -153,14 +179,17 @@ export async function printPenawaran(rows, meta) {
         <tr><td>Berlaku</td><td>7 hari sejak tanggal</td></tr>
       </table>
     </div>
-    <div class="ph-sec"><span class="bar"></span><span class="txt">Rincian Penawaran</span></div>
+    <div class="ph-sec"><span class="bar"></span><span class="txt">${isDraft ? "Opsi Harga — Pilih Salah Satu Metode" : "Rincian Penawaran"}</span></div>
     <table class="ph">
       <thead><tr>
         <th class="c" style="width:24px">No</th><th>Rute</th>
-        <th style="width:100px">Metode</th><th style="width:96px">Tipe Kendaraan</th><th class="r" style="width:132px">Total Harga</th>
+        <th style="width:100px">Metode</th><th style="width:96px">Tipe Kendaraan</th><th class="r" style="width:132px">Harga</th>
       </tr></thead>
       ${body}
     </table>
+    ${isDraft ? `
+    <div class="ph-draft-note">Ini penawaran <b>opsi harga</b>. Setiap rute menampilkan beberapa alternatif metode — silakan pilih <b>salah satu</b> per rute. Total &amp; pajak dihitung pada penawaran resmi setelah metode dipilih.</div>
+    ` : `
     <div class="ph-bar"><span class="lbl">${hasBreakdown ? "Subtotal Pengiriman" : "Total"}</span><span class="val">${fRp(subtotal)}</span></div>
     ${hasBreakdown ? `
     <div class="ph-sec"><span class="bar"></span><span class="txt">Ringkasan Biaya</span></div>
@@ -171,6 +200,7 @@ export async function printPenawaran(rows, meta) {
       ${premi ? `<div class="row"><span class="k">Premi Asuransi (${fRp(insBase)} &times; ${rate}%)</span><span class="v">${fRp(premi)}</span></div>` : ""}
       <div class="ph-grand"><span class="k">Grand Total</span><span class="v">${fRp(grandTotal)}</span></div>
     </div>` : ""}
+    `}
     <div class="ph-pay-box">
       <div class="ph-pay-badge">${DOC_BRAND.bank.name}</div>
       <div>
@@ -216,21 +246,27 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
   const [withPpn, setWithPpn] = useState(false);   // kenakan PPN 1,1%
   const [taxIncl, setTaxIncl] = useState(false);   // harga sudah termasuk PPN
   const [withPph, setWithPph] = useState(false);   // potong PPh 23 (2%)
-  // Breakdown metode harga per rute (khusus Penawaran ini, tidak mengubah data sumber).
-  // key = index rute di `list`; value = [{metode, harga, catatan}].
-  const [komponenMap, setKomponenMap] = useState({});
+  // Mode Penawaran: "draft" = Opsi Harga (alternatif per rute, TANPA total) ·
+  //                 "final" = Resmi (1 opsi terpilih per rute → baru total dihitung).
+  const [mode, setMode] = useState("draft");
+  // Opsi harga per rute (khusus Penawaran ini, tidak mengubah data sumber).
+  // key = index rute di `list`; value = [{metode, harga, catatan}] (ALTERNATIF, tidak dijumlah).
+  const [optMap, setOptMap] = useState({});
+  const [selMap, setSelMap] = useState({});          // index opsi terpilih per rute (mode final)
   const [expanded, setExpanded] = useState(() => new Set());
   const pNum = (s) => Number(String(s || "").replace(/[^0-9]/g, "")) || 0;
-  const kompOf = (i) => komponenMap[i] || [];
-  const routeTotal = (i, e) => { const k = kompOf(i); return k.length ? k.reduce((s, x) => s + pNum(x.harga), 0) : (e.harga_deal || 0); };
-  const addKomp = (i, seed) => setKomponenMap((m) => ({ ...m, [i]: [...(m[i] || []), seed || { metode: "Self Drive", harga: "", catatan: "" }] }));
-  const setKomp = (i, ki, patch) => setKomponenMap((m) => ({ ...m, [i]: (m[i] || []).map((x, idx) => (idx === ki ? { ...x, ...patch } : x)) }));
-  const delKomp = (i, ki) => setKomponenMap((m) => ({ ...m, [i]: (m[i] || []).filter((_, idx) => idx !== ki) }));
-  const tarikKomp = (i, e) => { if (kompOf(i).length) return; addKomp(i, { metode: e.moda || "Lainnya", harga: String(e.harga_deal || ""), catatan: "" }); setExpanded((s) => new Set(s).add(i)); };
+  const optOf = (i) => optMap[i] || [];
+  const selOf = (i) => { const o = optOf(i); if (!o.length) return -1; const s = selMap[i]; return (typeof s === "number" && s >= 0 && s < o.length) ? s : 0; };
+  // Harga FINAL 1 rute (mode final) = opsi terpilih atau harga_deal. TIDAK menjumlah opsi.
+  const routeFinal = (i, e) => { const o = optOf(i); if (!o.length) return e.harga_deal || 0; return pNum(o[selOf(i)].harga); };
+  const addOpt = (i, seed) => setOptMap((m) => ({ ...m, [i]: [...(m[i] || []), seed || { metode: "Self Drive", harga: "", catatan: "" }] }));
+  const setOpt = (i, ki, patch) => setOptMap((m) => ({ ...m, [i]: (m[i] || []).map((x, idx) => (idx === ki ? { ...x, ...patch } : x)) }));
+  const delOpt = (i, ki) => setOptMap((m) => ({ ...m, [i]: (m[i] || []).filter((_, idx) => idx !== ki) }));
+  const tarikOpt = (i, e) => { if (optOf(i).length) return; addOpt(i, { metode: e.moda || "Lainnya", harga: String(e.harga_deal || ""), catatan: "" }); setExpanded((s) => new Set(s).add(i)); };
   const toggleExpand = (i) => setExpanded((s) => { const n = new Set(s); n.has(i) ? n.delete(i) : n.add(i); return n; });
 
   const list = rows || [];
-  const openModal = () => { setSelIdx(new Set(list.map((_, i) => i))); setCari(""); setKomponenMap({}); setExpanded(new Set()); setOpen(true); };
+  const openModal = () => { setSelIdx(new Set(list.map((_, i) => i))); setCari(""); setOptMap({}); setSelMap({}); setExpanded(new Set()); setOpen(true); };
   const match = (e) => {
     const q = cari.trim().toLowerCase();
     if (!q) return true;
@@ -239,7 +275,8 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
 
   // Live preview rincian (ikut baris yang dicentang).
   const onlyDigits = (s) => String(s || "").replace(/[^0-9]/g, "");
-  const pvSub = list.reduce((s, e, i) => (selIdx.has(i) ? s + routeTotal(i, e) : s), 0);
+  // Subtotal preview hanya di mode FINAL (draft = opsi, tidak dijumlah).
+  const pvSub = mode === "draft" ? 0 : list.reduce((s, e, i) => (selIdx.has(i) ? s + routeFinal(i, e) : s), 0);
   const pvDpp = (withPpn && taxIncl) ? Math.round(pvSub / 1.011) : pvSub;
   const pvPpn = !withPpn ? 0 : (taxIncl ? pvSub - pvDpp : Math.round(pvSub * 0.011));
   const pvPph = withPph ? Math.round(pvDpp * 0.02) : 0;
@@ -273,8 +310,20 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
                 color:#9ca3af !important; -webkit-text-fill-color:#9ca3af !important; opacity:1 !important;
               }
             `}</style>
-            <div style={{ fontSize: 16, fontWeight: 900, color: navy, marginBottom: 3 }}>Cetak Penawaran Resmi</div>
-            <div style={{ fontSize: 11.5, color: gray, marginBottom: 16 }}>Centang rute yang mau dicetak (mis. pisahin yang Kalimantan), isi penanda tangan &amp; stempel. Format A4, huruf besar — tajam buat di-screenshot / print.</div>
+            <div style={{ fontSize: 16, fontWeight: 900, color: navy, marginBottom: 3 }}>Cetak Penawaran</div>
+            <div style={{ fontSize: 11.5, color: gray, marginBottom: 12 }}>Centang rute yang mau dicetak, isi penanda tangan &amp; stempel. Format A4, tajam buat di-screenshot / print.</div>
+
+            {/* Mode: Draft (Opsi Harga) vs Final (Resmi) */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+              {[["draft", "📝 Draft — Opsi Harga", "Beberapa alternatif metode per rute. Tanpa total."], ["final", "✅ Final — Resmi", "1 metode terpilih per rute → total & pajak dihitung."]].map(([k, t, d]) => (
+                <button key={k} onClick={() => setMode(k)} data-testid={`pnw-mode-${k}`}
+                  style={{ flex: 1, textAlign: "left", padding: "9px 11px", borderRadius: 9, cursor: "pointer",
+                    border: `1.5px solid ${mode === k ? navy : border}`, background: mode === k ? "#eff6ff" : "#fff" }}>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: mode === k ? navy : "#374151" }}>{t}</div>
+                  <div style={{ fontSize: 10, color: gray, marginTop: 2, lineHeight: 1.3 }}>{d}</div>
+                </button>
+              ))}
+            </div>
 
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
               <label style={{ fontSize: 11, fontWeight: 700, color: gray }}>PILIH RUTE — {selIdx.size} dari {list.length} dipilih</label>
@@ -298,10 +347,13 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
             <div style={{ maxHeight: 320, overflowY: "auto", border: `1px solid ${border}`, borderRadius: 8, marginBottom: 16 }}>
               {list.map((e, i) => ({ e, i })).filter(({ e }) => match(e)).map(({ e, i }) => {
                 const on = selIdx.has(i);
-                const komp = kompOf(i);
+                const opts = optOf(i);
                 const isOpen = expanded.has(i);
-                const total = routeTotal(i, e);
-                const modaLbl = komp.length ? (komp.length > 1 ? "Multi-Moda" : (komp[0].metode || "-")) : (e.moda || "-");
+                const sub = opts.length
+                  ? (mode === "final"
+                      ? `${opts[selOf(i)]?.metode || "-"} · ${fRp(routeFinal(i, e))} (terpilih)`
+                      : `${opts.length} opsi metode`)
+                  : `${e.moda || e.tipe_kendaraan || "-"} · ${fRp(e.harga_deal)}`;
                 return (
                   <div key={i} style={{ borderBottom: "1px solid #f1f5f9", background: on ? "#f0fdf4" : "#fff" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px" }}>
@@ -310,44 +362,50 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
                         style={{ width: 16, height: 16, flexShrink: 0 }} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 12.5, fontWeight: 700, color: "#1f2937", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.rute || "-"}</div>
-                        <div style={{ fontSize: 10.5, color: gray }}>{e.tipe_kendaraan || "-"} · {modaLbl} · <b style={{ color: "#1f2937" }}>{fRp(total)}</b>{komp.length ? " · breakdown" : ""}</div>
+                        <div style={{ fontSize: 10.5, color: gray }}>{e.tipe_kendaraan || "-"} · {sub}</div>
                       </div>
-                      <button onClick={() => toggleExpand(i)} data-testid={`pnw-brk-toggle-${i}`}
+                      <button onClick={() => toggleExpand(i)} data-testid={`pnw-opt-toggle-${i}`}
                         style={{ fontSize: 10.5, fontWeight: 700, color: navy, background: "#eff6ff", border: `1px solid ${border}`, borderRadius: 6, padding: "4px 8px", cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }}>
-                        {isOpen ? "▲ Metode" : `▾ Metode${komp.length ? ` (${komp.length})` : ""}`}
+                        {isOpen ? "▲ Opsi" : `▾ Opsi${opts.length ? ` (${opts.length})` : ""}`}
                       </button>
                     </div>
                     {isOpen && (
                       <div style={{ padding: "4px 10px 10px 36px", background: "#fafbfc" }}>
-                        <div style={{ fontSize: 10, fontWeight: 800, color: gray, textTransform: "uppercase", letterSpacing: ".3px", marginBottom: 6 }}>Komponen / Metode Harga</div>
-                        {komp.length === 0 && <div style={{ fontSize: 11, color: gray, marginBottom: 6 }}>Belum ada breakdown — pakai harga satuan {fRp(e.harga_deal)}. Tambah komponen kalau mau multi-moda.</div>}
-                        {komp.map((k, ki) => (
-                          <div key={ki} style={{ marginBottom: 8 }}>
+                        <div style={{ fontSize: 10, fontWeight: 800, color: gray, textTransform: "uppercase", letterSpacing: ".3px", marginBottom: 6 }}>Opsi Harga / Metode <span style={{ textTransform: "none", fontWeight: 400 }}>(alternatif — customer pilih 1, tidak dijumlah)</span></div>
+                        {opts.length === 0 && <div style={{ fontSize: 11, color: gray, marginBottom: 6 }}>Belum ada opsi — pakai harga satuan {fRp(e.harga_deal)}. Tambah opsi kalau mau kasih beberapa pilihan metode.</div>}
+                        {opts.map((k, ki) => {
+                          const picked = mode === "final" && selOf(i) === ki;
+                          return (
+                          <div key={ki} style={{ marginBottom: 8, padding: mode === "final" ? "6px 6px 6px 4px" : 0, border: mode === "final" ? `1px solid ${picked ? "#16a34a" : border}` : "none", borderRadius: 8, background: picked ? "#f0fdf4" : "transparent" }}>
                             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                              <select value={k.metode} onChange={(ev) => setKomp(i, ki, { metode: ev.target.value })} data-testid={`pnw-brk-metode-${i}-${ki}`}
+                              {mode === "final" && (
+                                <input type="radio" name={`pnw-sel-${i}`} checked={picked} onChange={() => setSelMap((m) => ({ ...m, [i]: ki }))} title="Pilih metode ini" data-testid={`pnw-opt-pick-${i}-${ki}`} style={{ width: 15, height: 15, flexShrink: 0 }} />
+                              )}
+                              <select value={k.metode} onChange={(ev) => setOpt(i, ki, { metode: ev.target.value })} data-testid={`pnw-opt-metode-${i}-${ki}`}
                                 style={{ flex: "1 1 110px", minWidth: 0, padding: "6px 8px", borderRadius: 7, border: `1px solid ${border}`, fontSize: 12 }}>
                                 {METODE_LIST.map((m) => <option key={m} value={m}>{m}</option>)}
                               </select>
-                              <input inputMode="numeric" value={k.harga ? Number(pNum(k.harga)).toLocaleString("id-ID") : ""} onChange={(ev) => setKomp(i, ki, { harga: ev.target.value.replace(/[^0-9]/g, "") })} placeholder="Harga" data-testid={`pnw-brk-harga-${i}-${ki}`}
+                              <input inputMode="numeric" value={k.harga ? Number(pNum(k.harga)).toLocaleString("id-ID") : ""} onChange={(ev) => setOpt(i, ki, { harga: ev.target.value.replace(/[^0-9]/g, "") })} placeholder="Harga" data-testid={`pnw-opt-harga-${i}-${ki}`}
                                 style={{ flex: "1 1 90px", minWidth: 0, padding: "6px 8px", borderRadius: 7, border: `1px solid ${border}`, fontSize: 12, textAlign: "right" }} />
-                              <button onClick={() => delKomp(i, ki)} title="Hapus komponen"
+                              <button onClick={() => delOpt(i, ki)} title="Hapus opsi"
                                 style={{ flexShrink: 0, color: "#991b1b", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6, padding: "5px 8px", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>✕</button>
                             </div>
-                            <input value={k.catatan || ""} onChange={(ev) => setKomp(i, ki, { catatan: ev.target.value })} placeholder="Catatan (opsional)"
+                            <input value={k.catatan || ""} onChange={(ev) => setOpt(i, ki, { catatan: ev.target.value })} placeholder="Catatan (opsional)"
                               style={{ width: "100%", boxSizing: "border-box", marginTop: 4, padding: "5px 8px", borderRadius: 7, border: `1px solid ${border}`, fontSize: 11 }} />
                           </div>
-                        ))}
+                          );
+                        })}
                         <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
-                          <button onClick={() => addKomp(i)} data-testid={`pnw-brk-add-${i}`}
-                            style={{ fontSize: 11, fontWeight: 700, color: navy, background: "#eff6ff", border: `1px solid ${border}`, borderRadius: 6, padding: "5px 10px", cursor: "pointer" }}>+ Tambah Komponen</button>
-                          {komp.length === 0 && (e.harga_deal || e.moda) ? (
-                            <button onClick={() => tarikKomp(i, e)} data-testid={`pnw-brk-tarik-${i}`}
+                          <button onClick={() => addOpt(i)} data-testid={`pnw-opt-add-${i}`}
+                            style={{ fontSize: 11, fontWeight: 700, color: navy, background: "#eff6ff", border: `1px solid ${border}`, borderRadius: 6, padding: "5px 10px", cursor: "pointer" }}>+ Tambah Opsi</button>
+                          {opts.length === 0 && (e.harga_deal || e.moda) ? (
+                            <button onClick={() => tarikOpt(i, e)} data-testid={`pnw-opt-tarik-${i}`}
                               style={{ fontSize: 11, fontWeight: 700, color: "#92610b", background: "#fffbeb", border: `1px solid ${gold}`, borderRadius: 6, padding: "5px 10px", cursor: "pointer" }}>⇩ Tarik harga saat ini</button>
                           ) : null}
                         </div>
-                        {komp.length > 0 && (
+                        {opts.length > 0 && mode === "final" && (
                           <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, paddingTop: 6, borderTop: `1px dashed ${border}`, fontSize: 12, fontWeight: 800, color: navy }}>
-                            <span>Total Rute</span><span>{fRp(total)}</span>
+                            <span>Harga Terpilih ({opts[selOf(i)]?.metode || "-"})</span><span>{fRp(routeFinal(i, e))}</span>
                           </div>
                         )}
                       </div>
@@ -362,7 +420,8 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
             <input type="date" value={tglPenawaran} onChange={(e) => setTglPenawaran(e.target.value)} data-testid="penawaran-tanggal"
               style={{ width: "100%", boxSizing: "border-box", padding: "9px 12px", borderRadius: 8, border: `1px solid ${border}`, fontSize: 13, marginBottom: 12 }} />
 
-            {/* ── RINCIAN BIAYA & PAJAK (opsional, kaya invoice) ── */}
+            {/* ── RINCIAN BIAYA & PAJAK — hanya mode FINAL (draft = opsi, tanpa total) ── */}
+            {mode === "final" && (
             <div style={{ border: `1px solid ${border}`, borderRadius: 10, padding: 12, marginBottom: 12, background: "#fafbfc" }}>
               <div style={{ fontSize: 11, fontWeight: 800, color: navy, marginBottom: 8, letterSpacing: 0.3 }}>RINCIAN BIAYA & PAJAK (opsional)</div>
 
@@ -403,6 +462,7 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
                 </div>
               )}
             </div>
+            )}
 
             <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: gray, marginBottom: 4 }}>NAMA PENANDA TANGAN</label>
             <input value={ttdNama} onChange={(e) => setTtdNama(e.target.value)} placeholder="mis. Alyssa Herman"
@@ -434,17 +494,17 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
                 style={{ padding: "9px 16px", borderRadius: 8, border: `1px solid ${border}`, background: "#fff", color: gray, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Batal</button>
               <button onClick={() => {
                 const sel = list.map((e, i) => ({ e, i })).filter(({ i }) => selIdx.has(i)).map(({ e, i }) => {
-                  const komp = kompOf(i)
+                  const options = optOf(i)
                     .map((k) => ({ metode: (k.metode || "Lainnya"), harga: pNum(k.harga), catatan: (k.catatan || "").trim() }))
                     .filter((k) => k.harga > 0 || k.metode);
-                  if (komp.length) return { ...e, komponen: komp, harga_deal: komp.reduce((s, k) => s + k.harga, 0) };
-                  return { ...e, komponen: [] };
+                  // options = ALTERNATIF (tidak dijumlah). `selected` = index opsi terpilih (mode final).
+                  return { ...e, options, selected: options.length ? selOf(i) : -1 };
                 });
                 if (!sel.length) { alert("Centang minimal 1 rute dulu bro."); return; }
-                printPenawaran(sel, { nama_pt: namaPt, ttdNama, ttdJabatan, stempel, tanggal: tglPenawaran, insVal, insRate, withPpn, taxIncl, withPph });
+                printPenawaran(sel, { nama_pt: namaPt, ttdNama, ttdJabatan, stempel, tanggal: tglPenawaran, insVal, insRate, withPpn, taxIncl, withPph, mode });
                 setOpen(false);
               }}
-                style={{ padding: "9px 18px", borderRadius: 8, border: "none", background: gold, color: "#fff", fontSize: 12.5, fontWeight: 800, cursor: "pointer" }}>🖨️ Cetak A4 ({selIdx.size})</button>
+                style={{ padding: "9px 18px", borderRadius: 8, border: "none", background: gold, color: "#fff", fontSize: 12.5, fontWeight: 800, cursor: "pointer" }}>🖨️ {mode === "draft" ? "Cetak Opsi Harga" : "Cetak Resmi"} ({selIdx.size})</button>
             </div>
           </div>
         </div>
