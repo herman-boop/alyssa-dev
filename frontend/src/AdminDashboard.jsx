@@ -3057,21 +3057,43 @@ function KontakBox({ headers }) {
     return Object.values(map).filter((g) => g.length > 1);
   }, [all, jenis]);
 
+  // Cari kontak existing yang namanya sama (jenis sama) — buat cegah dobel.
+  const findDupContact = (nama, jns) => {
+    const k = normName(nama);
+    if (!k) return null;
+    return all.find((c) => c.jenis === jns && normName(c.nama) === k) || null;
+  };
+
   const saveEdit = async () => {
     const nama = (edit.nama || "").trim();
     if (!nama) { flash("Nama wajib diisi"); return; }
-    const payload = { nama, jenis: edit.jenis || jenis, perusahaan: edit.perusahaan || "", no_hp: edit.no_hp || "", email: edit.email || "", alamat: edit.alamat || "", catatan: edit.catatan || "" };
-    const dupe = !edit.id && all.some((c) => c.jenis === jenis && normName(c.nama) === normName(nama));
+    const jns = edit.jenis || jenis;
+    // ── Cegah dobel: kalau TAMBAH BARU & nama sudah ada, kasih notif + konfirmasi.
+    //    (Penting supaya nanti semua transaksi/HPP nempel ke 1 pelanggan, bukan dobel.)
+    if (!edit.id) {
+      const match = findDupContact(nama, jns);
+      if (match) {
+        const ok = window.confirm(
+          `⚠️ Kontak ${jns === "pelanggan" ? "pelanggan" : "supplier"} "${match.nama}"${match.no_hp ? ` · ${match.no_hp}` : ""} SUDAH ADA di buku kontak.\n\n` +
+          `Kalau diteruskan, kontaknya jadi DOBEL.\n\n` +
+          `OK = buka & edit yang sudah ada (disarankan, tidak dobel)\n` +
+          `Batal = tetap tambah baru (sadar bikin dobel)`
+        );
+        if (ok) { setEdit({ ...match }); flash("Buka kontak yang sudah ada — edit di sini biar tidak dobel"); return; }
+        // Batal → user sadar & sengaja bikin dobel: lanjut simpan.
+      }
+    }
+    const payload = { nama, jenis: jns, perusahaan: edit.perusahaan || "", no_hp: edit.no_hp || "", email: edit.email || "", alamat: edit.alamat || "", catatan: edit.catatan || "" };
     if (serverMode) {
       try {
         if (edit.id) await axios.patch(`${API}/admin/contacts/${edit.id}`, payload, { headers });
         else await axios.post(`${API}/admin/contacts`, payload, { headers });
         await reloadServer();
-        flash(edit.id ? "✓ Kontak diperbarui" : (dupe ? "✓ Ditambah — ⚠️ nama mirip sudah ada" : "✓ Kontak ditambah"));
+        flash(edit.id ? "✓ Kontak diperbarui" : "✓ Kontak ditambah");
       } catch { flash("Gagal menyimpan ke server"); return; }
     } else {
       if (edit.id) { persistLocal(all.map((c) => c.id === edit.id ? { ...c, ...payload } : c)); flash("✓ Kontak diperbarui"); }
-      else { persistLocal([...all, { id: "CT-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), ...payload }]); flash(dupe ? "✓ Ditambah — ⚠️ nama mirip sudah ada" : "✓ Kontak ditambah"); }
+      else { persistLocal([...all, { id: "CT-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), ...payload }]); flash("✓ Kontak ditambah"); }
     }
     setEdit(null);
   };
@@ -3205,6 +3227,19 @@ function KontakBox({ headers }) {
               <button className="adm-modal-close" onClick={() => setEdit(null)} aria-label="Tutup">✕</button>
             </div>
             <div className="adm-modal-body" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {(() => {
+                if (edit.id) return null;
+                const match = findDupContact(edit.nama || "", edit.jenis || jenis);
+                if (!match) return null;
+                return (
+                  <div style={{ background: "#2a2410", border: "1px solid #7a5c12", borderRadius: 8, padding: "9px 11px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }} data-testid="kontak-dup-warn">
+                    <div style={{ fontSize: 12, color: "#e6b450", fontWeight: 700, flex: 1, minWidth: 160 }}>
+                      ⚠️ Nama ini sudah ada: <b style={{ color: "#fff" }}>{match.nama}</b>{match.no_hp ? ` · ${match.no_hp}` : ""}. Jangan dibikin dobel.
+                    </div>
+                    <button className="adm-btn adm-btn-xs" style={{ background: "#1f6feb", color: "#fff", border: "none" }} onClick={() => setEdit({ ...match })} data-testid="kontak-dup-open">✏️ Buka yang sudah ada</button>
+                  </div>
+                );
+              })()}
               {[["nama", "Nama *", "PT Transkon Jaya, TBK"], ["perusahaan", "Nama Perusahaan", "opsional"], ["no_hp", "No. Handphone", "0812…"], ["email", "Email", "opsional"], ["alamat", "Alamat", "opsional"], ["catatan", "Catatan", "opsional"]].map(([k, lbl, ph]) => (
                 <label key={k}>
                   <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", fontWeight: 700, marginBottom: 4 }}>{lbl}</span>
