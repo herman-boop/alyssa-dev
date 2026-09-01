@@ -1827,6 +1827,9 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
   const [collyDraft, setCollyDraft] = useState(order.jumlah_colly || "");
   const [editArrival, setEditArrival] = useState(false);
   const [arrivalDraft, setArrivalDraft] = useState(order.pickup_arrival || "");
+  const [editCust, setEditCust] = useState(false);
+  const [custNamaDraft, setCustNamaDraft] = useState(order.customer_nama || "");
+  const [custHpDraft, setCustHpDraft] = useState(order.customer_hp || "");
   const [kordDraft, setKordDraft] = useState(order.koordinator_id || "");
   const [kordSaving, setKordSaving] = useState(false);
   const lbl = STATUS_LABEL[order.status] || { txt: order.status, cls: "adm-chip-new" };
@@ -1871,6 +1874,12 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
   const saveRangka = async () => { await onPatch({ no_rangka: rangkaDraft.trim().toUpperCase() }); setEditRangka(false); };
   const saveColly = async () => { await onPatch({ jumlah_colly: collyDraft.replace(/[^0-9]/g, "") }); setEditColly(false); };
   const saveArrival = async () => { await onPatch({ pickup_arrival: arrivalDraft }); setEditArrival(false); };
+  const saveCust = async () => {
+    const nm = custNamaDraft.trim();
+    if (!nm) { window.alert("Nama pelanggan tidak boleh kosong."); return; }
+    await onPatch({ customer_nama: nm, customer_hp: custHpDraft.trim() });
+    setEditCust(false);
+  };
   // ── Status WhatsApp konfirmasi + kirim ulang ──
   const [waStatus, setWaStatus] = useState(order.wa_status || "belum_dikirim");
   const [waErr, setWaErr] = useState(order.wa_error || "");
@@ -1973,7 +1982,32 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
         <div className="adm-field-row">
           <div className="adm-field-key">Pelanggan</div>
           <div className="adm-field-val">
-            {order.customer_nama || "—"} &middot; {order.customer_hp || "—"}
+            {editCust ? (
+              <span className="adm-driver-edit-row">
+                <input
+                  className="adm-input-inline"
+                  value={custNamaDraft}
+                  onChange={(e) => setCustNamaDraft(e.target.value)}
+                  placeholder="Nama pelanggan"
+                  data-testid={`adm-cust-nama-${order.order_id}`}
+                />
+                <input
+                  className="adm-input-inline adm-mono"
+                  value={custHpDraft}
+                  onChange={(e) => setCustHpDraft(e.target.value)}
+                  placeholder="No. HP"
+                  inputMode="tel"
+                  data-testid={`adm-cust-hp-${order.order_id}`}
+                />
+                <button className="adm-btn adm-btn-gold adm-btn-xs" onClick={saveCust} data-testid={`adm-cust-save-${order.order_id}`}>OK</button>
+                <button className="adm-btn adm-btn-ghost adm-btn-xs" onClick={() => { setEditCust(false); setCustNamaDraft(order.customer_nama || ""); setCustHpDraft(order.customer_hp || ""); }}><IcoX /></button>
+              </span>
+            ) : (
+              <span className="adm-driver-row">
+                {order.customer_nama || "—"} &middot; {order.customer_hp || "—"}
+                <button className="adm-link" onClick={() => setEditCust(true)} data-testid={`adm-cust-edit-${order.order_id}`}><IcoPencil /></button>
+              </span>
+            )}
           </div>
         </div>
         <div className="adm-field-row">
