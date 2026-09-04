@@ -619,6 +619,22 @@ def _save_upload(trip_id: str, sub: str, file: UploadFile, allowed: set) -> str:
     return _store_bytes(trip_id, sub, data, ext, content_type)
 
 
+def _save_upload_soft(entity_id: str, sub: str, file: UploadFile, allowed: set):
+    """Versi 'tahan banting' dari _save_upload buat flow PEMBAYARAN: kalau upload
+    bukti gagal (mis. Supabase 402/kuota, jaringan), JANGAN gagalkan seluruh
+    request. Balikin (url_or_None, warning_or_None) supaya pembayaran tetap
+    tersimpan tanpa bukti — bukti bisa diupload belakangan lewat menu detail.
+    Format file salah (400) tetap dianggap warning, bukan gagal total."""
+    try:
+        return _save_upload(entity_id, sub, file, allowed), None
+    except HTTPException as e:
+        logger.error(f"[bukti:soft_fail] {getattr(e, 'detail', e)}")
+        return None, f"Bukti gagal diupload ({getattr(e, 'detail', 'error')}). Pembayaran tetap tersimpan — upload bukti lagi nanti."
+    except Exception as e:
+        logger.error(f"[bukti:soft_fail] {e}")
+        return None, "Bukti gagal diupload. Pembayaran tetap tersimpan — upload bukti lagi nanti."
+
+
 @api_router.get("/media")
 async def media_proxy(u: str):
     """Proxy gambar/PDF (bukti transfer, dokumen) dari Supabase dengan Content-Type
@@ -4315,8 +4331,9 @@ async def vendor_mobile_pay(
         raise HTTPException(404, "Tagihan vendor tidak ditemukan")
 
     bukti_url = None
+    bukti_warning = None
     if bukti is not None and bukti.filename:
-        bukti_url = _save_upload(target_sid, f"payment/{target_jid}", bukti, ALLOWED_IMG | ALLOWED_DOC)
+        bukti_url, bukti_warning = _save_upload_soft(target_sid, f"payment/{target_jid}", bukti, ALLOWED_IMG | ALLOWED_DOC)
 
     tgl = (tanggal or "").strip()
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", tgl):
@@ -4333,7 +4350,7 @@ async def vendor_mobile_pay(
     jt = _supplier_job_totals(jobs[idx])
     return {
         "ok": True, "supplier_id": target_sid, "supplier_nama": sup.get("nama"),
-        "job_id": target_jid, "payment": payment,
+        "job_id": target_jid, "payment": payment, "bukti_warning": bukti_warning,
         "nopol": jobs[idx].get("nopol") or "", "kategori": jobs[idx].get("kategori") or "Lainnya",
         "total_harga": jt.get("total_harga") or 0, "terbayar": jt.get("total_terbayar") or 0,
         "sisa": jt.get("sisa") or 0,
@@ -4410,8 +4427,9 @@ async def vendor_mobile_pay_batch(
         tgl = today_wib()
 
     bukti_url = None
+    bukti_warning = None
     if bukti is not None and bukti.filename:
-        bukti_url = _save_upload(supplier_id, "payment/batch", bukti, ALLOWED_IMG | ALLOWED_DOC)
+        bukti_url, bukti_warning = _save_upload_soft(supplier_id, "payment/batch", bukti, ALLOWED_IMG | ALLOWED_DOC)
 
     batch_id = _gen_supplier_id()
     remaining = int(amount)
@@ -4447,7 +4465,7 @@ async def vendor_mobile_pay_batch(
     return {
         "ok": True, "supplier_id": supplier_id, "supplier_nama": sup.get("nama"),
         "batch_id": batch_id, "total_dibayar": int(amount) - remaining,
-        "sisa_nominal": remaining, "applied": applied,
+        "sisa_nominal": remaining, "applied": applied, "bukti_warning": bukti_warning,
     }
 
 
@@ -4471,7 +4489,7 @@ async def add_customer_payment(
 
     bukti_url = None
     if bukti is not None and bukti.filename:
-        bukti_url = _save_upload(trip_id, "customer-payment", bukti, ALLOWED_IMG | ALLOWED_DOC)
+        bukti_url, _ = _save_upload_soft(trip_id, "customer-payment", bukti, ALLOWED_IMG | ALLOWED_DOC)
 
     tgl = (tanggal or "").strip()
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", tgl):
@@ -5800,8 +5818,9 @@ async def supplier_admin_pay_batch(
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", tgl):
         tgl = today_wib()
     bukti_url = None
+    bukti_warning = None
     if bukti is not None and bukti.filename:
-        bukti_url = _save_upload(supplier_id, "payment/batch", bukti, ALLOWED_IMG | ALLOWED_DOC)
+        bukti_url, bukti_warning = _save_upload_soft(supplier_id, "payment/batch", bukti, ALLOWED_IMG | ALLOWED_DOC)
     batch_id = _gen_supplier_id()
     remaining = int(amount)
     applied = []
@@ -5839,7 +5858,7 @@ async def supplier_admin_pay_batch(
         "ok": True, "supplier_id": supplier_id, "supplier_nama": sup.get("nama"),
         "batch_id": batch_id, "total_dibayar": int(amount) - remaining,
         "sisa_nominal": remaining, "bank": (bank or "").strip(), "no_referensi": (no_referensi or "").strip(),
-        "tanggal": tgl, "applied": applied,
+        "tanggal": tgl, "applied": applied, "bukti_warning": bukti_warning,
     }
 
 
@@ -5994,8 +6013,9 @@ async def add_supplier_payment(
     tipe = tipe.strip().lower() if tipe.strip().lower() in ("transfer", "kompensasi") else "transfer"
 
     bukti_url = None
+    bukti_warning = None
     if bukti is not None and bukti.filename:
-        bukti_url = _save_upload(supplier_id, f"payment/{job_id}", bukti, ALLOWED_IMG | ALLOWED_DOC)
+        bukti_url, bukti_warning = _save_upload_soft(supplier_id, f"payment/{job_id}", bukti, ALLOWED_IMG | ALLOWED_DOC)
 
     # Tanggal default = hari ini (WIB), tapi admin bisa pilih tanggal lain manual
     # (misal input telat / bayar beberapa hari lalu) lewat date picker di frontend.
@@ -6023,7 +6043,9 @@ async def add_supplier_payment(
     # implementasi $push/$pull nested tiap driver Mongo/mock.
     jobs[job_idx].setdefault("payments", []).append(payment)
     await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
-    return _supplier_job_totals(jobs[job_idx])
+    res = _supplier_job_totals(jobs[job_idx])
+    res["bukti_warning"] = bukti_warning
+    return res
 
 
 @api_router.delete("/admin/suppliers/{supplier_id}/jobs/{job_id}/payments/{payment_id}", dependencies=[Depends(require_admin_pin)])
@@ -6410,7 +6432,7 @@ async def add_selisih_payment(
 
     bukti_url = None
     if bukti is not None and bukti.filename:
-        bukti_url = _save_upload(pic_id, f"selisih/{tagihan_id}", bukti, ALLOWED_IMG | ALLOWED_DOC)
+        bukti_url, _ = _save_upload_soft(pic_id, f"selisih/{tagihan_id}", bukti, ALLOWED_IMG | ALLOWED_DOC)
 
     tgl = (tanggal or "").strip()
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", tgl):
@@ -6458,7 +6480,7 @@ async def selisih_pay_batch(
 
     bukti_url = None
     if bukti is not None and bukti.filename:
-        bukti_url = _save_upload(pic_id, "selisih/batch", bukti, ALLOWED_IMG | ALLOWED_DOC)
+        bukti_url, _ = _save_upload_soft(pic_id, "selisih/batch", bukti, ALLOWED_IMG | ALLOWED_DOC)
 
     batch_id = _gen_selisih_id()
     remaining = int(amount)
@@ -6760,7 +6782,7 @@ async def add_kompensasi_item(
 
     bukti_url = None
     if bukti is not None and bukti.filename:
-        bukti_url = _save_upload(pihak_id, "kompensasi", bukti, ALLOWED_IMG | ALLOWED_DOC)
+        bukti_url, _ = _save_upload_soft(pihak_id, "kompensasi", bukti, ALLOWED_IMG | ALLOWED_DOC)
 
     tgl = (tanggal or "").strip()
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", tgl):
@@ -6817,7 +6839,7 @@ async def add_kompensasi_payment(
 
     bukti_url = None
     if bukti is not None and bukti.filename:
-        bukti_url = _save_upload(pihak_id, "kompensasi-payment", bukti, ALLOWED_IMG | ALLOWED_DOC)
+        bukti_url, _ = _save_upload_soft(pihak_id, "kompensasi-payment", bukti, ALLOWED_IMG | ALLOWED_DOC)
 
     tgl = (tanggal or "").strip()
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", tgl):

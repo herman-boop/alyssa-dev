@@ -999,6 +999,7 @@ function VendorsScreen({ headers, onBack, setLoading, flash }) {
         <div className="vp-success-check">✓</div>
         <div className="vp-success-title">Pembayaran Tersimpan</div>
         <div className="vp-success-amt">{fmtRp(r.total_dibayar)}</div>
+        {r.bukti_warning && <div className="vp-warn">⚠️ {r.bukti_warning}</div>}
         <div className="vp-success-box">
           <Row k="Vendor" v={r._vendor || "-"} />
           <Row k="Tanggal" v={fmtTgl(r._tanggal)} />
@@ -1052,6 +1053,7 @@ function SuccessScreen({ data, flash, onAgain, onHome }) {
         <div className="vp-success-check">✓</div>
         <div className="vp-success-title">Pembayaran Tersimpan</div>
         <div className="vp-success-amt">{fmtRp(d._nominal)}</div>
+        {d.bukti_warning && <div className="vp-warn">⚠️ {d.bukti_warning}</div>}
         <div className="vp-success-box">
           <Row k="Vendor" v={d._vendor || "-"} />
           <Row k="Nopol" v={d._nopol || "-"} />
@@ -1208,6 +1210,8 @@ function VpStyle() {
       font-size:44px; font-weight:900; display:flex; align-items:center; justify-content:center; }
     .vp-success-title { font-size:21px; font-weight:900; } .vp-success-amt { font-size:30px; font-weight:900; color:var(--vp-navy); margin:6px 0 16px; }
     .vp-success-box { background:#fff; border-radius:16px; padding:6px 16px; margin-bottom:20px; box-shadow:0 3px 12px rgba(15,42,92,.07); text-align:left; }
+    .vp-warn { background:#fdf3e0; color:#8a6d00; border:1px solid #e6b450; border-radius:12px; padding:10px 14px; font-size:13px; font-weight:600; line-height:1.4; margin:0 0 16px; text-align:left; }
+    [data-theme="dark"] .vp-warn { background:#2a2410; color:#e6b450; border-color:#7a5c12; }
 
     /* Loading + toast */
     .vp-loading { position:fixed; inset:0; background:rgba(255,255,255,.6); z-index:200; display:flex; align-items:center; justify-content:center; }

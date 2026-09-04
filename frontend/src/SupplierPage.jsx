@@ -601,7 +601,7 @@ export default function SupplierPage() {
       await reloadSelected(selected.id);   // update total/sisa/status tanpa refresh halaman
       setListRefreshTick((t) => t + 1);
       const applied = (r.data?.applied || []).length;
-      flash(`Pembayaran ${fRp(r.data?.total_dibayar || amt)} tersimpan → ${applied} tagihan diupdate`);
+      flash(r.data?.bukti_warning ? `Pembayaran tersimpan, tapi ⚠️ ${r.data.bukti_warning}` : `Pembayaran ${fRp(r.data?.total_dibayar || amt)} tersimpan → ${applied} tagihan diupdate`);
     } catch (e) { flash(e?.response?.data?.detail || "Gagal simpan pembayaran"); }
     finally { setPaySaving(false); }
   };
@@ -771,10 +771,10 @@ export default function SupplierPage() {
         fd.append("kompensasi_asal_kota", dpKomp.asal.trim()); fd.append("kompensasi_tujuan_kota", dpKomp.tujuan.trim());
       }
       if (dpFile) fd.append("bukti", dpFile);
-      await axios.post(`${API}/admin/suppliers/${selected.id}/jobs/${job.id}/payments`, fd, { headers });
+      const r = await axios.post(`${API}/admin/suppliers/${selected.id}/jobs/${job.id}/payments`, fd, { headers });
       setDpAmount(""); setDpCatatan(""); setDpFile(null); if (dpFileRef.current) dpFileRef.current.value = "";
       await reloadSelected(selected.id); setListRefreshTick((t) => t + 1);
-      flash(dpTipe === "kompensasi" ? "Kompensasi tercatat" : "Pembayaran tercatat");
+      flash(r.data?.bukti_warning ? `Tersimpan, tapi ⚠️ ${r.data.bukti_warning}` : (dpTipe === "kompensasi" ? "Kompensasi tercatat" : "Pembayaran tercatat"));
     } catch (e) { flash(e?.response?.data?.detail || "Gagal simpan"); }
     finally { setDpSaving(false); }
   };
