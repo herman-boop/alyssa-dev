@@ -33,6 +33,7 @@ export default function TaskPage() {
   const [extra, setExtra] = useState({});
   const [cp, setCp] = useState(null);     // sheet checkpoint: {jenis, catatan, geo, alamat, file, previewUrl}
   const [scan, setScan] = useState(null); // {url, file, doc_type} → CropModal
+  const [uploadErr, setUploadErr] = useState(""); // notif gagal upload foto (persisten, biar driver ga ngira kesimpen)
   const albumInput = useRef(null);
   const cpInput = useRef(null);
 
@@ -92,7 +93,7 @@ export default function TaskPage() {
   const onAlbumPick = async (files) => {
     const arr = Array.from(files || []);
     if (!arr.length) return;
-    setBusy(true);
+    setBusy(true); setUploadErr("");
     flash("Mengambil lokasi GPS…");
     const geo = await getGeo();
     if (!geo) {
@@ -103,7 +104,7 @@ export default function TaskPage() {
     }
     let alamat = "";
     try { alamat = await reverseGeocode(geo.lat, geo.lng); } catch { alamat = ""; }
-    let okc = 0;
+    let okc = 0, fail = 0, lastStatus = 0;
     for (const file of arr) {
       let up = file;
       try {
@@ -114,11 +115,19 @@ export default function TaskPage() {
         fd.append("foto", up);
         const r = await axios.post(`${API}/public/task/${token}/upload`, fd, { headers: { "Content-Type": "multipart/form-data" } });
         setTask(r.data); okc++;
-      } catch { /* lanjut */ }
+      } catch (e) { fail++; lastStatus = e?.response?.status || lastStatus; }
     }
     setBusy(false);
-    flash(okc ? `✓ ${okc} foto masuk album` : "Gagal upload, coba lagi");
     if (albumInput.current) albumInput.current.value = "";
+    if (fail === 0) { flash(`✓ ${okc} foto masuk album`); return; }
+    // Ada yang gagal → kasih notif JELAS & persisten (biar driver ga ngira kesimpen).
+    const storageDown = lastStatus === 402 || lastStatus >= 500;
+    setUploadErr(
+      storageDown
+        ? `❌ ${fail} foto GAGAL diupload — server penyimpanan foto lagi penuh/bermasalah. Foto BELUM tersimpan. Coba lagi nanti atau hubungi admin.`
+        : `❌ ${fail} foto gagal diupload. Cek sinyal/koneksi lalu coba lagi.`
+    );
+    flash(okc ? `✓ ${okc} masuk · ⚠️ ${fail} gagal` : `❌ ${fail} foto gagal diupload`);
   };
 
   /* ── CHECKPOINT: buka sheet → GPS+jam+kamera auto, catatan opsional → timeline ── */
@@ -228,11 +237,17 @@ export default function TaskPage() {
                 {(task.foto_instruksi || []).map((s, i) => <div key={i}>• {s}</div>)}
               </div>
             </div>
+            {uploadErr && (
+              <div style={{ background: "#2d1214", border: `1px solid ${C.red}`, borderRadius: 12, padding: "12px 14px", display: "flex", gap: 10, alignItems: "flex-start" }}>
+                <div style={{ flex: 1, fontSize: 13, color: "#ffb4ab", fontWeight: 700, lineHeight: 1.45 }}>{uploadErr}</div>
+                <button onClick={() => setUploadErr("")} style={{ background: "none", border: "none", color: "#ffb4ab", fontSize: 16, cursor: "pointer", lineHeight: 1, flexShrink: 0 }} aria-label="Tutup">✕</button>
+              </div>
+            )}
             <input ref={albumInput} type="file" accept="image/*" capture="environment" multiple style={{ display: "none" }} onChange={(e) => onAlbumPick(e.target.files)} />
             <button style={bigBtn} disabled={busy} onClick={() => albumInput.current?.click()}>📷 {task.foto_title || "Tambah Foto"}</button>
             <div className="keep-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
               {(task.photos || []).slice().reverse().map((p) => (
-                <img key={p.id} src={resolveUrl(p.url)} alt="" style={{ width: "100%", aspectRatio: "1", borderRadius: 8, objectFit: "cover", border: `1px solid ${C.line}` }} />
+                <SafeImg key={p.id} src={resolveUrl(p.url)} style={{ width: "100%", aspectRatio: "1", borderRadius: 8, objectFit: "cover", border: `1px solid ${C.line}` }} />
               ))}
             </div>
             {(task.photos || []).length === 0 && <div style={{ textAlign: "center", color: C.mute, fontSize: 12, padding: 8 }}>Belum ada foto.</div>}
@@ -246,7 +261,7 @@ export default function TaskPage() {
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {(task.checkpoints || []).slice().reverse().map((c) => (
                 <div key={c.checkpoint_id} style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 12, display: "flex", gap: 10 }}>
-                  {c.url && <img src={resolveUrl(c.url)} alt="" style={{ width: 54, height: 54, borderRadius: 8, objectFit: "cover", flexShrink: 0, border: `1px solid ${C.line}` }} />}
+                  {c.url && <SafeImg src={resolveUrl(c.url)} style={{ width: 54, height: 54, borderRadius: 8, objectFit: "cover", flexShrink: 0, border: `1px solid ${C.line}` }} />}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 800, fontSize: 14 }}>{c.jenis}</div>
                     <div style={{ fontSize: 11, color: C.mute, marginTop: 2 }}>{c.ts ? new Date(c.ts).toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}</div>
@@ -365,8 +380,27 @@ function DocButton({ C, label, busy, onPick }) {
 
 function resolveUrl(u) {
   if (!u) return "";
-  if (u.startsWith("http")) return u;
+  if (/^https?:\/\//.test(u)) {
+    // Bukti/foto Supabase kadang ke-serve dgn mime salah → blank. Lewatkan proxy backend.
+    if (u.includes("/storage/v1/object/public/")) return `${API}/media?u=${encodeURIComponent(u)}`;
+    return u;
+  }
   return `${BACKEND_URL}${u.startsWith("/") ? "" : "/"}${u}`;
+}
+
+/* Thumbnail tahan-banting: kalau foto gagal dimuat (storage down/402),
+   tampilkan placeholder jelas, BUKAN ikon gambar rusak yang bikin bingung. */
+function SafeImg({ src, style }) {
+  const [err, setErr] = useState(false);
+  if (err) {
+    return (
+      <div style={{ ...style, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "#0d1117", color: "#8b949e", fontSize: 9, textAlign: "center", padding: 4, boxSizing: "border-box" }}>
+        <span style={{ fontSize: 16 }}>⚠️</span>
+        <span style={{ marginTop: 2 }}>foto gagal dimuat</span>
+      </div>
+    );
+  }
+  return <img src={src} alt="" style={style} onError={() => setErr(true)} />;
 }
 
 /* Tanda tangan penerima — canvas gambar (touch/mouse), simpan sebagai data URL. */
