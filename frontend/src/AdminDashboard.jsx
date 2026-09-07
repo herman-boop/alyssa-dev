@@ -695,7 +695,7 @@ function Dashboard({ pin, onLogout }) {
         ))}
       </section>
 
-      {jadwalCart.length > 0 && (
+      {jadwalCart.length > 0 && !showJadwalGab && !showInvoiceGab && (
         <div className="adm-cartbar" data-testid="adm-cartbar">
           <div className="adm-cartbar-info">✅ <b>{jadwalCart.length} unit</b> dipilih</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
