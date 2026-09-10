@@ -5012,6 +5012,19 @@ function Trip360Modal({ order, headers, onClose, onEditLegs, onPrintSuratJalan, 
     setBusy(false);
   };
 
+  // Hapus 1 foto album (kalau salah upload). Konfirmasi dulu, lalu refresh detail.
+  const delAlbumFoto = async (stage, id) => {
+    if (!order.trip_id || !id) return;
+    if (!window.confirm("Hapus foto ini? Tidak bisa dikembalikan.")) return;
+    setBusy(true);
+    try {
+      await axios.delete(`${API}/trips/${order.trip_id}/album/${stage}/${id}`, { headers });
+      flash("Foto dihapus");
+      fetchDetail();
+    } catch { flash("Gagal hapus foto"); }
+    setBusy(false);
+  };
+
   const qaCheckpoint = () => { if (!busy) cpInputRef.current?.click(); };
   const qaDokumen = () => { if (!busy) docInputRef.current?.click(); };
   const qaTagih = () => onOpenInvoice();
@@ -5095,7 +5108,7 @@ function Trip360Modal({ order, headers, onClose, onEditLegs, onPrintSuratJalan, 
             <Trip360Keuangan order={order} legs={legs} headers={headers} finance={finance} onFinance={setFinance} onOpenInvoice={onOpenInvoice} />
           )}
           {phase === "ready" && tab === "dokumen" && (
-            <Trip360Dokumen order={order} detail={detail} bastk={bastk} resi={resi} album={album} albumCount={albumCount} docReady={docReady} onPrintSuratJalan={onPrintSuratJalan} onOpenInvoice={onOpenInvoice} onUploadResi={qaDokumen} onView={setLightbox} />
+            <Trip360Dokumen order={order} detail={detail} bastk={bastk} resi={resi} album={album} albumCount={albumCount} docReady={docReady} onPrintSuratJalan={onPrintSuratJalan} onOpenInvoice={onOpenInvoice} onUploadResi={qaDokumen} onView={setLightbox} onDeleteFoto={delAlbumFoto} />
           )}
           {phase === "ready" && tab === "aktivitas" && (
             <Trip360Aktivitas order={order} detail={detail} checkpoints={checkpoints} />
@@ -5651,7 +5664,7 @@ function Trip360Keuangan({ order, legs, headers, finance, onFinance, onOpenInvoi
 }
 
 /* ── Dokumen ── */
-function Trip360Dokumen({ order, detail, bastk, resi, album, albumCount, docReady, onPrintSuratJalan, onOpenInvoice, onUploadResi, onView }) {
+function Trip360Dokumen({ order, detail, bastk, resi, album, albumCount, docReady, onPrintSuratJalan, onOpenInvoice, onUploadResi, onView, onDeleteFoto }) {
   const bastkUrl = bastk[0] ? resolveTripUrl(bastk[0].url) : null;
   const resiUrl = resi?.url ? resolveTripUrl(resi.url) : null;
   const readyCount = 2 + (docReady.bastk ? 1 : 0) + (docReady.resi ? 1 : 0); // Surat Jalan + Invoice selalu bisa dibuat
@@ -5704,7 +5717,10 @@ function Trip360Dokumen({ order, detail, bastk, resi, album, albumCount, docRead
                 <div className="t360-photos">
                   {photos.map((p, j) => (
                     <div key={j} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                      <img src={resolveTripUrl(p.url)} alt="" className="t360-photo" onClick={() => onView(resolveTripUrl(p.url))} />
+                      <div style={{ position: "relative" }}>
+                        <img src={resolveTripUrl(p.url)} alt="" className="t360-photo" onClick={() => onView(resolveTripUrl(p.url))} />
+                        {onDeleteFoto && <button onClick={(e) => { e.stopPropagation(); onDeleteFoto(stage, p.id); }} title="Hapus foto" style={{ position: "absolute", top: 4, right: 4, width: 24, height: 24, borderRadius: 6, border: "none", background: "rgba(180,30,30,.92)", color: "#fff", fontSize: 12, cursor: "pointer", lineHeight: 1 }}>🗑</button>}
+                      </div>
                       {p.catatan && <div style={{ fontSize: 10, color: "var(--text-2)", lineHeight: 1.3, wordBreak: "break-word" }} title={p.catatan}>📝 {p.catatan}</div>}
                     </div>
                   ))}
