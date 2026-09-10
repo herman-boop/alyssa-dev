@@ -93,6 +93,12 @@ export default function TaskPage() {
   const onAlbumPick = async (files) => {
     const arr = Array.from(files || []);
     if (!arr.length) return;
+    // Catatan (opsional) buat SEMUA foto batch ini — mis. nama kapal / lokasi.
+    // Note ini disimpan sbg caption (muncul di bawah foto, termasuk di link
+    // consumen/tracking) DAN dicap di foto (watermark) biar ikut kalau di-share.
+    const note = window.prompt("Catatan buat foto ini (opsional, mis. nama kapal / lokasi):", "");
+    if (note === null) { if (albumInput.current) albumInput.current.value = ""; return; } // batal
+    const noteTrim = note.trim();
     setBusy(true); setUploadErr("");
     flash("Mengambil lokasi GPS…");
     const geo = await getGeo();
@@ -108,11 +114,12 @@ export default function TaskPage() {
     for (const file of arr) {
       let up = file;
       try {
-        up = await stampPhoto(file, buildStampLines("", geo, alamat));
+        up = await stampPhoto(file, buildStampLines(noteTrim, geo, alamat));
       } catch { up = file; }
       try {
         const fd = new FormData();
         fd.append("foto", up);
+        if (noteTrim) fd.append("catatan", noteTrim);
         const r = await axios.post(`${API}/public/task/${token}/upload`, fd, { headers: { "Content-Type": "multipart/form-data" } });
         setTask(r.data); okc++;
       } catch (e) { fail++; lastStatus = e?.response?.status || lastStatus; }
@@ -247,7 +254,10 @@ export default function TaskPage() {
             <button style={bigBtn} disabled={busy} onClick={() => albumInput.current?.click()}>📷 {task.foto_title || "Tambah Foto"}</button>
             <div className="keep-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
               {(task.photos || []).slice().reverse().map((p) => (
-                <SafeImg key={p.id} src={resolveUrl(p.url)} style={{ width: "100%", aspectRatio: "1", borderRadius: 8, objectFit: "cover", border: `1px solid ${C.line}` }} />
+                <div key={p.id} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                  <SafeImg src={resolveUrl(p.url)} style={{ width: "100%", aspectRatio: "1", borderRadius: 8, objectFit: "cover", border: `1px solid ${C.line}` }} />
+                  {p.catatan && <div style={{ fontSize: 10, color: C.ink, lineHeight: 1.3, wordBreak: "break-word" }} title={p.catatan}>📝 {p.catatan}</div>}
+                </div>
               ))}
             </div>
             {(task.photos || []).length === 0 && <div style={{ textAlign: "center", color: C.mute, fontSize: 12, padding: 8 }}>Belum ada foto.</div>}
