@@ -3685,6 +3685,41 @@ async def public_task_upload(
     return _leg_task_public_view(t)
 
 
+@api_router.delete("/public/task/{token}/upload/{photo_id}")
+async def public_task_delete_photo(token: str, photo_id: str):
+    """Hapus 1 foto album yang diupload lewat link tugas (kalau salah upload).
+    Dihapus dari task.photos DAN dari trip.album.{stage} biar hilang juga di
+    tracking/consumen & admin. Scope: cuma foto milik token ini."""
+    t = await db.leg_tasks.find_one({"token": token})
+    if not t:
+        raise HTTPException(404, "Link tugas tidak ditemukan")
+    if t.get("disabled"):
+        raise HTTPException(410, "Link tugas sudah dinonaktifkan")
+    photos = t.get("photos") or []
+    target = next((p for p in photos if p.get("id") == photo_id), None)
+    if not target:
+        raise HTTPException(404, "Foto tidak ditemukan")
+    trip_id = t.get("trip_id")
+    stage = t.get("album_key") or t.get("album_stage") or "asal"
+    now = datetime.now(timezone.utc).isoformat()
+    await db.leg_tasks.update_one({"token": token}, {
+        "$pull": {"photos": {"id": photo_id}},
+        "$set": {"updated_at": now},
+    })
+    # Hapus dari album trip. Entry album punya id yang SAMA dgn task photo
+    # (di-stamp saat upload), jadi match by id. Fallback: bersihkan juga yg
+    # url-nya sama (jaga-jaga data lama) via update terpisah.
+    url = target.get("url")
+    await db.trips.update_one({"trip_id": trip_id}, {
+        "$pull": {f"album.{stage}": {"id": photo_id}},
+        "$set": {"updated_at": now},
+    })
+    if url:
+        await db.trips.update_one({"trip_id": trip_id}, {"$pull": {f"album.{stage}": {"url": url}}})
+    t = await db.leg_tasks.find_one({"token": token})
+    return _leg_task_public_view(t)
+
+
 @api_router.post("/public/task/{token}/checkpoint")
 async def public_task_checkpoint(
     token: str,

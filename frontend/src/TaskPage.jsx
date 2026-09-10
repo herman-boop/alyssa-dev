@@ -137,6 +137,18 @@ export default function TaskPage() {
     flash(okc ? `✓ ${okc} masuk · ⚠️ ${fail} gagal` : `❌ ${fail} foto gagal diupload`);
   };
 
+  // Hapus 1 foto album (kalau salah upload) — dari task.photos + album trip.
+  const delAlbumPhoto = async (p) => {
+    if (!p?.id) return;
+    if (!window.confirm("Hapus foto ini? Tidak bisa dikembalikan.")) return;
+    setBusy(true);
+    try {
+      const r = await axios.delete(`${API}/public/task/${token}/upload/${p.id}`);
+      setTask(r.data); flash("✓ Foto dihapus");
+    } catch (e) { flash(e?.response?.data?.detail || "Gagal hapus foto"); }
+    setBusy(false);
+  };
+
   /* ── CHECKPOINT: buka sheet → GPS+jam+kamera auto, catatan opsional → timeline ── */
   const openCheckpoint = async () => {
     setCp({ jenis: "", catatan: "", geo: null, alamat: "Mengambil lokasi…", file: null, previewUrl: null });
@@ -255,7 +267,11 @@ export default function TaskPage() {
             <div className="keep-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
               {(task.photos || []).slice().reverse().map((p) => (
                 <div key={p.id} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                  <SafeImg src={resolveUrl(p.url)} style={{ width: "100%", aspectRatio: "1", borderRadius: 8, objectFit: "cover", border: `1px solid ${C.line}` }} />
+                  <div style={{ position: "relative" }}>
+                    <SafeImg src={resolveUrl(p.url)} style={{ width: "100%", aspectRatio: "1", borderRadius: 8, objectFit: "cover", border: `1px solid ${C.line}` }} />
+                    <button onClick={() => delAlbumPhoto(p)} disabled={busy} title="Hapus foto"
+                      style={{ position: "absolute", top: 4, right: 4, width: 26, height: 26, borderRadius: 7, border: "none", background: "rgba(180,30,30,.92)", color: "#fff", fontSize: 13, cursor: "pointer", lineHeight: 1 }}>🗑</button>
+                  </div>
                   {p.catatan && <div style={{ fontSize: 10, color: C.ink, lineHeight: 1.3, wordBreak: "break-word" }} title={p.catatan}>📝 {p.catatan}</div>}
                 </div>
               ))}
