@@ -5703,7 +5703,10 @@ function Trip360Dokumen({ order, detail, bastk, resi, album, albumCount, docRead
                 <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text-2)", marginBottom: 8 }}>{label} ({photos.length})</div>
                 <div className="t360-photos">
                   {photos.map((p, j) => (
-                    <img key={j} src={resolveTripUrl(p.url)} alt="" className="t360-photo" onClick={() => onView(resolveTripUrl(p.url))} />
+                    <div key={j} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                      <img src={resolveTripUrl(p.url)} alt="" className="t360-photo" onClick={() => onView(resolveTripUrl(p.url))} />
+                      {p.catatan && <div style={{ fontSize: 10, color: "var(--text-2)", lineHeight: 1.3, wordBreak: "break-word" }} title={p.catatan}>📝 {p.catatan}</div>}
+                    </div>
                   ))}
                 </div>
               </div>
@@ -6818,7 +6821,7 @@ function FotoTab({ detail, loading, onView, onDelete }) {
                   <div key={i} style={{ position: "relative" }}>
                     <img src={resolveTripUrl(p.url)} alt="" onClick={() => onView(resolveTripUrl(p.url))} style={{ width: "100%", aspectRatio: "1", borderRadius: 8, objectFit: "cover", border: "1px solid #21262d", cursor: "pointer" }} />
                     {onDelete && <button onClick={(e) => { e.stopPropagation(); onDelete(stage.key, p.id); }} title="Hapus foto" style={{ position: "absolute", top: 4, right: 4, width: 24, height: 24, borderRadius: 6, border: "none", background: "rgba(180,30,30,.92)", color: "#fff", fontSize: 12, cursor: "pointer", lineHeight: 1 }}>🗑</button>}
-                    {p.catatan && <div style={{ fontSize: 9, color: "#8b949e", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.catatan}</div>}
+                    {p.catatan && <div style={{ fontSize: 9.5, color: "#c9d1d9", marginTop: 3, lineHeight: 1.3, wordBreak: "break-word" }} title={p.catatan}>📝 {p.catatan}</div>}
                   </div>
                 ))}
               </div>
