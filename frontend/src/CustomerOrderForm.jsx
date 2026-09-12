@@ -17,7 +17,7 @@ const KONDISI_OPTIONS = ["Bekas", "Baru"];
 
 // F1 — Unit Master (multi-unit per PO)
 const MAX_UNITS = 20;
-const emptyUnit = () => ({ vehicle_type: "", tipe_model: "", nopol: "", no_rangka: "", warna: "", catatan: "" });
+const emptyUnit = () => ({ vehicle_type: "", tipe_model: "", nopol: "", no_rangka: "", warna: "", kondisi: "Bekas", catatan: "" });
 
 /* ── Dark mode ── */
 function useDarkMode() {
@@ -172,7 +172,9 @@ export default function CustomerOrderForm() {
   const submit = async () => {
     setError(""); setSubmitting(true);
     try {
-      const payload = { ...data, units: shipmentType === "kendaraan" ? data.units : [] };
+      // Kondisi order (dipakai BASTK via customer_data.kondisi) diambil dari unit pertama.
+      const primaryKondisi = shipmentType === "kendaraan" ? (data.units?.[0]?.kondisi || data.kondisi || "Bekas") : (data.kondisi || "Bekas");
+      const payload = { ...data, kondisi: primaryKondisi, units: shipmentType === "kendaraan" ? data.units : [] };
       const r = await axios.post(`${API}/orders`, payload);
       // Backend memecah tiap unit jadi PO terpisah → upload berkas ke SEMUA order
       const orderIds = (r.data?.orders_created && r.data.orders_created.length)
@@ -348,6 +350,13 @@ export default function CustomerOrderForm() {
                                 <input type="text" className="of-inp" value={u.warna}
                                   onChange={(e) => setUnit(i, "warna", e.target.value)}
                                   placeholder="Hitam" data-testid={`ord-warna-${i}`} />
+                              </Field>
+                              <Field label="Kondisi">
+                                <select className="of-inp" value={u.kondisi || "Bekas"}
+                                  onChange={(e) => setUnit(i, "kondisi", e.target.value)}
+                                  data-testid={`ord-kondisi-${i}`}>
+                                  {KONDISI_OPTIONS.map((k) => <option key={k} value={k}>{k}</option>)}
+                                </select>
                               </Field>
                               <Field label="Catatan Unit" full hint="Opsional — kondisi khusus / kelengkapan unit ini.">
                                 <input type="text" className="of-inp" value={u.catatan}
