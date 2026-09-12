@@ -17,7 +17,7 @@ const KONDISI_OPTIONS = ["Bekas", "Baru"];
 
 // F1 — Unit Master (multi-unit per PO)
 const MAX_UNITS = 20;
-const emptyUnit = () => ({ vehicle_type: "", tipe_model: "", nopol: "", no_rangka: "", warna: "", kondisi: "Bekas", catatan: "" });
+const emptyUnit = () => ({ vehicle_type: "", tipe_model: "", nopol: "", no_rangka: "", warna: "", kondisi: "", catatan: "" });
 
 /* ── Dark mode ── */
 function useDarkMode() {
@@ -124,7 +124,7 @@ export default function CustomerOrderForm() {
   const [step, setStep] = useState(0);
   const [shipmentType, setShipmentType] = useState("kendaraan"); // "kendaraan" | "cargo"
   const [data, setData] = useState({
-    vehicle_type: "", nopol: "", warna: "", tahun: "", km: "", kondisi: "Bekas", no_rangka: "",
+    vehicle_type: "", nopol: "", warna: "", tahun: "", km: "", kondisi: "", no_rangka: "",
     panjang: "", lebar: "", tinggi: "", isi_kiriman: "", jumlah_colly: "",
     asal_kota: "", asal_alamat: "", pickup_date: "", pickup_time: "", pickup_pic: "", pickup_hp: "",
     tujuan_kota: "", tujuan_alamat: "", delivery_pic: "", delivery_hp: "",
@@ -157,7 +157,7 @@ export default function CustomerOrderForm() {
   const stepValid = useMemo(() => {
     if (step === 0) {
       return shipmentType === "kendaraan"
-        ? (data.units.length > 0 && data.units.every((u) => !!u.vehicle_type))
+        ? (data.units.length > 0 && data.units.every((u) => !!u.vehicle_type && !!u.kondisi))
         : !!data.isi_kiriman.trim();
     }
     if (step === 1) return !!data.asal_kota.trim();
@@ -173,7 +173,14 @@ export default function CustomerOrderForm() {
     setError(""); setSubmitting(true);
     try {
       // Kondisi order (dipakai BASTK via customer_data.kondisi) diambil dari unit pertama.
-      const primaryKondisi = shipmentType === "kendaraan" ? (data.units?.[0]?.kondisi || data.kondisi || "Bekas") : (data.kondisi || "Bekas");
+      // Wajib dipilih di step Kendaraan — tidak ada default diam-diam "Bekas".
+      const primaryKondisi = shipmentType === "kendaraan" ? (data.units?.[0]?.kondisi || "") : "";
+      if (shipmentType === "kendaraan" && data.units.some((u) => !u.kondisi)) {
+        setStep(0); setOpenUnit(data.units.findIndex((u) => !u.kondisi));
+        setError("Pilih Kondisi (Baru / Bekas) untuk setiap unit dulu — wajib biar BASTK ga salah.");
+        setSubmitting(false);
+        return;
+      }
       const payload = { ...data, kondisi: primaryKondisi, units: shipmentType === "kendaraan" ? data.units : [] };
       const r = await axios.post(`${API}/orders`, payload);
       // Backend memecah tiap unit jadi PO terpisah → upload berkas ke SEMUA order
@@ -200,7 +207,7 @@ export default function CustomerOrderForm() {
 
   const addAnother = () => {
     // Reset hanya data kendaraan, sisanya (asal/tujuan/customer) tetap
-    setData(d => ({ ...d, vehicle_type: "", nopol: "", warna: "", tahun: "", km: "", kondisi: "Bekas", no_rangka: "", panjang: "", lebar: "", tinggi: "", isi_kiriman: "", jumlah_colly: "", units: [emptyUnit()] }));
+    setData(d => ({ ...d, vehicle_type: "", nopol: "", warna: "", tahun: "", km: "", kondisi: "", no_rangka: "", panjang: "", lebar: "", tinggi: "", isi_kiriman: "", jumlah_colly: "", units: [emptyUnit()] }));
     setOpenUnit(0);
     setShipmentType("kendaraan");
     setFiles([]);
@@ -351,10 +358,12 @@ export default function CustomerOrderForm() {
                                   onChange={(e) => setUnit(i, "warna", e.target.value)}
                                   placeholder="Hitam" data-testid={`ord-warna-${i}`} />
                               </Field>
-                              <Field label="Kondisi">
-                                <select className="of-inp" value={u.kondisi || "Bekas"}
+                              <Field label="Kondisi" required hint="Wajib dipilih — dipakai di BASTK. Salah pilih bikin komplain (mobil baru ketulis bekas).">
+                                <select className={`of-inp${!u.kondisi ? " of-inp--invalid" : ""}`} value={u.kondisi || ""}
                                   onChange={(e) => setUnit(i, "kondisi", e.target.value)}
-                                  data-testid={`ord-kondisi-${i}`}>
+                                  data-testid={`ord-kondisi-${i}`}
+                                  style={!u.kondisi ? { borderColor: "#fdba74", background: "#fff7ed" } : undefined}>
+                                  <option value="" disabled>— Pilih Baru / Bekas —</option>
                                   {KONDISI_OPTIONS.map((k) => <option key={k} value={k}>{k}</option>)}
                                 </select>
                               </Field>
@@ -376,6 +385,18 @@ export default function CustomerOrderForm() {
                   {data.units.length >= MAX_UNITS && (
                     <div style={{ fontSize: 11.5, color: "#8a6d3b", marginTop: 8 }}>Maksimal {MAX_UNITS} unit lewat form. Lebih dari itu, hubungi admin PT Alyssa.</div>
                   )}
+                  {(() => {
+                    const missing = data.units
+                      .map((u, i) => (!u.vehicle_type || !u.kondisi) ? (i + 1) : null)
+                      .filter(Boolean);
+                    if (!missing.length) return null;
+                    return (
+                      <div data-testid="ord-unit-missing" style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "flex-start", background: "#fff7ed", border: "1px solid #fdba74", borderRadius: 12, padding: "10px 12px", color: "#c2410c", fontSize: 12.5, fontWeight: 600, lineHeight: 1.5 }}>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ flexShrink: 0, marginTop: 1 }}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                        <span>Lengkapi <b>Tipe Kendaraan</b> &amp; <b>Kondisi (Baru/Bekas)</b> di Unit {missing.join(", ")} dulu — wajib biar BASTK ga salah.</span>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 
