@@ -350,13 +350,23 @@ async def wa_send(to: str, message: str) -> dict:
         return {"ok": False, "message_id": None, "error": str(e)[:200], "provider": WA_PROVIDER}
 
 
-def _tracking_message(nama: str, resi: str, tracking_url: str) -> str:
+def _tracking_message(nama: str, resi: str, tracking_url: str,
+                      tipe: str = "", nopol: str = "") -> str:
+    # Baris detail kendaraan — hanya muncul kalau datanya ada (cargo bisa kosong).
+    detail = ""
+    tipe = (tipe or "").strip()
+    nopol = (nopol or "").strip()
+    if tipe:
+        detail += f"Tipe Kendaraan:\n{tipe}\n\n"
+    if nopol:
+        detail += f"No. Polisi:\n{nopol}\n\n"
     return (
         f"Halo Bapak/Ibu {nama or 'Pelanggan'},\n\n"
         "Terima kasih telah mempercayakan pengiriman kendaraan Anda kepada "
         "PT Alyssa Auto Logistik.\n\n"
         "Pesanan Anda telah berhasil dibuat.\n\n"
         f"Nomor Resi / Trip ID:\n{resi}\n\n"
+        f"{detail}"
         "Lacak status pengiriman melalui tautan berikut:\n"
         f"{tracking_url}\n\n"
         "Simpan pesan ini agar nomor resi dan link tracking mudah ditemukan kembali.\n\n"
@@ -393,7 +403,16 @@ async def send_tracking_whatsapp(order: dict, resend: bool = False) -> dict:
     to = _wa_normalize(to_raw)
     resi = order_id
     tracking_url = f"{PUBLIC_BASE_URL}/?track={order_id}"
-    msg = _tracking_message(order.get("customer_nama") or "", resi, tracking_url)
+    # Detail kendaraan buat pesan WA: Tipe (kategori + model) & No. Polisi.
+    unit0 = (order.get("units") or [{}])[0] if isinstance(order.get("units"), list) else {}
+    tipe_parts = []
+    for p in [order.get("vehicle_type"), unit0.get("tipe_model")]:
+        p = (p or "").strip()
+        if p and p not in tipe_parts:
+            tipe_parts.append(p)
+    tipe = " · ".join(tipe_parts)
+    nopol = (order.get("nopol") or unit0.get("nopol") or "").strip()
+    msg = _tracking_message(order.get("customer_nama") or "", resi, tracking_url, tipe, nopol)
 
     res = await wa_send(to, msg)
     upd = {
