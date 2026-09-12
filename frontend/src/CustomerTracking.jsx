@@ -724,7 +724,7 @@ export default function CustomerTracking() {
               )}
               {data.tipe_kendaraan && (
                 <div className="trk-panel-row">
-                  <span className="trk-panel-k">Muatan</span>
+                  <span className="trk-panel-k">Tipe Kendaraan</span>
                   <span className="trk-panel-v">{data.tipe_kendaraan}</span>
                 </div>
               )}

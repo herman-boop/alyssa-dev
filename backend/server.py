@@ -350,6 +350,19 @@ async def wa_send(to: str, message: str) -> dict:
         return {"ok": False, "message_id": None, "error": str(e)[:200], "provider": WA_PROVIDER}
 
 
+def _order_tipe_display(order: dict) -> str:
+    """Gabung kategori kendaraan + tipe/model jadi 1 string tampil.
+    Contoh: 'MOBIL · HIACE C'. Dipakai di pesan WA & tracking pelanggan."""
+    units = order.get("units")
+    unit0 = units[0] if isinstance(units, list) and units else {}
+    parts = []
+    for p in [order.get("vehicle_type"), unit0.get("tipe_model") or order.get("tipe_model")]:
+        p = (p or "").strip()
+        if p and p not in parts:
+            parts.append(p)
+    return " · ".join(parts)
+
+
 def _tracking_message(nama: str, resi: str, tracking_url: str,
                       tipe: str = "", nopol: str = "") -> str:
     # Baris detail kendaraan — hanya muncul kalau datanya ada (cargo bisa kosong).
@@ -405,12 +418,7 @@ async def send_tracking_whatsapp(order: dict, resend: bool = False) -> dict:
     tracking_url = f"{PUBLIC_BASE_URL}/?track={order_id}"
     # Detail kendaraan buat pesan WA: Tipe (kategori + model) & No. Polisi.
     unit0 = (order.get("units") or [{}])[0] if isinstance(order.get("units"), list) else {}
-    tipe_parts = []
-    for p in [order.get("vehicle_type"), unit0.get("tipe_model")]:
-        p = (p or "").strip()
-        if p and p not in tipe_parts:
-            tipe_parts.append(p)
-    tipe = " · ".join(tipe_parts)
+    tipe = _order_tipe_display(order)
     nopol = (order.get("nopol") or unit0.get("nopol") or "").strip()
     msg = _tracking_message(order.get("customer_nama") or "", resi, tracking_url, tipe, nopol)
 
@@ -1444,7 +1452,7 @@ async def _public_order_fallback(track_id: str):
         "pending": True,                       # belum jadi trip (belum di-dispatch admin)
         "status_order": o.get("status", "NEW"),
         "nopol": o.get("nopol", ""),
-        "tipe_kendaraan": o.get("vehicle_type", ""),
+        "tipe_kendaraan": _order_tipe_display(o) or o.get("vehicle_type", ""),
         "no_rangka": o.get("no_rangka", ""),
         "route": route,
         "nama_driver": "",
@@ -2165,7 +2173,7 @@ async def convert_order_to_trip(order_id: str, payload: OrderConvertBody):
         "route": route[:200],
         "uj": payload.uj, "t1": payload.t1, "t2": payload.t2, "t3": payload.t3,
         "bonus_daily": payload.bonus_daily, "bonus_kerajinan": payload.bonus_kerajinan,
-        "tipe_kendaraan": order.get("vehicle_type", ""),
+        "tipe_kendaraan": _order_tipe_display(order) or order.get("vehicle_type", ""),
         "no_rangka": order.get("no_rangka", ""),
         "legs": [],
         "nama_driver": (order.get("nama_driver") or "").strip()[:120],
