@@ -130,17 +130,24 @@ const IcoList     = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="
 export default function AdminDashboard() {
   const [pin, setPin] = useState(() => localStorage.getItem(PIN_KEY) || "");
   const [authed, setAuthed] = useState(false);
+  const [needPin, setNeedPin] = useState(false);  // true kalau backend masih minta PIN (mode terkunci)
+  const [probing, setProbing] = useState(true);    // lagi cek ke backend: butuh PIN atau engga
   const [authError, setAuthError] = useState("");
   const [authing, setAuthing] = useState(false);
 
   useEffect(() => {
     const cached = localStorage.getItem(PIN_KEY) || "";
-    if (!cached) return;
     (async () => {
       try {
-        const r = await axios.post(`${API}/admin/auth`, { pin: cached });
-        if (r.data?.ok) setAuthed(true);
-      } catch { localStorage.removeItem(PIN_KEY); setPin(""); }
+        // Probe: kalau admin OPEN (ADMIN_PIN env kosong) backend balas ok walau
+        // pin kosong → langsung masuk tanpa password. Kalau masih terkunci → 401.
+        await axios.post(`${API}/admin/auth`, { pin: cached });
+        setAuthed(true);
+      } catch {
+        localStorage.removeItem(PIN_KEY);
+        setPin("");
+        setNeedPin(true);   // backend masih minta PIN → tampilkan layar PIN
+      } finally { setProbing(false); }
     })();
   }, []);
 
@@ -155,9 +162,23 @@ export default function AdminDashboard() {
     } finally { setAuthing(false); }
   };
 
-  const logout = () => { localStorage.removeItem(PIN_KEY); setPin(""); setAuthed(false); };
+  const logout = () => {
+    localStorage.removeItem(PIN_KEY); setPin("");
+    // Reload → probe jalan lagi. Kalau admin OPEN, langsung masuk lagi; kalau
+    // terkunci (ADMIN_PIN di-set), baru muncul layar PIN.
+    try { window.location.reload(); } catch { setAuthed(false); setNeedPin(true); }
+  };
 
-  if (!authed) return <PinScreen pin={pin} setPin={setPin} doLogin={doLogin} authing={authing} authError={authError} />;
+  if (probing) return (
+    <div className="adm-root">
+      <div className="adm-pin-wrap"><div className="adm-pin-card">
+        <div className="adm-pin-logo-wrap"><Logo size={96} /></div>
+        <p className="adm-pin-sub">Memuat dashboard…</p>
+      </div></div>
+    </div>
+  );
+  if (!authed && needPin) return <PinScreen pin={pin} setPin={setPin} doLogin={doLogin} authing={authing} authError={authError} />;
+  if (!authed) return null;
   return <Dashboard pin={pin} onLogout={logout} />;
 }
 

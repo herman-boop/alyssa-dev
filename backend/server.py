@@ -89,8 +89,10 @@ def _validate_env_on_startup() -> None:
     """Production env hygiene — log warnings for unsafe defaults. Non-fatal."""
     warnings = []
     pin = (os.environ.get("ADMIN_PIN") or "").strip()
-    if not pin:
-        warnings.append("[ENV] ADMIN_PIN not set — /api/admin/* endpoints will return 503.")
+    if not _admin_locked():
+        warnings.append("[ENV] Admin OPEN (no password). Set ADMIN_LOCK=1 + ADMIN_PIN=<pin> to lock.")
+    elif not pin:
+        warnings.append("[ENV] ADMIN_LOCK on but ADMIN_PIN not set — admin still OPEN. Set ADMIN_PIN to lock.")
     elif pin == "0000":
         warnings.append("[ENV] ADMIN_PIN is default '0000' — CHANGE before public production deploy!")
     elif len(pin) < 4:
@@ -166,11 +168,21 @@ async def _launch_pdf_browser():
         _pw, _browser = None, None
 
 # ----- Admin PIN guard (simple, env-driven) -----
+# Admin dibuka TANPA password (permintaan owner) biar ga ribet login tiap masuk.
+# Mau dikunci lagi: set env ADMIN_LOCK=1 (dan ADMIN_PIN=<pin>) di Railway
+# (backend service → Variables) → gerbang PIN otomatis nyala lagi. Ini bikin
+# passwordless langsung aktif tanpa perlu hapus ADMIN_PIN yang mungkin sudah ada.
+def _admin_locked() -> bool:
+    return (os.environ.get("ADMIN_LOCK") or "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def require_admin_pin(x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin")) -> bool:
-    """Require X-Admin-Pin header matching ADMIN_PIN env var. Empty env disables admin endpoints."""
+    """Default: akses terbuka. Terkunci hanya kalau ADMIN_LOCK aktif + ADMIN_PIN di-set."""
+    if not _admin_locked():
+        return True  # mode terbuka: tanpa password
     expected = (os.environ.get("ADMIN_PIN") or "").strip()
     if not expected:
-        raise HTTPException(503, "Admin disabled (ADMIN_PIN env not set)")
+        return True
     if not x_admin_pin or x_admin_pin.strip() != expected:
         raise HTTPException(401, "Invalid or missing admin PIN")
     return True
@@ -2678,13 +2690,17 @@ class AdminAuthBody(BaseModel):
 
 @api_router.post("/admin/auth")
 async def admin_auth(body: AdminAuthBody):
-    """Validate PIN. Returns 200 if valid. Frontend stores PIN client-side."""
+    """Validate PIN. Returns 200 if valid. Frontend stores PIN client-side.
+    Default mode terbuka (ADMIN_LOCK tidak aktif) → selalu ok, frontend langsung
+    masuk tanpa layar PIN."""
+    if not _admin_locked():
+        return {"ok": True, "open": True}  # tanpa password
     expected = (os.environ.get("ADMIN_PIN") or "").strip()
     if not expected:
-        raise HTTPException(503, "Admin disabled (ADMIN_PIN env not set)")
+        return {"ok": True, "open": True}
     if not body.pin or body.pin.strip() != expected:
         raise HTTPException(401, "Invalid PIN")
-    return {"ok": True}
+    return {"ok": True, "open": False}
 
 
 _HEIC_URL_RE = re.compile(r"\.hei[cf](\?|$)", re.I)
