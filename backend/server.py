@@ -1127,6 +1127,137 @@ async def delete_doc_history(doc_id: str):
     return {"ok": True, "id": doc_id}
 
 
+# ── Rekap Penagihan (overlay Histori Dokumen) ────────────────────────────────
+# Lapisan rekap invoice yang sudah ditagih, ADDITIVE & non-destruktif: TIDAK
+# pernah menyentuh doc_history / invoice asli. Menyimpan 3 jenis record:
+#   - kind="manual"   : invoice/tagihan lama yang diinput manual admin
+#   - kind="override" : koreksi HANYA untuk rekap atas record otomatis (source_doc_id)
+#   - kind="hidden"   : record otomatis yang disembunyikan dari rekap (bukan dihapus)
+# Sumber invoice otomatis tetap dibaca dari doc_history (jenis=invoice).
+def _rekap_tgl(s: Optional[str]) -> str:
+    s = (s or "").strip()
+    return s if re.match(r"^\d{4}-\d{2}-\d{2}$", s) else ""
+
+
+class RekapManualBody(BaseModel):
+    tanggal: str = ""        # YYYY-MM-DD (Tanggal Ditagih)
+    no_invoice: str = ""
+    customer: str = ""
+    nominal: int = 0
+    keterangan: str = ""
+
+
+class RekapOverrideBody(BaseModel):
+    tanggal: Optional[str] = None
+    no_invoice: Optional[str] = None
+    customer: Optional[str] = None
+    nominal: Optional[int] = None
+    keterangan: Optional[str] = None
+
+
+@api_router.get("/admin/rekap-penagihan", dependencies=[Depends(require_admin_pin)])
+async def get_rekap_penagihan():
+    """Ambil overlay rekap: entri manual, daftar tersembunyi, & koreksi rekap-only.
+    Frontend menggabungkan ini dengan invoice dari doc_history."""
+    manual, hidden, overrides = [], [], {}
+    async for d in db.rekap_penagihan.find({}, {"_id": 0}):
+        k = d.get("kind")
+        if k == "manual":
+            manual.append(d)
+        elif k == "hidden":
+            sid = d.get("source_doc_id")
+            if sid:
+                hidden.append(sid)
+        elif k == "override":
+            sid = d.get("source_doc_id")
+            if sid:
+                overrides[sid] = d.get("fields") or {}
+    return {"manual": manual, "hidden": hidden, "overrides": overrides}
+
+
+@api_router.post("/admin/rekap-penagihan/manual", dependencies=[Depends(require_admin_pin)])
+async def add_rekap_manual(body: RekapManualBody):
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "id": "RKP-" + uuid.uuid4().hex[:10], "kind": "manual",
+        "tanggal": _rekap_tgl(body.tanggal) or today_wib(),
+        "no_invoice": (body.no_invoice or "").strip()[:80],
+        "customer": (body.customer or "").strip()[:200],
+        "nominal": int(body.nominal or 0),
+        "keterangan": (body.keterangan or "").strip()[:500],
+        "created_at": now, "updated_at": now,
+    }
+    await db.rekap_penagihan.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.patch("/admin/rekap-penagihan/manual/{rid}", dependencies=[Depends(require_admin_pin)])
+async def edit_rekap_manual(rid: str, body: RekapManualBody):
+    upd = {
+        "tanggal": _rekap_tgl(body.tanggal) or today_wib(),
+        "no_invoice": (body.no_invoice or "").strip()[:80],
+        "customer": (body.customer or "").strip()[:200],
+        "nominal": int(body.nominal or 0),
+        "keterangan": (body.keterangan or "").strip()[:500],
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    res = await db.rekap_penagihan.update_one({"id": rid, "kind": "manual"}, {"$set": upd})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Rekap manual tidak ditemukan")
+    d = await db.rekap_penagihan.find_one({"id": rid}, {"_id": 0})
+    return d
+
+
+@api_router.delete("/admin/rekap-penagihan/manual/{rid}", dependencies=[Depends(require_admin_pin)])
+async def del_rekap_manual(rid: str):
+    res = await db.rekap_penagihan.delete_one({"id": rid, "kind": "manual"})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Rekap manual tidak ditemukan")
+    return {"ok": True, "id": rid}
+
+
+@api_router.post("/admin/rekap-penagihan/hidden/{source_doc_id}", dependencies=[Depends(require_admin_pin)])
+async def hide_rekap_doc(source_doc_id: str):
+    """Sembunyikan invoice otomatis dari rekap SAJA (doc_history tetap utuh)."""
+    now = datetime.now(timezone.utc).isoformat()
+    await db.rekap_penagihan.update_one(
+        {"kind": "hidden", "source_doc_id": source_doc_id},
+        {"$set": {"kind": "hidden", "source_doc_id": source_doc_id, "created_at": now}},
+        upsert=True,
+    )
+    return {"ok": True, "source_doc_id": source_doc_id, "hidden": True}
+
+
+@api_router.delete("/admin/rekap-penagihan/hidden/{source_doc_id}", dependencies=[Depends(require_admin_pin)])
+async def unhide_rekap_doc(source_doc_id: str):
+    await db.rekap_penagihan.delete_one({"kind": "hidden", "source_doc_id": source_doc_id})
+    return {"ok": True, "source_doc_id": source_doc_id, "hidden": False}
+
+
+@api_router.patch("/admin/rekap-penagihan/override/{source_doc_id}", dependencies=[Depends(require_admin_pin)])
+async def override_rekap_doc(source_doc_id: str, body: RekapOverrideBody):
+    """Koreksi HANYA untuk rekap atas invoice otomatis — invoice/doc asli tidak diubah."""
+    fields = {}
+    if body.tanggal is not None:
+        fields["tanggal"] = _rekap_tgl(body.tanggal)
+    if body.no_invoice is not None:
+        fields["no_invoice"] = (body.no_invoice or "").strip()[:80]
+    if body.customer is not None:
+        fields["customer"] = (body.customer or "").strip()[:200]
+    if body.nominal is not None:
+        fields["nominal"] = int(body.nominal or 0)
+    if body.keterangan is not None:
+        fields["keterangan"] = (body.keterangan or "").strip()[:500]
+    now = datetime.now(timezone.utc).isoformat()
+    await db.rekap_penagihan.update_one(
+        {"kind": "override", "source_doc_id": source_doc_id},
+        {"$set": {"kind": "override", "source_doc_id": source_doc_id, "fields": fields, "updated_at": now}},
+        upsert=True,
+    )
+    return {"ok": True, "source_doc_id": source_doc_id, "fields": fields}
+
+
 # ── Kontak (buku alamat pelanggan & supplier) ────────────────────────────────
 # Buku alamat sederhana, sinkron lintas device. Jenis: pelanggan / supplier.
 CONTACT_JENIS = {"pelanggan", "supplier"}

@@ -414,6 +414,7 @@ function Dashboard({ pin, onLogout }) {
     kendaraan:    { title: "Kendaraan", sub: "Daftar kendaraan yang pernah dikirim" },
     dokumen:      { title: "Dokumen", sub: "BASTK, resi, dan dokumen pengiriman" },
     histori:      { title: "Histori Dokumen", sub: "Arsip Invoice & Jadwal yang pernah dicetak — cetak ulang atau hapus" },
+    "rekap-invoice": { title: "Rekap Invoice Ditagih", sub: "Tarik invoice yang sudah ditagih per periode — sumber Histori Dokumen" },
   };
   const section = SECTION_META[activeTab] || SECTION_META.pesanan;
 
@@ -533,6 +534,10 @@ function Dashboard({ pin, onLogout }) {
 
       {activeTab === "histori" && (
         <HistoriDokumen headers={headers} />
+      )}
+
+      {activeTab === "rekap-invoice" && (
+        <RekapInvoiceDitagih headers={headers} />
       )}
 
       {activeTab === "rekap-tagih" && (
@@ -1023,6 +1028,7 @@ const SIDEBAR_PRIMARY = [
   { key: "kendaraan", label: "Kendaraan" },
   { key: "dokumen", label: "Dokumen" },
   { key: "histori", label: "Histori Dokumen" },
+  { key: "rekap-invoice", label: "Rekap Invoice Ditagih" },
   { key: "laporan", label: "Laporan" },
 ];
 const SIDEBAR_TOOLS = [
@@ -3381,6 +3387,266 @@ function rowInfoFromRec(r) {
   };
 }
 function fmtDMY(iso) { if (!iso || !/^\d{4}-\d{2}-\d{2}/.test(iso)) return "—"; const [y, m, d] = iso.slice(0, 10).split("-"); return `${d}/${m}/${y}`; }
+
+/* ── Rekap Invoice Sudah Ditagih (per PERIODE) ──────────────────────────────
+   Menarik invoice dari Histori Dokumen (doc_history jenis=invoice) berdasarkan
+   rentang Tanggal Ditagih (= meta.tanggalInvoice, fallback created_at), plus
+   entri Manual. Overlay `rekap_penagihan` menyimpan manual/koreksi/sembunyi —
+   TIDAK pernah menyentuh invoice/doc asli. */
+function RekapInvoiceDitagih({ headers }) {
+  const isoToday = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+  const monthStart = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`; };
+
+  const [autoItems, setAutoItems] = useState([]);
+  const [manual, setManual] = useState([]);
+  const [hidden, setHidden] = useState([]);
+  const [overrides, setOverrides] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [dari, setDari] = useState(monthStart);
+  const [sampai, setSampai] = useState(isoToday);
+  const [fCust, setFCust] = useState("");
+  const [fInv, setFInv] = useState("");
+  const [applied, setApplied] = useState(() => ({ dari: monthStart(), sampai: isoToday(), cust: "", inv: "" }));
+  const [toast, setToast] = useState("");
+  const [form, setForm] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const flash = (m) => { setToast(m); setTimeout(() => setToast(""), 2600); };
+
+  const reload = useCallback(() => {
+    setLoading(true);
+    Promise.all([
+      axios.get(`${API}/admin/doc-history`, { headers, params: { jenis: "invoice", limit: 1000 } }).then((r) => r.data?.items || []).catch(() => []),
+      axios.get(`${API}/admin/rekap-penagihan`, { headers }).then((r) => r.data || {}).catch(() => ({})),
+    ]).then(([inv, rk]) => {
+      setAutoItems(Array.isArray(inv) ? inv : []);
+      setManual(rk.manual || []); setHidden(rk.hidden || []); setOverrides(rk.overrides || {});
+    }).finally(() => setLoading(false));
+  }, [headers]);
+  useEffect(() => { reload(); }, [reload]);
+
+  const effDay = (r) => { const t = r.meta?.tanggalInvoice; if (t && /^\d{4}-\d{2}-\d{2}$/.test(t)) return t; const d = new Date(r.created_at); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+
+  const rows = useMemo(() => {
+    const hs = new Set(hidden);
+    const auto = autoItems.filter((r) => !hs.has(r.id)).map((r) => {
+      const ov = overrides[r.id] || {};
+      const base = invTotalFromRec(r).total;
+      return {
+        key: r.id, source: "Otomatis", doc_id: r.id,
+        tanggal: ov.tanggal || effDay(r),
+        no_invoice: (ov.no_invoice != null && ov.no_invoice !== "") ? ov.no_invoice : (r.no_dokumen || r.meta?.no_invoice || ""),
+        customer: (ov.customer != null && ov.customer !== "") ? ov.customer : (r.customer || r.meta?.customer_nama || ""),
+        nominal: (ov.nominal != null) ? Number(ov.nominal) : base,
+        keterangan: (ov.keterangan != null) ? ov.keterangan : "",
+        overridden: Object.keys(ov).length > 0,
+      };
+    });
+    const man = manual.map((m) => ({
+      key: m.id, source: "Manual", rid: m.id, tanggal: (m.tanggal || "").slice(0, 10),
+      no_invoice: m.no_invoice || "", customer: m.customer || "", nominal: Number(m.nominal) || 0, keterangan: m.keterangan || "",
+    }));
+    return [...auto, ...man];
+  }, [autoItems, manual, hidden, overrides]);
+
+  const filtered = useMemo(() => {
+    const { dari: d1, sampai: d2, cust, inv } = applied;
+    const c = normName(cust), iv = (inv || "").toLowerCase().trim();
+    return rows.filter((r) => {
+      const t = (r.tanggal || "").slice(0, 10);
+      if (d1 && (!t || t < d1)) return false;
+      if (d2 && t && t > d2) return false;
+      if (c && !normName(r.customer).includes(c)) return false;
+      if (iv && !String(r.no_invoice || "").toLowerCase().includes(iv)) return false;
+      return true;
+    }).sort((a, b) => (b.tanggal || "").localeCompare(a.tanggal || "") || String(a.no_invoice).localeCompare(String(b.no_invoice), "id"));
+  }, [rows, applied]);
+
+  const total = filtered.reduce((s, r) => s + (Number(r.nominal) || 0), 0);
+  const periodeLabel = `${fmtDMY(applied.dari)} – ${fmtDMY(applied.sampai)}`;
+
+  const apply = () => setApplied({ dari, sampai, cust: fCust, inv: fInv });
+  const reset = () => { const d1 = monthStart(), d2 = isoToday(); setDari(d1); setSampai(d2); setFCust(""); setFInv(""); setApplied({ dari: d1, sampai: d2, cust: "", inv: "" }); };
+
+  const openAdd = () => setForm({ mode: "add", tanggal: isoToday(), no_invoice: "", customer: "", nominal: "", keterangan: "" });
+  const openEdit = (r) => setForm({ mode: "edit", source: r.source, doc_id: r.doc_id, rid: r.rid, tanggal: (r.tanggal || "").slice(0, 10), no_invoice: r.no_invoice || "", customer: r.customer || "", nominal: String(r.nominal || ""), keterangan: r.keterangan || "" });
+
+  const saveForm = async () => {
+    if (!form) return;
+    const payload = {
+      tanggal: form.tanggal, no_invoice: (form.no_invoice || "").trim(), customer: (form.customer || "").trim(),
+      nominal: parseInt(String(form.nominal).replace(/[^0-9]/g, ""), 10) || 0, keterangan: (form.keterangan || "").trim(),
+    };
+    setBusy(true);
+    try {
+      if (form.mode === "add") { await axios.post(`${API}/admin/rekap-penagihan/manual`, payload, { headers }); flash("✓ Invoice manual ditambahkan"); }
+      else if (form.source === "Manual") { await axios.patch(`${API}/admin/rekap-penagihan/manual/${form.rid}`, payload, { headers }); flash("✓ Rekap manual diperbarui"); }
+      else { await axios.patch(`${API}/admin/rekap-penagihan/override/${form.doc_id}`, payload, { headers }); flash("✓ Koreksi rekap disimpan — invoice asli tidak berubah"); }
+      setForm(null); reload();
+    } catch (e) { flash(e?.response?.data?.detail || "Gagal menyimpan"); }
+    finally { setBusy(false); }
+  };
+
+  const del = async (r) => {
+    const extra = r.source === "Otomatis" ? "\n\n(Invoice asli & Histori Dokumen TIDAK terhapus — hanya disembunyikan dari rekap.)" : "";
+    if (!window.confirm("Yakin ingin menghapus data ini dari Rekap Penagihan?" + extra)) return;
+    try {
+      if (r.source === "Manual") await axios.delete(`${API}/admin/rekap-penagihan/manual/${r.rid}`, { headers });
+      else await axios.post(`${API}/admin/rekap-penagihan/hidden/${r.doc_id}`, {}, { headers });
+      flash("✓ Dihapus dari rekap"); reload();
+    } catch (e) { flash("Gagal menghapus dari rekap"); }
+  };
+
+  const buildRows = () => filtered.map((r, i) => [i + 1, fmtDMY(r.tanggal), r.no_invoice || "-", r.customer || "-", r.nominal, r.source, r.keterangan || ""]);
+
+  const exportExcel = () => {
+    if (!filtered.length) { flash("Tidak ada data untuk diexport"); return; }
+    const cols = ["No", "Tanggal", "No Invoice", "Nama Pelanggan", "Nominal", "Sumber", "Keterangan"];
+    const esc = (v) => String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const head = `<tr><td colspan="7"><b>REKAP INVOICE SUDAH DITAGIH — PT Alyssa Auto Logistik</b></td></tr>`
+      + `<tr><td colspan="7">Periode: ${periodeLabel} · Jumlah: ${filtered.length} invoice · Total: Rp ${total.toLocaleString("id-ID")}</td></tr><tr><td></td></tr>`;
+    const body = buildRows().map((row) => `<tr>${row.map((c, idx) => `<td>${idx === 4 ? Number(c) : esc(c)}</td>`).join("")}</tr>`).join("");
+    const html = `<html><head><meta charset="utf-8"></head><body><table border="1">${head}<tr>${cols.map((c) => `<th>${c}</th>`).join("")}</tr>${body}</table></body></html>`;
+    const blob = new Blob(["﻿" + html], { type: "application/vnd.ms-excel" });
+    const url = URL.createObjectURL(blob); const a = document.createElement("a");
+    a.href = url; a.download = `Rekap_Invoice_${applied.dari}_sd_${applied.sampai}.xls`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    flash(`✓ ${filtered.length} baris diexport ke Excel`);
+  };
+
+  const cetakPDF = () => {
+    if (!filtered.length) { flash("Tidak ada data untuk dicetak"); return; }
+    const esc = (v) => String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const body = buildRows().map((row) => `<tr>${row.map((c, idx) => `<td class="${idx === 4 ? "r" : ""}">${idx === 4 ? ("Rp " + Number(c).toLocaleString("id-ID")) : esc(c)}</td>`).join("")}</tr>`).join("");
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Rekap Invoice ${applied.dari} sd ${applied.sampai}</title>`
+      + `<style>body{font-family:Arial,Helvetica,sans-serif;color:#111;padding:22px}h1{font-size:15px;margin:0}.meta{font-size:12px;color:#444;margin:6px 0 14px}`
+      + `table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #999;padding:5px 7px;text-align:left}th{background:#eee}.r{text-align:right}`
+      + `tfoot td{font-weight:bold;background:#f4f4f4}</style></head><body>`
+      + `<h1>REKAP INVOICE SUDAH DITAGIH — PT Alyssa Auto Logistik</h1>`
+      + `<div class="meta">Periode: ${periodeLabel} &middot; Jumlah: ${filtered.length} invoice &middot; Total: Rp ${total.toLocaleString("id-ID")} &middot; Dicetak: ${fmtDMY(isoToday())}</div>`
+      + `<table><thead><tr><th>No</th><th>Tanggal</th><th>No Invoice</th><th>Nama Pelanggan</th><th>Nominal</th><th>Sumber</th><th>Keterangan</th></tr></thead>`
+      + `<tbody>${body}</tbody>`
+      + `<tfoot><tr><td colspan="4">TOTAL (${filtered.length} invoice)</td><td class="r">Rp ${total.toLocaleString("id-ID")}</td><td colspan="2"></td></tr></tfoot></table>`
+      + `<script>window.onload=function(){setTimeout(function(){window.print();},300);}<\/script></body></html>`;
+    const w = window.open("", "_blank");
+    if (!w) { flash("Popup diblokir — izinkan popup untuk cetak PDF"); return; }
+    w.document.open(); w.document.write(html); w.document.close();
+  };
+
+  const cardS = { background: "#11161f", border: "1px solid #232a36", borderRadius: 12, padding: 16 };
+  const inpS = { background: "#0d1117", border: "1px solid #30363d", borderRadius: 8, color: "#e6edf3", padding: "8px 10px", fontSize: 13, boxSizing: "border-box", width: "100%" };
+  const lblS = { fontSize: 11, color: "#8b949e", fontWeight: 700, marginBottom: 4, display: "block", textTransform: "uppercase", letterSpacing: ".04em" };
+  const btnS = (bg, bd, fg) => ({ padding: "9px 15px", borderRadius: 8, border: `1px solid ${bd}`, background: bg, color: fg, cursor: "pointer", fontSize: 13, fontWeight: 700, whiteSpace: "nowrap" });
+
+  return (
+    <div style={{ maxWidth: 1120, margin: "0 auto", display: "flex", flexDirection: "column", gap: 14 }} data-testid="rekap-invoice-root">
+      {/* Filter */}
+      <div style={cardS}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12 }}>
+          <div><label style={lblS}>Dari Tanggal</label><input type="date" style={inpS} value={dari} onChange={(e) => setDari(e.target.value)} data-testid="rekap-dari" /></div>
+          <div><label style={lblS}>Sampai Tanggal</label><input type="date" style={inpS} value={sampai} onChange={(e) => setSampai(e.target.value)} data-testid="rekap-sampai" /></div>
+          <div><label style={lblS}>Nama Pelanggan (opsional)</label><input type="text" style={inpS} value={fCust} onChange={(e) => setFCust(e.target.value)} placeholder="cth: PT Maju" data-testid="rekap-cust" /></div>
+          <div><label style={lblS}>No. Invoice (opsional)</label><input type="text" style={inpS} value={fInv} onChange={(e) => setFInv(e.target.value)} placeholder="cth: INV-000123" data-testid="rekap-inv" /></div>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
+          <button style={btnS("#D4A847", "#D4A847", "#0a0e14")} onClick={apply} data-testid="rekap-tampilkan">🔍 Tampilkan / Tarik Data</button>
+          <button style={btnS("none", "#30363d", "#e6edf3")} onClick={reset} data-testid="rekap-reset">↺ Reset Filter</button>
+          <button style={btnS("none", "#2ea043", "#56d364")} onClick={openAdd} data-testid="rekap-add">+ Tambah Manual</button>
+          <div style={{ flex: 1 }} />
+          <button style={btnS("none", "#238636", "#3fb950")} onClick={exportExcel} data-testid="rekap-excel">⬇ Export Excel</button>
+          <button style={btnS("none", "#1f6feb", "#58a6ff")} onClick={cetakPDF} data-testid="rekap-pdf">🖨️ Cetak / PDF</button>
+        </div>
+      </div>
+
+      {/* Ringkasan */}
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ ...cardS, flex: "1 1 180px", padding: 14 }}>
+          <div style={{ fontSize: 11, color: "#8b949e", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em" }}>Periode</div>
+          <div style={{ fontSize: 15, color: "#e6edf3", fontWeight: 800, marginTop: 4 }} data-testid="rekap-periode">{periodeLabel}</div>
+        </div>
+        <div style={{ ...cardS, flex: "1 1 140px", padding: 14 }}>
+          <div style={{ fontSize: 11, color: "#8b949e", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em" }}>Jumlah Invoice</div>
+          <div style={{ fontSize: 22, color: "#e6edf3", fontWeight: 800, marginTop: 2 }} data-testid="rekap-count">{filtered.length}</div>
+        </div>
+        <div style={{ ...cardS, flex: "1 1 220px", padding: 14 }}>
+          <div style={{ fontSize: 11, color: "#8b949e", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em" }}>Total Nominal Invoice</div>
+          <div style={{ fontSize: 22, color: "#D4A847", fontWeight: 800, marginTop: 2 }} data-testid="rekap-total">Rp {total.toLocaleString("id-ID")}</div>
+        </div>
+      </div>
+
+      {/* Tabel */}
+      <div style={{ ...cardS, padding: 0, overflowX: "auto" }}>
+        {loading ? (
+          <div style={{ padding: 30, textAlign: "center", color: "#8b949e" }}>Memuat…</div>
+        ) : filtered.length === 0 ? (
+          <div style={{ padding: 30, textAlign: "center", color: "#8b949e" }}>Tidak ada invoice pada periode/filter ini.</div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 780 }}>
+            <thead>
+              <tr style={{ background: "#0d1117", color: "#8b949e", textAlign: "left" }}>
+                {["Tanggal", "No. Invoice", "Nama Pelanggan", "Nominal", "Sumber", "Keterangan", "Aksi"].map((h) => (
+                  <th key={h} style={{ padding: "10px 12px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 700, whiteSpace: "nowrap" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((r) => (
+                <tr key={r.key} style={{ borderTop: "1px solid #232a36", color: "#e6edf3" }} data-testid={`rekap-row-${r.key}`}>
+                  <td style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>{fmtDMY(r.tanggal)}</td>
+                  <td style={{ padding: "10px 12px", fontWeight: 700, whiteSpace: "nowrap" }}>{r.no_invoice || "—"}</td>
+                  <td style={{ padding: "10px 12px" }}>{r.customer || "—"}</td>
+                  <td style={{ padding: "10px 12px", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>Rp {Number(r.nominal).toLocaleString("id-ID")}</td>
+                  <td style={{ padding: "10px 12px" }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: r.source === "Manual" ? "#2a1f0d" : "#0d2a1f", color: r.source === "Manual" ? "#f0a742" : "#3fb950", border: `1px solid ${r.source === "Manual" ? "#7a5b12" : "#2ea043"}` }}>
+                      {r.source}{r.overridden ? " ✎" : ""}
+                    </span>
+                  </td>
+                  <td style={{ padding: "10px 12px", color: "#8b949e", maxWidth: 220 }}>{r.keterangan || "—"}</td>
+                  <td style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>
+                    <button style={{ ...btnS("none", "#30363d", "#58a6ff"), padding: "4px 10px", fontSize: 12 }} onClick={() => openEdit(r)} data-testid={`rekap-edit-${r.key}`}>Edit</button>
+                    <button style={{ ...btnS("none", "#7a2418", "#f85149"), padding: "4px 10px", fontSize: 12, marginLeft: 6 }} onClick={() => del(r)} data-testid={`rekap-del-${r.key}`}>Hapus</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div style={{ fontSize: 11.5, color: "#8b949e" }}>
+        <b style={{ color: "#3fb950" }}>Otomatis</b> = ditarik dari Histori Dokumen (invoice asli). <b style={{ color: "#f0a742" }}>Manual</b> = input tangan. Tanda ✎ = ada koreksi khusus rekap.
+        Hapus &amp; edit di sini <b>tidak</b> mengubah invoice/PO/Histori Dokumen asli.
+      </div>
+
+      {/* Form Modal */}
+      {form && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => !busy && setForm(null)}>
+          <div style={{ ...cardS, width: "100%", maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "#e6edf3", marginBottom: 4 }}>
+              {form.mode === "add" ? "+ Tambah Invoice Manual" : (form.source === "Manual" ? "Edit Invoice Manual" : "Koreksi Rekap (Otomatis)")}
+            </div>
+            {form.mode === "edit" && form.source === "Otomatis" && (
+              <div style={{ fontSize: 12, color: "#f0a742", background: "#2a1f0d", border: "1px solid #7a5b12", borderRadius: 8, padding: "8px 10px", margin: "6px 0 10px" }}>
+                Koreksi ini hanya untuk rekap. Invoice &amp; Histori Dokumen asli tidak berubah.
+              </div>
+            )}
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
+              <div><label style={lblS}>Tanggal Ditagih</label><input type="date" style={inpS} value={form.tanggal} onChange={(e) => setForm((f) => ({ ...f, tanggal: e.target.value }))} data-testid="rekap-f-tanggal" /></div>
+              <div><label style={lblS}>No. Invoice</label><input type="text" style={inpS} value={form.no_invoice} onChange={(e) => setForm((f) => ({ ...f, no_invoice: e.target.value }))} placeholder="INV-000123" data-testid="rekap-f-inv" /></div>
+              <div><label style={lblS}>Nama Pelanggan</label><input type="text" style={inpS} value={form.customer} onChange={(e) => setForm((f) => ({ ...f, customer: e.target.value }))} placeholder="PT Maju Jaya" data-testid="rekap-f-cust" /></div>
+              <div><label style={lblS}>Nominal Invoice</label><input type="text" inputMode="numeric" style={inpS} value={form.nominal} onChange={(e) => setForm((f) => ({ ...f, nominal: e.target.value.replace(/[^0-9]/g, "") }))} placeholder="0" data-testid="rekap-f-nominal" /></div>
+              <div><label style={lblS}>Keterangan (opsional)</label><input type="text" style={inpS} value={form.keterangan} onChange={(e) => setForm((f) => ({ ...f, keterangan: e.target.value }))} data-testid="rekap-f-ket" /></div>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 16, justifyContent: "flex-end" }}>
+              <button style={btnS("none", "#30363d", "#e6edf3")} onClick={() => setForm(null)} disabled={busy}>Batal</button>
+              <button style={btnS("#D4A847", "#D4A847", "#0a0e14")} onClick={saveForm} disabled={busy} data-testid="rekap-f-save">{busy ? "Menyimpan…" : "Simpan"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toast && <div style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", background: "#161b22", border: "1px solid #30363d", color: "#e6edf3", padding: "10px 18px", borderRadius: 10, zIndex: 300, fontSize: 13, fontWeight: 600 }}>{toast}</div>}
+    </div>
+  );
+}
 
 function TagihanHariIni({ headers, onBack }) {
   const localToday = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
