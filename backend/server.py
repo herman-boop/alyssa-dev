@@ -89,7 +89,10 @@ def _validate_env_on_startup() -> None:
     """Production env hygiene — log warnings for unsafe defaults. Non-fatal."""
     warnings = []
     pin = (os.environ.get("ADMIN_PIN") or "").strip()
-    if not _admin_locked():
+    # Cek inline (jangan panggil _admin_locked() di sini — fungsi itu didefinisikan
+    # SETELAH _validate_env_on_startup() dipanggil, jadi bakal NameError saat import).
+    admin_locked = (os.environ.get("ADMIN_LOCK") or "").strip().lower() in ("1", "true", "yes", "on")
+    if not admin_locked:
         warnings.append("[ENV] Admin OPEN (no password). Set ADMIN_LOCK=1 + ADMIN_PIN=<pin> to lock.")
     elif not pin:
         warnings.append("[ENV] ADMIN_LOCK on but ADMIN_PIN not set — admin still OPEN. Set ADMIN_PIN to lock.")
