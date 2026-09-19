@@ -3406,7 +3406,6 @@ function RekapInvoiceDitagih({ headers }) {
   const [sampai, setSampai] = useState(isoToday);
   const [fCust, setFCust] = useState("");
   const [fInv, setFInv] = useState("");
-  const [applied, setApplied] = useState(() => ({ dari: monthStart(), sampai: isoToday(), cust: "", inv: "" }));
   const [toast, setToast] = useState("");
   const [form, setForm] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -3448,24 +3447,24 @@ function RekapInvoiceDitagih({ headers }) {
     return [...auto, ...man];
   }, [autoItems, manual, hidden, overrides]);
 
+  // Filter LIVE — otomatis nyaring begitu tanggal/nama/no.invoice diketik/diubah,
+  // tanpa harus klik tombol dulu (mirip pencarian Mekari).
   const filtered = useMemo(() => {
-    const { dari: d1, sampai: d2, cust, inv } = applied;
-    const c = normName(cust), iv = (inv || "").toLowerCase().trim();
+    const c = normName(fCust), iv = (fInv || "").toLowerCase().trim();
     return rows.filter((r) => {
       const t = (r.tanggal || "").slice(0, 10);
-      if (d1 && (!t || t < d1)) return false;
-      if (d2 && t && t > d2) return false;
+      if (dari && (!t || t < dari)) return false;
+      if (sampai && t && t > sampai) return false;
       if (c && !normName(r.customer).includes(c)) return false;
       if (iv && !String(r.no_invoice || "").toLowerCase().includes(iv)) return false;
       return true;
     }).sort((a, b) => (b.tanggal || "").localeCompare(a.tanggal || "") || String(a.no_invoice).localeCompare(String(b.no_invoice), "id"));
-  }, [rows, applied]);
+  }, [rows, dari, sampai, fCust, fInv]);
 
   const total = filtered.reduce((s, r) => s + (Number(r.nominal) || 0), 0);
-  const periodeLabel = `${fmtDMY(applied.dari)} – ${fmtDMY(applied.sampai)}`;
+  const periodeLabel = `${fmtDMY(dari)} – ${fmtDMY(sampai)}`;
 
-  const apply = () => setApplied({ dari, sampai, cust: fCust, inv: fInv });
-  const reset = () => { const d1 = monthStart(), d2 = isoToday(); setDari(d1); setSampai(d2); setFCust(""); setFInv(""); setApplied({ dari: d1, sampai: d2, cust: "", inv: "" }); };
+  const reset = () => { setDari(monthStart()); setSampai(isoToday()); setFCust(""); setFInv(""); };
 
   const openAdd = () => setForm({ mode: "add", tanggal: isoToday(), no_invoice: "", customer: "", nominal: "", keterangan: "" });
   const openEdit = (r) => setForm({ mode: "edit", source: r.source, doc_id: r.doc_id, rid: r.rid, tanggal: (r.tanggal || "").slice(0, 10), no_invoice: r.no_invoice || "", customer: r.customer || "", nominal: String(r.nominal || ""), keterangan: r.keterangan || "" });
@@ -3508,7 +3507,7 @@ function RekapInvoiceDitagih({ headers }) {
     const html = `<html><head><meta charset="utf-8"></head><body><table border="1">${head}<tr>${cols.map((c) => `<th>${c}</th>`).join("")}</tr>${body}</table></body></html>`;
     const blob = new Blob(["﻿" + html], { type: "application/vnd.ms-excel" });
     const url = URL.createObjectURL(blob); const a = document.createElement("a");
-    a.href = url; a.download = `Rekap_Invoice_${applied.dari}_sd_${applied.sampai}.xls`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    a.href = url; a.download = `Rekap_Invoice_${dari}_sd_${sampai}.xls`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
     flash(`✓ ${filtered.length} baris diexport ke Excel`);
   };
 
@@ -3516,7 +3515,7 @@ function RekapInvoiceDitagih({ headers }) {
     if (!filtered.length) { flash("Tidak ada data untuk dicetak"); return; }
     const esc = (v) => String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     const body = buildRows().map((row) => `<tr>${row.map((c, idx) => `<td class="${idx === 4 ? "r" : ""}">${idx === 4 ? ("Rp " + Number(c).toLocaleString("id-ID")) : esc(c)}</td>`).join("")}</tr>`).join("");
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Rekap Invoice ${applied.dari} sd ${applied.sampai}</title>`
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Rekap Invoice ${dari} sd ${sampai}</title>`
       + `<style>body{font-family:Arial,Helvetica,sans-serif;color:#111;padding:22px}h1{font-size:15px;margin:0}.meta{font-size:12px;color:#444;margin:6px 0 14px}`
       + `table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #999;padding:5px 7px;text-align:left}th{background:#eee}.r{text-align:right}`
       + `tfoot td{font-weight:bold;background:#f4f4f4}</style></head><body>`
@@ -3546,8 +3545,9 @@ function RekapInvoiceDitagih({ headers }) {
           <div><label style={lblS}>Nama Pelanggan (opsional)</label><input type="text" style={inpS} value={fCust} onChange={(e) => setFCust(e.target.value)} placeholder="cth: PT Maju" data-testid="rekap-cust" /></div>
           <div><label style={lblS}>No. Invoice (opsional)</label><input type="text" style={inpS} value={fInv} onChange={(e) => setFInv(e.target.value)} placeholder="cth: INV-000123" data-testid="rekap-inv" /></div>
         </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
-          <button style={btnS("#D4A847", "#D4A847", "#0a0e14")} onClick={apply} data-testid="rekap-tampilkan">🔍 Tampilkan / Tarik Data</button>
+        <div style={{ fontSize: 11.5, color: "#8b949e", marginTop: 8 }}>Ketik nama pelanggan / no. invoice — hasil <b style={{ color: "#3fb950" }}>otomatis tersaring</b>. Tombol di bawah cuma buat menarik data terbaru dari server.</div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+          <button style={btnS("#D4A847", "#D4A847", "#0a0e14")} onClick={reload} data-testid="rekap-tampilkan">🔄 Muat Ulang Data</button>
           <button style={btnS("none", "#30363d", "#e6edf3")} onClick={reset} data-testid="rekap-reset">↺ Reset Filter</button>
           <button style={btnS("none", "#2ea043", "#56d364")} onClick={openAdd} data-testid="rekap-add">+ Tambah Manual</button>
           <div style={{ flex: 1 }} />
