@@ -3080,6 +3080,22 @@ const KONTAK_LS_KEY = "aal_contacts_v1";
 function loadContacts() { try { const a = JSON.parse(localStorage.getItem(KONTAK_LS_KEY) || "[]"); return Array.isArray(a) ? a : []; } catch { return []; } }
 function saveContacts(a) { try { localStorage.setItem(KONTAK_LS_KEY, JSON.stringify(a)); } catch {} }
 function normName(s) { return String(s || "").toLowerCase().replace(/[.,]/g, "").replace(/\s+/g, " ").trim(); }
+// Buang kata generik (PT/CV/Tbk/dst) biar banding nama fokus ke inti —
+// "PT Transkon" vs "PT Transkon Jaya Tbk" jadi kedeteksi MIRIP.
+function stripBiz(s) { return normName(s).replace(/\b(pt|cv|ud|tbk|persero|the)\b/g, " ").replace(/\s+/g, " ").trim(); }
+function similarName(a, b) {
+  const A = stripBiz(a), B = stripBiz(b);
+  if (!A || !B) return false;
+  if (A === B) return true;
+  if (A.length >= 4 && B.length >= 4 && (A.includes(B) || B.includes(A))) return true;
+  const ta = A.split(" ").filter((w) => w.length >= 3);
+  const tb = B.split(" ").filter((w) => w.length >= 3);
+  if (ta.length && tb.length) {
+    const [small, bigSet] = ta.length <= tb.length ? [ta, new Set(tb)] : [tb, new Set(ta)];
+    if (small.every((w) => bigSet.has(w))) return true; // semua kata inti yg lebih pendek ada di yg panjang
+  }
+  return false;
+}
 const KONTAK_EMPTY = { nama: "", perusahaan: "", no_hp: "", email: "", alamat: "", catatan: "" };
 
 function KontakBox({ headers }) {
@@ -3125,6 +3141,14 @@ function KontakBox({ headers }) {
     return all.find((c) => c.jenis === jns && normName(c.nama) === k) || null;
   };
 
+  // Kontak dengan nama MIRIP (bukan sama persis) — cegah "PT Transkon" vs
+  // "PT Transkon Jaya Tbk" jadi 2 entri beda, biar tarik data by nama konsisten.
+  const findSimilarContacts = (nama, jns, excludeId) => {
+    const k = normName(nama);
+    if (!k) return [];
+    return all.filter((c) => c.jenis === jns && c.id !== excludeId && normName(c.nama) !== k && similarName(c.nama, nama));
+  };
+
   const saveEdit = async () => {
     const nama = (edit.nama || "").trim();
     if (!nama) { flash("Nama wajib diisi"); return; }
@@ -3142,6 +3166,19 @@ function KontakBox({ headers }) {
         );
         if (ok) { setEdit({ ...match }); flash("Buka kontak yang sudah ada — edit di sini biar tidak dobel"); return; }
         // Batal → user sadar & sengaja bikin dobel: lanjut simpan.
+      } else {
+        // Belum ada yang sama persis, tapi mungkin MIRIP → kasih peringatan dulu.
+        const sim = findSimilarContacts(nama, jns);
+        if (sim.length) {
+          const ok = window.confirm(
+            `⚠️ Nama "${nama}" MIRIP dengan kontak yang sudah ada:\n\n` +
+            sim.slice(0, 6).map((c) => `• ${c.nama}${c.no_hp ? ` · ${c.no_hp}` : ""}`).join("\n") +
+            `\n\nBiar data gampang ditarik nanti (per nama pelanggan/supplier), sebaiknya pakai yang sudah ada.\n\n` +
+            `OK = tetap simpan sebagai kontak BARU\n` +
+            `Batal = jangan simpan dulu (cek yang sudah ada)`
+          );
+          if (!ok) return; // batal → biar user cek/pilih yang sudah ada
+        }
       }
     }
     const payload = { nama, jenis: jns, perusahaan: edit.perusahaan || "", no_hp: edit.no_hp || "", email: edit.email || "", alamat: edit.alamat || "", catatan: edit.catatan || "" };
@@ -3290,14 +3327,31 @@ function KontakBox({ headers }) {
             <div className="adm-modal-body" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {(() => {
                 if (edit.id) return null;
-                const match = findDupContact(edit.nama || "", edit.jenis || jenis);
-                if (!match) return null;
+                const jns = edit.jenis || jenis;
+                const match = findDupContact(edit.nama || "", jns);
+                const sim = match ? [] : findSimilarContacts(edit.nama || "", jns);
+                if (!match && !sim.length) return null;
                 return (
-                  <div style={{ background: "#2a2410", border: "1px solid #7a5c12", borderRadius: 8, padding: "9px 11px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }} data-testid="kontak-dup-warn">
-                    <div style={{ fontSize: 12, color: "#e6b450", fontWeight: 700, flex: 1, minWidth: 160 }}>
-                      ⚠️ Nama ini sudah ada: <b style={{ color: "#fff" }}>{match.nama}</b>{match.no_hp ? ` · ${match.no_hp}` : ""}. Jangan dibikin dobel.
-                    </div>
-                    <button className="adm-btn adm-btn-xs" style={{ background: "#1f6feb", color: "#fff", border: "none" }} onClick={() => setEdit({ ...match })} data-testid="kontak-dup-open">✏️ Buka yang sudah ada</button>
+                  <div style={{ background: "#2a2410", border: "1px solid #7a5c12", borderRadius: 8, padding: "9px 11px", display: "flex", flexDirection: "column", gap: 8 }} data-testid="kontak-dup-warn">
+                    {match ? (
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                        <div style={{ fontSize: 12, color: "#e6b450", fontWeight: 700, flex: 1, minWidth: 160 }}>
+                          ⚠️ Nama ini <b style={{ color: "#fff" }}>SUDAH ADA</b>: {match.nama}{match.no_hp ? ` · ${match.no_hp}` : ""}. Jangan dibikin dobel.
+                        </div>
+                        <button className="adm-btn adm-btn-xs" style={{ background: "#1f6feb", color: "#fff", border: "none" }} onClick={() => setEdit({ ...match })} data-testid="kontak-dup-open">✏️ Buka yang sudah ada</button>
+                      </div>
+                    ) : (
+                      <>
+                        <div style={{ fontSize: 12, color: "#e6b450", fontWeight: 700 }}>⚠️ Mirip dengan kontak yang sudah ada — cek biar tidak dobel:</div>
+                        {sim.slice(0, 4).map((c) => (
+                          <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                            <span style={{ fontSize: 12, color: "#fff", fontWeight: 600, flex: 1, minWidth: 140 }}>• {c.nama}{c.no_hp ? ` · ${c.no_hp}` : ""}</span>
+                            <button className="adm-btn adm-btn-xs" style={{ background: "#1f6feb", color: "#fff", border: "none" }} onClick={() => setEdit({ ...c })} data-testid={`kontak-sim-open-${c.id}`}>Pakai ini</button>
+                          </div>
+                        ))}
+                        {sim.length > 4 && <div style={{ fontSize: 11, color: "#b8a15a" }}>+{sim.length - 4} lagi…</div>}
+                      </>
+                    )}
                   </div>
                 );
               })()}
