@@ -6307,6 +6307,32 @@ async def attach_supplier_payment_bukti(
     return {"ok": True, "bukti_url": bukti_url, "updated": n}
 
 
+@api_router.delete("/admin/suppliers/{supplier_id}/payments/{txn_key}", dependencies=[Depends(require_admin_pin)])
+async def delete_supplier_payment_txn(supplier_id: str, txn_key: str):
+    """Hapus 1 TRANSAKSI pembayaran (1 transfer) dari riwayat — termasuk semua
+    baris alokasinya ke beberapa unit. `txn_key` = batch_id (transfer ke banyak
+    unit) atau id payment tunggal. Dipakai admin buat batalin pembayaran yang
+    salah input (mis. salah tanggal). Sisa tiap unit otomatis kehitung ulang.
+    TIDAK menyentuh tagihan/unit/supplier — cuma record payment yang dihapus."""
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    jobs = doc.get("jobs") or []
+    removed = 0
+    for j in jobs:
+        before = j.get("payments") or []
+        if not before:
+            continue
+        after = [p for p in before if not (p.get("batch_id") == txn_key or p.get("id") == txn_key)]
+        if len(after) != len(before):
+            removed += len(before) - len(after)
+            j["payments"] = after
+    if removed == 0:
+        raise HTTPException(404, "Transaksi pembayaran tidak ditemukan")
+    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
+    return {"ok": True, "txn_key": txn_key, "removed": removed}
+
+
 @api_router.post("/admin/suppliers/{supplier_id}/jobs/{job_id}/tambahan", dependencies=[Depends(require_admin_pin)])
 async def add_supplier_job_tambahan(supplier_id: str, job_id: str, body: dict = Body(...)):
     """Tambah 1 biaya tambahan ke unit (keterangan free-text + nominal). Boleh lebih

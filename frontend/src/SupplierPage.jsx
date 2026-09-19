@@ -885,6 +885,7 @@ export default function SupplierPage() {
   }, [jobs]);
   const [txnDetail, setTxnDetail] = useState(null);
   const [txnBuktiSaving, setTxnBuktiSaving] = useState(false);
+  const [txnDeleting, setTxnDeleting] = useState(false);
   const txnBuktiRef = useRef();
   // Tempel/ganti bukti transfer ke transaksi yang sudah tercatat (telat upload).
   const uploadTxnBukti = async (file) => {
@@ -899,6 +900,26 @@ export default function SupplierPage() {
       flash("✓ Bukti transfer tersimpan");
     } catch (e) { flash(e?.response?.data?.detail || "Gagal upload bukti"); }
     finally { setTxnBuktiSaving(false); if (txnBuktiRef.current) txnBuktiRef.current.value = ""; }
+  };
+  // Hapus 1 transaksi pembayaran dari riwayat (mis. salah tanggal) — termasuk
+  // semua alokasinya ke beberapa unit. Sisa tiap unit otomatis kembali. Tagihan/
+  // unit/supplier TIDAK terhapus.
+  const deleteTxn = async () => {
+    if (!txnDetail || !selected) return;
+    if (!window.confirm(
+      `Hapus transaksi pembayaran ini dari riwayat?\n\n` +
+      `${fRp(txnDetail.total)} · ${fDate(txnDetail.tanggal)} · ${txnDetail.allocs.length} unit\n\n` +
+      `Semua alokasinya ikut terhapus & sisa tagihan tiap unit otomatis kembali.\n` +
+      `Tagihan/unit TIDAK terhapus — cuma catatan pembayaran ini.`
+    )) return;
+    setTxnDeleting(true);
+    try {
+      await axios.delete(`${API}/admin/suppliers/${selected.id}/payments/${encodeURIComponent(txnDetail.key)}`, { headers });
+      await reloadSelected(selected.id); setListRefreshTick((t) => t + 1);
+      setTxnDetail(null);
+      flash("🗑️ Transaksi pembayaran dihapus");
+    } catch (e) { flash(e?.response?.data?.detail || "Gagal hapus transaksi"); }
+    finally { setTxnDeleting(false); }
   };
 
   /* ═══ Dokumen: semua bukti ═══ */
@@ -1542,6 +1563,12 @@ export default function SupplierPage() {
             {txnBuktiSaving ? "Mengunggah…" : (txnDetail.bukti_url ? "🔄 Ganti Bukti Transfer" : "📎 Upload Bukti Transfer")}
           </button>
           {!txnDetail.bukti_url && <div style={{ fontSize: 11.5, color: C.mute, marginTop: 6, textAlign: "center" }}>Belum ada bukti — bisa diupload sekarang biar lengkap.</div>}
+          <button
+            style={{ width: "100%", marginTop: 12, padding: "10px 14px", borderRadius: 9, border: `1px solid ${C.red}`, background: "#2d1214", color: C.red, cursor: "pointer", fontSize: 13, fontWeight: 700 }}
+            disabled={txnDeleting} onClick={deleteTxn} data-testid="sup-txn-delete">
+            {txnDeleting ? "Menghapus…" : "🗑️ Hapus Transaksi Ini"}
+          </button>
+          <div style={{ fontSize: 11.5, color: C.mute, marginTop: 6, textAlign: "center" }}>Buat batalin pembayaran yang salah input (mis. salah tanggal). Sisa tagihan unit otomatis kembali; tagihan/unit tidak terhapus.</div>
         </Modal>
       )}
 
