@@ -5767,6 +5767,7 @@ class SupplierPatchBody(BaseModel):
     jenis: Optional[str] = None
     no_hp: Optional[str] = None
     catatan: Optional[str] = None
+    ringkasan_catatan: Optional[str] = None   # keterangan yang tampil di PDF Ringkasan (mis. selisih/hutang)
 
 
 class SupplierJobBody(BaseModel):
@@ -5870,6 +5871,7 @@ async def patch_supplier(supplier_id: str, body: SupplierPatchBody):
     if body.jenis is not None: upd["jenis"] = body.jenis.strip()
     if body.no_hp is not None: upd["no_hp"] = body.no_hp.strip()
     if body.catatan is not None: upd["catatan"] = body.catatan.strip()
+    if body.ringkasan_catatan is not None: upd["ringkasan_catatan"] = body.ringkasan_catatan.strip()[:800]
     if not upd:
         raise HTTPException(400, "Tidak ada field yang diupdate")
     res = await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": upd})

@@ -39,6 +39,7 @@ export function printSupplierA4(sup, jobsOverride, noDocOverride, tglOverride) {
   const gSisa = gHarga - gBayar;          // SISA = Total Tagihan - Total Pembayaran
   const over = gSisa < 0;                 // pembayaran > tagihan -> Lebih Bayar
   const lunas = gHarga > 0 && gSisa === 0;
+  const ketRingkasan = String(sup.ringkasan_catatan || "").trim();  // keterangan resmi di PDF
 
   // Grouping per Projek (existing dipertahankan).
   const projList = sup.projects || [];
@@ -174,6 +175,11 @@ export function printSupplierA4(sup, jobsOverride, noDocOverride, tglOverride) {
         Status: ${over ? "OVERPAYMENT" : lunas ? "LUNAS" : "BELUM LUNAS"}
       </div>
     </div>
+
+    ${ketRingkasan ? `<div class="avoid-break" style="margin-top:10px; border:1px solid #c9d2e0; border-radius:6px; overflow:hidden;">
+      <div style="background:#0A1E3F; color:#fff; font-size:9px; font-weight:700; letter-spacing:.6px; padding:5px 10px;">KETERANGAN</div>
+      <div style="padding:8px 10px; font-size:9.5px; color:#1a2233; line-height:1.55; white-space:pre-wrap;">${esc(ketRingkasan)}</div>
+    </div>` : ``}
 
     <div class="rps-note"><b>Catatan:</b> Ringkasan tagihan ke supplier. Sisa = Total Tagihan Supplier &minus; Total Pembayaran. Riwayat pembayaran = transaksi transfer aktual (1 transfer = 1 baris). Konfirmasi: <b>${DOC_BRAND.phone}</b>.</div>
     ${docFooter({ docNo: `Ringkasan ${noDoc}` })}
@@ -827,8 +833,8 @@ export default function SupplierPage() {
 
   /* ═══ Edit / hapus supplier (3-titik) ═══ */
   const [editOpen, setEditOpen] = useState(false);
-  const [editForm, setEditForm] = useState({ jenis: "", no_hp: "", catatan: "" });
-  const openEdit = () => { setEditForm({ jenis: selected.jenis || "", no_hp: selected.no_hp || "", catatan: selected.catatan || "" }); setEditOpen(true); setMenuOpen(false); };
+  const [editForm, setEditForm] = useState({ jenis: "", no_hp: "", catatan: "", ringkasan_catatan: "" });
+  const openEdit = () => { setEditForm({ jenis: selected.jenis || "", no_hp: selected.no_hp || "", catatan: selected.catatan || "", ringkasan_catatan: selected.ringkasan_catatan || "" }); setEditOpen(true); setMenuOpen(false); };
   const saveEdit = async () => {
     try { await axios.patch(`${API}/admin/suppliers/${selected.id}`, editForm, { headers }); setEditOpen(false); await reloadSelected(selected.id); flash("Supplier diupdate"); }
     catch (e) { flash(e?.response?.data?.detail || "Gagal update"); }
@@ -1518,6 +1524,13 @@ export default function SupplierPage() {
             <div><label style={L}>Jenis</label><input style={I} value={editForm.jenis} onChange={(e) => setEditForm((f) => ({ ...f, jenis: e.target.value }))} placeholder="mis. Jasa Supir" /></div>
             <div><label style={L}>No. HP</label><input style={I} value={editForm.no_hp} onChange={(e) => setEditForm((f) => ({ ...f, no_hp: e.target.value }))} /></div>
             <div><label style={L}>Catatan</label><input style={I} value={editForm.catatan} onChange={(e) => setEditForm((f) => ({ ...f, catatan: e.target.value }))} /></div>
+            <div>
+              <label style={L}>Catatan Ringkasan <span style={{ color: C.mute, fontWeight: 400 }}>(tampil di PDF)</span></label>
+              <textarea style={{ ...I, minHeight: 64, resize: "vertical" }} value={editForm.ringkasan_catatan}
+                onChange={(e) => setEditForm((f) => ({ ...f, ringkasan_catatan: e.target.value }))}
+                placeholder="mis. Selisih lebih Rp 200.000 dihitung hutang Fabli Ryanto ke kantor" />
+              <div style={{ fontSize: 11, color: C.mute, marginTop: 3 }}>Keterangan resmi yang muncul di bagian bawah Ringkasan saat dicetak/PDF (mis. selisih bayar, hutang, kompensasi).</div>
+            </div>
           </div>
         </Modal>
       )}
