@@ -10,7 +10,7 @@ import SelisihPage from "@/SelisihPage";
 import KompensasiPage from "@/KompensasiPage";
 import MobileVendorPayment from "@/MobileVendorPayment";
 import PermintaanHargaPage from "@/PermintaanHargaPage";
-import { DOC_BRAND, DOC_BASE_CSS, docHeader, docFooter, terbilangRupiah, nextDocNo, DOC_ENTITIES, getActiveEntityId, setActiveEntityId, getEntity } from "@/docTheme";
+import { DOC_BRAND, DOC_BASE_CSS, docHeader, docFooter, terbilangRupiah, nextDocNo, DOC_ENTITIES, DEFAULT_ENTITY_ID, getActiveEntityId, setActiveEntityId, getEntity } from "@/docTheme";
 import { printReport, saveReportPNG } from "@/reportDoc";
 import "@/App.css";
 import "@/Driver.css";
@@ -3382,7 +3382,11 @@ function KontakBox({ headers }) {
 ════════════════════════════════════════ */
 function saveDocHistory(rec, headers) {
   try {
-    axios.post(`${API}/admin/doc-history`, rec, { headers }).catch(() => {});
+    // Tandai entitas aktif (PT/CV) di dokumen BARU supaya bisa difilter di Histori.
+    // Additive & aman: hanya ditambahkan kalau belum ada, tidak mengubah data lama.
+    const meta = { ...(rec.meta || {}) };
+    if (!meta.entity_id) meta.entity_id = getActiveEntityId();
+    axios.post(`${API}/admin/doc-history`, { ...rec, meta }, { headers }).catch(() => {});
   } catch (e) { /* jangan sampai ganggu cetak */ }
 }
 
@@ -4001,13 +4005,21 @@ const DOC_HIST_BADGE = {
   jadwal_gabungan: { txt: "Jadwal Gabungan", bg: "rgba(201,151,58,0.20)", fg: "#e6c375" },
 };
 
+const HIST_PAGE_SIZE = 50;
 function HistoriDokumen({ headers }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState("");
+  const [filter, setFilter] = useState("");            // jenis (chip) — fetch server-side
   const [err, setErr] = useState("");
   const [priceRows, setPriceRows] = useState([]);   // Daftar Harga (job supplier lunas)
   const [priceQ, setPriceQ] = useState("");         // cari asal/tujuan
+
+  // Filter tambahan (client-side, hanya untuk tampilan — tidak mengubah data).
+  const [fEntity, setFEntity] = useState("all");     // all | pt-alyssa | cv-alyssa-trans
+  const [fDari, setFDari] = useState("");
+  const [fSampai, setFSampai] = useState("");
+  const [fQ, setFQ] = useState("");                  // no dokumen / customer / PO
+  const [page, setPage] = useState(1);
 
   const isPrice = filter === "__pricelist";
 
@@ -4018,8 +4030,10 @@ function HistoriDokumen({ headers }) {
         const { data } = await axios.get(`${API}/admin/suppliers/pricelist`, { headers });
         setPriceRows(data.items || []);
       } else {
-        const q = filter ? `?jenis=${encodeURIComponent(filter)}` : "";
-        const { data } = await axios.get(`${API}/admin/doc-history${q}`, { headers });
+        // limit dinaikkan supaya filter/pagination client punya cukup data terbaru.
+        const params = { limit: 1000 };
+        if (filter) params.jenis = filter;
+        const { data } = await axios.get(`${API}/admin/doc-history`, { headers, params });
         setItems(data.items || []);
       }
     } catch (e) {
@@ -4028,6 +4042,45 @@ function HistoriDokumen({ headers }) {
   }, [filter, headers]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Normalisasi pembacaan (backward-compatible): dokumen lama tanpa entity_id
+  // dianggap PT Alyssa (historis memang PT). Tanggal dokumen = tanggal invoice
+  // kalau ada, kalau tidak pakai created_at. PO ditarik dari lines existing.
+  const entityOf = (rec) => (rec.meta && rec.meta.entity_id) || DEFAULT_ENTITY_ID;
+  const docDate = (rec) => {
+    const ti = rec.meta && rec.meta.tanggalInvoice;
+    if (ti && /^\d{4}-\d{2}-\d{2}/.test(ti)) return ti.slice(0, 10);
+    if (rec.created_at) { try { return new Date(rec.created_at).toISOString().slice(0, 10); } catch { return ""; } }
+    return "";
+  };
+  const poOfRec = (rec) => (rec.lines || []).map((l) => (l.customer_po_number ?? l.po ?? "")).filter(Boolean).join(" ");
+  const searchBlob = (rec) => [
+    rec.no_dokumen, rec.meta && rec.meta.no_invoice, rec.customer, rec.meta && rec.meta.customer_nama,
+    rec.judul, (rec.order_ids || []).join(" "), poOfRec(rec),
+  ].filter(Boolean).join(" ").toLowerCase();
+
+  const filteredDocs = useMemo(() => {
+    const q = fQ.trim().toLowerCase();
+    return items.filter((rec) => {
+      if (fEntity !== "all" && entityOf(rec) !== fEntity) return false;
+      const d = docDate(rec);
+      if (fDari && (!d || d < fDari)) return false;
+      if (fSampai && (!d || d > fSampai)) return false;
+      if (q && !searchBlob(rec).includes(q)) return false;
+      return true;
+    });
+  }, [items, fEntity, fDari, fSampai, fQ]);
+
+  // Reset ke halaman 1 tiap filter berubah (termasuk jenis chip).
+  useEffect(() => { setPage(1); }, [fEntity, fDari, fSampai, fQ, filter]);
+  const totalPages = Math.max(1, Math.ceil(filteredDocs.length / HIST_PAGE_SIZE));
+  const pageSafe = Math.min(page, totalPages);
+  const pageItems = filteredDocs.slice((pageSafe - 1) * HIST_PAGE_SIZE, pageSafe * HIST_PAGE_SIZE);
+
+  const isoToday = () => new Date().toISOString().slice(0, 10);
+  const quickBulan = () => { const d = new Date(); setFDari(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`); setFSampai(isoToday()); };
+  const quickTahun = () => { const d = new Date(); setFDari(`${d.getFullYear()}-01-01`); setFSampai(isoToday()); };
+  const resetFilter = () => { setFEntity("all"); setFDari(""); setFSampai(""); setFQ(""); setFilter(""); setPage(1); };
 
   const reprint = async (rec0) => {
     // Ambil record lengkap (termasuk stempel yang di-exclude dari daftar).
@@ -4081,6 +4134,36 @@ function HistoriDokumen({ headers }) {
         <button className="adm-dochist-chip" onClick={load} title="Muat ulang" style={{ marginLeft: "auto" }}>↻</button>
       </div>
 
+      {!isPrice && (() => {
+        const inpS = { background: "#0d1117", border: "1px solid #30363d", borderRadius: 8, color: "#e6edf3", padding: "7px 9px", fontSize: 13, width: "100%", boxSizing: "border-box" };
+        const lblS = { fontSize: 10.5, color: "#8b949e", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 3, display: "block" };
+        const btnS = { padding: "7px 12px", borderRadius: 8, border: "1px solid #30363d", background: "none", color: "#e6edf3", cursor: "pointer", fontSize: 12.5, fontWeight: 700, whiteSpace: "nowrap" };
+        return (
+          <div data-testid="dochist-filterbar" style={{ background: "#11161f", border: "1px solid #232a36", borderRadius: 10, padding: 10, margin: "8px 0 12px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 8 }}>
+              <div>
+                <label style={lblS}>Entitas</label>
+                <select style={inpS} value={fEntity} onChange={(e) => setFEntity(e.target.value)} data-testid="dochist-entity">
+                  <option value="all">Semua Entitas</option>
+                  {Object.values(DOC_ENTITIES).map((en) => (<option key={en.id} value={en.id}>{en.name}</option>))}
+                </select>
+              </div>
+              <div><label style={lblS}>Dari Tanggal</label><input type="date" style={inpS} value={fDari} onChange={(e) => setFDari(e.target.value)} data-testid="dochist-dari" /></div>
+              <div><label style={lblS}>Sampai Tanggal</label><input type="date" style={inpS} value={fSampai} onChange={(e) => setFSampai(e.target.value)} data-testid="dochist-sampai" /></div>
+              <div><label style={lblS}>Cari (No. Dok / Customer / PO)</label><input type="text" style={inpS} value={fQ} onChange={(e) => setFQ(e.target.value)} placeholder="cth: INV-000123 / PT Maju / PO-77" data-testid="dochist-q" /></div>
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 10 }}>
+              <button style={btnS} onClick={quickBulan} data-testid="dochist-bulan">Bulan ini</button>
+              <button style={btnS} onClick={quickTahun} data-testid="dochist-tahun">Tahun ini</button>
+              <div style={{ flex: 1 }} />
+              <button style={{ ...btnS, borderColor: "#1f6feb", color: "#58a6ff" }} onClick={load} data-testid="dochist-apply">Terapkan Filter</button>
+              <button style={btnS} onClick={resetFilter} data-testid="dochist-reset">Reset Filter</button>
+            </div>
+            <div style={{ fontSize: 11.5, color: "#8b949e", marginTop: 8 }}>Filter berlaku langsung saat diubah. <b style={{ color: "#3fb950" }}>Terapkan Filter</b> = tarik data terbaru dari server. Filter ini hanya untuk tampilan — tidak mengubah dokumen.</div>
+          </div>
+        );
+      })()}
+
       {loading ? (
         <div className="adm-dochist-empty">Memuat…</div>
       ) : err ? (
@@ -4120,15 +4203,29 @@ function HistoriDokumen({ headers }) {
             );
           })()}
         </div>
-      ) : items.length === 0 ? (
+      ) : filteredDocs.length === 0 ? (
         <div className="adm-dochist-empty">
-          <div style={{ fontSize: 30, marginBottom: 8 }}>🗂️</div>
-          Belum ada dokumen tersimpan.<br />
-          <span style={{ fontSize: 12, opacity: 0.75 }}>Setiap kali kamu cetak Invoice atau Jadwal Pengiriman, otomatis muncul di sini.</span>
+          {items.length === 0 ? (
+            <>
+              <div style={{ fontSize: 30, marginBottom: 8 }}>🗂️</div>
+              Belum ada dokumen tersimpan.<br />
+              <span style={{ fontSize: 12, opacity: 0.75 }}>Setiap kali kamu cetak Invoice atau Jadwal Pengiriman, otomatis muncul di sini.</span>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 30, marginBottom: 8 }}>🔎</div>
+              Tidak ada dokumen yang cocok dengan filter.<br />
+              <span style={{ fontSize: 12, opacity: 0.75 }}>Coba ubah entitas / tanggal / kata kunci, atau klik Reset Filter.</span>
+            </>
+          )}
         </div>
       ) : (
+        <>
+        <div style={{ fontSize: 12.5, color: "#8b949e", margin: "0 2px 8px" }} data-testid="dochist-count">
+          <b style={{ color: "#3fb950" }}>{filteredDocs.length}</b> dokumen ditemukan{totalPages > 1 ? ` · halaman ${pageSafe} dari ${totalPages}` : ""}
+        </div>
         <div className="adm-dochist-list">
-          {items.map((rec) => {
+          {pageItems.map((rec) => {
             const badge = DOC_HIST_BADGE[rec.jenis] || { txt: rec.jenis_label || rec.jenis, bg: "rgba(255,255,255,0.08)", fg: "#cbd5e1" };
             return (
               <div key={rec.id} className="adm-dochist-row" data-testid="dochist-row">
@@ -4149,6 +4246,14 @@ function HistoriDokumen({ headers }) {
             );
           })}
         </div>
+        {totalPages > 1 && (
+          <div style={{ display: "flex", gap: 10, justifyContent: "center", alignItems: "center", marginTop: 12 }} data-testid="dochist-pager">
+            <button className="adm-btn adm-btn-ghost adm-dochist-btn" disabled={pageSafe <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>← Sebelumnya</button>
+            <span style={{ fontSize: 12.5, color: "#8b949e" }}>Halaman {pageSafe} / {totalPages}</span>
+            <button className="adm-btn adm-btn-ghost adm-dochist-btn" disabled={pageSafe >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>Berikutnya →</button>
+          </div>
+        )}
+        </>
       )}
     </div>
   );

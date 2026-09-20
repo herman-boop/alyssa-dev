@@ -1074,7 +1074,7 @@ async def list_doc_history(jenis: Optional[str] = None, limit: int = 300):
         "meta.withTax": 1, "meta.withPph23": 1, "meta.taxInclusive": 1,
         "meta.asal_kota": 1, "meta.tujuan_kota": 1, "meta.order_id": 1,
         "meta.pesan": 1, "meta.no_invoice": 1, "meta.customer_nama": 1,
-        "meta.ttdNama": 1, "meta.ttdJabatan": 1,
+        "meta.ttdNama": 1, "meta.ttdJabatan": 1, "meta.entity_id": 1,
     }
     items = []
     # allow_disk_use=True: record lama bawa stempel base64 gede, sort by created_at
