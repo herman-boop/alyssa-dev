@@ -362,9 +362,9 @@ export default function CustomerOrderForm() {
                                 <select className={`of-inp${!u.kondisi ? " of-inp--invalid" : ""}`} value={u.kondisi || ""}
                                   onChange={(e) => setUnit(i, "kondisi", e.target.value)}
                                   data-testid={`ord-kondisi-${i}`}
-                                  style={!u.kondisi ? { borderColor: "#fdba74", background: "#fff7ed" } : undefined}>
-                                  <option value="" disabled>— Pilih Baru / Bekas —</option>
-                                  {KONDISI_OPTIONS.map((k) => <option key={k} value={k}>{k}</option>)}
+                                  style={{ colorScheme: "light", color: "#111827", ...(!u.kondisi ? { borderColor: "#fdba74", background: "#fff7ed" } : { background: "#ffffff" }) }}>
+                                  <option value="" disabled style={{ color: "#6b7280", background: "#ffffff" }}>— Pilih Baru / Bekas —</option>
+                                  {KONDISI_OPTIONS.map((k) => <option key={k} value={k} style={{ color: "#111827", background: "#ffffff" }}>{k}</option>)}
                                 </select>
                               </Field>
                               <Field label="Catatan Unit" full hint="Opsional — kondisi khusus / kelengkapan unit ini.">
