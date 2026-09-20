@@ -10,7 +10,8 @@ import SelisihPage from "@/SelisihPage";
 import KompensasiPage from "@/KompensasiPage";
 import MobileVendorPayment from "@/MobileVendorPayment";
 import PermintaanHargaPage from "@/PermintaanHargaPage";
-import { DOC_BRAND, DOC_BASE_CSS, docHeader, docFooter, terbilangRupiah, nextDocNo } from "@/docTheme";
+import { DOC_BRAND, DOC_BASE_CSS, docHeader, docFooter, terbilangRupiah, nextDocNo, DOC_ENTITIES, getActiveEntityId, setActiveEntityId, getEntity } from "@/docTheme";
+import { printReport, saveReportPNG } from "@/reportDoc";
 import "@/App.css";
 import "@/Driver.css";
 import "@/Admin.css";
@@ -3460,6 +3461,7 @@ function RekapInvoiceDitagih({ headers }) {
   const [sampai, setSampai] = useState(isoToday);
   const [fCust, setFCust] = useState("");
   const [fInv, setFInv] = useState("");
+  const [entityId, setEntityId] = useState(getActiveEntityId);
   const [toast, setToast] = useState("");
   const [form, setForm] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -3565,23 +3567,47 @@ function RekapInvoiceDitagih({ headers }) {
     flash(`✓ ${filtered.length} baris diexport ke Excel`);
   };
 
-  const cetakPDF = () => {
+  // ── Output dokumen resmi A4 (reusable report template, ikut entitas aktif) ──
+  const dmyFile = (iso) => { if (!iso || !/^\d{4}-\d{2}-\d{2}/.test(iso)) return "-"; const [y, m, d] = iso.slice(0, 10).split("-"); return `${d}-${m}-${y}`; };
+  const reportPayload = () => ({
+    entity: getEntity(entityId),
+    title: "REKAP INVOICE SUDAH DITAGIH",
+    periode: periodeLabel,
+    orientation: "portrait",
+    filename: `Rekap-Invoice-Ditagih_${dmyFile(dari)}_sd_${dmyFile(sampai)}`,
+    columns: [
+      { label: "No", align: "center", width: "32px" },
+      { label: "Tanggal", width: "78px" },
+      { label: "No. Invoice", width: "128px" },
+      { label: "Nama Pelanggan" },
+      { label: "Nominal", money: true, width: "120px" },
+      { label: "Keterangan" },
+    ],
+    rows: filtered.map((r, i) => [i + 1, fmtDMY(r.tanggal), r.no_invoice || "-", r.customer || "-", Number(r.nominal) || 0, r.keterangan || "-"]),
+    totalRow: [
+      { colspan: 4, text: `TOTAL (${filtered.length} invoice)`, align: "right" },
+      { money: true, value: total },
+      { text: "" },
+    ],
+    footNote: "Laporan invoice yang sudah ditagih pada periode di atas. Nominal dalam Rupiah. Dokumen ini dihasilkan otomatis dari Histori Dokumen.",
+  });
+
+  const cetakA4 = () => {
     if (!filtered.length) { flash("Tidak ada data untuk dicetak"); return; }
-    const esc = (v) => String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    const body = buildRows().map((row) => `<tr>${row.map((c, idx) => `<td class="${idx === 4 ? "r" : ""}">${idx === 4 ? ("Rp " + Number(c).toLocaleString("id-ID")) : esc(c)}</td>`).join("")}</tr>`).join("");
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Rekap Invoice ${dari} sd ${sampai}</title>`
-      + `<style>body{font-family:Arial,Helvetica,sans-serif;color:#111;padding:22px}h1{font-size:15px;margin:0}.meta{font-size:12px;color:#444;margin:6px 0 14px}`
-      + `table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #999;padding:5px 7px;text-align:left}th{background:#eee}.r{text-align:right}`
-      + `tfoot td{font-weight:bold;background:#f4f4f4}</style></head><body>`
-      + `<h1>REKAP INVOICE SUDAH DITAGIH — PT Alyssa Auto Logistik</h1>`
-      + `<div class="meta">Periode: ${periodeLabel} &middot; Jumlah: ${filtered.length} invoice &middot; Total: Rp ${total.toLocaleString("id-ID")} &middot; Dicetak: ${fmtDMY(isoToday())}</div>`
-      + `<table><thead><tr><th>No</th><th>Tanggal</th><th>No Invoice</th><th>Nama Pelanggan</th><th>Nominal</th><th>Sumber</th><th>Keterangan</th></tr></thead>`
-      + `<tbody>${body}</tbody>`
-      + `<tfoot><tr><td colspan="4">TOTAL (${filtered.length} invoice)</td><td class="r">Rp ${total.toLocaleString("id-ID")}</td><td colspan="2"></td></tr></tfoot></table>`
-      + `<script>window.onload=function(){setTimeout(function(){window.print();},300);}<\/script></body></html>`;
-    const w = window.open("", "_blank");
-    if (!w) { flash("Popup diblokir — izinkan popup untuk cetak PDF"); return; }
-    w.document.open(); w.document.write(html); w.document.close();
+    if (!printReport(reportPayload())) flash("Popup diblokir — izinkan popup untuk cetak");
+  };
+  const simpanPDF = () => {
+    if (!filtered.length) { flash("Tidak ada data untuk disimpan"); return; }
+    if (!printReport(reportPayload())) { flash("Popup diblokir — izinkan popup untuk simpan PDF"); return; }
+    flash("Pada dialog cetak, pilih tujuan \"Simpan sebagai PDF\"");
+  };
+  const [pngBusy, setPngBusy] = useState(false);
+  const simpanPNG = async () => {
+    if (!filtered.length) { flash("Tidak ada data untuk disimpan"); return; }
+    setPngBusy(true);
+    try { const n = await saveReportPNG(reportPayload()); flash(`✓ Gambar tersimpan (${n} halaman)`); }
+    catch (e) { flash("Gagal membuat gambar"); }
+    finally { setPngBusy(false); }
   };
 
   const cardS = { background: "#11161f", border: "1px solid #232a36", borderRadius: 12, padding: 16 };
@@ -3606,7 +3632,22 @@ function RekapInvoiceDitagih({ headers }) {
           <button style={btnS("none", "#2ea043", "#56d364")} onClick={openAdd} data-testid="rekap-add">+ Tambah Manual</button>
           <div style={{ flex: 1 }} />
           <button style={btnS("none", "#238636", "#3fb950")} onClick={exportExcel} data-testid="rekap-excel">⬇ Export Excel</button>
-          <button style={btnS("none", "#1f6feb", "#58a6ff")} onClick={cetakPDF} data-testid="rekap-pdf">🖨️ Cetak / PDF</button>
+        </div>
+        {/* Output dokumen resmi A4 — kop mengikuti entitas terpilih */}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10, alignItems: "center", borderTop: "1px solid #232a36", paddingTop: 12 }}>
+          <label style={{ ...lblS, margin: 0 }}>Kop / Entitas</label>
+          <select
+            value={entityId}
+            onChange={(e) => { setEntityId(e.target.value); setActiveEntityId(e.target.value); }}
+            style={{ ...inpS, width: "auto", minWidth: 220 }}
+            data-testid="rekap-entity"
+          >
+            {Object.values(DOC_ENTITIES).map((en) => (<option key={en.id} value={en.id}>{en.name}</option>))}
+          </select>
+          <div style={{ flex: 1 }} />
+          <button style={btnS("none", "#1f6feb", "#58a6ff")} onClick={cetakA4} data-testid="rekap-cetak-a4">🖨️ Cetak A4</button>
+          <button style={btnS("none", "#8957e5", "#b083f0")} onClick={simpanPDF} data-testid="rekap-pdf">📄 Simpan PDF</button>
+          <button style={btnS("none", "#bb8009", "#e3b341")} onClick={simpanPNG} disabled={pngBusy} data-testid="rekap-png">{pngBusy ? "Membuat…" : "🖼️ Simpan Gambar (PNG)"}</button>
         </div>
       </div>
 

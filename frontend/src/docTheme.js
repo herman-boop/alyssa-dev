@@ -29,6 +29,43 @@ export const DOC_BRAND = {
   paperMist: "#f7f8fa",
 };
 
+/* ============================================================
+   ENTITAS PERUSAHAAN — kop/header/footer dokumen mengikuti entitas
+   yang sedang aktif (JANGAN hard-code satu PT di semua laporan).
+   Dipakai oleh reusable report template (reportDoc.js) supaya kop A4,
+   PDF, & PNG semuanya ikut entitas terpilih.
+   Catatan: detail resmi CV (alamat/NPWP) mengikuti kantor yang sama —
+   silakan dikoreksi kalau berbeda. NPWP kosong = baris NPWP tidak dicetak.
+   ============================================================ */
+export const DOC_ENTITIES = {
+  "pt-alyssa": {
+    id: "pt-alyssa",
+    name: "PT. ALYSSA AUTO LOGISTIK",
+    footerName: "PT Alyssa Auto Logistik",
+    tagline: DOC_BRAND.tagline,
+    address: DOC_BRAND.address,
+    phone: DOC_BRAND.phone,
+    npwp: DOC_BRAND.npwp,
+    logo: "/logo.png",
+  },
+  "cv-alyssa-trans": {
+    id: "cv-alyssa-trans",
+    name: "CV. ALYSSA TRANS UTAMA",
+    footerName: "CV Alyssa Trans Utama",
+    tagline: DOC_BRAND.tagline,
+    address: DOC_BRAND.address,
+    phone: DOC_BRAND.phone,
+    npwp: "",
+    logo: "/logo.png",
+  },
+};
+export const DEFAULT_ENTITY_ID = "pt-alyssa";
+const ENTITY_LS_KEY = "aal_active_entity_v1";
+export function getEntity(id) { return DOC_ENTITIES[id] || DOC_ENTITIES[DEFAULT_ENTITY_ID]; }
+export function getActiveEntityId() { try { return localStorage.getItem(ENTITY_LS_KEY) || DEFAULT_ENTITY_ID; } catch { return DEFAULT_ENTITY_ID; } }
+export function setActiveEntityId(id) { try { if (DOC_ENTITIES[id]) localStorage.setItem(ENTITY_LS_KEY, id); } catch {} }
+export function getActiveEntity() { return getEntity(getActiveEntityId()); }
+
 export const DOC_BASE_CSS = `
   * { margin:0; padding:0; box-sizing:border-box; }
   /* Paksa browser mempertahankan warna asli (navy header, badge, zebra) saat
