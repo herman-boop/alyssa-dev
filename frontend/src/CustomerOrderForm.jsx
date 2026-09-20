@@ -139,7 +139,7 @@ export default function CustomerOrderForm() {
 
   // Semua input teks otomatis KAPITAL biar rapi — kecuali email (case-sensitive)
   // & vehicle_type (nilai dropdown yang harus persis cocok).
-  const upc = (k, v) => (typeof v === "string" && k !== "customer_email" && k !== "vehicle_type") ? v.toUpperCase() : v;
+  const upc = (k, v) => (typeof v === "string" && k !== "customer_email" && k !== "vehicle_type" && k !== "kondisi") ? v.toUpperCase() : v;
   const set = (k, v) => setData((d) => ({ ...d, [k]: upc(k, v) }));
   const setUnit = (i, k, v) => setData((d) => ({ ...d, units: d.units.map((u, x) => x === i ? { ...u, [k]: upc(k, v) } : u) }));
   const addUnit = () => setData((d) => {
