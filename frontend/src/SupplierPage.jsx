@@ -29,12 +29,22 @@ export function printSupplierA4(sup, jobsOverride, noDocOverride, tglOverride) {
   const _bankOrder = [];
   jobs.forEach((j) => (j.payments || []).forEach((p) => {
     const key = p.batch_id || p.id;
-    if (!_bankMap.has(key)) { _bankMap.set(key, { tanggal: p.tanggal || "", amount: 0 }); _bankOrder.push(key); }
+    if (!_bankMap.has(key)) { _bankMap.set(key, { tanggal: p.tanggal || "", amount: 0, bank: String(p.bank || "").trim(), ref: String(p.no_referensi || "").trim(), tipe: String(p.tipe || "").trim() }); _bankOrder.push(key); }
     const b = _bankMap.get(key);
     b.amount += (p.amount || 0);
     if (!b.tanggal && p.tanggal) b.tanggal = p.tanggal;
+    if (!b.bank && p.bank) b.bank = String(p.bank).trim();
+    if (!b.ref && p.no_referensi) b.ref = String(p.no_referensi).trim();
+    if (!b.tipe && p.tipe) b.tipe = String(p.tipe).trim();
   }));
   const payTx = _bankOrder.map((k) => _bankMap.get(k)).sort((a, b) => String(a.tanggal).localeCompare(String(b.tanggal)));
+  // REFERENSI = data apa adanya dari DB (bank / no. referensi / kompensasi). Tidak
+  // mengarang: kalau kosong tampil "—".
+  const refOf = (p) => {
+    if (p.tipe === "kompensasi") return "Kompensasi";
+    const parts = [p.bank, p.ref].filter(Boolean);
+    return parts.length ? parts.join(" · ") : "—";
+  };
   const gBayar = jobs.reduce((s, j) => s + (j.payments || []).reduce((a, p) => a + (p.amount || 0), 0), 0);
   const gSisa = gHarga - gBayar;          // SISA = Total Tagihan - Total Pembayaran
   const over = gSisa < 0;                 // pembayaran > tagihan -> Lebih Bayar
@@ -69,17 +79,17 @@ export function printSupplierA4(sup, jobsOverride, noDocOverride, tglOverride) {
     const gj = byPid.get(pid);
     const sH = gj.reduce((s, j) => s + (j.total_harga || 0), 0);
     const sB = gj.reduce((s, j) => s + (j.total_terbayar || 0), 0);
-    const head = multi ? `<tr class="grp"><td class="c">📁</td><td colspan="2"><b>${esc(nameOf(pid))}</b> · ${gj.length} unit</td><td class="r">${rp(sH)}</td><td class="r">${rp(sB)}</td><td class="r"><b>${rp(sH - sB)}</b></td><td></td></tr>` : "";
+    const head = multi ? `<tr class="grp"><td colspan="7"><div class="grp-in"><span class="gname">${esc(nameOf(pid))}</span><span class="gunit">${gj.length} UNIT</span></div></td></tr>` : "";
     const rows = gj.map(rowHtml).join("");
-    const sub = multi ? `<tr class="grpsub"><td class="lbl" colspan="3">Subtotal ${esc(nameOf(pid))}</td><td class="r">${rp(sH)}</td><td class="r">${rp(sB)}</td><td class="r">${rp(sH - sB)}</td><td></td></tr>` : "";
+    const sub = multi ? `<tr class="grpsub"><td class="lbl" colspan="3">Subtotal · ${esc(nameOf(pid))}</td><td class="r">${rp(sH)}</td><td class="r">${rp(sB)}</td><td class="r"><b>${rp(sH - sB)}</b></td><td></td></tr>` : "";
     return head + rows + sub;
   }).join("");
 
-  const payBody = payTx.map((p, i) => `<tr>
-      <td class="c">${String(i + 1).padStart(2, "0")}</td>
+  const payBody = payTx.map((p) => `<tr>
       <td>${fDate(p.tanggal) || "-"}</td>
+      <td class="ref">${esc(refOf(p))}</td>
       <td class="r"><b>${rp(p.amount)}</b></td>
-      <td class="c gd">&#10003; Diterima</td>
+      <td class="r"><span class="pill-ok">Diterima</span></td>
     </tr>`).join("");
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${noDoc}</title>
@@ -93,39 +103,50 @@ export function printSupplierA4(sup, jobsOverride, noDocOverride, tglOverride) {
     .rps-meta-table { border-collapse:collapse; font-size:11px; }
     .rps-meta-table td { padding:3px 0; } .rps-meta-table td:first-child { color:${DOC_BRAND.muted}; padding-right:18px; white-space:nowrap; }
     .rps-meta-table td:last-child { font-weight:700; text-align:right; }
-    .rps-sec { display:flex; align-items:center; gap:7px; margin:16px 0 6px; }
-    .rps-sec .bar { width:3px; height:13px; background:${DOC_BRAND.gold}; border-radius:2px; }
-    .rps-sec .txt { font-size:10.5px; font-weight:800; color:${DOC_BRAND.ink}; letter-spacing:.5px; text-transform:uppercase; }
+    /* Judul section — tipografi + hairline divider (tanpa bar emas / ikon) */
+    .rps-sec { margin:18px 0 7px; padding-bottom:4px; border-bottom:1px solid #c3ccd8; }
+    .rps-sec .txt { font-size:10px; font-weight:800; color:${DOC_BRAND.ink}; letter-spacing:1.2px; text-transform:uppercase; }
     table.rps { width:100%; border-collapse:collapse; margin-bottom:4px; }
     table.rps thead { display:table-header-group; }
     table.rps tbody tr, table.rps tfoot tr { break-inside:avoid; page-break-inside:avoid; }
-    table.rps th { text-align:left; font-size:8px; text-transform:uppercase; letter-spacing:.3px; color:#334155; background:#f1f5f9; font-weight:700; padding:4px 7px; white-space:nowrap; border-bottom:1.5px solid #cbd5e1; }
+    table.rps th { text-align:left; font-size:8px; text-transform:uppercase; letter-spacing:.4px; color:#475569; background:#fff; font-weight:700; padding:4px 7px; white-space:nowrap; border-bottom:1px solid #94a3b8; }
     table.rps th.r { text-align:right; } table.rps th.c { text-align:center; }
-    table.rps td { padding:3.5px 7px; font-size:9.5px; line-height:1.2; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; }
+    table.rps td { padding:4px 7px; font-size:9.5px; line-height:1.2; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; }
     table.rps td.c { text-align:center; } table.rps td.r { text-align:right; white-space:nowrap; }
-    table.rps td.gd { color:#0f7a4d; font-weight:700; font-size:9px; }
-    table.rps .rp-note { font-size:8px; color:${DOC_BRAND.muted}; margin-top:1px; }
-    table.rps .rp-st { font-size:8px; font-weight:800; border-radius:20px; padding:1px 8px; }
-    table.rps .rp-st.y { background:#dcfce7; color:#166534; } table.rps .rp-st.n { background:#fef3c7; color:#92400e; }
-    table.rps tr.grp td { background:#eef2f7; color:${DOC_BRAND.navy}; font-weight:800; font-size:9px; padding:4px 7px; border-top:1px solid #cbd5e1; border-bottom:1px solid #cbd5e1; }
-    table.rps tr.grp td:first-child { border-left:3px solid ${DOC_BRAND.gold}; }
-    table.rps tr.grpsub td { background:#f8fafc; color:#334155; font-weight:800; font-size:8.5px; border-bottom:1.5px solid #94a3b8; }
-    table.rps tr.grpsub .lbl { text-align:right; }
-    table.rps tfoot .tot td { border-top:2px solid ${DOC_BRAND.navy}; border-bottom:none; padding:6px 7px; font-size:10px; font-weight:900; background:#fff; color:${DOC_BRAND.ink}; }
+    table.rps td.ref { color:#334155; font-size:9px; }
+    table.rps .rp-note { font-size:8px; color:#475569; margin-top:1px; }
+    table.rps .rp-st { font-size:8px; font-weight:700; }
+    table.rps .rp-st.y { color:#0f7a4d; } table.rps .rp-st.n { color:#b45309; }
+    /* Badge pembayaran diterima — halus, bukan tanda centang besar */
+    .pill-ok { display:inline-block; font-size:8px; font-weight:700; color:#0f7a4d; background:#e7f6ee; border:1px solid #b6e2ca; border-radius:20px; padding:1px 8px; letter-spacing:.2px; }
+    /* Header rekap projek — dominan tapi minimalis, tanpa ikon folder */
+    table.rps tr.grp td { padding:7px 2px 4px; border-top:1px solid #c3ccd8; border-bottom:1px solid #e3e6ec; background:#fff; }
+    table.rps tr.grp { break-after:avoid; page-break-after:avoid; }
+    table.rps tr.grp .grp-in { display:flex; justify-content:space-between; align-items:baseline; gap:12px; }
+    table.rps tr.grp .gname { font-size:10.5px; font-weight:800; color:${DOC_BRAND.ink}; letter-spacing:.4px; text-transform:uppercase; }
+    table.rps tr.grp .gunit { font-size:8.5px; font-weight:700; color:#475569; letter-spacing:.5px; white-space:nowrap; }
+    table.rps tr.grpsub td { background:#fbfcfd; color:#334155; font-weight:700; font-size:8.5px; border-bottom:1px solid #94a3b8; }
+    table.rps tr.grpsub .lbl { text-align:right; font-weight:700; }
+    table.rps tfoot .tot td { border-top:1.5px solid ${DOC_BRAND.ink}; border-bottom:none; padding:6px 7px; font-size:10px; font-weight:800; background:#fff; color:${DOC_BRAND.ink}; }
     table.rps tfoot .tot .lbl { text-align:right; }
-    .rps-bar { display:flex; justify-content:space-between; align-items:center; border-top:2px solid ${DOC_BRAND.navy}; padding:6px 4px 0; margin-top:2px; }
-    .rps-bar .lbl { font-weight:900; font-size:10.5px; color:${DOC_BRAND.navy}; text-transform:uppercase; letter-spacing:.3px; }
-    .rps-bar .val { font-weight:900; font-size:11.5px; color:${DOC_BRAND.ink}; }
-    /* Ringkasan akhir — Sisa dominan (navy box), samain karakter dgn Ringkasan Selisih */
-    .rps-sum { width:62%; max-width:340px; margin:8px 0 0 auto; }
-    .rps-sum .row { display:flex; justify-content:space-between; padding:4px 2px; font-size:10px; border-bottom:1px solid ${DOC_BRAND.line}; }
-    .rps-sum .row .k { color:#333; text-transform:uppercase; letter-spacing:.3px; font-weight:600; font-size:9px; }
-    .rps-sum .row .v { font-weight:700; }
-    .rps-sisa { margin-top:7px; background:${over ? "#7a3b0f" : DOC_BRAND.navy}; border-radius:8px; padding:10px 14px; }
-    .rps-sisa .k { font-size:8.5px; font-weight:700; letter-spacing:.7px; color:#e8c98a; text-transform:uppercase; }
-    .rps-sisa .v { font-size:18px; font-weight:900; color:#fff; margin-top:1px; line-height:1.05; }
-    .rps-sisa .lunas { font-size:17px; font-weight:900; color:#fff; letter-spacing:.5px; }
-    .rps-note { font-size:9.5px; color:${DOC_BRAND.muted}; line-height:1.6; margin-top:12px; }
+    /* Total pembayaran — divider tipis, bersih (bukan bar navy tebal) */
+    .rps-bar { display:flex; justify-content:space-between; align-items:baseline; border-top:1px solid #94a3b8; padding:6px 4px 0; margin-top:2px; }
+    .rps-bar .lbl { font-weight:700; font-size:9px; color:#475569; text-transform:uppercase; letter-spacing:.6px; }
+    .rps-bar .val { font-weight:800; font-size:11px; color:${DOC_BRAND.ink}; }
+    /* Ringkasan finansial — Sisa paling dominan, status badge kecil (tanpa box biru) */
+    .rps-sum { width:62%; max-width:330px; margin:10px 0 0 auto; }
+    .rps-sum .row { display:flex; justify-content:space-between; align-items:baseline; padding:4px 2px; font-size:10px; }
+    .rps-sum .row .k { color:#334155; letter-spacing:.2px; font-weight:600; font-size:9px; }
+    .rps-sum .row .v { font-weight:700; color:${DOC_BRAND.ink}; }
+    .rps-sum .row.sisa { border-top:1px solid #94a3b8; margin-top:3px; padding-top:8px; }
+    .rps-sum .row.sisa .k { font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.5px; color:${DOC_BRAND.ink}; }
+    .rps-sum .row.sisa .v { font-size:17px; font-weight:900; color:${DOC_BRAND.ink}; line-height:1.05; }
+    .rps-sum .badge-row { text-align:right; margin-top:6px; }
+    .rps-pill { display:inline-block; font-size:8.5px; font-weight:800; letter-spacing:.6px; border-radius:20px; padding:2px 10px; text-transform:uppercase; }
+    .rps-pill.ok { color:#0f7a4d; background:#e7f6ee; border:1px solid #b6e2ca; }
+    .rps-pill.due { color:#b45309; background:#fdf3e3; border:1px solid #f0d59b; }
+    .rps-pill.over { color:#92400e; background:#fdf0e0; border:1px solid #eabf8c; }
+    .rps-note { font-size:8.5px; color:#475569; line-height:1.6; margin-top:14px; }
     @page { size:A4 portrait; margin:8mm; }
     @media print { @page { size:A4 portrait; margin:8mm; } thead{display:table-header-group;} tbody tr{break-inside:avoid;} .avoid-break{break-inside:avoid;page-break-inside:avoid;} }
   </style></head><body>
@@ -140,7 +161,7 @@ export function printSupplierA4(sup, jobsOverride, noDocOverride, tglOverride) {
       </table>
     </div>
 
-    <div class="rps-sec"><span class="bar"></span><span class="txt">Rincian Tagihan Supplier</span></div>
+    <div class="rps-sec"><span class="txt">Rincian Tagihan Supplier</span></div>
     <table class="rps">
       <thead><tr>
         <th class="c" style="width:22px">No</th><th>No. Polisi / Unit</th><th>Rute</th>
@@ -150,30 +171,22 @@ export function printSupplierA4(sup, jobsOverride, noDocOverride, tglOverride) {
       <tfoot><tr class="tot"><td class="lbl" colspan="3">TOTAL</td><td class="r">${rp(gHarga)}</td><td class="r">${rp(gBayar)}</td><td class="r">${rp(gSisa)}</td><td></td></tr></tfoot>
     </table>
 
-    <div class="rps-sec"><span class="bar"></span><span class="txt">Riwayat Pembayaran</span></div>
+    <div class="rps-sec"><span class="txt">Riwayat Pembayaran</span></div>
     <table class="rps">
       <thead><tr>
-        <th class="c" style="width:30px">No.</th><th>Tanggal Transfer</th>
-        <th class="r" style="width:130px">Nominal</th><th class="c" style="width:80px">Status</th>
+        <th>Tanggal</th><th>Referensi</th>
+        <th class="r" style="width:120px">Nominal</th><th class="r" style="width:76px">Status</th>
       </tr></thead>
       <tbody>${payBody || `<tr><td colspan="4" class="c" style="color:${DOC_BRAND.muted}">Belum ada pembayaran.</td></tr>`}</tbody>
     </table>
     <div class="rps-bar"><span class="lbl">Total Pembayaran</span><span class="val">${rp(gBayar)}</span></div>
 
-    <div class="rps-sec avoid-break"><span class="bar"></span><span class="txt">Ringkasan</span></div>
+    <div class="rps-sec avoid-break"><span class="txt">Ringkasan</span></div>
     <div class="rps-sum avoid-break">
       <div class="row"><span class="k">Total Tagihan Supplier</span><span class="v">${rp(gHarga)}</span></div>
       <div class="row"><span class="k">Total Pembayaran</span><span class="v">${rp(gBayar)}</span></div>
-      <div class="rps-sisa">
-        ${over
-          ? `<div class="k">Lebih Bayar (Overpayment)</div><div class="v">${rp(Math.abs(gSisa))}</div>`
-          : lunas
-            ? `<div class="lunas">&#10003; LUNAS</div>`
-            : `<div class="k">Sisa Yang Harus Ditransfer</div><div class="v">${rp(gSisa)}</div>`}
-      </div>
-      <div style="text-align:right; margin-top:6px; font-size:9.5px; font-weight:700; color:${over ? "#b45309" : lunas ? "#0f7a4d" : DOC_BRAND.muted}">
-        Status: ${over ? "OVERPAYMENT" : lunas ? "LUNAS" : "BELUM LUNAS"}
-      </div>
+      <div class="row sisa"><span class="k">${over ? "Lebih Bayar" : "Sisa"}</span><span class="v">${rp(Math.abs(gSisa))}</span></div>
+      <div class="badge-row"><span class="rps-pill ${lunas ? "ok" : over ? "over" : "due"}">${lunas ? "Lunas" : over ? "Lebih Bayar" : "Belum Lunas"}</span></div>
     </div>
 
     ${ketRingkasan ? `<div class="avoid-break" style="margin-top:10px; border:1px solid #c9d2e0; border-radius:6px; overflow:hidden;">
