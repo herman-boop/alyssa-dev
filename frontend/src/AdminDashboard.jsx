@@ -6355,6 +6355,14 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(true);
   const [lightbox, setLightbox] = useState(null);
+  const [kapalMaster, setKapalMaster] = useState([]);   // daftar kapal tersimpan {nama, imo}
+
+  // Muat daftar kapal yang pernah diinput (buat autocomplete nama → IMO otomatis).
+  useEffect(() => {
+    axios.get(`${API}/admin/kapal-master`, { headers })
+      .then((r) => setKapalMaster(r.data?.items || []))
+      .catch(() => {});
+  }, [headers]);
 
   useEffect(() => {
     let alive = true;
@@ -6704,6 +6712,7 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
     <>
     <div className="adm-modal-bg" onClick={onClose}>
       <div className="adm-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 780, maxHeight: "92vh", overflowY: "auto", padding: 0 }}>
+        <datalist id="kapal-master-dl">{kapalMaster.map((k) => <option key={k.imo || k.nama} value={k.nama}>{k.imo ? `IMO ${k.imo}` : ""}</option>)}</datalist>
 
         {/* Header */}
         <div style={{ padding: "16px 22px", borderBottom: "1px solid #21262d", display: "flex", justifyContent: "space-between", alignItems: "flex-start", position: "sticky", top: 0, background: "#161b22", zIndex: 5 }}>
@@ -6969,7 +6978,11 @@ function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tri
                   <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 800, marginBottom: 8, letterSpacing: .5 }}>🚢 INFO KAPAL</div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
                     <label style={MINI_LABEL}>Nama Kapal
-                      <input list="kapal-dl" style={MINI_INPUT} value={leg.kapal || ""} onChange={e => setLeg(i, { kapal: e.target.value })} placeholder="KM Mutiara Persada" />
+                      <input list="kapal-master-dl" style={MINI_INPUT} value={leg.kapal || ""} onChange={e => {
+                        const v = e.target.value;
+                        const m = kapalMaster.find((k) => String(k.nama || "").trim().toLowerCase() === v.trim().toLowerCase());
+                        setLeg(i, m && m.imo ? { kapal: v, imo: m.imo } : { kapal: v });
+                      }} placeholder="KM Mutiara Persada" />
                     </label>
                     <label style={MINI_LABEL}>Marking / Kode
                       <input style={MINI_INPUT} value={leg.marking || ""} onChange={e => setLeg(i, { marking: e.target.value })} placeholder="AAL-001" />

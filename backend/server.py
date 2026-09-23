@@ -3229,7 +3229,31 @@ async def admin_patch_trip_legs(trip_id: str, body: LegsBody):
         legs.append(leg)
     now = datetime.utcnow().isoformat()
     await db.trips.update_one({"trip_id": trip_id}, {"$set": {"legs": legs, "updated_at": now}})
+    # Ingat pasangan nama kapal + IMO untuk autocomplete (master kapal). Additive,
+    # tidak mengubah data trip; kalau gagal, simpan legs tetap sukses.
+    try:
+        for lg in legs:
+            nama = (lg.get("kapal") or "").strip()
+            imo = re.sub(r"\D", "", str(lg.get("imo") or ""))
+            if nama and imo:
+                await db.kapal_master.update_one(
+                    {"imo": imo},
+                    {"$set": {"imo": imo, "nama": nama[:80], "updated_at": now}},
+                    upsert=True,
+                )
+    except Exception as e:
+        logger.warning(f"[kapal_master] upsert gagal: {e}")
     return {"ok": True, "trip_id": trip_id, "legs_count": len(legs), "legs": legs}
+
+
+@api_router.get("/admin/kapal-master", dependencies=[Depends(require_admin_pin)])
+async def list_kapal_master():
+    """Daftar kapal (nama + IMO) yang pernah diinput — untuk autocomplete di form
+    leg. Read-only; sumbernya di-upsert otomatis tiap simpan legs."""
+    out = []
+    async for d in db.kapal_master.find({}, {"_id": 0}).sort("nama", 1):
+        out.append(d)
+    return {"items": out}
 
 
 @api_router.get("/admin/trips/{trip_id}/legs", dependencies=[Depends(require_admin_pin)])
