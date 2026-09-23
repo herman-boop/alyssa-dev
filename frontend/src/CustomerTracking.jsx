@@ -30,6 +30,14 @@ function vesselTrackUrl(name, mmsi, imo) {
 // Nama transport generik (bukan nama kapal spesifik) — jangan kasih link tracking.
 const GENERIC_KAPAL = new Set(["self drive", "car carrier", "towing", "self loader", "low bed", "trucking", "container", "kapal", "lainnya"]);
 
+/* Status kapal (notif kecil ke pelanggan) — di-set admin, tampil sebagai badge. */
+const KAPAL_STATUS = {
+  berangkat: { emoji: "🚢", text: (t) => `Kapal berangkat menuju ${t || "tujuan"}`, color: "#58a6ff", bg: "#0d2136", bd: "#1f4a73" },
+  berlabuh:  { emoji: "⚓", text: (t) => `Kapal berlabuh di ${t || "tujuan"}`,       color: "#e3b341", bg: "#241c0a", bd: "#5c4a13" },
+  sandar:    { emoji: "🛳️", text: (t) => `Kapal sandar di ${t || "tujuan"}`,         color: "#56d364", bg: "#0f2d1f", bd: "#1c5233" },
+  bongkar:   { emoji: "📦", text: (t) => `Bongkar muatan di ${t || "tujuan"}`,       color: "#c191f0", bg: "#1c1030", bd: "#3d2a5c" },
+};
+
 
 /* ── Opener global modal preview (dipakai PhotoCard & thumbnail checkpoint) ── */
 let _openDoc = null;
@@ -882,6 +890,17 @@ export default function CustomerTracking() {
                               </a>
                             )}
                           </div>}
+                          {leg.kapal_status && KAPAL_STATUS[leg.kapal_status] && (() => {
+                            const s = KAPAL_STATUS[leg.kapal_status];
+                            return (
+                              <div style={{ marginTop: 5 }}>
+                                <span style={{ fontSize: 10.5, fontWeight: 700, padding: "3px 9px", borderRadius: 12, background: s.bg, color: s.color, border: `1px solid ${s.bd}`, display: "inline-block" }}>
+                                  {s.emoji} {s.text(leg.tujuan)}
+                                </span>
+                                {leg.kapal_status_ts && <span style={{ fontSize: 9.5, color: "#6e7681", marginLeft: 6 }}>diperbarui {new Date(leg.kapal_status_ts).toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>}
+                              </div>
+                            );
+                          })()}
                           {leg.eta && <div style={{ fontSize: 10, color: isActive ? "#EF9F27" : "#8b949e", marginTop: 3 }}>ETA {new Date(leg.eta).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" })}</div>}
                         </div>
                       </div>

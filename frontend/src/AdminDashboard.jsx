@@ -6984,6 +6984,15 @@ function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tri
                     )}
                   </div>
                   <div style={{ fontSize: 10, color: "#6e7681", marginBottom: 8 }}>Isi IMO (7 digit) biar link tracking ke pelanggan langsung tepat ke kapal ini. Kalau kosong, link mencari lewat nama kapal.</div>
+                  <label style={{ ...MINI_LABEL, display: "block", marginBottom: 8 }}>Status Kapal (notif kecil ke pelanggan)
+                    <select style={MINI_INPUT} value={leg.kapal_status || ""} onChange={e => setLeg(i, { kapal_status: e.target.value, kapal_status_ts: e.target.value ? new Date().toISOString() : "" })}>
+                      <option value="">— belum ada —</option>
+                      <option value="berangkat">🚢 Berangkat menuju tujuan</option>
+                      <option value="berlabuh">⚓ Berlabuh di tujuan</option>
+                      <option value="sandar">🛳️ Sandar di tujuan</option>
+                      <option value="bongkar">📦 Bongkar muatan</option>
+                    </select>
+                  </label>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 6 }}>
                     <label style={MINI_LABEL}>Koordinator Kapal
                       <input style={MINI_INPUT} value={leg.kord_kapal || ""} onChange={e => setLeg(i, { kord_kapal: e.target.value })} placeholder="Nama" />
