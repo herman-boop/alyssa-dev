@@ -6713,6 +6713,7 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
     <div className="adm-modal-bg" onClick={onClose}>
       <div className="adm-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 780, maxHeight: "92vh", overflowY: "auto", padding: 0 }}>
         <datalist id="kapal-master-dl">{kapalMaster.map((k) => <option key={k.imo || k.nama} value={k.nama}>{k.imo ? `IMO ${k.imo}` : ""}</option>)}</datalist>
+        <datalist id="imo-master-dl">{kapalMaster.map((k) => <option key={"i" + (k.imo || k.nama)} value={k.imo}>{k.nama || ""}</option>)}</datalist>
 
         {/* Header */}
         <div style={{ padding: "16px 22px", borderBottom: "1px solid #21262d", display: "flex", justifyContent: "space-between", alignItems: "flex-start", position: "sticky", top: 0, background: "#161b22", zIndex: 5 }}>
@@ -6990,7 +6991,11 @@ function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tri
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, marginBottom: 4, alignItems: "end" }}>
                     <label style={MINI_LABEL}>IMO Kapal (tracking presisi)
-                      <input style={MINI_INPUT} value={leg.imo || ""} onChange={e => setLeg(i, { imo: e.target.value.replace(/\D/g, "").slice(0, 7) })} placeholder="cth: 9123456" inputMode="numeric" />
+                      <input list={kapalMaster.length ? "imo-master-dl" : undefined} style={MINI_INPUT} value={leg.imo || ""} onChange={e => {
+                        const v = e.target.value.replace(/\D/g, "").slice(0, 7);
+                        const m = kapalMaster.find((k) => String(k.imo || "") === v);
+                        setLeg(i, m && m.nama ? { imo: v, kapal: m.nama } : { imo: v });
+                      }} placeholder="cth: 9123456" inputMode="numeric" />
                     </label>
                     {(leg.imo || String(leg.kapal || "").trim()) && (
                       <a href={vesselPublicUrl(leg)} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "#58a6ff", fontWeight: 700, textDecoration: "none", padding: "8px 6px", whiteSpace: "nowrap" }}>🚢 Cek posisi</a>
