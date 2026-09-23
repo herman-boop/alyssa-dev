@@ -19,7 +19,9 @@ const ALBUM_STAGES = ["asal", "kapal", "tujuan", "dokumen"];
 /* Link posisi kapal via AIS publik (GRATIS) — cari berdasarkan nama kapal di
    VesselFinder. Buat pelanggan pengiriman antar pulau yang tanya "kapalnya di mana".
    Kalau nanti ada nomor MMSI, bisa diarahkan langsung ke kapal spesifik. */
-function vesselTrackUrl(name, mmsi) {
+function vesselTrackUrl(name, mmsi, imo) {
+  const i = String(imo || "").replace(/\D/g, "");
+  if (i) return `https://www.marinetraffic.com/en/ais/details/ships/imo:${i}`;
   const m = String(mmsi || "").replace(/\D/g, "");
   if (m) return `https://www.vesselfinder.com/?mmsi=${m}`;
   const q = encodeURIComponent(String(name || "").trim());
@@ -873,8 +875,8 @@ export default function CustomerTracking() {
                           </div>
                           {leg.kapal && <div style={{ fontSize: 11, color: "#8b949e", marginTop: 3 }}>
                             ⚓ {leg.kapal}
-                            {(/kapal/i.test(leg.tipe || "") || /kapal/i.test(leg.status || "")) && !GENERIC_KAPAL.has(String(leg.kapal).trim().toLowerCase()) && (
-                              <a href={vesselTrackUrl(leg.kapal, leg.mmsi)} target="_blank" rel="noreferrer"
+                            {(leg.imo || ((/kapal/i.test(leg.tipe || "") || /kapal/i.test(leg.status || "")) && !GENERIC_KAPAL.has(String(leg.kapal).trim().toLowerCase()))) && (
+                              <a href={vesselTrackUrl(leg.kapal, leg.mmsi, leg.imo)} target="_blank" rel="noreferrer"
                                  style={{ marginLeft: 8, color: "#58a6ff", fontWeight: 600, textDecoration: "none", whiteSpace: "nowrap" }}>
                                 🚢 Lihat posisi kapal
                               </a>

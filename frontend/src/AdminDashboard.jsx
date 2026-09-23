@@ -18,6 +18,18 @@ import "@/Admin.css";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
+
+/* Link posisi kapal via AIS publik (gratis). Prioritas IMO (presisi ke 1 kapal via
+   MarineTraffic), lalu MMSI, lalu cari nama di VesselFinder. Dipakai admin utk cek
+   cepat & sama persis dgn link yang dilihat pelanggan di halaman tracking. */
+function vesselPublicUrl({ imo, mmsi, kapal } = {}) {
+  const i = String(imo || "").replace(/\D/g, "");
+  if (i) return `https://www.marinetraffic.com/en/ais/details/ships/imo:${i}`;
+  const m = String(mmsi || "").replace(/\D/g, "");
+  if (m) return `https://www.vesselfinder.com/?mmsi=${m}`;
+  const q = encodeURIComponent(String(kapal || "").trim());
+  return `https://www.vesselfinder.com/vessels?name=${q}`;
+}
 const PIN_KEY = "aal_admin_pin";
 
 // navigator.clipboard.writeText() silently rejects on some mobile browsers /
@@ -6963,6 +6975,15 @@ function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tri
                       <input style={MINI_INPUT} value={leg.marking || ""} onChange={e => setLeg(i, { marking: e.target.value })} placeholder="AAL-001" />
                     </label>
                   </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, marginBottom: 4, alignItems: "end" }}>
+                    <label style={MINI_LABEL}>IMO Kapal (tracking presisi)
+                      <input style={MINI_INPUT} value={leg.imo || ""} onChange={e => setLeg(i, { imo: e.target.value.replace(/\D/g, "").slice(0, 7) })} placeholder="cth: 9123456" inputMode="numeric" />
+                    </label>
+                    {(leg.imo || String(leg.kapal || "").trim()) && (
+                      <a href={vesselPublicUrl(leg)} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "#58a6ff", fontWeight: 700, textDecoration: "none", padding: "8px 6px", whiteSpace: "nowrap" }}>🚢 Cek posisi</a>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 10, color: "#6e7681", marginBottom: 8 }}>Isi IMO (7 digit) biar link tracking ke pelanggan langsung tepat ke kapal ini. Kalau kosong, link mencari lewat nama kapal.</div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 6 }}>
                     <label style={MINI_LABEL}>Koordinator Kapal
                       <input style={MINI_INPUT} value={leg.kord_kapal || ""} onChange={e => setLeg(i, { kord_kapal: e.target.value })} placeholder="Nama" />
