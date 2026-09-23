@@ -6978,7 +6978,7 @@ function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tri
                   <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 800, marginBottom: 8, letterSpacing: .5 }}>🚢 INFO KAPAL</div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
                     <label style={MINI_LABEL}>Nama Kapal
-                      <input list="kapal-master-dl" style={MINI_INPUT} value={leg.kapal || ""} onChange={e => {
+                      <input list={kapalMaster.length ? "kapal-master-dl" : undefined} style={MINI_INPUT} value={leg.kapal || ""} onChange={e => {
                         const v = e.target.value;
                         const m = kapalMaster.find((k) => String(k.nama || "").trim().toLowerCase() === v.trim().toLowerCase());
                         setLeg(i, m && m.imo ? { kapal: v, imo: m.imo } : { kapal: v });
