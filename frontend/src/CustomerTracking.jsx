@@ -16,6 +16,19 @@ function resolveUrl(url) {
 }
 const ALBUM_STAGES = ["asal", "kapal", "tujuan", "dokumen"];
 
+/* Link posisi kapal via AIS publik (GRATIS) — cari berdasarkan nama kapal di
+   VesselFinder. Buat pelanggan pengiriman antar pulau yang tanya "kapalnya di mana".
+   Kalau nanti ada nomor MMSI, bisa diarahkan langsung ke kapal spesifik. */
+function vesselTrackUrl(name, mmsi) {
+  const m = String(mmsi || "").replace(/\D/g, "");
+  if (m) return `https://www.vesselfinder.com/?mmsi=${m}`;
+  const q = encodeURIComponent(String(name || "").trim());
+  return `https://www.vesselfinder.com/vessels?name=${q}`;
+}
+// Nama transport generik (bukan nama kapal spesifik) — jangan kasih link tracking.
+const GENERIC_KAPAL = new Set(["self drive", "car carrier", "towing", "self loader", "low bed", "trucking", "container", "kapal", "lainnya"]);
+
+
 /* ── Opener global modal preview (dipakai PhotoCard & thumbnail checkpoint) ── */
 let _openDoc = null;
 function openDocPreview(url, label, isPdf) { if (_openDoc) _openDoc({ url, label, isPdf }); }
@@ -858,7 +871,15 @@ export default function CustomerTracking() {
                           <div style={{ fontSize: 12, color: "#e6edf3", fontWeight: 600 }}>
                             {leg.asal || "?"} <span style={{ color: "#8b949e", fontWeight: 400 }}>→</span> {leg.tujuan || "?"}
                           </div>
-                          {leg.kapal && <div style={{ fontSize: 11, color: "#8b949e", marginTop: 3 }}>⚓ {leg.kapal}</div>}
+                          {leg.kapal && <div style={{ fontSize: 11, color: "#8b949e", marginTop: 3 }}>
+                            ⚓ {leg.kapal}
+                            {(/kapal/i.test(leg.tipe || "") || /kapal/i.test(leg.status || "")) && !GENERIC_KAPAL.has(String(leg.kapal).trim().toLowerCase()) && (
+                              <a href={vesselTrackUrl(leg.kapal, leg.mmsi)} target="_blank" rel="noreferrer"
+                                 style={{ marginLeft: 8, color: "#58a6ff", fontWeight: 600, textDecoration: "none", whiteSpace: "nowrap" }}>
+                                🚢 Lihat posisi kapal
+                              </a>
+                            )}
+                          </div>}
                           {leg.eta && <div style={{ fontSize: 10, color: isActive ? "#EF9F27" : "#8b949e", marginTop: 3 }}>ETA {new Date(leg.eta).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" })}</div>}
                         </div>
                       </div>
