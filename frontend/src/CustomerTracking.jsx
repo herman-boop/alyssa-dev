@@ -32,10 +32,13 @@ const GENERIC_KAPAL = new Set(["self drive", "car carrier", "towing", "self load
 
 /* Status kapal (notif kecil ke pelanggan) — di-set admin, tampil sebagai badge. */
 const KAPAL_STATUS = {
-  berangkat: { emoji: "🚢", text: (t) => `Kapal berangkat menuju ${t || "tujuan"}`, color: "#58a6ff", bg: "#0d2136", bd: "#1f4a73" },
-  berlabuh:  { emoji: "⚓", text: (t) => `Kapal berlabuh di ${t || "tujuan"}`,       color: "#e3b341", bg: "#241c0a", bd: "#5c4a13" },
-  sandar:    { emoji: "🛳️", text: (t) => `Kapal sandar di ${t || "tujuan"}`,         color: "#56d364", bg: "#0f2d1f", bd: "#1c5233" },
-  bongkar:   { emoji: "📦", text: (t) => `Bongkar muatan di ${t || "tujuan"}`,       color: "#c191f0", bg: "#1c1030", bd: "#3d2a5c" },
+  menunggu_jadwal: { emoji: "🕓", text: (a, t) => `Menunggu jadwal kapal`,                         color: "#8b949e", bg: "#161b22", bd: "#30363d" },
+  menunggu_muat:   { emoji: "⏳", text: (a, t) => `Menunggu muat di ${a || "pelabuhan"} (antre space)`, color: "#e3b341", bg: "#241c0a", bd: "#5c4a13" },
+  belum_termuat:   { emoji: "⚠️", text: (a, t) => `Belum termuat — menunggu kapal berikutnya`,       color: "#f85149", bg: "#2a1113", bd: "#5c1f22" },
+  berangkat:       { emoji: "🚢", text: (a, t) => `Kapal berangkat menuju ${t || "tujuan"}`,          color: "#58a6ff", bg: "#0d2136", bd: "#1f4a73" },
+  berlabuh:        { emoji: "⚓", text: (a, t) => `Kapal berlabuh di ${t || "tujuan"}`,               color: "#e3b341", bg: "#241c0a", bd: "#5c4a13" },
+  sandar:          { emoji: "🛳️", text: (a, t) => `Kapal sandar di ${t || "tujuan"}`,                 color: "#56d364", bg: "#0f2d1f", bd: "#1c5233" },
+  bongkar:         { emoji: "📦", text: (a, t) => `Bongkar muatan di ${t || "tujuan"}`,               color: "#c191f0", bg: "#1c1030", bd: "#3d2a5c" },
 };
 
 
@@ -895,7 +898,7 @@ export default function CustomerTracking() {
                             return (
                               <div style={{ marginTop: 5 }}>
                                 <span style={{ fontSize: 10.5, fontWeight: 700, padding: "3px 9px", borderRadius: 12, background: s.bg, color: s.color, border: `1px solid ${s.bd}`, display: "inline-block" }}>
-                                  {s.emoji} {s.text(leg.tujuan)}
+                                  {s.emoji} {s.text(leg.asal, leg.tujuan)}
                                 </span>
                                 {leg.kapal_status_ts && <span style={{ fontSize: 9.5, color: "#6e7681", marginLeft: 6 }}>diperbarui {new Date(leg.kapal_status_ts).toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>}
                               </div>

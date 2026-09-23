@@ -6987,6 +6987,9 @@ function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tri
                   <label style={{ ...MINI_LABEL, display: "block", marginBottom: 8 }}>Status Kapal (notif kecil ke pelanggan)
                     <select style={MINI_INPUT} value={leg.kapal_status || ""} onChange={e => setLeg(i, { kapal_status: e.target.value, kapal_status_ts: e.target.value ? new Date().toISOString() : "" })}>
                       <option value="">— belum ada —</option>
+                      <option value="menunggu_jadwal">🕓 Menunggu jadwal kapal</option>
+                      <option value="menunggu_muat">⏳ Menunggu muat (antre space)</option>
+                      <option value="belum_termuat">⚠️ Belum termuat — tunggu kapal berikutnya</option>
                       <option value="berangkat">🚢 Berangkat menuju tujuan</option>
                       <option value="berlabuh">⚓ Berlabuh di tujuan</option>
                       <option value="sandar">🛳️ Sandar di tujuan</option>
