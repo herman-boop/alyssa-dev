@@ -6765,7 +6765,7 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
             <RuteLegTab
               legs={legs} setLeg={setLeg} addLeg={addLeg} nextLeg={nextLeg} delLeg={delLeg} moveLeg={moveLeg}
               order={order} tripId={tripId} headers={headers}
-              detail={detail}
+              detail={detail} kapalMaster={kapalMaster}
               copiedLeg={copiedLeg} copyLegLink={copyLegLink}
               openMultiUnit={openMultiUnit} printKartuMuat={printKartuMuat}
               setKepala={setKepala} addDriverRow={addDriverRow} setDriverRow={setDriverRow} delDriverRow={delDriverRow}
@@ -6896,7 +6896,7 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
 }
 
 /* ── Tab: Rute Leg — kartu workflow per leg ── */
-function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tripId, headers, detail, copiedLeg, copyLegLink, openMultiUnit, printKartuMuat,
+function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tripId, headers, detail, kapalMaster = [], copiedLeg, copyLegLink, openMultiUnit, printKartuMuat,
   setKepala, addDriverRow, setDriverRow, delDriverRow, romb, rombBusy, rombCopied, copyRombLink, waRombLink, regenRomb, setJamClose, saveStatus }) {
   // Status simpan (dari autosave backend) — jangan pernah bilang "tersimpan"
   // kalau backend gagal (saveStatus === "error").
