@@ -6355,14 +6355,6 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(true);
   const [lightbox, setLightbox] = useState(null);
-  const [kapalMaster, setKapalMaster] = useState([]);   // daftar kapal tersimpan {nama, imo}
-
-  // Muat daftar kapal yang pernah diinput (buat autocomplete nama → IMO otomatis).
-  useEffect(() => {
-    axios.get(`${API}/admin/kapal-master`, { headers })
-      .then((r) => setKapalMaster(r.data?.items || []))
-      .catch(() => {});
-  }, [headers]);
 
   useEffect(() => {
     let alive = true;
@@ -6712,8 +6704,6 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
     <>
     <div className="adm-modal-bg" onClick={onClose}>
       <div className="adm-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 780, maxHeight: "92vh", overflowY: "auto", padding: 0 }}>
-        <datalist id="kapal-master-dl">{kapalMaster.map((k) => <option key={k.imo || k.nama} value={k.nama}>{k.imo ? `IMO ${k.imo}` : ""}</option>)}</datalist>
-        <datalist id="imo-master-dl">{kapalMaster.map((k) => <option key={"i" + (k.imo || k.nama)} value={k.imo}>{k.nama || ""}</option>)}</datalist>
 
         {/* Header */}
         <div style={{ padding: "16px 22px", borderBottom: "1px solid #21262d", display: "flex", justifyContent: "space-between", alignItems: "flex-start", position: "sticky", top: 0, background: "#161b22", zIndex: 5 }}>
@@ -6765,7 +6755,7 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
             <RuteLegTab
               legs={legs} setLeg={setLeg} addLeg={addLeg} nextLeg={nextLeg} delLeg={delLeg} moveLeg={moveLeg}
               order={order} tripId={tripId} headers={headers}
-              detail={detail} kapalMaster={kapalMaster}
+              detail={detail}
               copiedLeg={copiedLeg} copyLegLink={copyLegLink}
               openMultiUnit={openMultiUnit} printKartuMuat={printKartuMuat}
               setKepala={setKepala} addDriverRow={addDriverRow} setDriverRow={setDriverRow} delDriverRow={delDriverRow}
@@ -6896,7 +6886,7 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
 }
 
 /* ── Tab: Rute Leg — kartu workflow per leg ── */
-function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tripId, headers, detail, kapalMaster = [], copiedLeg, copyLegLink, openMultiUnit, printKartuMuat,
+function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tripId, headers, detail, copiedLeg, copyLegLink, openMultiUnit, printKartuMuat,
   setKepala, addDriverRow, setDriverRow, delDriverRow, romb, rombBusy, rombCopied, copyRombLink, waRombLink, regenRomb, setJamClose, saveStatus }) {
   // Status simpan (dari autosave backend) — jangan pernah bilang "tersimpan"
   // kalau backend gagal (saveStatus === "error").
@@ -6979,11 +6969,7 @@ function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tri
                   <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 800, marginBottom: 8, letterSpacing: .5 }}>🚢 INFO KAPAL</div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
                     <label style={MINI_LABEL}>Nama Kapal
-                      <input list={kapalMaster.length ? "kapal-master-dl" : undefined} style={MINI_INPUT} value={leg.kapal || ""} onChange={e => {
-                        const v = e.target.value;
-                        const m = kapalMaster.find((k) => String(k.nama || "").trim().toLowerCase() === v.trim().toLowerCase());
-                        setLeg(i, m && m.imo ? { kapal: v, imo: m.imo } : { kapal: v });
-                      }} placeholder="KM Mutiara Persada" />
+                      <input list="kapal-dl" style={MINI_INPUT} value={leg.kapal || ""} onChange={e => setLeg(i, { kapal: e.target.value })} placeholder="KM Mutiara Persada" />
                     </label>
                     <label style={MINI_LABEL}>Marking / Kode
                       <input style={MINI_INPUT} value={leg.marking || ""} onChange={e => setLeg(i, { marking: e.target.value })} placeholder="AAL-001" />
@@ -6991,11 +6977,7 @@ function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tri
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, marginBottom: 4, alignItems: "end" }}>
                     <label style={MINI_LABEL}>IMO Kapal (tracking presisi)
-                      <input list={kapalMaster.length ? "imo-master-dl" : undefined} style={MINI_INPUT} value={leg.imo || ""} onChange={e => {
-                        const v = e.target.value.replace(/\D/g, "").slice(0, 7);
-                        const m = kapalMaster.find((k) => String(k.imo || "") === v);
-                        setLeg(i, m && m.nama ? { imo: v, kapal: m.nama } : { imo: v });
-                      }} placeholder="cth: 9123456" inputMode="numeric" />
+                      <input style={MINI_INPUT} value={leg.imo || ""} onChange={e => setLeg(i, { imo: e.target.value.replace(/\D/g, "").slice(0, 7) })} placeholder="cth: 9123456" inputMode="numeric" />
                     </label>
                     {(leg.imo || String(leg.kapal || "").trim()) && (
                       <a href={vesselPublicUrl(leg)} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "#58a6ff", fontWeight: 700, textDecoration: "none", padding: "8px 6px", whiteSpace: "nowrap" }}>🚢 Cek posisi</a>
