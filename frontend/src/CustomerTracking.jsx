@@ -423,11 +423,11 @@ function createShipIcon(freshness, heading) {
   });
 }
 
-/* Badge & label kesegaran AIS. LIVE hanya untuk fresh. */
+/* Badge & label kesegaran AIS. Tidak pernah menyebut LIVE kalau bukan fresh. */
 function aisBadge(freshness) {
-  if (freshness === "fresh") return { label: "🟢 LIVE", color: "#16a34a", bg: "#e7f6ee", bd: "#b6e2ca" };
-  if (freshness === "recent") return { label: "🟡 Posisi terakhir (agak lama)", color: "#b45309", bg: "#fdf3e3", bd: "#f0d59b" };
-  if (freshness === "stale") return { label: "🔴 Posisi terakhir (lama)", color: "#dc2626", bg: "#fdecec", bd: "#f5c2c2" };
+  if (freshness === "fresh") return { label: "🟢 Fresh", color: "#16a34a", bg: "#e7f6ee", bd: "#b6e2ca" };
+  if (freshness === "recent") return { label: "🟡 Posisi Terakhir", color: "#b45309", bg: "#fdf3e3", bd: "#f0d59b" };
+  if (freshness === "stale") return { label: "🔴 Stale", color: "#dc2626", bg: "#fdecec", bd: "#f5c2c2" };
   return { label: "Belum ada data AIS", color: "#6e7681", bg: "#161b22", bd: "#30363d" };
 }
 
@@ -452,6 +452,16 @@ function MapFitter({ positions }) {
       map.fitBounds(bounds, { padding: [48, 48] });
     }
   }, [map, positions]);
+  return null;
+}
+
+/* Terbang/fokus ke satu titik saat `nonce` berubah (mis. pelanggan klik leg kapal). */
+function MapFlyTo({ target, nonce }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!target || !nonce) return;
+    try { map.flyTo(target, Math.max(map.getZoom() || 11, 11), { duration: 0.8 }); } catch (e) {}
+  }, [nonce]); // eslint-disable-line react-hooks/exhaustive-deps
   return null;
 }
 
@@ -488,6 +498,9 @@ export default function CustomerTracking() {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedCp, setSelectedCp] = useState(null);
   const [docPreview, setDocPreview] = useState(null);
+  const [shipDetail, setShipDetail] = useState(false);   // toggle "Detail kapal"
+  const [flyNonce, setFlyNonce] = useState(0);           // fokus map ke kapal saat klik leg
+  const mapAreaRef = useRef(null);
   const [geoNames, setGeoNames] = useState({}); // "lat,lng" -> nama lokasi (checkpoint lama tanpa alamat)
   const geoTriedRef = useRef(new Set());
   const panelRef = useRef(null);
@@ -627,6 +640,11 @@ export default function CustomerTracking() {
     ? [parseFloat(shipInfo.latitude), parseFloat(shipInfo.longitude)] : null;
   const fitPositions = shipPos ? [...positions, shipPos] : positions;
   const hasMap    = gpsPoints.length > 0 || !!shipPos;
+  const focusShip = () => {
+    if (!shipPos) return;
+    setFlyNonce((n) => n + 1);
+    try { mapAreaRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }); } catch (e) {}
+  };
 
   /* Basemap: OpenStreetMap (gratis, tanpa API key). CARTO sekarang wajib key
      sehingga tile-nya muncul watermark "API KEY REQUIRED". */
@@ -681,7 +699,7 @@ export default function CustomerTracking() {
       <div className="trk-layout">
 
         {/* MAP */}
-        <div className="trk-map-area">
+        <div className="trk-map-area" ref={mapAreaRef}>
           {hasMap ? (
             <MapContainer
               center={lastGps ? [parseFloat(lastGps.lat), parseFloat(lastGps.lng)] : (shipPos || defaultCenter)}
@@ -692,6 +710,7 @@ export default function CustomerTracking() {
             >
               <TileLayer url={tileUrl} attribution={tileAttr} maxZoom={19} />
               <MapFitter positions={fitPositions} />
+              <MapFlyTo target={shipPos} nonce={flyNonce} />
 
               {/* Marker kapal (AIS) — hanya kalau ada posisi */}
               {shipPos && shipInfo && (
@@ -903,35 +922,51 @@ export default function CustomerTracking() {
             )}
           </div>
 
-          {/* Panel Posisi Kapal (AIS) — tampil kalau trip punya kapal ber-MMSI/IMO */}
+          {/* Panel Posisi Kapal (AIS) — sederhana untuk pelanggan */}
           {shipAis && (shipAis.mmsi || shipAis.imo || shipAis.ship_name) && (() => {
             const b = aisBadge(shipInfo ? shipInfo.freshness : null);
             const extUrl = vesselTrackUrl(shipAis.ship_name, shipAis.mmsi, shipAis.imo);
+            const rowS = { display: "flex", justifyContent: "space-between", fontSize: 12.5, color: "#c9d1d9", padding: "3px 0" };
+            const kS = { color: "#8b949e" };
             return (
               <div style={{ marginBottom: 16 }}>
-                <div className="trk-section-title" style={{ marginBottom: 10 }}>🚢 Posisi Kapal (AIS)</div>
-                <div style={{ background: "#11161f", border: "1px solid #232a36", borderRadius: 10, padding: 12 }} data-testid="trk-ais-panel">
+                <div className="trk-section-title" style={{ marginBottom: 10 }}>🚢 Posisi Kapal</div>
+                <div style={{ background: "#11161f", border: "1px solid #232a36", borderRadius: 10, padding: 14 }} data-testid="trk-ais-panel">
+                  {/* Header: nama kapal + badge kesegaran */}
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-                    <div style={{ fontSize: 13, fontWeight: 800, color: "#e6edf3" }}>{shipAis.ship_name || shipInfo?.ship_name || "Kapal"}</div>
-                    <span style={{ fontSize: 10.5, fontWeight: 700, padding: "2px 9px", borderRadius: 12, background: b.bg, color: b.color, border: `1px solid ${b.bd}` }}>{b.label}</span>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: "#e6edf3" }}>{shipAis.ship_name || shipInfo?.ship_name || "Kapal"}</div>
+                    <span style={{ fontSize: 11, fontWeight: 800, padding: "3px 10px", borderRadius: 12, background: b.bg, color: b.color, border: `1px solid ${b.bd}` }}>{b.label}</span>
                   </div>
-                  <div style={{ fontSize: 11, color: "#8b949e", marginTop: 2 }}>
-                    {shipAis.mmsi ? `MMSI ${shipAis.mmsi}` : ""}{shipAis.mmsi && shipAis.imo ? " · " : ""}{shipAis.imo ? `IMO ${shipAis.imo}` : ""}
-                  </div>
+
                   {shipInfo ? (
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 12px", fontSize: 12, color: "#c9d1d9", marginTop: 8 }}>
-                      <div>Posisi: {Number(shipInfo.latitude).toFixed(4)}, {Number(shipInfo.longitude).toFixed(4)}</div>
-                      <div>Kecepatan: {shipInfo.speed != null ? `${shipInfo.speed} knot` : "—"}</div>
-                      <div>Course: {shipInfo.course != null ? `${shipInfo.course}°` : "—"}</div>
-                      <div>Heading: {shipInfo.heading != null ? `${shipInfo.heading}°` : "—"}</div>
-                      <div>Tujuan: {shipInfo.destination || "—"}</div>
-                      <div>ETA: {shipInfo.eta || "—"}</div>
-                      <div style={{ gridColumn: "1 / -1", color: "#8b949e", marginTop: 2 }}>Last AIS update: {aisAgeText(shipInfo.age_seconds)}</div>
-                    </div>
+                    <>
+                      <div style={{ marginTop: 10 }}>
+                        <div style={rowS}><span style={kS}>Last AIS update</span><b style={{ color: "#e6edf3" }}>{aisAgeText(shipInfo.age_seconds)}</b></div>
+                        <div style={rowS}><span style={kS}>Kecepatan</span><span>{shipInfo.speed != null ? `${shipInfo.speed} knot` : "—"}</span></div>
+                        <div style={rowS}><span style={kS}>Tujuan</span><span>{shipInfo.destination || "—"}</span></div>
+                        <div style={rowS}><span style={kS}>ETA</span><span>{shipInfo.eta || "—"}</span></div>
+                      </div>
+                      {shipPos && (
+                        <button onClick={focusShip} style={{ width: "100%", marginTop: 10, padding: "9px 12px", borderRadius: 8, border: "1px solid #1f6feb", background: "#0d2340", color: "#58a6ff", fontWeight: 700, fontSize: 13, cursor: "pointer" }} data-testid="trk-ais-focus">📍 Lihat posisi kapal di peta</button>
+                      )}
+                    </>
                   ) : (
-                    <div style={{ fontSize: 12, color: "#8b949e", marginTop: 8 }}>Belum ada data posisi AIS terbaru untuk kapal ini.</div>
+                    <div style={{ fontSize: 12.5, color: "#8b949e", marginTop: 10 }}>Belum ada data posisi AIS terbaru untuk kapal ini. Coba beberapa saat lagi.</div>
                   )}
-                  <a href={extUrl} target="_blank" rel="noreferrer" style={{ display: "inline-block", marginTop: 10, fontSize: 12, color: "#58a6ff", fontWeight: 700, textDecoration: "none" }}>🔗 Buka di VesselFinder</a>
+
+                  {/* Detail kapal (disembunyikan) — MMSI/IMO + sumber AIS */}
+                  <button onClick={() => setShipDetail((v) => !v)} style={{ marginTop: 10, background: "none", border: "none", color: "#8b949e", fontSize: 11.5, fontWeight: 700, cursor: "pointer", padding: 0 }}>
+                    {shipDetail ? "▾ Sembunyikan detail kapal" : "▸ Detail kapal"}
+                  </button>
+                  {shipDetail && (
+                    <div style={{ marginTop: 6, fontSize: 11.5, color: "#8b949e", lineHeight: 1.7, borderTop: "1px solid #232a36", paddingTop: 8 }}>
+                      {shipAis.mmsi ? <div>MMSI: {shipAis.mmsi}</div> : null}
+                      {shipAis.imo ? <div>IMO: {shipAis.imo}</div> : null}
+                      {shipInfo && shipInfo.latitude != null ? <div>Koordinat: {Number(shipInfo.latitude).toFixed(4)}, {Number(shipInfo.longitude).toFixed(4)}</div> : null}
+                      {shipInfo && shipInfo.course != null ? <div>Course: {shipInfo.course}° · Heading: {shipInfo.heading != null ? `${shipInfo.heading}°` : "—"}</div> : null}
+                      <a href={extUrl} target="_blank" rel="noreferrer" style={{ display: "inline-block", marginTop: 4, color: "#58a6ff", textDecoration: "none" }}>🔗 Lihat sumber AIS (VesselFinder)</a>
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -980,11 +1015,15 @@ export default function CustomerTracking() {
                           </div>
                           {leg.kapal && <div style={{ fontSize: 11, color: "#8b949e", marginTop: 3 }}>
                             ⚓ {leg.kapal}
-                            {(leg.mmsi || leg.imo || ((/kapal/i.test(leg.tipe || "") || /kapal/i.test(leg.status || "")) && !GENERIC_KAPAL.has(String(leg.kapal).trim().toLowerCase()))) && (
-                              <a href={vesselTrackUrl(leg.kapal, leg.mmsi, leg.imo)} target="_blank" rel="noreferrer"
-                                 style={{ marginLeft: 8, color: "#58a6ff", fontWeight: 600, textDecoration: "none", whiteSpace: "nowrap" }}>
-                                🚢 Lihat posisi kapal
-                              </a>
+                            {shipPos && /kapal/i.test(leg.tipe || "") ? (
+                              <button onClick={focusShip} style={{ marginLeft: 8, background: "none", border: "none", padding: 0, color: "#58a6ff", fontWeight: 700, cursor: "pointer", fontSize: 11 }}>📍 Lihat di peta</button>
+                            ) : (
+                              (leg.mmsi || leg.imo || ((/kapal/i.test(leg.tipe || "") || /kapal/i.test(leg.status || "")) && !GENERIC_KAPAL.has(String(leg.kapal).trim().toLowerCase()))) && (
+                                <a href={vesselTrackUrl(leg.kapal, leg.mmsi, leg.imo)} target="_blank" rel="noreferrer"
+                                   style={{ marginLeft: 8, color: "#6e7681", fontWeight: 600, textDecoration: "underline", whiteSpace: "nowrap", fontSize: 10.5 }}>
+                                  Lihat sumber AIS
+                                </a>
+                              )
                             )}
                           </div>}
                           {leg.kapal_status && KAPAL_STATUS[leg.kapal_status] && (() => {
