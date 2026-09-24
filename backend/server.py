@@ -2220,6 +2220,7 @@ class JadwalUnitBody(BaseModel):
     nama_kapal: Optional[str] = None
     etd: Optional[str] = None          # YYYY-MM-DD
     transit_hari: Optional[int] = None
+    serah_terima: Optional[str] = None # YYYY-MM-DD (tanggal serah terima per unit)
 
 
 class JadwalBody(BaseModel):
@@ -2252,6 +2253,9 @@ async def set_order_jadwal(order_id: str, body: JadwalBody):
             etd = p.etd.strip()
             u["etd"] = etd if re.match(r"^\d{4}-\d{2}-\d{2}$", etd) else ""
         if p.transit_hari is not None: u["transit_hari"] = max(0, int(p.transit_hari))
+        if p.serah_terima is not None:
+            st = p.serah_terima.strip()
+            u["serah_terima"] = st if re.match(r"^\d{4}-\d{2}-\d{2}$", st) else ""
         u["updated_at"] = now
     upd = {"units": units, "updated_at": now}
     if body.tanggal_siap is not None:

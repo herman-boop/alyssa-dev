@@ -2965,6 +2965,7 @@ function JadwalModal({ order, headers, onClose, onPrint }) {
   const [rows, setRows] = useState(() => units.map((u) => ({
     unit_id: u.unit_id, tujuan: u.tujuan || "", no_mesin: u.no_mesin || "",
     nama_kapal: u.nama_kapal || "", etd: u.etd || "", transit_hari: u.transit_hari || "",
+    serah_terima: u.serah_terima || "",
   })));
   const [bulk, setBulk] = useState({ nama_kapal: "", etd: "", transit_hari: "" });
   const [saving, setSaving] = useState(false);
@@ -2980,7 +2981,7 @@ function JadwalModal({ order, headers, onClose, onPrint }) {
 
   const payload = () => ({
     tanggal_siap: tanggalSiap || "", catatan_jadwal: catatan || "", pelabuhan_asal: pelabuhanAsal || "",
-    units: rows.map((r) => ({ unit_id: r.unit_id, tujuan: r.tujuan, no_mesin: r.no_mesin, nama_kapal: r.nama_kapal, etd: r.etd, transit_hari: parseInt(r.transit_hari, 10) || 0 })),
+    units: rows.map((r) => ({ unit_id: r.unit_id, tujuan: r.tujuan, no_mesin: r.no_mesin, nama_kapal: r.nama_kapal, etd: r.etd, transit_hari: parseInt(r.transit_hari, 10) || 0, serah_terima: r.serah_terima || "" })),
   });
 
   const save = async () => {
@@ -2997,6 +2998,7 @@ function JadwalModal({ order, headers, onClose, onPrint }) {
     nama_kapal: rows[i]?.nama_kapal || "",
     etd: rows[i]?.etd || "",
     transit_hari: parseInt(rows[i]?.transit_hari, 10) || 0,
+    serah_terima: rows[i]?.serah_terima || "",
   }));
 
   const doPrint = () => {
@@ -3058,6 +3060,7 @@ function JadwalModal({ order, headers, onClose, onPrint }) {
                     <label>Kapal Berangkat<input type="date" className="adm-input" value={r.etd} onChange={(e) => setRow(i, { etd: e.target.value })} /></label>
                     <label>Transit (hr)<input inputMode="numeric" className="adm-input" value={r.transit_hari} onChange={(e) => setRow(i, { transit_hari: e.target.value.replace(/\D/g, "") })} placeholder="4" /></label>
                     <div className="jm-eta">Estimasi Tiba<b>{eta ? jpFmt(eta) : "—"}</b></div>
+                    <label>Serah Terima<input type="date" className="adm-input" value={r.serah_terima || ""} onChange={(e) => setRow(i, { serah_terima: e.target.value })} /></label>
                   </div>
                 </div>
               );
@@ -4478,7 +4481,7 @@ function printJadwalDoc(meta, units) {
     <table class="jp">
       <thead><tr>
         <th class="c" style="width:22px">No</th><th>Unit / Tipe</th><th>No. Polisi</th><th>No. Rangka</th><th>No. Mesin</th>
-        <th>Tujuan</th><th>Nama Kapal</th><th>Kapal Berangkat</th><th>Estimasi Tiba</th>
+        <th>Tujuan</th><th>Nama Kapal</th><th>Kapal Berangkat</th><th>Estimasi Tiba</th><th>Serah Terima</th>
       </tr></thead>
       <tbody>
         ${rows.map((u, i) => {
@@ -4495,6 +4498,7 @@ function printJadwalDoc(meta, units) {
             <td>${u.nama_kapal || "—"}</td>
             <td>${fmtTgl(u.etd)}</td>
             <td><b>${eta ? fmtTgl(eta) : "—"}</b>${u.transit_hari ? ` <span style="color:${DOC_BRAND.muted};font-size:9px">(${u.transit_hari} hr)</span>` : ""}</td>
+            <td><b>${u.serah_terima ? fmtTgl(u.serah_terima) : "—"}</b></td>
           </tr>`;
         }).join("")}
       </tbody>
@@ -4559,7 +4563,7 @@ function printJadwalGabungan(meta, units) {
     <table class="jp">
       <thead><tr>
         <th class="c" style="width:22px">No</th><th>Unit / Tipe</th><th>No. Polisi</th><th>No. Rangka</th><th>No. Mesin</th>
-        <th>Tujuan</th><th>Nama Kapal</th><th>Kapal Berangkat</th><th>Estimasi Tiba</th>
+        <th>Tujuan</th><th>Nama Kapal</th><th>Kapal Berangkat</th><th>Estimasi Tiba</th><th>Serah Terima</th>
       </tr></thead>
       <tbody>
         ${rows.map((u, i) => {
@@ -4575,6 +4579,7 @@ function printJadwalGabungan(meta, units) {
             <td>${u.nama_kapal || "—"}</td>
             <td>${jpFmt(u.etd)}</td>
             <td><b>${eta ? jpFmt(eta) : "—"}</b>${u.transit_hari ? ` <span style="color:${DOC_BRAND.muted};font-size:9px">(${u.transit_hari} hr)</span>` : ""}</td>
+            <td><b>${u.serah_terima ? jpFmt(u.serah_terima) : "—"}</b></td>
           </tr>`;
         }).join("")}
       </tbody>
@@ -4618,6 +4623,7 @@ function JadwalGabunganModal({ cart, headers, onClose, onDone }) {
     tujuan: c.unit?.tujuan || c.tujuan_kota || "",
     no_mesin: c.unit?.no_mesin || "",
     nama_kapal: c.unit?.nama_kapal || "", etd: c.unit?.etd || "", transit_hari: c.unit?.transit_hari || "",
+    serah_terima: c.unit?.serah_terima || "",
   })));
   const [bulk, setBulk] = useState({ nama_kapal: "", etd: "", transit_hari: "" });
 
@@ -4671,6 +4677,7 @@ function JadwalGabunganModal({ cart, headers, onClose, onDone }) {
     vehicle_type: r.unit?.vehicle_type, tipe_model: r.unit?.tipe_model, nopol: r.unit?.nopol,
     no_rangka: r.unit?.no_rangka, no_mesin: r.no_mesin || r.unit?.no_mesin, tujuan: r.tujuan,
     nama_kapal: r.nama_kapal, etd: r.etd, transit_hari: parseInt(r.transit_hari, 10) || 0,
+    serah_terima: r.serah_terima || "",
   }));
 
   const persist = () => {
@@ -4680,7 +4687,7 @@ function JadwalGabunganModal({ cart, headers, onClose, onDone }) {
     Object.entries(byOrder).forEach(([oid, rs]) => {
       axios.patch(`${API}/admin/orders/${oid}/jadwal`, {
         tanggal_siap: tanggalSiap || "", catatan_jadwal: catatan || "", pelabuhan_asal: pelabuhanAsal || "",
-        units: rs.map((r) => ({ unit_id: r.unit?.unit_id, tujuan: r.tujuan, no_mesin: r.no_mesin, nama_kapal: r.nama_kapal, etd: r.etd, transit_hari: parseInt(r.transit_hari, 10) || 0 })),
+        units: rs.map((r) => ({ unit_id: r.unit?.unit_id, tujuan: r.tujuan, no_mesin: r.no_mesin, nama_kapal: r.nama_kapal, etd: r.etd, transit_hari: parseInt(r.transit_hari, 10) || 0, serah_terima: r.serah_terima || "" })),
       }, { headers }).catch(() => {});
     });
   };
@@ -4757,6 +4764,7 @@ function JadwalGabunganModal({ cart, headers, onClose, onDone }) {
                     <label>Kapal Berangkat<input type="date" className="adm-input" value={r.etd} onChange={(e) => setRow(i, { etd: e.target.value })} /></label>
                     <label>Transit (hr)<input inputMode="numeric" className="adm-input" value={r.transit_hari} onChange={(e) => setRow(i, { transit_hari: e.target.value.replace(/\D/g, "") })} placeholder="4" /></label>
                     <div className="jm-eta">Estimasi Tiba<b>{eta ? jpFmt(eta) : "—"}</b></div>
+                    <label>Serah Terima<input type="date" className="adm-input" value={r.serah_terima || ""} onChange={(e) => setRow(i, { serah_terima: e.target.value })} /></label>
                   </div>
                 </div>
               );
