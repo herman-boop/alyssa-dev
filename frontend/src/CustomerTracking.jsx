@@ -23,7 +23,7 @@ function vesselTrackUrl(name, mmsi, imo) {
   const m = String(mmsi || "").replace(/\D/g, "");
   if (m) return `https://www.vesselfinder.com/?mmsi=${m}`;
   const i = String(imo || "").replace(/\D/g, "");
-  if (i) return `https://www.vesselfinder.com/vessels?name=${i}`;
+  if (i) return `https://www.vesselfinder.com/vessels/details/${i}`;
   const q = encodeURIComponent(String(name || "").trim());
   return `https://www.vesselfinder.com/vessels?name=${q}`;
 }
