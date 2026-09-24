@@ -20,10 +20,10 @@ const ALBUM_STAGES = ["asal", "kapal", "tujuan", "dokumen"];
    VesselFinder. Buat pelanggan pengiriman antar pulau yang tanya "kapalnya di mana".
    Kalau nanti ada nomor MMSI, bisa diarahkan langsung ke kapal spesifik. */
 function vesselTrackUrl(name, mmsi, imo) {
-  const i = String(imo || "").replace(/\D/g, "");
-  if (i) return `https://www.marinetraffic.com/en/ais/details/ships/imo:${i}`;
   const m = String(mmsi || "").replace(/\D/g, "");
   if (m) return `https://www.vesselfinder.com/?mmsi=${m}`;
+  const i = String(imo || "").replace(/\D/g, "");
+  if (i) return `https://www.vesselfinder.com/vessels?name=${i}`;
   const q = encodeURIComponent(String(name || "").trim());
   return `https://www.vesselfinder.com/vessels?name=${q}`;
 }
@@ -885,7 +885,7 @@ export default function CustomerTracking() {
                           </div>
                           {leg.kapal && <div style={{ fontSize: 11, color: "#8b949e", marginTop: 3 }}>
                             ⚓ {leg.kapal}
-                            {(leg.imo || ((/kapal/i.test(leg.tipe || "") || /kapal/i.test(leg.status || "")) && !GENERIC_KAPAL.has(String(leg.kapal).trim().toLowerCase()))) && (
+                            {(leg.mmsi || leg.imo || ((/kapal/i.test(leg.tipe || "") || /kapal/i.test(leg.status || "")) && !GENERIC_KAPAL.has(String(leg.kapal).trim().toLowerCase()))) && (
                               <a href={vesselTrackUrl(leg.kapal, leg.mmsi, leg.imo)} target="_blank" rel="noreferrer"
                                  style={{ marginLeft: 8, color: "#58a6ff", fontWeight: 600, textDecoration: "none", whiteSpace: "nowrap" }}>
                                 🚢 Lihat posisi kapal
