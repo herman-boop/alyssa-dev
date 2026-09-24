@@ -588,11 +588,10 @@ export default function CustomerTracking() {
   const lastGps   = gpsPoints[gpsPoints.length - 1];
   const hasMap    = gpsPoints.length > 0;
 
-  /* CartoDB tiles: professional light/dark */
-  const tileUrl = dark
-    ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-    : "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png";
-  const tileAttr = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
+  /* Basemap: OpenStreetMap (gratis, tanpa API key). CARTO sekarang wajib key
+     sehingga tile-nya muncul watermark "API KEY REQUIRED". */
+  const tileUrl = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+  const tileAttr = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
   const defaultCenter = [-2.5, 118.0];
 
   const waUrl = `https://wa.me/628186311350?text=${encodeURIComponent(`Halo Admin Alyssa, saya ingin menanyakan status pengiriman saya.\nTrip ID: ${tripId}`)}`;
