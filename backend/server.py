@@ -1745,6 +1745,26 @@ async def public_trip(trip_id: str):
     return view
 
 
+@api_router.get("/admin/ais/diag", dependencies=[Depends(require_admin_pin)])
+async def admin_ais_diag():
+    """Diagnostik AIS (read-only). configured = yes/no (bukan nilai key)."""
+    return await ais.diag(db)
+
+
+@api_router.get("/admin/trips/{trip_id}/ais", dependencies=[Depends(require_admin_pin)])
+async def admin_trip_ais(trip_id: str):
+    """Cek per-trip: identitas kapal tiap leg (MMSI tersimpan atau belum) + ship_ais."""
+    doc = await db.trips.find_one({"trip_id": trip_id}, {"legs": 1})
+    if not doc:
+        raise HTTPException(404, "Trip not found")
+    legs = doc.get("legs") or []
+    kapal_legs = [
+        {"tipe": l.get("tipe"), "kapal": l.get("kapal"), "mmsi": l.get("mmsi"), "imo": l.get("imo")}
+        for l in legs if (l.get("mmsi") or l.get("imo") or l.get("kapal"))
+    ]
+    return {"kapal_legs": kapal_legs, "ship_ais": await ais.position_for_legs(db, legs)}
+
+
 @api_router.get("/trips/{trip_id}/bastk/pdf")
 async def bastk_pdf(trip_id: str):
     """Generate BASTK sebagai PDF vector asli (backend-rendered), pengganti

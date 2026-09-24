@@ -273,9 +273,38 @@ async def _run(db):
             await asyncio.sleep(15)
 
 
+def worker_running() -> bool:
+    return bool(_worker_task and not _worker_task.done())
+
+
+async def diag(db):
+    """Diagnostik AIS (read-only, TANPA menampilkan API key). configured=yes/no."""
+    watched = await active_mmsis(db)
+    cache_count = 0
+    sample = []
+    try:
+        cache_count = await db.ais_positions.count_documents({})
+        cur = db.ais_positions.find({}, {"_id": 0, "mmsi": 1, "ship_name": 1, "imo": 1, "position_timestamp": 1}).limit(10)
+        async for d in cur:
+            st = staleness(d.get("position_timestamp"))
+            sample.append({
+                "mmsi": d.get("mmsi"), "ship_name": d.get("ship_name"), "imo": d.get("imo"),
+                "position_timestamp": d.get("position_timestamp"), "freshness": st["freshness"],
+            })
+    except Exception as e:
+        logger.warning("[ais] diag gagal: %s", e)
+    return {
+        "configured": provider_enabled(),          # yes/no saja — bukan nilai key
+        "worker_running": worker_running(),
+        "watched_mmsi_count": len(watched),
+        "watched_sample": watched[:20],
+        "cache_count": cache_count,
+        "cache_sample": sample,
+    }
+
+
 def start_worker(db):
     """Start worker sekali. Aman dipanggil walau key kosong (langsung no-op)."""
-    global _worker_task
     if not provider_enabled():
         logger.info("[ais] provider tidak aktif (tanpa key) — Fleet pakai fallback link eksternal.")
         return
