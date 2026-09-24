@@ -408,6 +408,38 @@ function createCpIcon(num, isLatest, dark) {
   });
 }
 
+/* Marker kapal (AIS). Diputar sesuai heading/course kalau ada. */
+function createShipIcon(freshness, heading) {
+  const col = freshness === "fresh" ? "#16a34a" : freshness === "recent" ? "#d97706" : "#dc2626";
+  const rot = (heading != null && !isNaN(heading)) ? heading : null;
+  return L.divIcon({
+    html: `<div style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;
+        border-radius:50%;background:${col};border:2.5px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.35);
+        ${rot != null ? `transform:rotate(${rot}deg);` : ""}font-size:17px;line-height:1;">🚢</div>`,
+    className: "",
+    iconSize: [34, 34],
+    iconAnchor: [17, 17],
+    popupAnchor: [0, -20],
+  });
+}
+
+/* Badge & label kesegaran AIS. LIVE hanya untuk fresh. */
+function aisBadge(freshness) {
+  if (freshness === "fresh") return { label: "🟢 LIVE", color: "#16a34a", bg: "#e7f6ee", bd: "#b6e2ca" };
+  if (freshness === "recent") return { label: "🟡 Posisi terakhir (agak lama)", color: "#b45309", bg: "#fdf3e3", bd: "#f0d59b" };
+  if (freshness === "stale") return { label: "🔴 Posisi terakhir (lama)", color: "#dc2626", bg: "#fdecec", bd: "#f5c2c2" };
+  return { label: "Belum ada data AIS", color: "#6e7681", bg: "#161b22", bd: "#30363d" };
+}
+
+/* Umur posisi -> teks relatif Indonesia. */
+function aisAgeText(sec) {
+  if (sec == null) return "—";
+  if (sec < 60) return "baru saja";
+  if (sec < 3600) return `${Math.floor(sec / 60)} menit lalu`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)} jam ${Math.floor((sec % 3600) / 60)} menit lalu`;
+  return `${Math.floor(sec / 86400)} hari lalu`;
+}
+
 /* ── Map auto-fit ── */
 function MapFitter({ positions }) {
   const map = useMap();
@@ -586,7 +618,15 @@ export default function CustomerTracking() {
     shareWaPhotos(allPhotoItems);
   };
   const lastGps   = gpsPoints[gpsPoints.length - 1];
-  const hasMap    = gpsPoints.length > 0;
+
+  /* Posisi AIS kapal (dari backend, scoped ke trip ini). shipAis.ais bisa null
+     kalau belum ada data (fallback link tetap tampil). */
+  const shipAis = data.ship_ais || null;
+  const shipInfo = shipAis && shipAis.ais ? shipAis.ais : null;
+  const shipPos = (shipInfo && shipInfo.latitude != null && shipInfo.longitude != null)
+    ? [parseFloat(shipInfo.latitude), parseFloat(shipInfo.longitude)] : null;
+  const fitPositions = shipPos ? [...positions, shipPos] : positions;
+  const hasMap    = gpsPoints.length > 0 || !!shipPos;
 
   /* Basemap: OpenStreetMap (gratis, tanpa API key). CARTO sekarang wajib key
      sehingga tile-nya muncul watermark "API KEY REQUIRED". */
@@ -644,14 +684,35 @@ export default function CustomerTracking() {
         <div className="trk-map-area">
           {hasMap ? (
             <MapContainer
-              center={lastGps ? [parseFloat(lastGps.lat), parseFloat(lastGps.lng)] : defaultCenter}
+              center={lastGps ? [parseFloat(lastGps.lat), parseFloat(lastGps.lng)] : (shipPos || defaultCenter)}
               zoom={12}
               className="trk-leaflet-map"
               zoomControl={true}
               attributionControl={true}
             >
               <TileLayer url={tileUrl} attribution={tileAttr} maxZoom={19} />
-              <MapFitter positions={positions} />
+              <MapFitter positions={fitPositions} />
+
+              {/* Marker kapal (AIS) — hanya kalau ada posisi */}
+              {shipPos && shipInfo && (
+                <Marker position={shipPos} icon={createShipIcon(shipInfo.freshness, shipInfo.heading != null ? shipInfo.heading : shipInfo.course)}>
+                  <Popup className="trk-popup" maxWidth={260}>
+                    <div className="trk-popup-inner">
+                      <div className="trk-popup-header"><b>🚢 {shipInfo.ship_name || shipAis.ship_name || "Kapal"}</b></div>
+                      <div style={{ fontSize: 12, lineHeight: 1.6 }}>
+                        {shipInfo.mmsi ? <div>MMSI: {shipInfo.mmsi}</div> : null}
+                        {shipInfo.imo ? <div>IMO: {shipInfo.imo}</div> : null}
+                        <div>Posisi: {Number(shipInfo.latitude).toFixed(4)}, {Number(shipInfo.longitude).toFixed(4)}</div>
+                        {shipInfo.speed != null ? <div>Kecepatan: {shipInfo.speed} knot</div> : null}
+                        {shipInfo.course != null ? <div>Course: {shipInfo.course}°</div> : null}
+                        {shipInfo.destination ? <div>Tujuan: {shipInfo.destination}</div> : null}
+                        {shipInfo.eta ? <div>ETA: {shipInfo.eta}</div> : null}
+                        <div style={{ marginTop: 3, color: "#6e7681" }}>{aisBadge(shipInfo.freshness).label} · {aisAgeText(shipInfo.age_seconds)}</div>
+                      </div>
+                    </div>
+                  </Popup>
+                </Marker>
+              )}
 
               {/* Route polyline */}
               {positions.length > 1 && (
@@ -841,6 +902,40 @@ export default function CustomerTracking() {
               </div>
             )}
           </div>
+
+          {/* Panel Posisi Kapal (AIS) — tampil kalau trip punya kapal ber-MMSI/IMO */}
+          {shipAis && (shipAis.mmsi || shipAis.imo || shipAis.ship_name) && (() => {
+            const b = aisBadge(shipInfo ? shipInfo.freshness : null);
+            const extUrl = vesselTrackUrl(shipAis.ship_name, shipAis.mmsi, shipAis.imo);
+            return (
+              <div style={{ marginBottom: 16 }}>
+                <div className="trk-section-title" style={{ marginBottom: 10 }}>🚢 Posisi Kapal (AIS)</div>
+                <div style={{ background: "#11161f", border: "1px solid #232a36", borderRadius: 10, padding: 12 }} data-testid="trk-ais-panel">
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: "#e6edf3" }}>{shipAis.ship_name || shipInfo?.ship_name || "Kapal"}</div>
+                    <span style={{ fontSize: 10.5, fontWeight: 700, padding: "2px 9px", borderRadius: 12, background: b.bg, color: b.color, border: `1px solid ${b.bd}` }}>{b.label}</span>
+                  </div>
+                  <div style={{ fontSize: 11, color: "#8b949e", marginTop: 2 }}>
+                    {shipAis.mmsi ? `MMSI ${shipAis.mmsi}` : ""}{shipAis.mmsi && shipAis.imo ? " · " : ""}{shipAis.imo ? `IMO ${shipAis.imo}` : ""}
+                  </div>
+                  {shipInfo ? (
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 12px", fontSize: 12, color: "#c9d1d9", marginTop: 8 }}>
+                      <div>Posisi: {Number(shipInfo.latitude).toFixed(4)}, {Number(shipInfo.longitude).toFixed(4)}</div>
+                      <div>Kecepatan: {shipInfo.speed != null ? `${shipInfo.speed} knot` : "—"}</div>
+                      <div>Course: {shipInfo.course != null ? `${shipInfo.course}°` : "—"}</div>
+                      <div>Heading: {shipInfo.heading != null ? `${shipInfo.heading}°` : "—"}</div>
+                      <div>Tujuan: {shipInfo.destination || "—"}</div>
+                      <div>ETA: {shipInfo.eta || "—"}</div>
+                      <div style={{ gridColumn: "1 / -1", color: "#8b949e", marginTop: 2 }}>Last AIS update: {aisAgeText(shipInfo.age_seconds)}</div>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 12, color: "#8b949e", marginTop: 8 }}>Belum ada data posisi AIS terbaru untuk kapal ini.</div>
+                  )}
+                  <a href={extUrl} target="_blank" rel="noreferrer" style={{ display: "inline-block", marginTop: 10, fontSize: 12, color: "#58a6ff", fontWeight: 700, textDecoration: "none" }}>🔗 Buka di VesselFinder</a>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Legs Timeline */}
           {legs.length > 0 && (() => {

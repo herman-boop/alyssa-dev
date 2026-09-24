@@ -12,6 +12,7 @@ from typing import List, Optional, Any, Dict
 from datetime import datetime, timezone, timedelta
 from odoo_client import OdooClient
 from playwright.async_api import async_playwright
+import ais  # modul AIS (posisi kapal) — provider-agnostic, aman tanpa key
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -144,6 +145,21 @@ async def _ensure_indexes():
         await db.doc_history.create_index([("created_at", -1)])
     except Exception as e:
         logger.warning(f"[startup] gagal bikin index doc_history.created_at: {e}")
+
+
+@app.on_event("startup")
+async def _ais_startup():
+    """Cache posisi AIS + worker aisstream. Aman tanpa key (worker no-op,
+    Fleet pakai fallback link eksternal)."""
+    try:
+        await db.ais_positions.create_index("mmsi", unique=True)
+    except Exception as e:
+        logger.warning(f"[startup] gagal bikin index ais_positions.mmsi: {e}")
+    try:
+        ais.start_worker(db)
+    except Exception as e:
+        logger.warning(f"[startup] gagal start AIS worker: {e}")
+
 
 
 @app.on_event("startup")
@@ -1719,6 +1735,13 @@ async def public_trip(trip_id: str):
         real_trip_id = doc.get("trip_id")
     await _merge_task_media(real_trip_id, view)
     await _merge_task_checkpoints(real_trip_id, view)
+    # Posisi AIS kapal — SCOPED ke trip ini saja (dari leg kapal milik trip).
+    # Tidak menerima query MMSI bebas; hanya kapal pada trip/resi pemilik link.
+    try:
+        view["ship_ais"] = await ais.position_for_legs(db, view.get("legs") or [])
+    except Exception as e:
+        logger.warning(f"[ais] attach ship_ais gagal: {e}")
+        view["ship_ais"] = None
     return view
 
 
