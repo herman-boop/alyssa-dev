@@ -101,14 +101,20 @@ def _vesselapi_get(path, params):
 
 
 def _pluck(js, need_key):
-    """Cari objek data di dalam respons VesselAPI, apa pun bentuk envelope-nya
-    (flat, atau dibungkus 'data'/'position'/'eta'/'result'/'vessel')."""
+    """Cari objek data di dalam respons VesselAPI, apa pun bentuk envelope-nya.
+    VesselAPI membungkus, mis. {"vesselPosition": {...}} / {"vesselEta": {...}}.
+    1) kalau field ada di top-level -> pakai itu; 2) cek pembungkus yang dikenal;
+    3) fallback: pindai semua nilai dict 1 level, ambil yang punya need_key."""
     if not isinstance(js, dict):
         return None
     if js.get(need_key) is not None:
         return js
-    for k in ("data", "position", "eta", "result", "vessel"):
+    for k in ("vesselPosition", "vesselEta", "vesselInfo", "data", "position",
+              "eta", "result", "vessel"):
         v = js.get(k)
+        if isinstance(v, dict) and v.get(need_key) is not None:
+            return v
+    for v in js.values():  # fallback generik: pembungkus apa pun namanya
         if isinstance(v, dict) and v.get(need_key) is not None:
             return v
     return None
