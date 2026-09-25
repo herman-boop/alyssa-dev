@@ -1308,11 +1308,19 @@ function PengaturanPage({ dark, onToggleTheme, onLogout, fixHeicPhotos, fixingHe
   const row = { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 18px", borderRadius: 12, background: "#0e1420", border: "1px solid #1a2130", marginBottom: 12, gap: 12, flexWrap: "wrap" };
   const [aisDiag, setAisDiag] = useState(null);
   const [aisBusy, setAisBusy] = useState(false);
+  const [aisProbe, setAisProbe] = useState(null);
+  const [probeBusy, setProbeBusy] = useState(false);
   const runAisDiag = async () => {
     setAisBusy(true); setAisDiag(null);
     try { const { data } = await axios.get(`${API}/admin/ais/diag`); setAisDiag(data); }
     catch (e) { setAisDiag({ error: e?.response?.status || "gagal", detail: e?.message }); }
     finally { setAisBusy(false); }
+  };
+  const runAisProbe = async () => {
+    setProbeBusy(true); setAisProbe(null);
+    try { const { data } = await axios.get(`${API}/admin/ais/probe`); setAisProbe(data); }
+    catch (e) { setAisProbe({ error: e?.response?.status || "gagal", detail: e?.message }); }
+    finally { setProbeBusy(false); }
   };
   return (
     <div style={{ maxWidth: 640 }}>
@@ -1376,6 +1384,16 @@ function PengaturanPage({ dark, onToggleTheme, onLogout, fixHeicPhotos, fixingHe
             )}
           </div>
         )}
+        <div style={{ marginTop: 12, borderTop: "1px solid #1a2130", paddingTop: 12 }}>
+          <button onClick={runAisProbe} disabled={probeBusy} style={{ padding: "8px 14px", borderRadius: 9, border: "1px solid #2ea043", background: "#0d2a17", color: "#3fb950", fontWeight: 700, fontSize: 12, cursor: "pointer" }} data-testid="ais-probe-run">
+            {probeBusy ? "⏳ Menguji..." : "🔬 Tes VesselAPI (kapal pertama)"}
+          </button>
+          {aisProbe && (
+            <pre style={{ marginTop: 10, fontSize: 10.5, color: "#c9d1d9", background: "#0a0e16", border: "1px solid #1a2130", borderRadius: 8, padding: 10, maxHeight: 320, overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+{JSON.stringify(aisProbe, null, 2)}
+            </pre>
+          )}
+        </div>
       </div>
     </div>
   );

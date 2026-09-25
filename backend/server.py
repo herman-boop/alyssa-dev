@@ -1751,6 +1751,18 @@ async def admin_ais_diag():
     return await ais.diag(db)
 
 
+@api_router.get("/admin/ais/probe", dependencies=[Depends(require_admin_pin)])
+async def admin_ais_probe(mmsi: Optional[str] = None, imo: Optional[str] = None):
+    """Diagnostik: panggil VesselAPI /position mentah (status + bentuk respons),
+    TANPA menampilkan API key. Tanpa param → pakai MMSI pertama yang dipantau."""
+    if not mmsi and not imo:
+        watched = await ais.active_mmsis(db)
+        mmsi = watched[0] if watched else None
+    if not mmsi and not imo:
+        return {"error": "tidak ada kapal ber-MMSI untuk diuji"}
+    return await ais.probe_vesselapi(mmsi, imo)
+
+
 @api_router.get("/admin/trips/{trip_id}/ais", dependencies=[Depends(require_admin_pin)])
 async def admin_trip_ais(trip_id: str):
     """Cek per-trip: identitas kapal tiap leg (MMSI tersimpan atau belum) + ship_ais."""

@@ -500,6 +500,36 @@ async def diag(db):
     }
 
 
+async def probe_vesselapi(mmsi, imo=None):
+    """Diagnostik: panggil VesselAPI /position mentah untuk lihat status + bentuk
+    respons (TANPA menampilkan API key). Coba mmsi dulu, lalu imo kalau 404."""
+    if not vesselapi_enabled():
+        return {"error": "VESSELAPI_KEY belum diset di backend"}
+    out = {}
+    for label, ident, idtype in (("mmsi", mmsi, "mmsi"), ("imo", imo, "imo")):
+        ident = str(ident or "").strip()
+        if not ident:
+            continue
+        try:
+            r = await asyncio.to_thread(_vesselapi_get, f"/vessel/{ident}/position", {"filter.idType": idtype})
+            try:
+                body = r.json()
+            except Exception:
+                body = {"_text": (r.text or "")[:800]}
+            out[label] = {
+                "id": ident,
+                "status": r.status_code,
+                "ratelimit_remaining": r.headers.get("X-RateLimit-Remaining"),
+                "x_data_source": r.headers.get("X-Data-Source"),
+                "body": body,
+            }
+            if r.status_code == 200:
+                break
+        except Exception as e:
+            out[label] = {"id": ident, "error": str(e)}
+    return out or {"error": "tidak ada mmsi/imo untuk diuji"}
+
+
 def start_worker(db):
     """Start worker sekali. Aman dipanggil walau key kosong (langsung no-op)."""
     global _worker_task
