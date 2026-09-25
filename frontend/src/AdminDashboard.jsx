@@ -1306,6 +1306,14 @@ function LaporanPage({ stats, onExportCsv }) {
 ════════════════════════════════════════ */
 function PengaturanPage({ dark, onToggleTheme, onLogout, fixHeicPhotos, fixingHeic }) {
   const row = { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 18px", borderRadius: 12, background: "#0e1420", border: "1px solid #1a2130", marginBottom: 12, gap: 12, flexWrap: "wrap" };
+  const [aisDiag, setAisDiag] = useState(null);
+  const [aisBusy, setAisBusy] = useState(false);
+  const runAisDiag = async () => {
+    setAisBusy(true); setAisDiag(null);
+    try { const { data } = await axios.get(`${API}/admin/ais/diag`); setAisDiag(data); }
+    catch (e) { setAisDiag({ error: e?.response?.status || "gagal", detail: e?.message }); }
+    finally { setAisBusy(false); }
+  };
   return (
     <div style={{ maxWidth: 640 }}>
       <div style={row}>
@@ -1334,6 +1342,39 @@ function PengaturanPage({ dark, onToggleTheme, onLogout, fixHeicPhotos, fixingHe
         <button onClick={onLogout} style={{ padding: "9px 16px", borderRadius: 9, border: "1px solid #7a2020", background: "none", color: "#f85149", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>
           🚪 Keluar
         </button>
+      </div>
+
+      <div style={{ ...row, display: "block" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 13.5, fontWeight: 700, color: "#e6edf3" }}>Diagnosa AIS (Tracking Kapal)</div>
+            <div style={{ fontSize: 11.5, color: "#6b7688", marginTop: 3 }}>Cek status sumber AIS &amp; cache posisi kapal. Tidak menampilkan API key.</div>
+          </div>
+          <button onClick={runAisDiag} disabled={aisBusy} style={{ padding: "9px 16px", borderRadius: 9, border: "1px solid #1f6feb", background: "#0d2340", color: "#58a6ff", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }} data-testid="ais-diag-run">
+            {aisBusy ? "⏳ Mengecek..." : "🔍 Jalankan Diagnosa"}
+          </button>
+        </div>
+        {aisDiag && (
+          <div style={{ marginTop: 12 }}>
+            {aisDiag.error ? (
+              <div style={{ fontSize: 12, color: "#f85149" }}>Gagal memanggil diagnosa: {String(aisDiag.error)} {aisDiag.detail ? `(${aisDiag.detail})` : ""}</div>
+            ) : (
+              <div style={{ fontSize: 12.5, color: "#c9d1d9", lineHeight: 1.9 }}>
+                <div>API key terpasang: <b style={{ color: aisDiag.configured ? "#3fb950" : "#f85149" }}>{aisDiag.configured ? "YA" : "TIDAK"}</b></div>
+                <div>Worker jalan: <b style={{ color: aisDiag.worker_running ? "#3fb950" : "#f0a742" }}>{aisDiag.worker_running ? "YA" : "TIDAK"}</b></div>
+                <div>MMSI dipantau: <b>{aisDiag.watched_mmsi_count}</b> {aisDiag.watched_sample?.length ? `(${aisDiag.watched_sample.join(", ")})` : ""}</div>
+                <div>Kapal di cache: <b>{aisDiag.cache_count}</b></div>
+                {aisDiag.cache_sample?.length ? (
+                  <div style={{ marginTop: 4 }}>
+                    {aisDiag.cache_sample.map((c, i) => (
+                      <div key={i} style={{ fontSize: 11.5, color: "#8b949e" }}>• {c.ship_name || "?"} · MMSI {c.mmsi} · {c.freshness}</div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
