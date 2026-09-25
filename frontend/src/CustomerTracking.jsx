@@ -440,17 +440,26 @@ function aisAgeText(sec) {
   return `${Math.floor(sec / 86400)} hari lalu`;
 }
 
-/* ── Map auto-fit ── */
+/* ── Map auto-fit ──
+   Zoom regional biar langsung dapat konteks (kapal + pulau besar sekitarnya),
+   BUKAN zoom mepet ke 1 marker. Auto-fit hanya SEKALI saat data pertama siap;
+   sesudah itu user bebas zoom/pan — tidak dipaksa balik tiap AIS refresh. */
+const REGIONAL_ZOOM = 7;   // 1 posisi: tampilkan konteks regional (mis. Kalimantan+Sulawesi)
+const FIT_MAX_ZOOM = 9;    // banyak titik berdekatan: jangan lebih dekat dari ini
 function MapFitter({ positions }) {
   const map = useMap();
+  const done = useRef(false);
   useEffect(() => {
-    if (positions.length === 0) return;
-    if (positions.length === 1) {
-      map.setView(positions[0], 13);
-    } else {
-      const bounds = L.latLngBounds(positions);
-      map.fitBounds(bounds, { padding: [48, 48] });
-    }
+    if (done.current) return;              // hanya auto-fit sekali (initial)
+    if (!positions || positions.length === 0) return;
+    try {
+      if (positions.length === 1) {
+        map.setView(positions[0], REGIONAL_ZOOM);
+      } else {
+        map.fitBounds(L.latLngBounds(positions), { padding: [50, 50], maxZoom: FIT_MAX_ZOOM });
+      }
+      done.current = true;                 // kunci: refresh AIS berikutnya tidak re-center
+    } catch (e) {}
   }, [map, positions]);
   return null;
 }
@@ -703,7 +712,7 @@ export default function CustomerTracking() {
           {hasMap ? (
             <MapContainer
               center={lastGps ? [parseFloat(lastGps.lat), parseFloat(lastGps.lng)] : (shipPos || defaultCenter)}
-              zoom={12}
+              zoom={REGIONAL_ZOOM}
               className="trk-leaflet-map"
               zoomControl={true}
               attributionControl={true}
