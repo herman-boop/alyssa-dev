@@ -34,6 +34,38 @@ RECENT_MAX = 6 * 3600
 
 _worker_task = None
 
+# ── Provider tambahan (berbayar, opsional): VesselAPI (REST) ──────────────
+# Modular: kalau VESSELAPI_KEY diisi, posisi diambil on-demand via REST saat
+# halaman tracking dibuka & cache sudah basi. Hemat kuota (tidak polling 24 jam).
+# Terrestrial default; satelit hanya kalau VESSELAPI_USE_SAT=true + ada kredit.
+VESSELAPI_URL = "https://api.vesselapi.com/v1"
+# Umur maksimum posisi cache (menit) sebelum coba refresh dari VesselAPI:
+VESSELAPI_MAX_AGE_MIN = int(os.environ.get("VESSELAPI_MAX_AGE_MIN") or "45")
+# Jeda minimum antar-panggil VesselAPI untuk 1 kapal (detik) — cegah boros kuota:
+_MIN_FETCH_INTERVAL = 300
+_ETA_FETCH_INTERVAL = 3600
+_last_pos_fetch = {}
+_last_eta_fetch = {}
+
+# Status navigasi AIS (kode -> teks Indonesia)
+NAV_STATUS = {
+    0: "Berlayar (mesin)", 1: "Lego jangkar", 2: "Tidak terkendali",
+    3: "Olah gerak terbatas", 4: "Terbatas draft", 5: "Sandar",
+    6: "Kandas", 7: "Menangkap ikan", 8: "Berlayar (layar)",
+    9: "Kapal khusus (HSC)", 10: "Kapal khusus (WIG)",
+    11: "Menarik (di belakang)", 12: "Mendorong/menggandeng",
+    14: "AIS-SART/darurat", 15: "Tidak ada info",
+}
+
+
+def nav_status_text(code):
+    if code is None:
+        return ""
+    try:
+        return NAV_STATUS.get(int(code), "")
+    except Exception:
+        return ""
+
 
 def api_key() -> str:
     """API key aisstream — HANYA dari env backend. Jangan pernah diekspos."""
@@ -42,6 +74,53 @@ def api_key() -> str:
 
 def provider_enabled() -> bool:
     return bool(api_key())
+
+
+def vesselapi_key() -> str:
+    """API key VesselAPI — HANYA dari env backend. Jangan pernah diekspos."""
+    return (os.environ.get("VESSELAPI_KEY") or "").strip()
+
+
+def vesselapi_enabled() -> bool:
+    return bool(vesselapi_key())
+
+
+def any_provider_enabled() -> bool:
+    return provider_enabled() or vesselapi_enabled()
+
+
+def _vesselapi_use_sat() -> bool:
+    return (os.environ.get("VESSELAPI_USE_SAT") or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _vesselapi_get(path, params):
+    """HTTP GET ke VesselAPI (blocking; dipanggil via asyncio.to_thread)."""
+    import requests
+    headers = {"Authorization": f"Bearer {vesselapi_key()}"}
+    return requests.get(f"{VESSELAPI_URL}{path}", params=params, headers=headers, timeout=15)
+
+
+def _pluck(js, need_key):
+    """Cari objek data di dalam respons VesselAPI, apa pun bentuk envelope-nya
+    (flat, atau dibungkus 'data'/'position'/'eta'/'result'/'vessel')."""
+    if not isinstance(js, dict):
+        return None
+    if js.get(need_key) is not None:
+        return js
+    for k in ("data", "position", "eta", "result", "vessel"):
+        v = js.get(k)
+        if isinstance(v, dict) and v.get(need_key) is not None:
+            return v
+    return None
+
+
+def _num(v):
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except Exception:
+        return None
 
 
 def _parse_ts(s):
@@ -92,11 +171,110 @@ def public_ais(doc):
         "heading": doc.get("heading"),
         "destination": doc.get("destination") or "",
         "eta": doc.get("eta") or "",
+        "draught": doc.get("draught"),
+        "nav_status": doc.get("nav_status"),
+        "nav_status_text": nav_status_text(doc.get("nav_status")),
         "position_timestamp": ts,
         "source": doc.get("source") or "",
         "age_seconds": st["age_seconds"],
         "freshness": st["freshness"],
     }
+
+
+def _doc_age_seconds(doc):
+    if not doc:
+        return None
+    st = staleness(doc.get("position_timestamp") or doc.get("updated_at"))
+    return st["age_seconds"]
+
+
+async def _vesselapi_refresh(db, mmsi, imo):
+    """Ambil posisi (+ETA) 1 kapal dari VesselAPI dan simpan ke cache.
+    On-demand + throttle supaya kuota hemat. Return dokumen cache terbaru / None.
+    Aman kalau key kosong (langsung None)."""
+    if not vesselapi_enabled():
+        return None
+    ident = (mmsi or imo or "").strip()
+    if not ident:
+        return None
+    idtype = "mmsi" if mmsi else "imo"
+    import time as _t
+    now_m = _t.monotonic()
+    if now_m - _last_pos_fetch.get(ident, 0) < _MIN_FETCH_INTERVAL:
+        return None  # baru saja diambil — jangan boros kuota
+    _last_pos_fetch[ident] = now_m
+
+    params = {"filter.idType": idtype}
+    if _vesselapi_use_sat():
+        params["filter.sat"] = "true"
+    try:
+        r = await asyncio.to_thread(_vesselapi_get, f"/vessel/{ident}/position", params)
+    except Exception as e:
+        logger.warning("[ais] VesselAPI position gagal: %s", e)
+        return None
+    if r.status_code == 404:
+        logger.info("[ais] VesselAPI: belum ada posisi untuk %s (404).", ident)
+        return None
+    if r.status_code != 200:
+        logger.warning("[ais] VesselAPI position HTTP %s untuk %s.", r.status_code, ident)
+        return None
+    try:
+        pos = _pluck(r.json(), "latitude")
+    except Exception:
+        pos = None
+    if not pos or pos.get("latitude") is None or pos.get("longitude") is None:
+        return None
+
+    now = datetime.now(timezone.utc).isoformat()
+    src = "vesselapi-satellite" if (r.headers.get("X-Data-Source") == "satellite") else "vesselapi"
+    key_mmsi = str(pos.get("mmsi") or mmsi or "").strip()
+    if not key_mmsi:
+        return None
+    upd = {"mmsi": key_mmsi, "source": src, "updated_at": now,
+           "latitude": _num(pos.get("latitude")), "longitude": _num(pos.get("longitude"))}
+    if pos.get("imo"):
+        upd["imo"] = str(pos.get("imo"))
+    if pos.get("vessel_name"):
+        upd["ship_name"] = str(pos.get("vessel_name")).strip()
+    if _num(pos.get("sog")) is not None:
+        upd["speed"] = _num(pos.get("sog"))
+    if _num(pos.get("cog")) is not None:
+        upd["course"] = _num(pos.get("cog"))
+    if _num(pos.get("heading")) is not None:
+        upd["heading"] = _num(pos.get("heading"))
+    if pos.get("nav_status") is not None:
+        try:
+            upd["nav_status"] = int(pos.get("nav_status"))
+        except Exception:
+            pass
+    upd["position_timestamp"] = pos.get("timestamp") or now
+
+    # ETA/tujuan/draught — endpoint terpisah, throttle lebih longgar (jarang berubah)
+    if now_m - _last_eta_fetch.get(ident, 0) >= _ETA_FETCH_INTERVAL:
+        _last_eta_fetch[ident] = now_m
+        try:
+            re = await asyncio.to_thread(_vesselapi_get, f"/vessel/{ident}/eta", {"filter.idType": idtype})
+            if re.status_code == 200:
+                eta = _pluck(re.json(), "destination") or _pluck(re.json(), "eta") or {}
+                if isinstance(eta, dict):
+                    dest = (eta.get("destination") or "").strip() if eta.get("destination") else ""
+                    if dest:
+                        upd["destination"] = dest
+                    ev = eta.get("eta")
+                    if ev:
+                        upd["eta"] = str(ev)
+                    dr = _num(eta.get("draught"))
+                    if dr is not None:
+                        upd["draught"] = dr
+        except Exception as e:
+            logger.info("[ais] VesselAPI eta lewati: %s", e)
+
+    try:
+        await db.ais_positions.update_one({"mmsi": key_mmsi}, {"$set": upd}, upsert=True)
+        return await db.ais_positions.find_one({"mmsi": key_mmsi}, {"_id": 0})
+    except Exception as e:
+        logger.warning("[ais] VesselAPI upsert gagal: %s", e)
+        return None
 
 
 async def position_for_legs(db, legs):
@@ -123,11 +301,20 @@ async def position_for_legs(db, legs):
             doc = await db.ais_positions.find_one({"imo": chosen["imo"]}, {"_id": 0})
     except Exception as e:
         logger.warning("[ais] lookup gagal: %s", e)
+
+    # On-demand refresh via VesselAPI kalau cache kosong / basi (hemat kuota via throttle)
+    if vesselapi_enabled():
+        age = _doc_age_seconds(doc)
+        if doc is None or age is None or age > VESSELAPI_MAX_AGE_MIN * 60:
+            fresh = await _vesselapi_refresh(db, chosen["mmsi"], chosen["imo"])
+            if fresh:
+                doc = fresh
+
     return {
         "ship_name": chosen["ship_name"],
         "mmsi": chosen["mmsi"],
         "imo": chosen["imo"],
-        "provider_enabled": provider_enabled(),
+        "provider_enabled": any_provider_enabled(),
         "ais": public_ais(doc),
     }
 
@@ -211,6 +398,10 @@ async def _handle(db, msg, watch):
         if th is not None and th != 511:
             try: upd["heading"] = float(th)
             except Exception: pass
+        ns = pr.get("NavigationalStatus")
+        if ns is not None:
+            try: upd["nav_status"] = int(ns)
+            except Exception: pass
         upd["position_timestamp"] = _meta_time(meta) or now
     elif mt == "ShipStaticData":
         sd = inner.get("ShipStaticData") or {}
@@ -223,6 +414,10 @@ async def _handle(db, msg, watch):
         eta = _fmt_eta(sd.get("Eta"))
         if eta:
             upd["eta"] = eta
+        dr = sd.get("MaximumStaticDraught")
+        if dr is not None:
+            try: upd["draught"] = float(dr)
+            except Exception: pass
     else:
         return
     try:
@@ -294,8 +489,10 @@ async def diag(db):
     except Exception as e:
         logger.warning("[ais] diag gagal: %s", e)
     return {
-        "configured": provider_enabled(),          # yes/no saja — bukan nilai key
+        "configured": provider_enabled(),          # aisstream: yes/no saja — bukan nilai key
         "worker_running": worker_running(),
+        "vesselapi_configured": vesselapi_enabled(),   # VesselAPI: yes/no saja
+        "vesselapi_sat": _vesselapi_use_sat(),
         "watched_mmsi_count": len(watched),
         "watched_sample": watched[:20],
         "cache_count": cache_count,

@@ -719,13 +719,13 @@ export default function CustomerTracking() {
                     <div className="trk-popup-inner">
                       <div className="trk-popup-header"><b>🚢 {shipInfo.ship_name || shipAis.ship_name || "Kapal"}</b></div>
                       <div style={{ fontSize: 12, lineHeight: 1.6 }}>
-                        {shipInfo.mmsi ? <div>MMSI: {shipInfo.mmsi}</div> : null}
-                        {shipInfo.imo ? <div>IMO: {shipInfo.imo}</div> : null}
                         <div>Posisi: {Number(shipInfo.latitude).toFixed(4)}, {Number(shipInfo.longitude).toFixed(4)}</div>
-                        {shipInfo.speed != null ? <div>Kecepatan: {shipInfo.speed} knot</div> : null}
-                        {shipInfo.course != null ? <div>Course: {shipInfo.course}°</div> : null}
+                        {shipInfo.speed != null ? <div>Kecepatan: {shipInfo.speed} knot{shipInfo.course != null ? ` · ${shipInfo.course}°` : ""}</div> : (shipInfo.course != null ? <div>Course: {shipInfo.course}°</div> : null)}
+                        {shipInfo.nav_status_text ? <div>Status: {shipInfo.nav_status_text}</div> : null}
                         {shipInfo.destination ? <div>Tujuan: {shipInfo.destination}</div> : null}
                         {shipInfo.eta ? <div>ETA: {shipInfo.eta}</div> : null}
+                        {shipInfo.draught != null ? <div>Draft: {shipInfo.draught} m</div> : null}
+                        {shipInfo.mmsi ? <div style={{ color: "#6e7681" }}>MMSI: {shipInfo.mmsi}{shipInfo.imo ? ` · IMO: ${shipInfo.imo}` : ""}</div> : null}
                         <div style={{ marginTop: 3, color: "#6e7681" }}>{aisBadge(shipInfo.freshness).label} · {aisAgeText(shipInfo.age_seconds)}</div>
                       </div>
                     </div>
@@ -941,10 +941,12 @@ export default function CustomerTracking() {
                   {shipInfo ? (
                     <>
                       <div style={{ marginTop: 10 }}>
-                        <div style={rowS}><span style={kS}>Last AIS update</span><b style={{ color: "#e6edf3" }}>{aisAgeText(shipInfo.age_seconds)}</b></div>
+                        <div style={rowS}><span style={kS}>Update terakhir</span><b style={{ color: "#e6edf3" }}>{aisAgeText(shipInfo.age_seconds)}</b></div>
                         <div style={rowS}><span style={kS}>Kecepatan</span><span>{shipInfo.speed != null ? `${shipInfo.speed} knot` : "—"}</span></div>
+                        {shipInfo.nav_status_text ? <div style={rowS}><span style={kS}>Status</span><span>{shipInfo.nav_status_text}</span></div> : null}
                         <div style={rowS}><span style={kS}>Tujuan</span><span>{shipInfo.destination || "—"}</span></div>
                         <div style={rowS}><span style={kS}>ETA</span><span>{shipInfo.eta || "—"}</span></div>
+                        {shipInfo.draught != null ? <div style={rowS}><span style={kS}>Draft</span><span>{shipInfo.draught} m</span></div> : null}
                       </div>
                       {shipPos && (
                         <button onClick={focusShip} style={{ width: "100%", marginTop: 10, padding: "9px 12px", borderRadius: 8, border: "1px solid #1f6feb", background: "#0d2340", color: "#58a6ff", fontWeight: 700, fontSize: 13, cursor: "pointer" }} data-testid="trk-ais-focus">📍 Lihat posisi kapal di peta</button>

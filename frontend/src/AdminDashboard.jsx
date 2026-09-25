@@ -1360,8 +1360,9 @@ function PengaturanPage({ dark, onToggleTheme, onLogout, fixHeicPhotos, fixingHe
               <div style={{ fontSize: 12, color: "#f85149" }}>Gagal memanggil diagnosa: {String(aisDiag.error)} {aisDiag.detail ? `(${aisDiag.detail})` : ""}</div>
             ) : (
               <div style={{ fontSize: 12.5, color: "#c9d1d9", lineHeight: 1.9 }}>
-                <div>API key terpasang: <b style={{ color: aisDiag.configured ? "#3fb950" : "#f85149" }}>{aisDiag.configured ? "YA" : "TIDAK"}</b></div>
-                <div>Worker jalan: <b style={{ color: aisDiag.worker_running ? "#3fb950" : "#f0a742" }}>{aisDiag.worker_running ? "YA" : "TIDAK"}</b></div>
+                <div>aisstream (gratis) terpasang: <b style={{ color: aisDiag.configured ? "#3fb950" : "#f85149" }}>{aisDiag.configured ? "YA" : "TIDAK"}</b></div>
+                <div>Worker aisstream jalan: <b style={{ color: aisDiag.worker_running ? "#3fb950" : "#f0a742" }}>{aisDiag.worker_running ? "YA" : "TIDAK"}</b></div>
+                <div>VesselAPI (berbayar) terpasang: <b style={{ color: aisDiag.vesselapi_configured ? "#3fb950" : "#f0a742" }}>{aisDiag.vesselapi_configured ? "YA" : "TIDAK"}</b>{aisDiag.vesselapi_configured ? <span style={{ color: "#8b949e" }}> · satelit: {aisDiag.vesselapi_sat ? "aktif" : "nonaktif"}</span> : null}</div>
                 <div>MMSI dipantau: <b>{aisDiag.watched_mmsi_count}</b> {aisDiag.watched_sample?.length ? `(${aisDiag.watched_sample.join(", ")})` : ""}</div>
                 <div>Kapal di cache: <b>{aisDiag.cache_count}</b></div>
                 {aisDiag.cache_sample?.length ? (
