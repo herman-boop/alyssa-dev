@@ -305,6 +305,7 @@ async def diag(db):
 
 def start_worker(db):
     """Start worker sekali. Aman dipanggil walau key kosong (langsung no-op)."""
+    global _worker_task
     if not provider_enabled():
         logger.info("[ais] provider tidak aktif (tanpa key) — Fleet pakai fallback link eksternal.")
         return
