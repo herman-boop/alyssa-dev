@@ -4,6 +4,8 @@ import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "./Tracking.css";
+import shipMarkerImg from "./assets/ship-roro.png";
+import { MAP_TILE_URL, MAP_LABEL_URL, MAP_ATTR, MAP_MAX_ZOOM, MAP_MAX_NATIVE_ZOOM, ROUTE_COLOR, ROUTE_WEIGHT, ROUTE_OPACITY, ROUTE_DASH, freshnessDot } from "./mapTheme";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -383,43 +385,64 @@ function getOverallStatus(data) {
 
 /* ── Custom Leaflet marker ── */
 function createCpIcon(num, isLatest, dark) {
-  const bg = isLatest ? "#E11D48" : "#2563EB";
-  const ring = isLatest ? "rgba(225,29,72,0.3)" : "transparent";
+  const bg = isLatest ? "#E11D48" : "#475569";   // terbaru: rose · lainnya: slate corporate
+  const ring = isLatest ? "rgba(225,29,72,0.28)" : "transparent";
   return L.divIcon({
     html: `
       <div style="
-        width:30px;height:30px;
+        width:24px;height:24px;
         border-radius:50%;
         background:${bg};
         color:#fff;
         font-family:Inter,sans-serif;
-        font-size:11px;
+        font-size:10.5px;
         font-weight:800;
         display:flex;align-items:center;justify-content:center;
-        border:2.5px solid #fff;
-        box-shadow:0 2px 8px rgba(0,0,0,0.28),0 0 0 ${isLatest ? "6px" : "0"} ${ring};
+        border:2px solid #fff;
+        box-shadow:0 1px 5px rgba(0,0,0,0.25),0 0 0 ${isLatest ? "5px" : "0"} ${ring};
         ${isLatest ? "animation:cpPulse 2s ease-in-out infinite;" : ""}
       ">${num}</div>
     `,
     className: "",
-    iconSize: [30, 30],
-    iconAnchor: [15, 15],
-    popupAnchor: [0, -18],
+    iconSize: [24, 24],
+    iconAnchor: [12, 12],
+    popupAnchor: [0, -14],
   });
 }
 
-/* Marker kapal (AIS). Diputar sesuai heading/course kalau ada. */
-function createShipIcon(freshness, heading) {
-  const col = freshness === "fresh" ? "#16a34a" : freshness === "recent" ? "#d97706" : "#dc2626";
+/* Marker kapal (AIS) gaya fleet: gambar kapal RORO (tegak) + panah arah heading
+   (fallback COG) + pill nama kapal. Kesegaran ditunjukkan dot kecil di pill —
+   BUKAN mewarnai seluruh marker. */
+function createShipIcon(freshness, heading, shipName) {
+  const S = 46;                                  // ukuran gambar kapal (px)
+  const dot = freshnessDot(freshness);
   const rot = (heading != null && !isNaN(heading)) ? heading : null;
+  const arrow = rot != null
+    ? `<div style="position:absolute;left:50%;top:50%;width:0;height:0;transform:translate(-50%,-50%) rotate(${rot}deg);pointer-events:none;">
+         <div style="position:absolute;left:-5px;top:-${S / 2 + 13}px;width:0;height:0;
+           border-left:5px solid transparent;border-right:5px solid transparent;
+           border-bottom:9px solid #1e3a5f;filter:drop-shadow(0 1px 1px rgba(0,0,0,.35));"></div>
+       </div>`
+    : "";
+  const name = shipName
+    ? `<div style="position:absolute;left:${S + 5}px;top:50%;transform:translateY(-50%);
+         display:flex;align-items:center;gap:5px;white-space:nowrap;
+         background:rgba(255,255,255,.96);border:1px solid #cbd5e1;border-radius:999px;
+         padding:2px 8px;font:800 11px Inter,system-ui,sans-serif;color:#1e293b;
+         box-shadow:0 1px 4px rgba(0,0,0,.18);pointer-events:none;">
+         <span style="width:7px;height:7px;border-radius:50%;background:${dot};flex:none;"></span>${shipName}
+       </div>`
+    : "";
   return L.divIcon({
-    html: `<div style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;
-        border-radius:50%;background:${col};border:2.5px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.35);
-        ${rot != null ? `transform:rotate(${rot}deg);` : ""}font-size:17px;line-height:1;">🚢</div>`,
+    html: `<div style="position:relative;width:${S}px;height:${S}px;">
+        <img src="${shipMarkerImg}" alt="" style="width:${S}px;height:${S}px;object-fit:contain;
+          display:block;filter:drop-shadow(0 2px 4px rgba(0,0,0,.35));" />
+        ${arrow}${name}
+      </div>`,
     className: "",
-    iconSize: [34, 34],
-    iconAnchor: [17, 17],
-    popupAnchor: [0, -20],
+    iconSize: [S, S],
+    iconAnchor: [S / 2, S / 2],
+    popupAnchor: [0, -S / 2 + 2],
   });
 }
 
@@ -655,10 +678,8 @@ export default function CustomerTracking() {
     try { mapAreaRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }); } catch (e) {}
   };
 
-  /* Basemap: OpenStreetMap (gratis, tanpa API key). CARTO sekarang wajib key
-     sehingga tile-nya muncul watermark "API KEY REQUIRED". */
-  const tileUrl = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
-  const tileAttr = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+  /* Basemap corporate: Esri Light Gray Canvas (lihat mapTheme.js) — gratis,
+     tanpa API key, tampilan clean/soft; label kota/pelabuhan di layer terpisah. */
   const defaultCenter = [-2.5, 118.0];
 
   const waUrl = `https://wa.me/628186311350?text=${encodeURIComponent(`Halo Admin Alyssa, saya ingin menanyakan status pengiriman saya.\nTrip ID: ${tripId}`)}`;
@@ -717,13 +738,14 @@ export default function CustomerTracking() {
               zoomControl={true}
               attributionControl={true}
             >
-              <TileLayer url={tileUrl} attribution={tileAttr} maxZoom={19} />
+              <TileLayer url={MAP_TILE_URL} attribution={MAP_ATTR} maxZoom={MAP_MAX_ZOOM} maxNativeZoom={MAP_MAX_NATIVE_ZOOM} />
+              <TileLayer url={MAP_LABEL_URL} maxZoom={MAP_MAX_ZOOM} maxNativeZoom={MAP_MAX_NATIVE_ZOOM} />
               <MapFitter positions={fitPositions} />
               <MapFlyTo target={shipPos} nonce={flyNonce} />
 
               {/* Marker kapal (AIS) — hanya kalau ada posisi */}
               {shipPos && shipInfo && (
-                <Marker position={shipPos} icon={createShipIcon(shipInfo.freshness, shipInfo.heading != null ? shipInfo.heading : shipInfo.course)}>
+                <Marker position={shipPos} icon={createShipIcon(shipInfo.freshness, shipInfo.heading != null ? shipInfo.heading : shipInfo.course, shipInfo.ship_name || shipAis.ship_name || "")}>
                   <Popup className="trk-popup" maxWidth={260}>
                     <div className="trk-popup-inner">
                       <div className="trk-popup-header"><b>🚢 {shipInfo.ship_name || shipAis.ship_name || "Kapal"}</b></div>
@@ -746,7 +768,7 @@ export default function CustomerTracking() {
               {positions.length > 1 && (
                 <Polyline
                   positions={positions}
-                  pathOptions={{ color: "#2563EB", weight: 3, opacity: 0.7, dashArray: "8 6" }}
+                  pathOptions={{ color: ROUTE_COLOR, weight: ROUTE_WEIGHT, opacity: ROUTE_OPACITY, dashArray: ROUTE_DASH }}
                 />
               )}
 

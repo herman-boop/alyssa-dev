@@ -6,6 +6,7 @@ import { MapPin, Plus, Truck, Clock, Navigation, FileText, CheckCircle2, AlertCi
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { MAP_TILE_URL, MAP_LABEL_URL, MAP_ATTR, MAP_MAX_ZOOM, MAP_MAX_NATIVE_ZOOM, ROUTE_COLOR, ROUTE_WEIGHT, ROUTE_OPACITY, ROUTE_DASH } from "./mapTheme";
 
 // Fix default marker icon paths (Leaflet + webpack)
 delete L.Icon.Default.prototype._getIconUrl;
@@ -226,10 +227,8 @@ export default function Dashboard() {
                 scrollWheelZoom={true}
                 style={{ height: "520px", width: "100%" }}
               >
-                <TileLayer
-                  attribution='&copy; OpenStreetMap'
-                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                />
+                <TileLayer url={MAP_TILE_URL} attribution={MAP_ATTR} maxZoom={MAP_MAX_ZOOM} maxNativeZoom={MAP_MAX_NATIVE_ZOOM} />
+                <TileLayer url={MAP_LABEL_URL} maxZoom={MAP_MAX_ZOOM} maxNativeZoom={MAP_MAX_NATIVE_ZOOM} />
                 <FlyTo position={position} />
                 <Marker position={position} icon={liveIcon}>
                   <Popup>Posisi saat ini</Popup>
@@ -243,7 +242,7 @@ export default function Dashboard() {
                   </Marker>
                 ))}
                 {polyline.length > 1 && (
-                  <Polyline positions={polyline} pathOptions={{ color: "#09090B", weight: 3, dashArray: "6 8" }} />
+                  <Polyline positions={polyline} pathOptions={{ color: ROUTE_COLOR, weight: ROUTE_WEIGHT, opacity: ROUTE_OPACITY, dashArray: ROUTE_DASH }} />
                 )}
               </MapContainer>
             ) : (

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { MAP_TILE_URL, MAP_LABEL_URL, MAP_ATTR, MAP_MAX_ZOOM, MAP_MAX_NATIVE_ZOOM } from "./mapTheme";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 
@@ -123,7 +124,8 @@ export default function PoDCard({ photo, backendUrl, namaDriver, nopol, dayIndex
               ref={mapRef}
               data-testid="pod-map"
             >
-              <TileLayer attribution='&copy; OSM' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+              <TileLayer url={MAP_TILE_URL} attribution={MAP_ATTR} maxZoom={MAP_MAX_ZOOM} maxNativeZoom={MAP_MAX_NATIVE_ZOOM} />
+              <TileLayer url={MAP_LABEL_URL} maxZoom={MAP_MAX_ZOOM} maxNativeZoom={MAP_MAX_NATIVE_ZOOM} />
               <Marker position={center} icon={podIcon}>
                 <Popup>{photo.lat.toFixed(5)}, {photo.lng.toFixed(5)}</Popup>
               </Marker>
