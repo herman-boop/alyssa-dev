@@ -4,7 +4,6 @@ import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "./Tracking.css";
-import shipMarkerImg from "./assets/ship-roro.png";
 import { MAP_TILE_URL, MAP_LABEL_URL, MAP_ATTR, MAP_MAX_ZOOM, MAP_MAX_NATIVE_ZOOM, ROUTE_COLOR, ROUTE_WEIGHT, ROUTE_OPACITY, ROUTE_DASH, freshnessDot } from "./mapTheme";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -410,22 +409,23 @@ function createCpIcon(num, isLatest, dark) {
   });
 }
 
-/* Marker kapal (AIS) gaya fleet: gambar kapal RORO (tegak) + panah arah heading
-   (fallback COG) + pill nama kapal. Kesegaran ditunjukkan dot kecil di pill —
-   BUKAN mewarnai seluruh marker. */
+/* Marker kapal (AIS) gaya standar: PANAH arah yang berputar mengikuti heading
+   (fallback COG) — persis seperti app pelacak kapal umum. Kalau arah tidak
+   diketahui, tampil bulatan (tanpa mengklaim arah). Nama kapal jadi pill kecil
+   di samping; kesegaran jadi dot kecil di pill (BUKAN mewarnai seluruh marker). */
 function createShipIcon(freshness, heading, shipName) {
-  const S = 46;                                  // ukuran gambar kapal (px)
+  const S = 26;                                  // kotak ikon panah (px)
   const dot = freshnessDot(freshness);
   const rot = (heading != null && !isNaN(heading)) ? heading : null;
-  const arrow = rot != null
-    ? `<div style="position:absolute;left:50%;top:50%;width:0;height:0;transform:translate(-50%,-50%) rotate(${rot}deg);pointer-events:none;">
-         <div style="position:absolute;left:-5px;top:-${S / 2 + 13}px;width:0;height:0;
-           border-left:5px solid transparent;border-right:5px solid transparent;
-           border-bottom:9px solid #1e3a5f;filter:drop-shadow(0 1px 1px rgba(0,0,0,.35));"></div>
-       </div>`
-    : "";
+  const glyph = rot != null
+    ? `<svg viewBox="0 0 24 24" width="${S}" height="${S}" style="display:block;transform:rotate(${rot}deg);filter:drop-shadow(0 1px 2px rgba(0,0,0,.4));">
+         <path d="M12 2 L19 21 L12 17 L5 21 Z" fill="#1d4ed8" stroke="#ffffff" stroke-width="1.4" stroke-linejoin="round"/>
+       </svg>`
+    : `<svg viewBox="0 0 24 24" width="${S}" height="${S}" style="display:block;filter:drop-shadow(0 1px 2px rgba(0,0,0,.4));">
+         <circle cx="12" cy="12" r="6.5" fill="#1d4ed8" stroke="#ffffff" stroke-width="1.6"/>
+       </svg>`;
   const name = shipName
-    ? `<div style="position:absolute;left:${S + 5}px;top:50%;transform:translateY(-50%);
+    ? `<div style="position:absolute;left:${S + 4}px;top:50%;transform:translateY(-50%);
          display:flex;align-items:center;gap:5px;white-space:nowrap;
          background:rgba(255,255,255,.96);border:1px solid #cbd5e1;border-radius:999px;
          padding:2px 8px;font:800 11px Inter,system-ui,sans-serif;color:#1e293b;
@@ -434,15 +434,11 @@ function createShipIcon(freshness, heading, shipName) {
        </div>`
     : "";
   return L.divIcon({
-    html: `<div style="position:relative;width:${S}px;height:${S}px;">
-        <img src="${shipMarkerImg}" alt="" style="width:${S}px;height:${S}px;object-fit:contain;
-          display:block;filter:drop-shadow(0 2px 4px rgba(0,0,0,.35));" />
-        ${arrow}${name}
-      </div>`,
+    html: `<div style="position:relative;width:${S}px;height:${S}px;">${glyph}${name}</div>`,
     className: "",
     iconSize: [S, S],
     iconAnchor: [S / 2, S / 2],
-    popupAnchor: [0, -S / 2 + 2],
+    popupAnchor: [0, -S / 2],
   });
 }
 
