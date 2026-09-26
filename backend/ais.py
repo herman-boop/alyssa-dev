@@ -41,6 +41,10 @@ _worker_task = None
 VESSELAPI_URL = "https://api.vesselapi.com/v1"
 # Umur maksimum posisi cache (menit) sebelum coba refresh dari VesselAPI:
 VESSELAPI_MAX_AGE_MIN = int(os.environ.get("VESSELAPI_MAX_AGE_MIN") or "45")
+# Satelit: seberapa lama fix satelit boleh diterima (menit, 60-4800). Tersedia di
+# semua paket termasuk Free. Default 480 (8 jam) -> lebih banyak dapat posisi
+# untuk kapal offshore. (satMaxAgeMinutes TIDAK dipakai: khusus paket berbayar.)
+VESSELAPI_SAT_LOOKBACK = int(os.environ.get("VESSELAPI_SAT_LOOKBACK") or "480")
 # Jeda minimum antar-panggil VesselAPI untuk 1 kapal (detik) — cegah boros kuota:
 _MIN_FETCH_INTERVAL = 300
 _ETA_FETCH_INTERVAL = 3600
@@ -213,6 +217,9 @@ async def _vesselapi_refresh(db, mmsi, imo):
     params = {"filter.idType": idtype}
     if _vesselapi_use_sat():
         params["filter.sat"] = "true"
+        params["filter.satLookbackMinutes"] = str(VESSELAPI_SAT_LOOKBACK)  # aman di Free
+        # NB: filter.satMaxAgeMinutes sengaja TIDAK dikirim (khusus paket berbayar;
+        # di Free bikin 403). Default server (60 mnt) tetap berlaku.
     try:
         r = await asyncio.to_thread(_vesselapi_get, f"/vessel/{ident}/position", params)
     except Exception as e:
