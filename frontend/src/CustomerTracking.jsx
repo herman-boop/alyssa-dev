@@ -15,6 +15,13 @@ function resolveUrl(url) {
   if (url.startsWith("http://") || url.startsWith("https://")) return url;
   return `${BACKEND_URL}${url}`;
 }
+
+/* Deteksi link LOKASI (Google Maps), bukan foto — biar tidak dirender sebagai
+   gambar rusak. Kadang petugas share lokasi (bukan foto) lewat link tugas. */
+function isMapLink(url) {
+  const u = String(url || "").toLowerCase();
+  return /goo\.gl\/maps|maps\.app\.goo\.gl|google\.[a-z.]+\/maps|maps\.google|\/maps\?|[?&](?:q|ll|daddr)=[-\d.]+,[-\d.]+/.test(u);
+}
 const ALBUM_STAGES = ["asal", "kapal", "tujuan", "dokumen"];
 
 /* Link posisi kapal via AIS publik (GRATIS) — cari berdasarkan nama kapal di
@@ -210,16 +217,35 @@ function WaShareBtn({ url, label }) {
   );
 }
 
-/* Satu kartu foto: gambar (klik = buka) + tombol share WhatsApp. */
+/* Satu kartu foto: gambar (klik = buka) + tombol share WhatsApp.
+   - Kalau url ternyata LINK LOKASI (Google Maps), tampilkan tombol "Lihat Lokasi"
+     (bukan gambar rusak).
+   - Kalau gambar gagal dimuat (mis. HEIC/URL rusak), tampilkan placeholder rapi. */
 function PhotoCard({ url, label, caption, isPdf }) {
   const src = resolveUrl(url);
+  const mapLink = isMapLink(url);
+  const [imgErr, setImgErr] = useState(false);
+  const placeholder = { display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", width: "100%", height: "100%", padding: 8, fontSize: 11.5, fontWeight: 700, color: "#64748b", background: "#f1f5f9", lineHeight: 1.4 };
+  if (mapLink) {
+    return (
+      <div className="trk-album-item" style={{ position: "relative" }}>
+        <a href={url} target="_blank" rel="noreferrer" style={{ ...placeholder, color: "#1d4ed8", textDecoration: "none", flexDirection: "column", gap: 4, cursor: "pointer" }}>
+          <span style={{ fontSize: 22 }}>📍</span>
+          <span>Lihat Lokasi</span>
+          {caption && <div className="trk-album-caption">{caption}</div>}
+        </a>
+      </div>
+    );
+  }
   return (
     <div className="trk-album-item" style={{ position: "relative" }}>
-      <div onClick={() => openDocPreview(url, label, isPdf)} style={{ display: "block", width: "100%", height: "100%", cursor: "pointer" }}>
-        {isPdf ? <div className="trk-pdf-thumb">PDF</div> : <img src={src} alt={label || ""} loading="lazy" />}
+      <div onClick={() => { if (!imgErr) openDocPreview(url, label, isPdf); }} style={{ display: "block", width: "100%", height: "100%", cursor: imgErr ? "default" : "pointer" }}>
+        {isPdf ? <div className="trk-pdf-thumb">PDF</div>
+          : imgErr ? <div style={placeholder}>Foto tidak bisa<br />ditampilkan</div>
+          : <img src={src} alt={label || ""} loading="lazy" onError={() => setImgErr(true)} />}
         {caption && <div className="trk-album-caption">{caption}</div>}
       </div>
-      <WaShareBtn url={src} label={label} />
+      {!imgErr && <WaShareBtn url={src} label={label} />}
     </div>
   );
 }
