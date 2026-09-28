@@ -35,7 +35,7 @@ RECENT_MAX = 6 * 3600
 _worker_task = None
 
 # ── Provider tambahan (berbayar, opsional): VesselAPI (REST) ──────────────
-# Modular: kalau VESSELAPI_KEY diisi, posisi diambil on-demand via REST saat
+# Modular: kalau VESSEL_API_KEY diisi, posisi diambil on-demand via REST saat
 # halaman tracking dibuka & cache sudah basi. Hemat kuota (tidak polling 24 jam).
 # Terrestrial default; satelit hanya kalau VESSELAPI_USE_SAT=true + ada kredit.
 VESSELAPI_URL = "https://api.vesselapi.com/v1"
@@ -82,7 +82,7 @@ def provider_enabled() -> bool:
 
 def vesselapi_key() -> str:
     """API key VesselAPI — HANYA dari env backend. Jangan pernah diekspos."""
-    return (os.environ.get("VESSELAPI_KEY") or "").strip()
+    return (os.environ.get("VESSEL_API_KEY") or "").strip()
 
 
 def vesselapi_enabled() -> bool:
@@ -517,7 +517,7 @@ async def probe_vesselapi(mmsi, imo=None):
     """Diagnostik: panggil VesselAPI /position mentah untuk lihat status + bentuk
     respons (TANPA menampilkan API key). Coba mmsi dulu, lalu imo kalau 404."""
     if not vesselapi_enabled():
-        return {"error": "VESSELAPI_KEY belum diset di backend"}
+        return {"error": "VESSEL_API_KEY belum diset di backend"}
     out = {}
     for label, ident, idtype in (("mmsi", mmsi, "mmsi"), ("imo", imo, "imo")):
         ident = str(ident or "").strip()
