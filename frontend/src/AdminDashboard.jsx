@@ -469,6 +469,7 @@ function Dashboard({ pin, onLogout }) {
             onOpenInvoiceGab={() => setShowInvoiceGab(true)}
             onOpenOrder={(o) => { setSearch(o.order_id); setActiveTab("pesanan"); }}
             onOpenSettings={() => setActiveTab("pengaturan")}
+            onCreate={() => setCreateSheet(true)}
             flash={flash}
           />
         )}
@@ -802,7 +803,6 @@ function Dashboard({ pin, onLogout }) {
         <BottomNav
           activeTab={activeTab}
           onNav={setActiveTab}
-          onCreate={() => setCreateSheet(true)}
           onTrip={() => { setStatusFilter("ON_TRIP"); setActiveTab("pesanan"); }}
         />
       </div>
@@ -852,35 +852,57 @@ function greetingByHour() {
   return "Selamat malam";
 }
 
-function MobileHome({ stats, orders, onNav, onTrip, onSearchSubmit, onOpenSidebar, onOpenJadwalGab, onOpenInvoiceGab, onOpenOrder, flash, onOpenSettings }) {
+/* Nama kapal pada leg kapal yang sedang AKTIF (Berlangsung) — generik, tanpa
+   hardcode. Dipakai kartu Pengiriman Aktif supaya kelihatan kapal mana yang
+   sedang jalan pada shipping leg. Kosong kalau bukan sedang di leg kapal. */
+function activeShipNameOf(order) {
+  const legs = Array.isArray(order?.legs) ? order.legs : [];
+  const isShip = (l) => /kapal/i.test(l?.tipe || "") || l?.mmsi || l?.imo;
+  const act = legs.find((l) => isShip(l) && /berlangsung|berangkat|jalan/i.test(l?.status || ""));
+  const lg = act || legs.find(isShip);
+  return lg ? String(lg.kapal || "").trim() : "";
+}
+
+const MH_STATUS_LABEL = { NEW: "Baru", DISPATCHED: "Dispatch", ON_TRIP: "Perjalanan", DELIVERED: "Selesai", CANCELLED: "Batal" };
+
+function MobileHome({ stats, orders, onNav, onTrip, onSearchSubmit, onOpenSidebar, onOpenJadwalGab, onOpenInvoiceGab, onOpenOrder, flash, onOpenSettings, onCreate }) {
   const [q, setQ] = useState("");
   const active = (orders || []).filter((o) => o.status === "ON_TRIP");
   const activeTop = active.slice(0, 3);
 
-  const QUICK = [
-    { ic: "🚚", label: "Pesanan", go: () => onNav("pesanan") },
-    { ic: "📦", label: "Trip", go: onTrip },
-    { ic: "🧾", label: "Invoice", go: () => onNav("histori") },
-    { ic: "🔗", label: "Tracking", go: onTrip },
-    { ic: "👨‍✈️", label: "Driver", go: () => onNav("drivers") },
-    { ic: "🚢", label: "Kapal", go: () => onNav("supplier") },
-    { ic: "📄", label: "Dokumen", go: () => onNav("dokumen") },
-    { ic: "•••", label: "Lainnya", go: onOpenSidebar },
+  const by = stats?.by_status || {};
+  // Ringkasan 3 kelompok: Persiapan (Baru+Dispatch), Perjalanan (On-Trip), Selesai.
+  const SUMMARY = [
+    { label: "Dalam Persiapan", value: (by.NEW || 0) + (by.DISPATCHED || 0), tone: "#EF9F27", go: () => onNav("pesanan") },
+    { label: "Dalam Perjalanan", value: by.ON_TRIP || 0, tone: "#5b8def", go: () => onTrip("ON_TRIP") },
+    { label: "Selesai", value: by.DELIVERED || 0, tone: "#3fb950", go: () => onTrip("DELIVERED") },
   ];
-  const RINGKAS = stats ? [
-    { label: "Total", value: stats.total || 0, tone: "#8b98ab", onClick: () => onNav("pesanan") },
-    { label: "Baru", value: stats.by_status?.NEW || 0, tone: "#EF9F27", onClick: () => onTrip("NEW") },
-    { label: "Dispatched", value: stats.by_status?.DISPATCHED || 0, tone: "#5b8def", onClick: () => onTrip("DISPATCHED") },
-    { label: "On-Trip", value: stats.by_status?.ON_TRIP || 0, tone: "#a371f7", onClick: () => onTrip("ON_TRIP") },
-    { label: "Selesai", value: stats.by_status?.DELIVERED || 0, tone: "#3fb950", onClick: () => onTrip("DELIVERED") },
-    { label: "Batal", value: stats.by_status?.CANCELLED || 0, tone: "#f85149", onClick: () => onTrip("CANCELLED") },
-  ] : [];
+
+  // Layanan angkut (mirror kartu service mySPIL) — buka alur Buat pengiriman.
+  const LAYANAN = [
+    { ic: "🚗", label: "Self Drive", c: "#5b8def" },
+    { ic: "🪝", label: "Towing", c: "#EF9F27" },
+    { ic: "🚛", label: "Car Carrier", c: "#3fb950" },
+    { ic: "🚢", label: "RORO / Kapal", c: "#38bdf8" },
+    { ic: "🏗️", label: "Self Loader", c: "#a371f7" },
+    { ic: "🛻", label: "Low Bed", c: "#f472b6" },
+  ];
+
+  // Quick menu sesuai spesifikasi — semua ke fungsi/tab existing.
+  const QUICK = [
+    { ic: "➕", label: "Buat Order", go: onCreate },
+    { ic: "🔗", label: "Tracking", go: onTrip },
+    { ic: "🌿", label: "Supplier", go: () => onNav("supplier") },
+    { ic: "🧾", label: "Invoice", go: () => onNav("rekap-invoice") },
+    { ic: "📊", label: "Rekonsiliasi", go: () => onNav("selisih") },
+    { ic: "▦", label: "Semua Menu", go: onOpenSidebar },
+  ];
 
   const submitSearch = (e) => { e.preventDefault(); onSearchSubmit(q.trim()); };
 
   return (
     <div className="mh">
-      {/* Header */}
+      {/* ── Header ── */}
       <div className="mh-header">
         <div className="mh-head-row">
           <div className="mh-brand">
@@ -892,21 +914,44 @@ function MobileHome({ stats, orders, onNav, onTrip, onSearchSubmit, onOpenSideba
           </div>
           <div className="mh-head-icons">
             <button className="mh-iconbtn" title="Notifikasi" onClick={() => onNav("histori")}>🔔</button>
-            <button className="mh-iconbtn" title="Pengaturan" onClick={onOpenSettings}>⚙️</button>
+            <button className="mh-iconbtn" title="Akun" onClick={onOpenSettings}>👤</button>
           </div>
         </div>
-        <div className="mh-sub">Kelola pengiriman kendaraan dengan lebih mudah</div>
         <form className="mh-search" onSubmit={submitSearch}>
           <span className="mh-search-ico">🔎</span>
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cari No. Resi / Customer / Unit / No. Rangka"
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cari order, nopol, resi…"
             enterKeyHint="search" data-testid="mh-search" />
         </form>
       </div>
 
-      {/* Akses Cepat */}
+      {/* ── Summary card (3 kelompok) ── */}
       <section className="mh-sec">
-        <div className="mh-sec-hd"><span className="mh-sec-title">Akses Cepat</span>
-          <button className="mh-sec-act" onClick={onOpenSidebar}>Atur</button></div>
+        <div className="mh-summary" data-testid="mh-summary">
+          {SUMMARY.map((s, i) => (
+            <button key={s.label} className={`mh-sum${i > 0 ? " mh-sum-div" : ""}`} onClick={s.go}>
+              <span className="mh-sum-val" style={{ color: s.tone }}>{s.value}</span>
+              <span className="mh-sum-lbl">{s.label}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {/* ── Layanan ── */}
+      <section className="mh-sec">
+        <div className="mh-sec-hd"><span className="mh-sec-title">Layanan</span></div>
+        <div className="mh-svc-grid">
+          {LAYANAN.map((s) => (
+            <button key={s.label} className="mh-svc" onClick={onCreate} data-testid={`mh-svc-${s.label}`}>
+              <span className="mh-svc-ic" style={{ background: `${s.c}22`, color: s.c }}>{s.ic}</span>
+              <span className="mh-svc-lbl">{s.label}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {/* ── Quick menu ── */}
+      <section className="mh-sec">
+        <div className="mh-sec-hd"><span className="mh-sec-title">Menu Cepat</span></div>
         <div className="mh-quick-grid">
           {QUICK.map((it) => (
             <button key={it.label} className="mh-quick" onClick={it.go} data-testid={`mh-quick-${it.label}`}>
@@ -917,20 +962,7 @@ function MobileHome({ stats, orders, onNav, onTrip, onSearchSubmit, onOpenSideba
         </div>
       </section>
 
-      {/* Ringkasan Pengiriman */}
-      <section className="mh-sec">
-        <div className="mh-sec-hd"><span className="mh-sec-title">Ringkasan Pengiriman</span></div>
-        <div className="mh-ring-grid">
-          {RINGKAS.map((r) => (
-            <button key={r.label} className="mh-ring" onClick={r.onClick}>
-              <span className="mh-ring-val" style={{ color: r.tone }}>{r.value}</span>
-              <span className="mh-ring-lbl">{r.label}</span>
-            </button>
-          ))}
-        </div>
-      </section>
-
-      {/* Pengiriman Aktif */}
+      {/* ── Pengiriman Aktif ── */}
       <section className="mh-sec">
         <div className="mh-sec-hd"><span className="mh-sec-title">Pengiriman Aktif</span>
           {active.length > 0 && <button className="mh-sec-act" onClick={onTrip} data-testid="mh-see-all">Lihat Semua</button>}</div>
@@ -938,21 +970,28 @@ function MobileHome({ stats, orders, onNav, onTrip, onSearchSubmit, onOpenSideba
           <div className="mh-empty">🚛 Belum ada pengiriman yang sedang berjalan.</div>
         ) : activeTop.map((o) => {
           const veh = `${o.vehicle_type || (o.units?.[0]?.vehicle_type) || "Kendaraan"}${o.tipe_model ? " " + o.tipe_model : ""}`.trim();
+          const nopol = o.nopol || o.units?.[0]?.nopol || "";
+          const kapal = activeShipNameOf(o);
+          const stLbl = MH_STATUS_LABEL[o.status] || o.status || "";
           return (
             <button key={o.order_id} className="mh-ship" onClick={() => onOpenOrder(o)} data-testid={`mh-ship-${o.order_id}`}>
               <div className="mh-ship-top">
                 <div className="mh-ship-veh">🚛 {veh}</div>
-                <span className="mh-ship-arrow">›</span>
+                <span className="mh-ship-badge">{stLbl}</span>
               </div>
-              <div className="mh-ship-cust">{o.customer_nama || "-"}</div>
+              <div className="mh-ship-cust">
+                {o.customer_nama || "-"}
+                {nopol ? <span className="mh-ship-nopol">{nopol}</span> : null}
+              </div>
               <div className="mh-ship-route">{o.asal_kota || "?"} <span className="mh-ship-sep">→</span> {o.tujuan_kota || "?"}</div>
+              {kapal ? <div className="mh-ship-kapal">🚢 {kapal}</div> : null}
               <ProgressTimeline order={o} />
             </button>
           );
         })}
       </section>
 
-      {/* Aksi Operasional */}
+      {/* ── Aksi Operasional ── */}
       <section className="mh-sec">
         <div className="mh-sec-hd"><span className="mh-sec-title">Aksi Operasional</span></div>
         <button className="mh-act" onClick={async () => { const ok = await copyToClipboard(`${window.location.origin}/order`); flash(ok ? "✓ Link form pesanan disalin" : "Gagal menyalin"); }}>
@@ -975,19 +1014,20 @@ function MobileHome({ stats, orders, onNav, onTrip, onSearchSubmit, onOpenSideba
   );
 }
 
-/* Bottom navigation mobile — 5 item, tombol tengah "Buat". Desktop di-hide via CSS. */
-function BottomNav({ activeTab, onNav, onCreate, onTrip }) {
+/* Bottom navigation mobile — 5 item, tombol tengah "Home" (prominent).
+   Home / Order / Tracking / Finance / Account. Desktop di-hide via CSS. */
+function BottomNav({ activeTab, onNav, onTrip }) {
   const items = [
-    { key: "beranda", ic: "🏠", label: "Beranda", go: () => onNav("beranda") },
-    { key: "pesanan", ic: "📦", label: "Pesanan", go: () => onNav("pesanan") },
-    { key: "__buat", ic: "＋", label: "Buat", center: true, go: onCreate },
-    { key: "__trip", ic: "🚚", label: "Trip", go: onTrip },
-    { key: "pengaturan", ic: "👤", label: "Akun", go: () => onNav("pengaturan") },
+    { key: "pesanan", ic: "📦", label: "Order", go: () => onNav("pesanan") },
+    { key: "__trip", ic: "🔗", label: "Tracking", go: onTrip },
+    { key: "beranda", ic: "🏠", label: "Home", center: true, go: () => onNav("beranda") },
+    { key: "histori", ic: "🧾", label: "Finance", go: () => onNav("histori") },
+    { key: "pengaturan", ic: "👤", label: "Account", go: () => onNav("pengaturan") },
   ];
   return (
     <nav className="adm-bottomnav" data-testid="adm-bottomnav">
       {items.map((it) => it.center ? (
-        <button key={it.key} className="adm-bnav-center" onClick={it.go} data-testid="adm-bnav-buat">
+        <button key={it.key} className={`adm-bnav-center${activeTab === it.key ? " active" : ""}`} onClick={it.go} data-testid="adm-bnav-home">
           <span className="adm-bnav-plus">{it.ic}</span>
           <span className="adm-bnav-lbl">{it.label}</span>
         </button>

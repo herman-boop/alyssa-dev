@@ -188,20 +188,32 @@ code {
 .mh-sec-title { font-size: 14px; font-weight: 800; color: #f2f5fa; }
 .mh-sec-act { border: none; background: none; color: var(--mh-gold); font-size: 12.5px; font-weight: 700; cursor: pointer; }
 
-/* Akses Cepat grid */
-.mh-quick-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; }
-.mh-quick { display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 12px 4px;
+/* Summary card — 1 kartu, 3 segmen (Persiapan / Perjalanan / Selesai) */
+.mh-summary { display: grid; grid-template-columns: repeat(3,1fr); background: var(--mh-card);
+  border: 1px solid var(--mh-line); border-radius: 16px; overflow: hidden; }
+.mh-sum { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 16px 6px;
+  background: none; border: none; cursor: pointer; color: var(--mh-ink); }
+.mh-sum:active { background: rgba(255,255,255,.04); }
+.mh-sum-div { border-left: 1px solid var(--mh-line); }
+.mh-sum-val { font-size: 24px; font-weight: 900; line-height: 1; }
+.mh-sum-lbl { font-size: 10.5px; color: #9aa6b6; font-weight: 600; text-align: center; }
+
+/* Layanan grid (kartu service ala mySPIL) */
+.mh-svc-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; }
+.mh-svc { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 4px;
+  background: var(--mh-card); border: 1px solid var(--mh-line); border-radius: 16px; cursor: pointer; color: var(--mh-ink); }
+.mh-svc:active { transform: scale(.96); }
+.mh-svc-ic { width: 44px; height: 44px; border-radius: 13px; display: flex; align-items: center;
+  justify-content: center; font-size: 22px; }
+.mh-svc-lbl { font-size: 11px; font-weight: 700; color: #d3dcea; text-align: center; }
+
+/* Menu cepat grid (3 kolom) */
+.mh-quick-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; }
+.mh-quick { display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 14px 4px;
   background: var(--mh-card); border: 1px solid var(--mh-line); border-radius: 14px; cursor: pointer; color: var(--mh-ink); }
 .mh-quick:active { transform: scale(.96); }
 .mh-quick-ic { font-size: 22px; line-height: 1; }
 .mh-quick-lbl { font-size: 11px; font-weight: 600; color: #c7d0dd; }
-
-/* Ringkasan grid (compact chips, bukan 6 card besar) */
-.mh-ring-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; }
-.mh-ring { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px 12px;
-  background: var(--mh-card); border: 1px solid var(--mh-line); border-radius: 14px; cursor: pointer; }
-.mh-ring-val { font-size: 22px; font-weight: 900; line-height: 1.05; }
-.mh-ring-lbl { font-size: 11px; color: #9aa6b6; font-weight: 600; }
 
 /* Pengiriman aktif — compact shipment card */
 .mh-ship { display: block; width: 100%; text-align: left; padding: 14px; margin-bottom: 10px;
@@ -211,8 +223,13 @@ code {
 .mh-ship-veh { font-size: 14px; font-weight: 800; color: #f2f5fa; }
 .mh-ship-arrow { font-size: 20px; color: #5b6577; }
 .mh-ship-cust { font-size: 12.5px; color: var(--mh-gold); font-weight: 700; margin-top: 2px; }
-.mh-ship-route { font-size: 12.5px; color: #b9c4d4; margin: 4px 0 12px; }
+.mh-ship-route { font-size: 12.5px; color: #b9c4d4; margin: 4px 0 10px; }
 .mh-ship-sep { color: #5b8def; }
+.mh-ship-badge { font-size: 10px; font-weight: 800; padding: 3px 9px; border-radius: 20px;
+  background: rgba(91,141,239,.16); color: #7ea8f5; border: 1px solid rgba(91,141,239,.35); white-space: nowrap; }
+.mh-ship-nopol { display: inline-block; margin-left: 8px; font-size: 10.5px; font-weight: 800; letter-spacing: .4px;
+  color: #e6edf3; background: #0a1220; border: 1px solid #24344d; border-radius: 6px; padding: 1px 7px; }
+.mh-ship-kapal { font-size: 11.5px; font-weight: 700; color: #38bdf8; margin: 0 0 10px; }
 .mh-empty { padding: 22px 14px; text-align: center; font-size: 13px; color: #7b8698;
   background: var(--mh-card2); border: 1px dashed var(--mh-line); border-radius: 14px; }
 
@@ -243,11 +260,14 @@ code {
   .adm-bnav-ic { font-size: 19px; line-height: 1; }
   .adm-bnav-lbl { font-size: 10px; font-weight: 600; }
   .adm-bnav-center { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 3px;
-    border: none; background: none; cursor: pointer; margin-top: -18px; }
-  .adm-bnav-plus { width: 52px; height: 52px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
-    font-size: 28px; font-weight: 300; color: #10203a; background: linear-gradient(135deg,#f2ad3c,#e0891a);
-    box-shadow: 0 8px 20px rgba(224,137,26,.45); }
-  .adm-bnav-center .adm-bnav-lbl { font-size: 10px; font-weight: 700; color: var(--mh-gold); }
+    border: none; background: none; cursor: pointer; margin-top: -20px; }
+  .adm-bnav-plus { width: 54px; height: 54px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-size: 25px; color: #fff; background: linear-gradient(135deg,#3f7ae0,#1f4fb0);
+    border: 3px solid var(--mh-bg); box-shadow: 0 8px 20px rgba(31,79,176,.5); transition: transform .12s; }
+  .adm-bnav-center:active .adm-bnav-plus { transform: scale(.94); }
+  .adm-bnav-center.active .adm-bnav-plus { background: linear-gradient(135deg,#f2ad3c,#e0891a); box-shadow: 0 8px 20px rgba(224,137,26,.5); }
+  .adm-bnav-center .adm-bnav-lbl { font-size: 10px; font-weight: 800; color: var(--mh-blue); }
+  .adm-bnav-center.active .adm-bnav-lbl { color: var(--mh-gold); }
 
   /* Konten normal (pesanan dll) kasih ruang bawah biar nggak ketutup bottom nav */
   .adm-content-wrap { padding-bottom: 92px !important; }
