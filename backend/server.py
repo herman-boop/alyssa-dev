@@ -45,6 +45,9 @@ CRON_SECRET      = os.environ.get("CRON_SECRET", "").strip()
 #   meta   : WA_TOKEN (access token), WA_PHONE_ID (phone number id), WA_TEMPLATE (opsional)
 #   wablas : WABLAS_TOKEN, WABLAS_DOMAIN
 # Kalau token provider kosong -> pesan cuma di-log (no-op), order tetap tersimpan.
+# Rem darurat: set WA_ENABLED=false (atau 0/no/off) di env backend untuk MEMATIKAN
+# SEMUA kirim WA (konfirmasi/tracking) tanpa deploy ulang kode. Default: nyala.
+WA_ENABLED = (os.environ.get("WA_ENABLED", "true").strip().lower() not in ("false", "0", "no", "off"))
 WA_PROVIDER      = (os.environ.get("WA_PROVIDER", "fonnte").strip().lower() or "fonnte")
 WA_TOKEN         = os.environ.get("WA_TOKEN", "").strip()
 WA_PHONE_ID      = os.environ.get("WA_PHONE_ID", "").strip()
@@ -374,6 +377,9 @@ def _wa_send_sync(to: str, message: str) -> dict:
 
 async def wa_send(to: str, message: str) -> dict:
     """Async wrapper untuk provider WA. Never raises."""
+    if not WA_ENABLED:
+        logger.warning(f"[wa:disabled] WA_ENABLED=false — tidak kirim ke {to}: {message[:50]}")
+        return {"ok": False, "message_id": None, "error": "wa_disabled", "provider": WA_PROVIDER}
     try:
         return await asyncio.to_thread(_wa_send_sync, to, message)
     except Exception as e:
@@ -436,6 +442,14 @@ async def send_tracking_whatsapp(order: dict, resend: bool = False) -> dict:
     order_id = order.get("order_id")
     to_raw = order.get("customer_hp") or ""
     now = datetime.now(timezone.utc).isoformat()
+
+    # Idempoten: di jalur OTOMATIS (resend=False), 1 order hanya boleh kirim
+    # konfirmasi "berhasil dibuat" SEKALI seumur hidup. Cegah blast berulang bila
+    # fungsi ini ke-trigger lagi (deploy/restart/integrasi/aksi ganda). Kirim ulang
+    # manual (resend=True dari tombol admin/pelanggan) tetap diizinkan.
+    if not resend and order.get("wa_status") in ("terkirim", "dikirim_ulang"):
+        logger.info(f"[wa:skip-dup] {order_id} sudah pernah terkirim — lewati auto-send ulang.")
+        return {"wa_status": order.get("wa_status"), "wa_skipped_duplicate": True}
 
     # Validasi nomor — jangan kirim kalau tidak valid
     if not _wa_valid_id(to_raw):
