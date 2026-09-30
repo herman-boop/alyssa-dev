@@ -710,6 +710,30 @@ export default function CustomerTracking() {
     ? [parseFloat(shipInfo.latitude), parseFloat(shipInfo.longitude)] : null;
   const fitPositions = shipPos ? [...positions, shipPos] : positions;
   const hasMap    = gpsPoints.length > 0 || !!shipPos;
+
+  /* Leg kapal yang sedang berjalan (untuk info Pelabuhan/ETA/ETB di panel).
+     Generik: cocokkan MMSI/IMO dgn AIS aktif, lalu leg kapal "Berlangsung",
+     lalu leg kapal mana pun. Tidak ada hardcode nama kapal. */
+  const activeShipLeg = (() => {
+    if (!legs || legs.length === 0) return null;
+    const norm = (v) => String(v || "").replace(/\D/g, "");
+    const aisMmsi = norm(shipAis?.mmsi);
+    const aisImo  = norm(shipAis?.imo);
+    const isShip  = (l) => /kapal/i.test(l?.tipe || "") || l?.mmsi || l?.imo;
+    let m = legs.find(l => isShip(l) && ((aisMmsi && norm(l.mmsi) === aisMmsi) || (aisImo && norm(l.imo) === aisImo)));
+    if (m) return m;
+    m = legs.find(l => isShip(l) && /berlangsung|berangkat|jalan/i.test(l.status || ""));
+    if (m) return m;
+    return legs.find(isShip) || null;
+  })();
+  const fmtLegDate = (v) => {
+    if (!v) return "";
+    try {
+      const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(v) ? `${v}T00:00:00` : v);
+      if (isNaN(d.getTime())) return "";
+      return d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" });
+    } catch (e) { return ""; }
+  };
   const focusShip = () => {
     if (!shipPos) return;
     setFlyNonce((n) => n + 1);
@@ -1009,6 +1033,21 @@ export default function CustomerTracking() {
                     <div style={{ fontSize: 15, fontWeight: 800, color: "#e6edf3" }}>{shipAis.ship_name || shipInfo?.ship_name || "Kapal"}</div>
                     <span style={{ fontSize: 11, fontWeight: 800, padding: "3px 10px", borderRadius: 12, background: b.bg, color: b.color, border: `1px solid ${b.bd}` }}>{b.label}</span>
                   </div>
+
+                  {/* Info pelabuhan tujuan leg kapal aktif: Port + ETA + ETB (sandar) */}
+                  {activeShipLeg && (activeShipLeg.tujuan || activeShipLeg.eta || activeShipLeg.etb) && (
+                    <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }} data-testid="trk-ais-leg-port">
+                      {activeShipLeg.tujuan ? (
+                        <span style={{ fontSize: 11, fontWeight: 700, color: "#7ee2b8", background: "#0f2d1f", border: "1px solid #1f6f47", borderRadius: 8, padding: "3px 8px" }}>⚓ {activeShipLeg.tujuan}</span>
+                      ) : null}
+                      {fmtLegDate(activeShipLeg.eta) ? (
+                        <span style={{ fontSize: 11, fontWeight: 700, color: "#9db8e8", background: "#0d2340", border: "1px solid #1f3a5a", borderRadius: 8, padding: "3px 8px" }}>ETA {fmtLegDate(activeShipLeg.eta)}</span>
+                      ) : null}
+                      {fmtLegDate(activeShipLeg.etb) ? (
+                        <span style={{ fontSize: 11, fontWeight: 700, color: "#e8c99d", background: "#2b1d0e", border: "1px solid #5a411f", borderRadius: 8, padding: "3px 8px" }}>ETB {fmtLegDate(activeShipLeg.etb)}</span>
+                      ) : null}
+                    </div>
+                  )}
 
                   {shipInfo ? (
                     <>
