@@ -450,13 +450,20 @@ function createShipIcon(freshness, heading, shipName) {
     : `<svg viewBox="0 0 24 24" width="${S}" height="${S}" style="display:block;filter:drop-shadow(0 1px 2px rgba(0,0,0,.4));">
          <circle cx="12" cy="12" r="6.5" fill="#1d4ed8" stroke="#ffffff" stroke-width="1.6"/>
        </svg>`;
+  // Label nama kapal gaya BENDERA di tiang: kecil, warna terang (gradient biru→cyan),
+  // + branding "ALYSSA LOGISTIK". Menempel di kanan marker seperti bendera kapal.
   const name = shipName
-    ? `<div style="position:absolute;left:${S + 4}px;top:50%;transform:translateY(-50%);
-         display:flex;align-items:center;gap:5px;white-space:nowrap;
-         background:rgba(255,255,255,.96);border:1px solid #cbd5e1;border-radius:999px;
-         padding:2px 8px;font:800 11px Inter,system-ui,sans-serif;color:#1e293b;
-         box-shadow:0 1px 4px rgba(0,0,0,.18);pointer-events:none;">
-         <span style="width:7px;height:7px;border-radius:50%;background:${dot};flex:none;"></span>${shipName}
+    ? `<div style="position:absolute;left:${S - 5}px;top:1px;display:flex;align-items:flex-start;pointer-events:none;">
+         <div style="width:1.5px;height:19px;background:#94a3b8;flex:none;border-radius:1px;"></div>
+         <div style="background:linear-gradient(90deg,#1d4ed8,#38bdf8);color:#fff;
+              padding:2px 7px 2.5px 6px;border-radius:0 5px 5px 0;white-space:nowrap;
+              box-shadow:0 1px 4px rgba(0,0,0,.35);line-height:1.05;">
+           <div style="display:flex;align-items:center;gap:4px;">
+             <span style="width:6px;height:6px;border-radius:50%;background:${dot};box-shadow:0 0 4px ${dot};flex:none;"></span>
+             <span style="font:800 9.5px Inter,system-ui,sans-serif;letter-spacing:.2px;">${shipName}</span>
+           </div>
+           <div style="font:800 6.5px Inter,system-ui,sans-serif;letter-spacing:.7px;opacity:.92;margin-left:10px;">ALYSSA LOGISTIK</div>
+         </div>
        </div>`
     : "";
   return L.divIcon({
