@@ -802,10 +802,13 @@ export default function CustomerTracking() {
                 </Marker>
               )}
 
-              {/* Route polyline */}
-              {positions.length > 1 && (
+              {/* Route polyline — checkpoint darat + tersambung sampai ke KAPAL yang
+                  sedang berlangsung (titik terdepan). Otomatis ikut kapal leg aktif
+                  (shipPos = kapal leg aktif), jadi saat ganti kapal di hub garis
+                  mengikuti kapal yang berlangsung. */}
+              {fitPositions.length > 1 && (
                 <Polyline
-                  positions={positions}
+                  positions={fitPositions}
                   pathOptions={{ color: ROUTE_COLOR, weight: ROUTE_WEIGHT, opacity: ROUTE_OPACITY, dashArray: ROUTE_DASH }}
                 />
               )}
