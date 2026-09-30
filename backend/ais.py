@@ -17,6 +17,7 @@ Data model (cache `ais_positions`, 1 dokumen per kapal, key = mmsi):
   destination, eta, position_timestamp, source, updated_at
 """
 import os
+import re
 import json
 import asyncio
 import logging
@@ -290,22 +291,76 @@ async def _vesselapi_refresh(db, mmsi, imo):
         return None
 
 
-async def position_for_legs(db, legs):
-    """Ambil identitas kapal dari leg (mmsi/imo) + posisi AIS dari cache.
-    Dipanggil oleh view per-trip supaya SELALU scoped ke trip pemiliknya
-    (tidak ada query MMSI bebas dari publik). Return None kalau tidak ada
-    leg kapal ber-mmsi/imo."""
-    chosen = None
-    for lg in (legs or []):
-        lg = lg or {}
-        mmsi = str(lg.get("mmsi") or "").strip()
-        imo = str(lg.get("imo") or "").strip()
-        if mmsi or imo:
-            chosen = {"ship_name": str(lg.get("kapal") or "").strip(), "mmsi": mmsi, "imo": imo}
-            if mmsi:
-                break
-    if not chosen:
+# Status leg: nilai kanonik "Menunggu"/"Berlangsung"/"Selesai" (default Menunggu).
+_LEG_ACTIVE_RE = re.compile(r"berlangsung|berjalan|berangkat|sedang|on\s*trip|in\s*transit", re.I)
+_LEG_DONE_RE = re.compile(r"selesai|tiba|delivered|done|complete|arrived", re.I)
+
+
+def _leg_ship_id(lg):
+    """(mmsi, imo) leg sebagai string ter-strip; ('','') kalau bukan/tak ada."""
+    lg = lg or {}
+    return (str(lg.get("mmsi") or "").strip(), str(lg.get("imo") or "").strip())
+
+
+def _leg_is_ship(lg):
+    """Leg kapal kalau tipe diawali 'Kapal' ATAU punya mmsi/imo."""
+    lg = lg or {}
+    mmsi, imo = _leg_ship_id(lg)
+    if mmsi or imo:
+        return True
+    return str(lg.get("tipe") or "").strip().lower().startswith("kapal")
+
+
+def _leg_status_kind(lg):
+    st = str((lg or {}).get("status") or "").strip()
+    if _LEG_DONE_RE.search(st):
+        return "done"
+    if _LEG_ACTIVE_RE.search(st):
+        return "active"
+    return "waiting"
+
+
+def pick_active_ship_leg(legs):
+    """Pilih leg KAPAL sesuai leg yang sedang AKTIF/Berlangsung — bukan sekadar
+    kapal pertama. Generik (tanpa hardcode nama kapal):
+      1. Kalau leg 'Berlangsung' itu sendiri leg kapal (ada mmsi/imo) -> pakai itu.
+      2. Kalau leg aktif bukan kapal (mis. Self Drive) -> kapal terdekat BERIKUTNYA
+         (leg kapal index >= aktif), else kapal terakhir SEBELUM leg aktif.
+      3. Kalau tak ada leg 'Berlangsung' -> kapal pada leg 'Selesai' terakhir,
+         else leg kapal pertama (kompatibel perilaku lama / 1 kapal per trip).
+    Return leg dict terpilih, atau None kalau tak ada leg kapal ber-mmsi/imo."""
+    legs = [lg or {} for lg in (legs or [])]
+    ship_idx = [i for i, lg in enumerate(legs) if _leg_is_ship(lg) and any(_leg_ship_id(lg))]
+    if not ship_idx:
         return None
+    kinds = [_leg_status_kind(lg) for lg in legs]
+    active_i = next((i for i, k in enumerate(kinds) if k == "active"), None)
+    if active_i is not None:
+        if active_i in ship_idx:
+            return legs[active_i]
+        ahead = [i for i in ship_idx if i >= active_i]
+        if ahead:
+            return legs[min(ahead)]
+        behind = [i for i in ship_idx if i < active_i]
+        if behind:
+            return legs[max(behind)]
+    done_ship = [i for i in ship_idx if kinds[i] == "done"]
+    if done_ship:
+        return legs[max(done_ship)]
+    return legs[ship_idx[0]]
+
+
+async def position_for_legs(db, legs):
+    """Ambil identitas kapal dari leg AKTIF (mmsi/imo) + posisi AIS dari cache.
+    Dipanggil oleh view per-trip supaya SELALU scoped ke trip pemiliknya
+    (tidak ada query MMSI bebas dari publik). Kapal mengikuti leg yang sedang
+    'Berlangsung' (multi-leg: bisa ganti kapal per leg). Return None kalau tidak
+    ada leg kapal ber-mmsi/imo."""
+    lg = pick_active_ship_leg(legs)
+    if not lg:
+        return None
+    mmsi, imo = _leg_ship_id(lg)
+    chosen = {"ship_name": str(lg.get("kapal") or "").strip(), "mmsi": mmsi, "imo": imo}
     doc = None
     try:
         if chosen["mmsi"]:
