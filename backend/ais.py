@@ -334,7 +334,10 @@ def pick_active_ship_leg(legs):
     if not ship_idx:
         return None
     kinds = [_leg_status_kind(lg) for lg in legs]
-    active_i = next((i for i, k in enumerate(kinds) if k == "active"), None)
+    # Ambil leg 'Berlangsung' TERAKHIR (paling jauh progresnya) — tahan banting
+    # kalau leg sebelumnya lupa ditandai 'Selesai' (mis. Leg2 & Leg3 dua-duanya
+    # Berlangsung -> pakai Leg3 yang lebih current).
+    active_i = next((i for i in range(len(kinds) - 1, -1, -1) if kinds[i] == "active"), None)
     if active_i is not None:
         if active_i in ship_idx:
             return legs[active_i]
