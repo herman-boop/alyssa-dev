@@ -496,15 +496,24 @@ function aisAgeText(sec) {
    Zoom regional biar langsung dapat konteks (kapal + pulau besar sekitarnya),
    BUKAN zoom mepet ke 1 marker. Auto-fit hanya SEKALI saat data pertama siap;
    sesudah itu user bebas zoom/pan — tidak dipaksa balik tiap AIS refresh. */
-const REGIONAL_ZOOM = 7;   // 1 posisi: tampilkan konteks regional (mis. Kalimantan+Sulawesi)
+const REGIONAL_ZOOM = 7;   // 1 posisi: tampilkan konteks regional
+const SHIP_ZOOM = 8;       // fokus ke kapal: kapal + kota/pelabuhan terdekat terbaca (mis. Nabire)
 const FIT_MAX_ZOOM = 9;    // banyak titik berdekatan: jangan lebih dekat dari ini
-function MapFitter({ positions }) {
+function MapFitter({ positions, shipPos }) {
   const map = useMap();
   const done = useRef(false);
   useEffect(() => {
     if (done.current) return;              // hanya auto-fit sekali (initial)
-    if (!positions || positions.length === 0) return;
     try {
+      // Prioritas: langsung fokus ke KAPAL (yang dicari pelanggan) di zoom yang
+      // menampilkan kapal + kota/pelabuhan terdekat. Ini mencegah peta ke-zoom
+      // out kejauhan gara-gara checkpoint (mis. Jakarta) jauh dari kapal (mis. Papua).
+      if (shipPos && shipPos.length === 2) {
+        map.setView(shipPos, SHIP_ZOOM);
+        done.current = true;
+        return;
+      }
+      if (!positions || positions.length === 0) return;
       if (positions.length === 1) {
         map.setView(positions[0], REGIONAL_ZOOM);
       } else {
@@ -512,7 +521,7 @@ function MapFitter({ positions }) {
       }
       done.current = true;                 // kunci: refresh AIS berikutnya tidak re-center
     } catch (e) {}
-  }, [map, positions]);
+  }, [map, positions, shipPos]);
   return null;
 }
 
@@ -761,15 +770,15 @@ export default function CustomerTracking() {
         <div className="trk-map-area" ref={mapAreaRef}>
           {hasMap ? (
             <MapContainer
-              center={lastGps ? [parseFloat(lastGps.lat), parseFloat(lastGps.lng)] : (shipPos || defaultCenter)}
-              zoom={REGIONAL_ZOOM}
+              center={shipPos || (lastGps ? [parseFloat(lastGps.lat), parseFloat(lastGps.lng)] : defaultCenter)}
+              zoom={shipPos ? SHIP_ZOOM : REGIONAL_ZOOM}
               className="trk-leaflet-map"
               zoomControl={true}
               attributionControl={true}
             >
               <TileLayer url={MAP_TILE_URL} attribution={MAP_ATTR} maxZoom={MAP_MAX_ZOOM} maxNativeZoom={MAP_MAX_NATIVE_ZOOM} />
               <TileLayer url={MAP_LABEL_URL} maxZoom={MAP_MAX_ZOOM} maxNativeZoom={MAP_MAX_NATIVE_ZOOM} />
-              <MapFitter positions={fitPositions} />
+              <MapFitter positions={fitPositions} shipPos={shipPos} />
               <MapFlyTo target={shipPos} nonce={flyNonce} />
 
               {/* Marker kapal (AIS) — hanya kalau ada posisi */}
