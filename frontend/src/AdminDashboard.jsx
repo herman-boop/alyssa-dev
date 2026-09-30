@@ -7056,15 +7056,7 @@ function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tri
                       <a href={vesselPublicUrl(leg)} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "#58a6ff", fontWeight: 700, textDecoration: "none", padding: "4px 6px", whiteSpace: "nowrap" }}>🚢 Cek posisi kapal</a>
                     )}
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 4 }}>
-                    <label style={MINI_LABEL}>ETA (tiba pelabuhan)
-                      <input type="date" style={MINI_INPUT} value={leg.eta || ""} onChange={e => setLeg(i, { eta: e.target.value })} />
-                    </label>
-                    <label style={MINI_LABEL}>ETB (sandar / berthing)
-                      <input type="date" style={MINI_INPUT} value={leg.etb || ""} onChange={e => setLeg(i, { etb: e.target.value })} />
-                    </label>
-                  </div>
-                  <div style={{ fontSize: 10, color: "#6e7681", marginBottom: 8 }}>ETA = perkiraan kapal tiba di pelabuhan tujuan. ETB = perkiraan kapal sandar (berthing). Tampil kecil di peta pelanggan saat kapal berangkat.</div>
+                  <div style={{ fontSize: 10, color: "#3fb950", marginBottom: 8 }}>ⓘ ETA & tanggal Sandar otomatis dari jaringan AIS — tidak perlu diisi manual. Cukup isi MMSI/IMO kapal.</div>
                   <div style={{ fontSize: 10, color: "#6e7681", marginBottom: 8 }}>MMSI paling akurat untuk posisi live (lihat di FindShip). IMO/nama sebagai cadangan. Cukup isi salah satu.</div>
                   <label style={{ ...MINI_LABEL, display: "block", marginBottom: 8 }}>Status Kapal (notif kecil ke pelanggan)
                     <select style={MINI_INPUT} value={leg.kapal_status || ""} onChange={e => setLeg(i, { kapal_status: e.target.value, kapal_status_ts: e.target.value ? new Date().toISOString() : "" })}>

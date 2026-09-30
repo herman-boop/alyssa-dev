@@ -185,6 +185,7 @@ def public_ais(doc):
         "draught": doc.get("draught"),
         "nav_status": doc.get("nav_status"),
         "nav_status_text": nav_status_text(doc.get("nav_status")),
+        "berthed_at": doc.get("berthed_at") or "",
         "position_timestamp": ts,
         "source": doc.get("source") or "",
         "age_seconds": st["age_seconds"],
@@ -197,6 +198,68 @@ def _doc_age_seconds(doc):
         return None
     st = staleness(doc.get("position_timestamp") or doc.get("updated_at"))
     return st["age_seconds"]
+
+
+# Kode status navigasi AIS: 5 = Sandar (moored di dermaga), 0/8 = Berlayar.
+_NAV_MOORED = 5
+_NAV_UNDERWAY = {0, 8}
+
+
+def _nav_int(v):
+    try:
+        return int(v) if v is not None else None
+    except Exception:
+        return None
+
+
+async def _apply_berth_state(db, doc):
+    """Deteksi SANDAR otomatis dari status navigasi AIS — tanpa input manual.
+    Alur akurat (mengikuti jaringan AIS):
+      1. Kapal berlayar (nav_status 0/8) -> tandai `sailing`, hapus catatan
+         sandar lama (siap mencatat kedatangan berikutnya).
+      2. Kapal Sandar (nav_status 5) SETELAH sempat berlayar -> catat
+         `berthed_at` = waktu posisi (= tanggal kapal tiba & sandar).
+    Dengan syarat 'harus sempat berlayar dulu', sandar di pelabuhan asal
+    (sebelum berangkat) tidak salah dihitung sebagai tiba. Return dokumen
+    (mungkin sudah diperbarui)."""
+    if not doc:
+        return doc
+    mmsi = str(doc.get("mmsi") or "").strip()
+    if not mmsi:
+        return doc
+    ns = _nav_int(doc.get("nav_status"))
+    if ns is None:
+        return doc
+    sailing = bool(doc.get("sailing"))
+    has_berth = bool(doc.get("berthed_at"))
+    set_upd, unset_upd = {}, {}
+    if ns in _NAV_UNDERWAY:
+        if not sailing:
+            set_upd["sailing"] = True
+        if has_berth:
+            unset_upd["berthed_at"] = ""
+    elif ns == _NAV_MOORED:
+        if sailing and not has_berth:
+            when = (doc.get("position_timestamp") or doc.get("updated_at")
+                    or datetime.now(timezone.utc).isoformat())
+            set_upd["berthed_at"] = when
+            set_upd["sailing"] = False
+    if not set_upd and not unset_upd:
+        return doc
+    ops = {}
+    if set_upd:
+        ops["$set"] = set_upd
+    if unset_upd:
+        ops["$unset"] = unset_upd
+    try:
+        await db.ais_positions.update_one({"mmsi": mmsi}, ops)
+        for k, v in set_upd.items():
+            doc[k] = v
+        for k in unset_upd:
+            doc.pop(k, None)
+    except Exception as e:
+        logger.warning("[ais] berth-state gagal: %s", e)
+    return doc
 
 
 async def _vesselapi_refresh(db, mmsi, imo):
@@ -380,6 +443,9 @@ async def position_for_legs(db, legs):
             fresh = await _vesselapi_refresh(db, chosen["mmsi"], chosen["imo"])
             if fresh:
                 doc = fresh
+
+    # Deteksi sandar otomatis (nav_status) sebelum dikirim ke publik.
+    doc = await _apply_berth_state(db, doc)
 
     return {
         "ship_name": chosen["ship_name"],

@@ -726,13 +726,33 @@ export default function CustomerTracking() {
     if (m) return m;
     return legs.find(isShip) || null;
   })();
+  /* Tanggal ISO / yyyy-mm-dd -> "DD Mon YYYY" (dipakai untuk waktu Sandar dari AIS). */
   const fmtLegDate = (v) => {
     if (!v) return "";
     try {
-      const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(v) ? `${v}T00:00:00` : v);
+      const s = String(v);
+      const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(s) ? `${s}T00:00:00` : s);
       if (isNaN(d.getTime())) return "";
       return d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" });
     } catch (e) { return ""; }
+  };
+  /* ETA dari jaringan AIS bisa berbentuk ISO (VesselAPI) atau "DD-MM HH:MM"
+     (aisstream). Normalisasi ke tgl/bln, tanpa jam. Kosong = "". */
+  const fmtAisEta = (v) => {
+    if (!v) return "";
+    const s = String(v).trim();
+    // Format aisstream: "DD-MM HH:MM" atau "DD-MM"
+    const m = s.match(/^(\d{1,2})-(\d{1,2})(?:\s|$)/);
+    if (m) {
+      const MON = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+      const day = parseInt(m[1], 10), mon = parseInt(m[2], 10);
+      if (mon >= 1 && mon <= 12) return `${String(day).padStart(2, "0")} ${MON[mon - 1]}`;
+    }
+    try {
+      const d = new Date(/^\d{4}-\d{2}-\d{2}/.test(s) && !/T/.test(s) ? `${s.slice(0, 10)}T00:00:00` : s);
+      if (!isNaN(d.getTime())) return d.toLocaleDateString("id-ID", { day: "2-digit", month: "short" });
+    } catch (e) {}
+    return "";
   };
   const focusShip = () => {
     if (!shipPos) return;
@@ -1034,20 +1054,27 @@ export default function CustomerTracking() {
                     <span style={{ fontSize: 11, fontWeight: 800, padding: "3px 10px", borderRadius: 12, background: b.bg, color: b.color, border: `1px solid ${b.bd}` }}>{b.label}</span>
                   </div>
 
-                  {/* Info pelabuhan tujuan leg kapal aktif: Port + ETA + ETB (sandar) */}
-                  {activeShipLeg && (activeShipLeg.tujuan || activeShipLeg.eta || activeShipLeg.etb) && (
-                    <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }} data-testid="trk-ais-leg-port">
-                      {activeShipLeg.tujuan ? (
-                        <span style={{ fontSize: 11, fontWeight: 700, color: "#7ee2b8", background: "#0f2d1f", border: "1px solid #1f6f47", borderRadius: 8, padding: "3px 8px" }}>⚓ {activeShipLeg.tujuan}</span>
-                      ) : null}
-                      {fmtLegDate(activeShipLeg.eta) ? (
-                        <span style={{ fontSize: 11, fontWeight: 700, color: "#9db8e8", background: "#0d2340", border: "1px solid #1f3a5a", borderRadius: 8, padding: "3px 8px" }}>ETA {fmtLegDate(activeShipLeg.eta)}</span>
-                      ) : null}
-                      {fmtLegDate(activeShipLeg.etb) ? (
-                        <span style={{ fontSize: 11, fontWeight: 700, color: "#e8c99d", background: "#2b1d0e", border: "1px solid #5a411f", borderRadius: 8, padding: "3px 8px" }}>ETB {fmtLegDate(activeShipLeg.etb)}</span>
-                      ) : null}
-                    </div>
-                  )}
+                  {/* Info leg kapal aktif — OTOMATIS dari jaringan AIS:
+                      Pelabuhan (nama dari leg), ETA (AIS), & tanggal Sandar
+                      (terdeteksi otomatis saat kapal benar-benar sandar). */}
+                  {(() => {
+                    const port = (activeShipLeg && activeShipLeg.tujuan) || (shipInfo && shipInfo.destination) || "";
+                    const etaTxt = shipInfo ? fmtAisEta(shipInfo.eta) : "";
+                    const sandarTxt = shipInfo ? fmtLegDate(shipInfo.berthed_at) : "";
+                    if (!port && !etaTxt && !sandarTxt) return null;
+                    return (
+                      <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }} data-testid="trk-ais-leg-port">
+                        {port ? (
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "#7ee2b8", background: "#0f2d1f", border: "1px solid #1f6f47", borderRadius: 8, padding: "3px 8px" }}>⚓ {port}</span>
+                        ) : null}
+                        {sandarTxt ? (
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "#e8c99d", background: "#2b1d0e", border: "1px solid #5a411f", borderRadius: 8, padding: "3px 8px" }}>🛳️ Sandar {sandarTxt}</span>
+                        ) : etaTxt ? (
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "#9db8e8", background: "#0d2340", border: "1px solid #1f3a5a", borderRadius: 8, padding: "3px 8px" }}>ETA {etaTxt}</span>
+                        ) : null}
+                      </div>
+                    );
+                  })()}
 
                   {shipInfo ? (
                     <>
@@ -1056,7 +1083,8 @@ export default function CustomerTracking() {
                         <div style={rowS}><span style={kS}>Kecepatan</span><span>{shipInfo.speed != null ? `${shipInfo.speed} knot` : "—"}</span></div>
                         {shipInfo.nav_status_text ? <div style={rowS}><span style={kS}>Status</span><span>{shipInfo.nav_status_text}</span></div> : null}
                         <div style={rowS}><span style={kS}>Tujuan</span><span>{shipInfo.destination || "—"}</span></div>
-                        <div style={rowS}><span style={kS}>ETA</span><span>{shipInfo.eta || "—"}</span></div>
+                        <div style={rowS}><span style={kS}>ETA</span><span>{fmtAisEta(shipInfo.eta) || shipInfo.eta || "—"}</span></div>
+                        {shipInfo.berthed_at ? <div style={rowS}><span style={kS}>Sandar</span><b style={{ color: "#e8c99d" }}>{fmtLegDate(shipInfo.berthed_at)}</b></div> : null}
                         {shipInfo.draught != null ? <div style={rowS}><span style={kS}>Draft</span><span>{shipInfo.draught} m</span></div> : null}
                       </div>
                       {shipPos && (
