@@ -184,7 +184,7 @@ def public_ais(doc):
         "eta": doc.get("eta") or "",
         "draught": doc.get("draught"),
         "nav_status": doc.get("nav_status"),
-        "nav_status_text": nav_status_text(doc.get("nav_status")),
+        "nav_status_text": _nav_display(doc.get("nav_status"), doc.get("speed")),
         "berthed_at": doc.get("berthed_at") or "",
         "position_timestamp": ts,
         "source": doc.get("source") or "",
@@ -203,6 +203,11 @@ def _doc_age_seconds(doc):
 # Kode status navigasi AIS: 5 = Sandar (moored di dermaga), 0/8 = Berlayar.
 _NAV_MOORED = 5
 _NAV_UNDERWAY = {0, 8}
+# Ambang kecepatan (knot): kapal JELAS berlayar kalau >= _SAILING_SPEED, dan
+# dianggap benar-benar diam (boleh dihitung sandar) kalau <= _MOORED_MAX_SPEED.
+# Kru kapal sering lupa update nav_status AIS, jadi kecepatan lebih dipercaya.
+_SAILING_SPEED = 3.0
+_MOORED_MAX_SPEED = 1.0
 
 
 def _nav_int(v):
@@ -210,6 +215,16 @@ def _nav_int(v):
         return int(v) if v is not None else None
     except Exception:
         return None
+
+
+def _nav_display(nav_status, speed):
+    """Teks status navigasi yang 'nalar': kecepatan mengalahkan nav_status AIS.
+    Kapal ngebut (>= _SAILING_SPEED knot) -> 'Berlayar' walau AIS masih bilang
+    'Sandar' (data nav sering basi / tak di-update kru)."""
+    sp = _num(speed)
+    if sp is not None and sp >= _SAILING_SPEED:
+        return nav_status_text(0)  # "Berlayar (mesin)"
+    return nav_status_text(nav_status)
 
 
 async def _apply_berth_state(db, doc):
@@ -228,17 +243,23 @@ async def _apply_berth_state(db, doc):
     if not mmsi:
         return doc
     ns = _nav_int(doc.get("nav_status"))
-    if ns is None:
+    sp = _num(doc.get("speed"))
+    if ns is None and sp is None:
         return doc
+    # Kecepatan mengalahkan nav_status (kru sering lupa update AIS):
+    moving = sp is not None and sp >= _SAILING_SPEED
+    slow = sp is None or sp <= _MOORED_MAX_SPEED
+    underway = (ns in _NAV_UNDERWAY) or moving
+    moored = (ns == _NAV_MOORED) and slow  # sandar hanya kalau nav=5 DAN memang diam
     sailing = bool(doc.get("sailing"))
     has_berth = bool(doc.get("berthed_at"))
     set_upd, unset_upd = {}, {}
-    if ns in _NAV_UNDERWAY:
+    if underway:
         if not sailing:
             set_upd["sailing"] = True
         if has_berth:
             unset_upd["berthed_at"] = ""
-    elif ns == _NAV_MOORED:
+    elif moored:
         if sailing and not has_berth:
             when = (doc.get("position_timestamp") or doc.get("updated_at")
                     or datetime.now(timezone.utc).isoformat())
