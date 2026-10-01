@@ -289,7 +289,7 @@ export default function TaskPage() {
         {/* ── TAB CHECKPOINT (timeline) ── */}
         {tab === "checkpoint" && (
           <>
-            <button style={bigBtn} disabled={busy} onClick={openCheckpoint}>📍 Tambah Checkpoint</button>
+            <button style={bigBtn} disabled={busy} onClick={openCheckpoint}>📷 Tambah Checkpoint</button>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {(task.checkpoints || []).slice().reverse().map((c) => (
                 <div key={c.checkpoint_id} style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 12, display: "flex", gap: 10 }}>
