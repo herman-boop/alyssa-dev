@@ -163,21 +163,30 @@ export default function TaskPage() {
   };
   const saveCheckpoint = async () => {
     if (!cp?.jenis) { flash("Pilih jenis checkpoint dulu"); return; }
-    // Lokasi WAJIB. Kalau GPS belum kebaca, coba ambil ulang; kalau tetap gagal, stop.
+    // Petugas pelabuhan: GPS TIDAK wajib — cukup 1 foto jepret (di pelabuhan GPS
+    // sering susah). Peran lain (driver): lokasi tetap wajib untuk tracking.
+    const gpsOptional = /pelabuhan/i.test(task.tipe_tugas || "");
     let geo = cp.geo, alamat = cp.alamat;
     if (!geo) {
       flash("Mengambil lokasi GPS…");
       geo = await getGeo();
       if (geo) { try { alamat = await reverseGeocode(geo.lat, geo.lng); } catch {} setCp((c) => c ? { ...c, geo, alamat: alamat || "Lokasi terekam" } : c); }
     }
-    if (!geo) { flash("⚠️ Aktifkan izin Lokasi (GPS) dulu — lokasi WAJIB di checkpoint"); return; }
+    if (!geo) {
+      if (gpsOptional) {
+        if (!cp.file) { flash("📷 Ambil foto dulu (lokasi GPS boleh kosong)"); return; }
+        alamat = "Lokasi tidak tersedia";
+      } else {
+        flash("⚠️ Aktifkan izin Lokasi (GPS) dulu — lokasi WAJIB di checkpoint"); return;
+      }
+    }
     setBusy(true);
     try {
       const fd = new FormData();
       fd.append("jenis", cp.jenis);
       fd.append("catatan", cp.catatan || "");
       fd.append("alamat", alamat && alamat !== "Lokasi tidak tersedia" ? alamat : "");
-      fd.append("lat", geo.lat); fd.append("lng", geo.lng); if (geo.acc != null) fd.append("acc", geo.acc);
+      if (geo) { fd.append("lat", geo.lat); fd.append("lng", geo.lng); if (geo.acc != null) fd.append("acc", geo.acc); }
       if (cp.file) { let up = cp.file; try { up = await stampPhoto(cp.file, buildStampLines(cp.jenis, geo, alamat)); } catch {} fd.append("foto", up); }
       const r = await axios.post(`${API}/public/task/${token}/checkpoint`, fd, { headers: { "Content-Type": "multipart/form-data" } });
       setTask(r.data); setCp(null); flash("✓ Checkpoint tersimpan");
