@@ -3270,23 +3270,30 @@ async def admin_patch_order(order_id: str, payload: OrderPatchBody):
         if trip is not None:
             cd = dict(trip.get("customer_data") or {})
             cust = dict(trip.get("customer") or {})
+            # Nilai yang dianggap "auto-fill dari pelanggan" (boleh ditimpa):
+            # nama pelanggan lama di order DAN snapshot nama di BASTK (buat benahi
+            # data yang sudah terlanjur melenceng sebelum perbaikan ini ada).
             if "customer_nama" in upd:
                 new_cn = upd["customer_nama"]
-                old_cn = (order.get("customer_nama") or "").strip()
+                auto_nm = {(order.get("customer_nama") or "").strip(),
+                           (cd.get("nama") or "").strip(),
+                           (cust.get("nama") or "").strip()} - {""}
                 cd["nama"] = new_cn
                 cust["nama"] = new_cn
                 for k in ("pic", "penyerah_nama", "penerima_nama"):
                     cur = (cd.get(k) or "").strip()
-                    if not cur or cur == old_cn:
+                    if not cur or cur in auto_nm:
                         cd[k] = new_cn
             if "customer_hp" in upd:
                 new_hp = upd["customer_hp"]
-                old_hp = (order.get("customer_hp") or "").strip()
+                auto_hp = {(order.get("customer_hp") or "").strip(),
+                           (cd.get("hp") or "").strip(),
+                           (cust.get("hp") or "").strip()} - {""}
                 cd["hp"] = new_hp
                 cust["hp"] = new_hp
                 for k in ("penyerah_hp", "penerima_hp"):
                     cur = (cd.get(k) or "").strip()
-                    if not cur or cur == old_hp:
+                    if not cur or cur in auto_hp:
                         cd[k] = new_hp
             await db.trips.update_one(
                 {"trip_id": tid},
