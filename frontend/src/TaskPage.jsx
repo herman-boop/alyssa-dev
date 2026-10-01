@@ -15,7 +15,7 @@ const C = {
   gray: "#21262d", red: "#f85149",
 };
 const TAB_META = {
-  foto: { icon: "📷", label: "Foto" },
+  foto: { icon: "📷", label: "Ambil Foto" },
   checkpoint: { icon: "📍", label: "Checkpoint" },
   dokumen: { icon: "📄", label: "Dokumen" },
   scan: { icon: "📄", label: "Scan" },
@@ -263,7 +263,13 @@ export default function TaskPage() {
               </div>
             )}
             <input ref={albumInput} type="file" accept="image/*" capture="environment" multiple style={{ display: "none" }} onChange={(e) => onAlbumPick(e.target.files)} />
-            <button style={bigBtn} disabled={busy} onClick={() => albumInput.current?.click()}>📷 {task.foto_title || "Tambah Foto"}</button>
+            <button
+              style={{ ...bigBtn, flexDirection: "column", gap: 4, padding: "20px 16px", minHeight: 92, fontSize: 19, lineHeight: 1.2 }}
+              disabled={busy} onClick={() => albumInput.current?.click()} data-testid="btn-ambil-foto">
+              <span style={{ fontSize: 34, lineHeight: 1 }}>📷</span>
+              <span>{busy ? "Mengupload..." : "PENCET DI SINI UNTUK FOTO"}</span>
+              {!busy && <span style={{ fontSize: 12.5, fontWeight: 700, opacity: 0.9 }}>Buka kamera HP, lalu foto kendaraan</span>}
+            </button>
             <div className="keep-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
               {(task.photos || []).slice().reverse().map((p) => (
                 <div key={p.id} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
