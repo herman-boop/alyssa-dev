@@ -3260,6 +3260,39 @@ async def admin_patch_order(order_id: str, payload: OrderPatchBody):
             tupd["no_rangka"] = upd["no_rangka"]
         await db.trips.update_one({"trip_id": tid}, {"$set": tupd})
 
+    # Mirror edit nama/HP pelanggan ke snapshot BASTK (trip.customer_data) + objek
+    # customer tracking. customer_data dibekukan saat dispatch, jadi tanpa ini
+    # cetak BASTK tetap pakai nama lama. Field nama turunan (pic/penyerah/penerima)
+    # ikut diperbarui HANYA kalau masih sama dgn nama lama (auto-fill) — edit manual
+    # di halaman BASTK tidak ditimpa.
+    if tid and ("customer_nama" in upd or "customer_hp" in upd):
+        trip = await db.trips.find_one({"trip_id": tid}, {"customer_data": 1, "customer": 1})
+        if trip is not None:
+            cd = dict(trip.get("customer_data") or {})
+            cust = dict(trip.get("customer") or {})
+            if "customer_nama" in upd:
+                new_cn = upd["customer_nama"]
+                old_cn = (order.get("customer_nama") or "").strip()
+                cd["nama"] = new_cn
+                cust["nama"] = new_cn
+                for k in ("pic", "penyerah_nama", "penerima_nama"):
+                    cur = (cd.get(k) or "").strip()
+                    if not cur or cur == old_cn:
+                        cd[k] = new_cn
+            if "customer_hp" in upd:
+                new_hp = upd["customer_hp"]
+                old_hp = (order.get("customer_hp") or "").strip()
+                cd["hp"] = new_hp
+                cust["hp"] = new_hp
+                for k in ("penyerah_hp", "penerima_hp"):
+                    cur = (cd.get(k) or "").strip()
+                    if not cur or cur == old_hp:
+                        cd[k] = new_hp
+            await db.trips.update_one(
+                {"trip_id": tid},
+                {"$set": {"customer_data": cd, "customer": cust, "updated_at": upd["updated_at"]}},
+            )
+
     # Reload
     fresh = await db.orders.find_one({"order_id": order_id})
     fresh.pop("_id", None)
