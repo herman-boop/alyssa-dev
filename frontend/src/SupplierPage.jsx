@@ -824,6 +824,38 @@ export default function SupplierPage() {
     try { await axios.delete(`${API}/admin/suppliers/${selected.id}/jobs/${jobId}/tambahan/${tambahanId}`, { headers }); await reloadSelected(selected.id); setListRefreshTick((t) => t + 1); }
     catch { flash("Gagal hapus biaya tambahan"); }
   };
+  /* ═══ Pembayaran Audit Rekon — alokasi & reversal (level supplier) ═══ */
+  const [allocPay, setAllocPay] = useState(null);      // rekon payment yg sedang dialokasikan
+  const [allocRows, setAllocRows] = useState([]);      // [{job_id, amount}]
+  const [allocSaving, setAllocSaving] = useState(false);
+  const openAlloc = (p) => {
+    setAllocPay(p);
+    setAllocRows((p.allocations && p.allocations.length) ? p.allocations.map((a) => ({ job_id: a.job_id, amount: String(a.amount || "") })) : [{ job_id: "", amount: "" }]);
+  };
+  const allocTotal = allocRows.reduce((s, r) => s + pNum(r.amount), 0);
+  const saveAlloc = async () => {
+    if (!allocPay) return;
+    const rows = allocRows.filter((r) => r.job_id && pNum(r.amount) > 0).map((r) => ({ job_id: r.job_id, amount: pNum(r.amount) }));
+    if (allocTotal > (allocPay.amount || 0)) { flash("Total alokasi melebihi nominal pembayaran"); return; }
+    setAllocSaving(true);
+    try {
+      await axios.post(`${API}/admin/suppliers/${selected.id}/rekon-payments/${allocPay.id}/allocate`, { allocations: rows }, { headers });
+      setAllocPay(null); setAllocRows([]);
+      await reloadSelected(selected.id); setListRefreshTick((t) => t + 1);
+      flash("✓ Alokasi disimpan");
+    } catch (e) { flash(e?.response?.data?.detail || "Gagal alokasi"); }
+    finally { setAllocSaving(false); }
+  };
+  const reverseRekon = async (p) => {
+    const reason = window.prompt(`Batalkan (Reverse) pembayaran Rekon ${fRp(p.amount)}?\nData tetap tersimpan (audit). Alasan:`, "");
+    if (reason === null) return;
+    try {
+      await axios.post(`${API}/admin/rekon/imports/${p.bank_transaction_id}/reverse`, { reason }, { headers });
+      await reloadSelected(selected.id); setListRefreshTick((t) => t + 1);
+      flash("✓ Pembayaran Rekon dibatalkan (reversed)");
+    } catch (e) { flash(e?.response?.data?.detail || "Gagal reverse"); }
+  };
+
   /* ═══ Tag/Judul Kelompok laporan per unit (pembatas visual PDF) ═══ */
   const [detailTag, setDetailTag] = useState("");
   const [tagSaving, setTagSaving] = useState(false);
@@ -1026,8 +1058,9 @@ export default function SupplierPage() {
                 { lbl: "Total Invoice", val: grandTax.invoice, c: C.ink },
                 { lbl: "PPh 23 Dipotong", val: grandTax.pph23, c: C.gold },
                 { lbl: "Net Transfer", val: grandTax.net, c: C.ink },
-                { lbl: "Sudah Transfer", val: grandTax.terbayar, c: C.green },
+                { lbl: "Sudah Dialokasikan", val: grandTax.terbayar, c: C.green },
                 { lbl: "Sisa Transfer", val: grandTax.sisa_transfer, c: (grandTax.sisa_transfer > 0 ? C.red : C.green) },
+                ...(((selected.total_unallocated || 0) > 0) ? [{ lbl: "Belum Dialokasikan", val: selected.total_unallocated, c: C.gold }] : []),
               ].map((s, i) => (
                 <div key={i} style={{ background: C.inpBg, border: `1px solid ${C.line}`, borderRadius: 12, padding: "10px 10px" }}>
                   <div style={{ fontSize: 9.5, color: C.mute, textTransform: "uppercase", letterSpacing: ".3px", fontWeight: 700 }}>{s.lbl}</div>
@@ -1244,7 +1277,29 @@ export default function SupplierPage() {
           {/* ═══ TAB RIWAYAT (timeline) ═══ */}
           {tab === "riwayat" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {txns.length === 0 && <div style={{ textAlign: "center", padding: 30, color: C.mute }}>Belum ada pembayaran.</div>}
+              {(selected.rekon_payments || []).length > 0 && (
+                <div style={{ background: "#1a1408", border: `1px solid ${C.gold}`, borderRadius: 12, padding: 12 }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: C.gold, marginBottom: 8 }}>🏦 Pembayaran dari Audit Rekon Bank</div>
+                  {selected.rekon_payments.map((p) => {
+                    const st = p.alloc_status;
+                    const badge = st === "allocated" ? { t: "Dialokasikan", c: C.green } : st === "partial" ? { t: `Sebagian · sisa ${fRp(p.unallocated)}`, c: C.gold } : { t: "Belum Dialokasikan", c: C.red };
+                    return (
+                      <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "9px 0", borderTop: `1px solid ${C.line}`, flexWrap: "wrap" }} data-testid={`sup-rekon-${p.id}`}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 13.5, fontWeight: 800 }}>{fRp(p.amount)} <span style={{ fontSize: 11, fontWeight: 700, color: badge.c }}>· {badge.t}</span></div>
+                          <div style={{ fontSize: 11, color: C.mute, marginTop: 2 }}>{fDate(p.tanggal)}{p.catatan ? ` · ${p.catatan}` : ""} · btx {p.bank_transaction_id}</div>
+                        </div>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button style={{ ...BTN_GHOST, padding: "6px 10px" }} onClick={() => openAlloc(p)} data-testid={`sup-rekon-alloc-${p.id}`}>Alokasikan</button>
+                          <button style={{ ...BTN_GHOST, padding: "6px 10px", color: C.red, borderColor: C.red }} onClick={() => reverseRekon(p)}>Reverse</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div style={{ fontSize: 10.5, color: C.mute, marginTop: 8 }}>Uang ini sudah ditransfer ke supplier. Alokasikan ke PO/tagihan supaya mengurangi Sisa unit. Pembatalan lewat <b style={{ color: C.ink }}>Reverse</b> (bukan hapus).</div>
+                </div>
+              )}
+              {txns.length === 0 && (selected.rekon_payments || []).length === 0 && <div style={{ textAlign: "center", padding: 30, color: C.mute }}>Belum ada pembayaran.</div>}
               {txns.map((tx) => (
                 <button key={tx.key} onClick={() => setTxnDetail(tx)} style={{ textAlign: "left", background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 14, cursor: "pointer", color: C.ink }} data-testid={`sup-txn-${tx.key}`}>
                   {/* Card utama = TRANSAKSI BANK: tanggal + nominal + status. Unit cuma helper kecil. */}
@@ -1277,6 +1332,29 @@ export default function SupplierPage() {
             </div>
           )}
         </>
+      )}
+
+      {/* ── Modal alokasi pembayaran Rekon ── */}
+      {allocPay && (
+        <Modal title={`Alokasikan ${fRp(allocPay.amount)}`} onClose={() => setAllocPay(null)}
+          foot={<button style={BTN} disabled={allocSaving} onClick={saveAlloc} data-testid="sup-alloc-save">{allocSaving ? "…" : "💾 Simpan Alokasi"}</button>}>
+          <div style={{ fontSize: 12, color: C.mute, marginBottom: 10 }}>
+            Pilih tagihan/unit + jumlah. Total alokasi ≤ {fRp(allocPay.amount)}.
+            Belum dialokasi: <b style={{ color: allocTotal > allocPay.amount ? C.red : C.gold }}>{fRp(Math.max(0, allocPay.amount - allocTotal))}</b>
+            {allocTotal > allocPay.amount && <span style={{ color: C.red }}> · melebihi nominal!</span>}
+          </div>
+          {allocRows.map((r, i) => (
+            <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              <select style={{ ...I, flex: 1.6 }} value={r.job_id} onChange={(e) => setAllocRows((rows) => rows.map((x, k) => k === i ? { ...x, job_id: e.target.value } : x))} data-testid={`sup-alloc-job-${i}`}>
+                <option value="">— pilih unit/PO —</option>
+                {(selected.jobs || []).map((j) => <option key={j.id} value={j.id}>{j.nopol || j.no_rangka || j.kategori || j.id} · sisa {fRp(j.sisa || 0)}</option>)}
+              </select>
+              <input inputMode="numeric" style={{ ...I, flex: 1 }} value={r.amount ? Number(onlyDigits(r.amount)).toLocaleString("id-ID") : ""} onChange={(e) => setAllocRows((rows) => rows.map((x, k) => k === i ? { ...x, amount: onlyDigits(e.target.value) } : x))} placeholder="Jumlah" data-testid={`sup-alloc-amt-${i}`} />
+              <button style={{ ...BTN_GHOST, padding: "0 10px", color: C.red }} onClick={() => setAllocRows((rows) => rows.filter((_, k) => k !== i))}>✕</button>
+            </div>
+          ))}
+          <button style={{ ...BTN_GHOST, marginTop: 4 }} onClick={() => setAllocRows((rows) => [...rows, { job_id: "", amount: "" }])}>+ Tambah baris alokasi</button>
+        </Modal>
       )}
 
       {/* ── Sticky bottom bar (tab Pembayaran) ── */}
