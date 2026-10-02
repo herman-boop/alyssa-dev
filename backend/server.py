@@ -5779,9 +5779,14 @@ PPN_RATE_DEFAULT = 1.1    # % dari DPP (PPN yang ditagih supplier, on top harga)
 PPH23_RATE_DEFAULT = 2.0  # % dari DPP (PPh 23 dipotong dari transfer supplier)
 
 
-def _supplier_job_totals(job: dict) -> dict:
+def _supplier_job_totals(job: dict, extra_paid: int = 0) -> dict:
     """Hitung total_terbayar & sisa dari daftar payments — bukan disimpan,
     dihitung ulang tiap read biar nggak pernah nyimpang dari data payments.
+
+    `extra_paid` = jumlah ALOKASI pembayaran Rekon (level supplier) yang
+    diarahkan ke job ini. Dihitung sebagai 'sudah dibayar' TANPA bikin entri
+    payment di job (pembayaran aslinya ada di supplier.rekon_payments). Default
+    0 → perilaku lama persis sama (backward-compatible).
 
     Biaya tambahan per unit (job['tambahan'] = [{id,label,amount}]) NAMBAH tagihan:
     total efektif = harga deal awal + seluruh biaya tambahan. `harga_deal`
@@ -5797,7 +5802,7 @@ def _supplier_job_totals(job: dict) -> dict:
       NET TRANSFER  = TOTAL INVOICE − PPh23 — yang benar-benar ditransfer ke supplier
     Sisa dihitung terhadap NET TRANSFER. Kalau tanpa pajak → net = DPP, jadi
     angka lama TIDAK berubah (backward-compatible)."""
-    terbayar = sum((p.get("amount") or 0) for p in (job.get("payments") or []))
+    terbayar = sum((p.get("amount") or 0) for p in (job.get("payments") or [])) + int(extra_paid or 0)
     job = dict(job)
     base = job.get("total_harga") or 0
     tambahan = job.get("tambahan") or []
@@ -5873,6 +5878,46 @@ def _supplier_job_totals(job: dict) -> dict:
     # tidak memengaruhi total_harga/sisa. Selisih = Harga Invoice - Harga Deal.
     job["selisih"] = (job.get("selisih_invoice") or 0) - (job.get("selisih_deal") or 0)
     return job
+
+
+def _supplier_rekon_overview(sup: dict) -> dict:
+    """Ringkasan pembayaran Audit Rekon di LEVEL SUPPLIER (terpisah dari jobs).
+    Pembayaran rekon TIDAK ditaruh di job dummy — disimpan di
+    supplier['rekon_payments']. Masing-masing bisa punya `allocations`
+    [{job_id, amount}] ke tagihan yang sudah dikonfirmasi.
+
+    Return:
+      alloc_by_job          : {job_id: total_alokasi}  → dipakai sbg extra_paid job
+      total_rekon           : total uang rekon yang masuk (non-reversed)
+      total_rekon_allocated : total yang sudah dialokasikan ke tagihan
+      total_unallocated     : total yang BELUM dialokasikan
+      rekon_payments        : daftar pembayaran + status alokasi (buat Riwayat)
+    """
+    rps = [p for p in (sup.get("rekon_payments") or []) if p.get("status") != "reversed"]
+    alloc_by_job, total_rekon, total_alloc, out = {}, 0, 0, []
+    for p in rps:
+        amt = p.get("amount") or 0
+        total_rekon += amt
+        a_sum = 0
+        for a in (p.get("allocations") or []):
+            jid = a.get("job_id"); av = a.get("amount") or 0
+            if jid and av > 0:
+                alloc_by_job[jid] = alloc_by_job.get(jid, 0) + av
+                a_sum += av
+        total_alloc += a_sum
+        status = "allocated" if (amt > 0 and a_sum >= amt) else ("partial" if a_sum > 0 else "unallocated")
+        pp = dict(p)
+        pp["allocated"] = a_sum
+        pp["unallocated"] = max(0, amt - a_sum)
+        pp["alloc_status"] = status
+        out.append(pp)
+    return {
+        "alloc_by_job": alloc_by_job,
+        "total_rekon": total_rekon,
+        "total_rekon_allocated": total_alloc,
+        "total_unallocated": max(0, total_rekon - total_alloc),
+        "rekon_payments": out,
+    }
 
 
 async def _ensure_supplier_projects(doc: dict) -> dict:
@@ -6016,12 +6061,21 @@ async def get_supplier(supplier_id: str):
     if not doc:
         raise HTTPException(404, "Supplier tidak ditemukan")
     doc = await _ensure_supplier_projects(doc)
-    jobs = [_supplier_job_totals(j) for j in (doc.get("jobs") or [])]
+    rk = _supplier_rekon_overview(doc)
+    alloc_by_job = rk["alloc_by_job"]
+    jobs = [_supplier_job_totals(j, extra_paid=alloc_by_job.get(j.get("id"), 0)) for j in (doc.get("jobs") or [])]
     doc["jobs"] = jobs
     doc["projects"] = doc.get("projects") or []
     doc["grand_total_harga"] = sum(j.get("total_harga") or 0 for j in jobs)
+    # grand_total_terbayar sudah termasuk alokasi rekon (via extra_paid di job).
     doc["grand_total_terbayar"] = sum(j.get("total_terbayar") or 0 for j in jobs)
     doc["grand_sisa"] = sum(j.get("sisa") or 0 for j in jobs)
+    # ── Breakdown "Sudah Transfer" level supplier (bedakan 3 angka) ──
+    manual_transfer = sum((p.get("amount") or 0) for j in (doc.get("jobs") or []) for p in (j.get("payments") or []))
+    doc["rekon_payments"] = rk["rekon_payments"]
+    doc["total_transferred"] = manual_transfer + rk["total_rekon"]      # total uang benar2 ditransfer
+    doc["total_allocated"] = manual_transfer + rk["total_rekon_allocated"]  # yang sudah nempel ke tagihan
+    doc["total_unallocated"] = rk["total_unallocated"]                  # masih belum dialokasikan
     return doc
 
 
@@ -6589,6 +6643,18 @@ async def rekon_reverse_import(bank_transaction_id: str, body: Optional[Dict[str
     res = await rekon_sync.reverse_import(db, bank_transaction_id, (body or {}).get("reason", ""))
     if res.get("status") == "not_found":
         raise HTTPException(404, "Import rekon tidak ditemukan")
+    return res
+
+
+@api_router.post("/admin/suppliers/{supplier_id}/rekon-payments/{rekon_payment_id}/allocate", dependencies=[Depends(require_admin_pin)])
+async def rekon_allocate_payment(supplier_id: str, rekon_payment_id: str, body: Dict[str, Any] = Body(...)):
+    """Alokasikan pembayaran Rekon (yang Belum Dialokasikan) ke 1+ tagihan/job.
+    Tidak membuat pembayaran baru & tidak mengubah bank_transaction_id. Total
+    alokasi tidak boleh melebihi nominal. Setelah ini, Sisa job terkait otomatis
+    berkurang (via extra_paid di get_supplier)."""
+    res = await rekon_sync.allocate_payment(db, supplier_id, rekon_payment_id, (body or {}).get("allocations") or [])
+    if isinstance(res, dict) and res.get("error"):
+        raise HTTPException(400, res["error"])
     return res
 
 
