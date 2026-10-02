@@ -17,19 +17,24 @@ export default function DedupAudit() {
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(true);
 
+  const fmtErr = (e, label) => {
+    const st = e?.response?.status;
+    if (st === 401 || st === 403) return `${label}: butuh login admin (PIN). Buka /admin & login dulu.`;
+    if (st === 404) return `${label}: endpoint belum ada di server (404) — kemungkinan backend belum selesai deploy. Coba lagi sebentar.`;
+    if (e?.code === "ECONNABORTED") return `${label}: timeout (server terlalu lama membalas). Coba Muat ulang.`;
+    return `${label}: ${st ? "HTTP " + st + " · " : ""}${e?.response?.data?.detail || e?.message || "gagal"}`;
+  };
   const load = async () => {
     setLoading(true); setErr("");
-    try {
-      const [s, c] = await Promise.all([
-        axios.get(`${API}/admin/suppliers/dedup/audit`, { headers }),
-        axios.get(`${API}/admin/contacts/dedup/audit`, { headers }),
-      ]);
-      setSup(s.data); setCon(c.data);
-    } catch (e) {
-      setErr(e?.response?.status === 401 || e?.response?.status === 403
-        ? "Butuh login admin (PIN). Buka /admin & login dulu, lalu buka halaman ini lagi."
-        : (e?.response?.data?.detail || e.message || "Gagal memuat"));
-    } finally { setLoading(false); }
+    if (!pin) { setErr("PIN admin tidak terbaca di browser ini. Buka /admin, login, lalu buka /audit-duplikat lagi (tab yang sama)."); setLoading(false); return; }
+    const errs = [];
+    // Dua request TERPISAH + timeout → tidak mungkin hang selamanya.
+    try { const s = await axios.get(`${API}/admin/suppliers/dedup/audit`, { headers, timeout: 90000 }); setSup(s.data); }
+    catch (e) { errs.push(fmtErr(e, "Audit Supplier")); }
+    try { const c = await axios.get(`${API}/admin/contacts/dedup/audit`, { headers, timeout: 90000 }); setCon(c.data); }
+    catch (e) { errs.push(fmtErr(e, "Audit Contacts")); }
+    if (errs.length) setErr(errs.join("  •  "));
+    setLoading(false);
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
 
@@ -56,7 +61,6 @@ export default function DedupAudit() {
   const kv = (k, v, c) => (<div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}><span style={{ color: C.mute }}>{k}</span><b style={{ color: c || C.ink }}>{v}</b></div>);
 
   if (loading) return <div style={{ ...wrap, display: "flex", alignItems: "center", justifyContent: "center" }}>Memuat audit (read-only)…</div>;
-  if (err) return <div style={wrap}><div style={{ ...box, borderColor: C.red }}><b style={{ color: C.red }}>⚠️ {err}</b><div style={{ marginTop: 10 }}><button onClick={load} style={{ padding: "8px 14px", borderRadius: 8, border: `1px solid ${C.line}`, background: "none", color: C.ink, cursor: "pointer" }}>Coba lagi</button></div></div></div>;
 
   const Group = ({ g, kind }) => (
     <div style={{ ...box, marginBottom: 10 }}>
@@ -91,6 +95,8 @@ export default function DedupAudit() {
           </div>
         </div>
         <div style={{ fontSize: 12, color: C.mute, marginBottom: 14 }}>Laporan ini hanya membaca data — tidak ada merge/hapus/perubahan. Kirim hasil "Salin JSON" ke chat untuk dirapikan & di-ACC sebelum tindakan apa pun.</div>
+        {err && <div style={{ ...box, borderColor: C.red }}><b style={{ color: C.red }}>⚠️ {err}</b><div style={{ marginTop: 8 }}><button onClick={load} style={{ padding: "7px 12px", borderRadius: 8, border: `1px solid ${C.line}`, background: "none", color: C.ink, cursor: "pointer" }}>Coba lagi</button></div></div>}
+        {!sup && !con && !err && <div style={box}>Tidak ada data.</div>}
 
         <div style={box}>
           <div style={{ fontWeight: 800, marginBottom: 8 }}>📦 SUPPLIER</div>
