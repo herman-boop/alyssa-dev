@@ -808,9 +808,8 @@ export default function SupplierPage() {
   const [tbhSaving, setTbhSaving] = useState(false);
   const addTambahan = async () => {
     const job = detailJob; if (!job) return;
-    const label = tbhLabel.trim(); const amount = pNum(tbhAmount);
-    if (!label) { flash("Isi keterangan biaya tambahan"); return; }
-    if (amount <= 0) { flash("Isi nominal biaya tambahan"); return; }
+    const label = tbhLabel.trim() || "Biaya tambahan"; const amount = pNum(tbhAmount);
+    if (amount <= 0) { flash("Isi nominal biaya tambahan dulu (mis. 900.000)"); return; }
     setTbhSaving(true);
     try {
       await axios.post(`${API}/admin/suppliers/${selected.id}/jobs/${job.id}/tambahan`, { label, amount }, { headers });
@@ -1470,7 +1469,7 @@ export default function SupplierPage() {
             <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
               <input style={{ ...I, flex: 1.4 }} placeholder="Keterangan (mis. Tambahan BBM)" value={tbhLabel} onChange={(e) => setTbhLabel(e.target.value)} data-testid="sup-tbh-label" />
               <input style={{ ...I, flex: 1 }} inputMode="numeric" placeholder="Nominal" value={fmtRpInput(tbhAmount)} onChange={(e) => setTbhAmount(onlyDigits(e.target.value))} data-testid="sup-tbh-amount" />
-              <button style={{ ...BTN, padding: "0 16px", minWidth: 56 }} disabled={tbhSaving} onClick={addTambahan} data-testid="sup-tbh-add">{tbhSaving ? "…" : "+"}</button>
+              <button style={{ ...BTN, padding: "0 16px", minWidth: 84, whiteSpace: "nowrap" }} disabled={tbhSaving} onClick={addTambahan} data-testid="sup-tbh-add">{tbhSaving ? "…" : "+ Tambah"}</button>
             </div>
             <div style={{ fontSize: 11, color: C.mute, marginTop: 5 }}>Biaya tambahan nambah Total &amp; Sisa unit ini. Harga deal awal tetap.</div>
           </div>
