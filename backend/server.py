@@ -15,6 +15,7 @@ from playwright.async_api import async_playwright
 import ais  # modul AIS (posisi kapal) — provider-agnostic, aman tanpa key
 import rekon_sync  # integrasi pembayaran supplier dari Audit Rekon (isolated)
 import rekon_felis_client  # adapter PULL dari Felis (stub sampai kontrak final)
+import expenses as expenses_mod  # Biaya Umum & Administratif (isolated, terpisah dari HPP)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -160,6 +161,11 @@ async def _rekon_startup():
         await rekon_sync.ensure_indexes(db)
     except Exception as e:
         logger.warning(f"[startup] gagal bikin index rekon: {e}")
+    try:
+        await expenses_mod.ensure_indexes(db)
+        await expenses_mod.seed_categories(db)
+    except Exception as e:
+        logger.warning(f"[startup] gagal init expenses: {e}")
 
 
 @app.on_event("startup")
@@ -6423,6 +6429,9 @@ async def delete_supplier_payment(supplier_id: str, job_id: str, payment_id: str
     job_idx = next((i for i, j in enumerate(jobs) if j.get("id") == job_id), None)
     if job_idx is None:
         raise HTTPException(404, "Unit/job tidak ditemukan")
+    target = next((p for p in (jobs[job_idx].get("payments") or []) if p.get("id") == payment_id), None)
+    if target and target.get("source") == "rekon-bank":
+        raise HTTPException(409, "Pembayaran dari Audit Rekon Bank tidak bisa dihapus biasa. Gunakan Reverse (batalkan lewat record Rekon).")
     before = len(jobs[job_idx].get("payments") or [])
     jobs[job_idx]["payments"] = [p for p in (jobs[job_idx].get("payments") or []) if p.get("id") != payment_id]
     if len(jobs[job_idx]["payments"]) == before:
@@ -6475,6 +6484,11 @@ async def delete_supplier_payment_txn(supplier_id: str, txn_key: str):
     if not doc:
         raise HTTPException(404, "Supplier tidak ditemukan")
     jobs = doc.get("jobs") or []
+    # Proteksi: pembayaran dari Audit Rekon tidak boleh dihapus biasa → wajib Reverse.
+    for j in jobs:
+        for p in (j.get("payments") or []):
+            if (p.get("batch_id") == txn_key or p.get("id") == txn_key) and p.get("source") == "rekon-bank":
+                raise HTTPException(409, "Pembayaran dari Audit Rekon Bank tidak bisa dihapus biasa. Gunakan Reverse (batalkan lewat record Rekon).")
     removed = 0
     for j in jobs:
         before = j.get("payments") or []
@@ -6601,6 +6615,79 @@ async def rekon_pull_from_felis():
     for r in results:
         summary[r.get("status")] = summary.get(r.get("status"), 0) + 1
     return {"ok": True, "summary": summary, "results": results}
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# BIAYA UMUM & ADMINISTRATIF (EXPENSES) — terpisah dari HPP (no double counting)
+# ══════════════════════════════════════════════════════════════════════════
+@api_router.get("/admin/expense-categories", dependencies=[Depends(require_admin_pin)])
+async def expense_categories_list(include_inactive: bool = False):
+    return {"items": await expenses_mod.list_categories(db, include_inactive=include_inactive)}
+
+
+@api_router.post("/admin/expense-categories", dependencies=[Depends(require_admin_pin)])
+async def expense_categories_add(body: Dict[str, Any] = Body(...)):
+    res = await expenses_mod.add_category(db, (body or {}).get("nama"))
+    if isinstance(res, dict) and res.get("error"):
+        raise HTTPException(400, res["error"])
+    return res
+
+
+@api_router.patch("/admin/expense-categories/{cat_id}", dependencies=[Depends(require_admin_pin)])
+async def expense_categories_update(cat_id: str, body: Dict[str, Any] = Body(...)):
+    res = await expenses_mod.update_category(db, cat_id, nama=(body or {}).get("nama"), aktif=(body or {}).get("aktif"))
+    if isinstance(res, dict) and res.get("error"):
+        raise HTTPException(400, res["error"])
+    return res
+
+
+@api_router.get("/admin/expenses", dependencies=[Depends(require_admin_pin)])
+async def expenses_list(entity_id: Optional[str] = None, date_from: Optional[str] = None,
+                        date_to: Optional[str] = None, kategori: Optional[str] = None,
+                        status: str = "active", limit: int = 500):
+    return await expenses_mod.list_expenses(db, entity_id=entity_id, date_from=date_from,
+                                            date_to=date_to, kategori=kategori, status=status, limit=limit)
+
+
+@api_router.get("/admin/expenses/summary", dependencies=[Depends(require_admin_pin)])
+async def expenses_summary(entity_id: Optional[str] = None, date_from: Optional[str] = None, date_to: Optional[str] = None):
+    return await expenses_mod.summary(db, entity_id=entity_id, date_from=date_from, date_to=date_to)
+
+
+@api_router.post("/admin/expenses", dependencies=[Depends(require_admin_pin)])
+async def expenses_create(body: Dict[str, Any] = Body(...)):
+    res = await expenses_mod.create_expense(db, body)
+    if isinstance(res, dict) and res.get("error"):
+        raise HTTPException(400, res["error"])
+    return res
+
+
+@api_router.patch("/admin/expenses/{expense_id}", dependencies=[Depends(require_admin_pin)])
+async def expenses_update(expense_id: str, body: Dict[str, Any] = Body(...)):
+    res = await expenses_mod.update_expense(db, expense_id, body)
+    if isinstance(res, dict) and res.get("error"):
+        raise HTTPException(400, res["error"])
+    return res
+
+
+@api_router.post("/admin/expenses/{expense_id}/void", dependencies=[Depends(require_admin_pin)])
+async def expenses_void(expense_id: str, body: Optional[Dict[str, Any]] = Body(None)):
+    res = await expenses_mod.void_expense(db, expense_id, (body or {}).get("reason", ""))
+    if isinstance(res, dict) and res.get("error"):
+        raise HTTPException(404, res["error"])
+    return res
+
+
+@api_router.post("/admin/expenses/{expense_id}/bukti", dependencies=[Depends(require_admin_pin)])
+async def expenses_bukti(expense_id: str, bukti: UploadFile = File(...)):
+    doc = await db[expenses_mod.EXPENSES].find_one({"id": expense_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Expense tidak ditemukan")
+    if not bukti or not bukti.filename:
+        raise HTTPException(400, "File bukti wajib")
+    url, warn = _save_upload_soft("expenses", expense_id, bukti, ALLOWED_IMG | ALLOWED_DOC)
+    await db[expenses_mod.EXPENSES].update_one({"id": expense_id}, {"$set": {"bukti_url": url, "updated_at": datetime.now(timezone.utc).isoformat()}})
+    return {"ok": True, "bukti_url": url, "bukti_warning": warn}
 
 
 @api_router.get("/admin/suppliers/{supplier_id}/ringkasan")

@@ -6,6 +6,7 @@ import { VEHICLE_TYPE_LIST } from "@/VehicleSketches";
 import CostCalculator from "@/CostCalculator";
 import DriverData from "@/DriverData";
 import SupplierPage, { printSupplierA4 } from "@/SupplierPage";
+import ExpensesPage from "@/ExpensesPage";
 import SelisihPage from "@/SelisihPage";
 import KompensasiPage from "@/KompensasiPage";
 import MobileVendorPayment from "@/MobileVendorPayment";
@@ -418,6 +419,7 @@ function Dashboard({ pin, onLogout }) {
     koordinator:  { title: "Koordinator", sub: "Kelola akun koordinator lapangan" },
     supplier:     { title: "Supplier", sub: "Kelola unit titipan & selisih harga supplier" },
     selisih:      { title: "Selisih Harga", sub: "Bandingkan HPP vs harga deal pelanggan" },
+    "biaya-umum": { title: "Biaya Umum & Administratif", sub: "Expenses operasional kantor — terpisah dari HPP/Cost of Sales" },
     "pembayaran-vendor": { title: "Pembayaran Vendor", sub: "Bayar beberapa PO per vendor sekaligus (Keuangan)" },
     kompensasi:   { title: "Kompensasi", sub: "Kompensasi hutang piutang antar pihak" },
     "minta-harga":{ title: "Minta Harga", sub: "Permintaan harga ke perwakilan supplier" },
@@ -506,6 +508,10 @@ function Dashboard({ pin, onLogout }) {
 
       {activeTab === "supplier" && (
         <SupplierPage />
+      )}
+
+      {activeTab === "biaya-umum" && (
+        <ExpensesPage />
       )}
 
       {activeTab === "selisih" && (
@@ -837,6 +843,7 @@ const SIDEBAR_ICON = {
   pesanan: "▦", "route-leg": "🧭", drivers: "👤", supplier: "🌿", koordinator: "🧑‍💼",
   kendaraan: "🚙", dokumen: "📄", histori: "🗂️", laporan: "📑", kalkulator: "🧮", selisih: "📊",
   kompensasi: "🔄", "minta-harga": "📩", pengaturan: "⚙️", "pembayaran-vendor": "🏢",
+  "biaya-umum": "🧾",
 };
 
 /* ════════════════════════════════════════
@@ -1087,6 +1094,7 @@ const SIDEBAR_PRIMARY = [
 const SIDEBAR_TOOLS = [
   { key: "kalkulator", label: "Kalkulator HPP" },
   { key: "selisih", label: "Selisih Harga" },
+  { key: "biaya-umum", label: "Biaya Umum & Adm" },
   { key: "pembayaran-vendor", label: "Pembayaran Vendor" },
   { key: "kompensasi", label: "Kompensasi" },
   { key: "minta-harga", label: "Minta Harga" },

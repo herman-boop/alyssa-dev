@@ -1490,7 +1490,9 @@ export default function SupplierPage() {
               {detailJobLive.payments.map((p) => (
                 <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, padding: "6px 0", borderBottom: `1px solid ${C.line}` }}>
                   <span><span style={{ color: C.mute }}>{fDate(p.tanggal)}</span> — {fRp(p.amount)}{p.tipe === "kompensasi" && <span style={{ color: C.blue }}> · 🚗 Kompensasi</span>}{p.source === "rekon-bank" && <span style={{ color: C.gold }} title={p.bank_transaction_id ? `Bank txn: ${p.bank_transaction_id}` : ""}> · 🏦 Audit Rekon Bank</span>}{p.bukti_url && <a href={resolveUrl(p.bukti_url)} target="_blank" rel="noreferrer" style={{ marginLeft: 6, color: C.blue }}>📎</a>}</span>
-                  <button onClick={() => deletePayment(detailJobLive.id, p.id)} style={{ background: "none", border: "none", color: C.red, cursor: "pointer", fontSize: 12 }}>Hapus</button>
+                  {p.source === "rekon-bank"
+                    ? <span style={{ fontSize: 11, color: C.mute }} title="Pembayaran dari Audit Rekon Bank — batalkan lewat Reverse, bukan hapus biasa.">🔒 via Rekon</span>
+                    : <button onClick={() => deletePayment(detailJobLive.id, p.id)} style={{ background: "none", border: "none", color: C.red, cursor: "pointer", fontSize: 12 }}>Hapus</button>}
                 </div>
               ))}
             </div>
