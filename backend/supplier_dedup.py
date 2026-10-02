@@ -83,22 +83,29 @@ def _payments_count_sum(sup):
     return cnt, tot
 
 
-async def usage(db, sup):
-    """Hitung seberapa 'terpakai' sebuah supplier (buat pilih master & keamanan hapus)."""
+def _usage_mem(sup, imp_counts, per_counts):
+    """Usage dari data in-memory (TANPA query per-supplier → cepat, tidak hang)."""
     jobs = sup.get("jobs") or []
     pay_cnt, pay_sum = _payments_count_sum(sup)
-    rekon = [p for p in (sup.get("rekon_payments") or [])]
+    rekon = len(sup.get("rekon_payments") or [])
     sid = sup.get("id")
-    imports = await db.bank_payment_imports.count_documents({"supplier_id": sid})
-    permintaan = await db.permintaan_harga.count_documents({"supplier_id": sid})
-    ref_total = len(jobs) + pay_cnt + len(rekon) + imports + permintaan
-    completeness = sum(1 for k in ("no_hp", "catatan", "jenis") if str(sup.get(k) or "").strip())
+    imports = imp_counts.get(sid, 0)
+    permintaan = per_counts.get(sid, 0)
+    ref_total = len(jobs) + pay_cnt + rekon + imports + permintaan
+    completeness = sum(1 for k in ("no_hp", "catatan", "jenis", "npwp", "email", "alamat") if str(sup.get(k) or "").strip())
     return {
         "jobs": len(jobs), "payments_count": pay_cnt, "payments_sum": pay_sum,
-        "rekon_payments": len(rekon), "import_refs": imports, "permintaan_refs": permintaan,
+        "rekon_payments": rekon, "import_refs": imports, "permintaan_refs": permintaan,
         "ref_total": ref_total, "completeness": completeness,
         "empty_unused": ref_total == 0,
     }
+
+
+async def usage(db, sup):
+    """Versi async (kompatibel) — dipakai di luar audit kalau perlu."""
+    imp = await db.bank_payment_imports.count_documents({"supplier_id": sup.get("id")})
+    per = await db.permintaan_harga.count_documents({"supplier_id": sup.get("id")})
+    return _usage_mem(sup, {sup.get("id"): imp}, {sup.get("id"): per})
 
 
 def _master_score(u, sup):
@@ -116,10 +123,18 @@ async def audit_duplicates(db):
         sups.append(s)
     total = len(sups)
 
-    # index usage sekali
-    u_by_id = {}
-    for s in sups:
-        u_by_id[s["id"]] = await usage(db, s)
+    # Precompute referensi eksternal SEKALI (stream 2 collection kecil) — hindari
+    # 2×N query count per-supplier yang bikin audit lambat/seperti hang.
+    imp_counts, per_counts = {}, {}
+    async for d in db.bank_payment_imports.find({}, {"_id": 0, "supplier_id": 1}):
+        sid = d.get("supplier_id")
+        if sid:
+            imp_counts[sid] = imp_counts.get(sid, 0) + 1
+    async for d in db.permintaan_harga.find({}, {"_id": 0, "supplier_id": 1}):
+        sid = d.get("supplier_id")
+        if sid:
+            per_counts[sid] = per_counts.get(sid, 0) + 1
+    u_by_id = {s["id"]: _usage_mem(s, imp_counts, per_counts) for s in sups}
 
     def _group(key_fn):
         g = {}
