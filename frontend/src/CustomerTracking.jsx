@@ -754,6 +754,26 @@ export default function CustomerTracking() {
     } catch (e) {}
     return "";
   };
+  /* ETA AIS dianggap AKURAT hanya kalau tanggalnya belum lewat (hari ini/ke depan).
+     ETA di AIS diketik kru kapal & sering tidak di-update, jadi kalau sudah lewat
+     kita tidak tampilkan ETA — cukup "Kapal sudah berangkat". Toleransi 12 jam. */
+  const aisEtaFuture = (v) => {
+    if (!v) return false;
+    const s = String(v).trim();
+    let d = null;
+    const m = s.match(/^(\d{1,2})-(\d{1,2})/);
+    if (m) {
+      const now = new Date();
+      d = new Date(now.getFullYear(), parseInt(m[2], 10) - 1, parseInt(m[1], 10), 23, 59, 59);
+      // "DD-MM" tanpa tahun: kalau hasilnya jauh di masa lalu, berarti tahun depan.
+      if (d.getTime() < Date.now() - 60 * 864e5) d.setFullYear(now.getFullYear() + 1);
+    } else {
+      const dd = new Date(/^\d{4}-\d{2}-\d{2}/.test(s) && !/T/.test(s) ? `${s.slice(0, 10)}T23:59:59` : s);
+      if (!isNaN(dd.getTime())) d = dd;
+    }
+    if (!d || isNaN(d.getTime())) return false;
+    return d.getTime() >= Date.now() - 12 * 36e5;
+  };
   const focusShip = () => {
     if (!shipPos) return;
     setFlyNonce((n) => n + 1);
@@ -1059,9 +1079,12 @@ export default function CustomerTracking() {
                       (terdeteksi otomatis saat kapal benar-benar sandar). */}
                   {(() => {
                     const port = (activeShipLeg && activeShipLeg.tujuan) || (shipInfo && shipInfo.destination) || "";
-                    const etaTxt = shipInfo ? fmtAisEta(shipInfo.eta) : "";
                     const sandarTxt = shipInfo ? fmtLegDate(shipInfo.berthed_at) : "";
-                    if (!port && !etaTxt && !sandarTxt) return null;
+                    const etaOk = shipInfo && aisEtaFuture(shipInfo.eta);
+                    const etaTxt = etaOk ? fmtAisEta(shipInfo.eta) : "";
+                    // Kapal dianggap sudah berangkat kalau ada data AIS & belum sandar.
+                    const berangkat = !!shipInfo && !sandarTxt;
+                    if (!port && !sandarTxt && !etaTxt && !berangkat) return null;
                     return (
                       <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }} data-testid="trk-ais-leg-port">
                         {port ? (
@@ -1071,6 +1094,8 @@ export default function CustomerTracking() {
                           <span style={{ fontSize: 11, fontWeight: 700, color: "#e8c99d", background: "#2b1d0e", border: "1px solid #5a411f", borderRadius: 8, padding: "3px 8px" }}>🛳️ Sandar {sandarTxt}</span>
                         ) : etaTxt ? (
                           <span style={{ fontSize: 11, fontWeight: 700, color: "#9db8e8", background: "#0d2340", border: "1px solid #1f3a5a", borderRadius: 8, padding: "3px 8px" }}>ETA {etaTxt}</span>
+                        ) : berangkat ? (
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "#9db8e8", background: "#0d2340", border: "1px solid #1f3a5a", borderRadius: 8, padding: "3px 8px" }}>🚢 Kapal sudah berangkat</span>
                         ) : null}
                       </div>
                     );
@@ -1083,7 +1108,7 @@ export default function CustomerTracking() {
                         <div style={rowS}><span style={kS}>Kecepatan</span><span>{shipInfo.speed != null ? `${shipInfo.speed} knot` : "—"}</span></div>
                         {shipInfo.nav_status_text ? <div style={rowS}><span style={kS}>Status</span><span>{shipInfo.nav_status_text}</span></div> : null}
                         <div style={rowS}><span style={kS}>Tujuan</span><span>{shipInfo.destination || "—"}</span></div>
-                        <div style={rowS}><span style={kS}>ETA</span><span>{fmtAisEta(shipInfo.eta) || shipInfo.eta || "—"}</span></div>
+                        <div style={rowS}><span style={kS}>ETA</span><span>{aisEtaFuture(shipInfo.eta) ? fmtAisEta(shipInfo.eta) : (shipInfo.berthed_at ? "—" : "Kapal sudah berangkat")}</span></div>
                         {shipInfo.berthed_at ? <div style={rowS}><span style={kS}>Sandar</span><b style={{ color: "#e8c99d" }}>{fmtLegDate(shipInfo.berthed_at)}</b></div> : null}
                         {shipInfo.draught != null ? <div style={rowS}><span style={kS}>Draft</span><span>{shipInfo.draught} m</span></div> : null}
                       </div>
