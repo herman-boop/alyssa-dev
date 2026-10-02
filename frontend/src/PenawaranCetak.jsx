@@ -41,7 +41,7 @@ function routeFinalMetode(e) {
 
 export async function printPenawaran(rows, meta) {
   const w = window.open("", "_blank"); // buka dulu (dalam gesture klik) biar nggak keblok popup
-  const { nama_pt, ttdNama, ttdJabatan, stempel, tanggal, insVal, insRate, withPpn, taxIncl, withPph } = meta || {};
+  const { nama_pt, ttdNama, ttdJabatan, stempel, tanggal, insVal, insRate, withPpn, taxIncl, withPph, catatan } = meta || {};
   const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const fmtTgl = (iso) => (iso ? new Date(iso).toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" }) : "-");
   const now = new Date();
@@ -208,6 +208,7 @@ export async function printPenawaran(rows, meta) {
         <div class="ph-pay-name">Cabang ${DOC_BRAND.bank.cabang} &middot; a.n. ${DOC_BRAND.bank.an}</div>
       </div>
     </div>
+    ${catatan && String(catatan).trim() ? `<div class="ph-valid" style="margin-bottom:6px"><b>Keterangan:</b> ${esc(String(catatan).trim()).replace(/\n/g, "<br>")}</div>` : ""}
     <div class="ph-valid">
       <b>Catatan:</b> Harga di atas berlaku 7 (tujuh) hari sejak tanggal penawaran &amp; dapat berubah sewaktu-waktu mengikuti kondisi operasional. Untuk konfirmasi hubungi <b>0818 631 135</b>.
     </div>
@@ -234,6 +235,7 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
   const [ttdNama, setTtdNama] = useState("");
   const [ttdJabatan, setTtdJabatan] = useState("");
   const [stempel, setStempel] = useState("");
+  const [catatanUmum, setCatatanUmum] = useState(""); // catatan bebas (mis. Door to door) → tampil di penawaran
   const [tglPenawaran, setTglPenawaran] = useState(() => {
     const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
     return d.toISOString().slice(0, 10); // hari ini (lokal), yyyy-mm-dd
@@ -464,6 +466,11 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
             </div>
             )}
 
+            <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: gray, marginBottom: 4 }}>CATATAN (tampil di penawaran)</label>
+            <textarea value={catatanUmum} onChange={(e) => setCatatanUmum(e.target.value)} rows={3} data-testid="penawaran-catatan"
+              placeholder="mis. Harga Door to Door, sudah termasuk BBM & tol, belum termasuk asuransi, dll"
+              style={{ width: "100%", boxSizing: "border-box", padding: "9px 12px", borderRadius: 8, border: `1px solid ${border}`, fontSize: 13, marginBottom: 12, resize: "vertical", fontFamily: "inherit" }} />
+
             <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: gray, marginBottom: 4 }}>NAMA PENANDA TANGAN</label>
             <input value={ttdNama} onChange={(e) => setTtdNama(e.target.value)} placeholder="mis. Alyssa Herman"
               style={{ width: "100%", boxSizing: "border-box", padding: "9px 12px", borderRadius: 8, border: `1px solid ${border}`, fontSize: 13, marginBottom: 12 }} />
@@ -501,7 +508,7 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
                   return { ...e, options, selected: options.length ? selOf(i) : -1 };
                 });
                 if (!sel.length) { alert("Centang minimal 1 rute dulu bro."); return; }
-                printPenawaran(sel, { nama_pt: namaPt, ttdNama, ttdJabatan, stempel, tanggal: tglPenawaran, insVal, insRate, withPpn, taxIncl, withPph, mode });
+                printPenawaran(sel, { nama_pt: namaPt, ttdNama, ttdJabatan, stempel, tanggal: tglPenawaran, insVal, insRate, withPpn, taxIncl, withPph, mode, catatan: catatanUmum });
                 setOpen(false);
               }}
                 style={{ padding: "9px 18px", borderRadius: 8, border: "none", background: gold, color: "#fff", fontSize: 12.5, fontWeight: 800, cursor: "pointer" }}>🖨️ {mode === "draft" ? "Cetak Opsi Harga" : "Cetak Resmi"} ({selIdx.size})</button>
