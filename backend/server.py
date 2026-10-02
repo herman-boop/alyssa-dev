@@ -16,6 +16,7 @@ import ais  # modul AIS (posisi kapal) — provider-agnostic, aman tanpa key
 import rekon_sync  # integrasi pembayaran supplier dari Audit Rekon (isolated)
 import rekon_felis_client  # adapter PULL dari Felis (stub sampai kontrak final)
 import expenses as expenses_mod  # Biaya Umum & Administratif (isolated, terpisah dari HPP)
+import supplier_dedup  # audit & merge duplikat master supplier (isolated, reversible)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -6754,6 +6755,44 @@ async def expenses_bukti(expense_id: str, bukti: UploadFile = File(...)):
     url, warn = _save_upload_soft("expenses", expense_id, bukti, ALLOWED_IMG | ALLOWED_DOC)
     await db[expenses_mod.EXPENSES].update_one({"id": expense_id}, {"$set": {"bukti_url": url, "updated_at": datetime.now(timezone.utc).isoformat()}})
     return {"ok": True, "bukti_url": url, "bukti_warning": warn}
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# DEDUP MASTER SUPPLIER — audit (read-only) + merge reversible (dry-run default)
+# ══════════════════════════════════════════════════════════════════════════
+@api_router.get("/admin/suppliers/dedup/audit", dependencies=[Depends(require_admin_pin)])
+async def suppliers_dedup_audit():
+    """READ-ONLY. Daftar kandidat duplikat + saran master + konflik. Tidak mengubah apa pun."""
+    return await supplier_dedup.audit_duplicates(db)
+
+
+@api_router.get("/admin/suppliers/dedup/merge-log", dependencies=[Depends(require_admin_pin)])
+async def suppliers_dedup_log(limit: int = 100):
+    out = []
+    async for d in db[supplier_dedup.MERGE_LOG].find({}, {"_id": 0, "canonical_before": 0, "duplicates": 0}).sort("at", -1).limit(max(1, min(limit, 500))):
+        out.append(d)
+    return {"items": out, "count": len(out)}
+
+
+@api_router.post("/admin/suppliers/dedup/merge", dependencies=[Depends(require_admin_pin)])
+async def suppliers_dedup_merge(body: Dict[str, Any] = Body(...)):
+    """Merge duplicate_ids → canonical_id. DEFAULT dry_run=true (tidak menulis).
+    Kirim dry_run=false untuk eksekusi (reversible lewat unmerge)."""
+    dry = body.get("dry_run", True)
+    res = await supplier_dedup.merge_suppliers(
+        db, body.get("canonical_id"), body.get("duplicate_ids") or [],
+        dry_run=bool(dry), reason=body.get("reason", ""))
+    if isinstance(res, dict) and res.get("error"):
+        raise HTTPException(400, res["error"])
+    return res
+
+
+@api_router.post("/admin/suppliers/dedup/unmerge", dependencies=[Depends(require_admin_pin)])
+async def suppliers_dedup_unmerge(body: Dict[str, Any] = Body(...)):
+    res = await supplier_dedup.unmerge(db, (body or {}).get("log_id"))
+    if isinstance(res, dict) and res.get("error"):
+        raise HTTPException(404, res["error"])
+    return res
 
 
 @api_router.get("/admin/suppliers/{supplier_id}/ringkasan")

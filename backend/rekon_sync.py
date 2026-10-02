@@ -154,6 +154,13 @@ async def ingest_transaction(db, payload):
     if not sid:
         return await _fail("supplier_not_found", reason="supplier_id kosong")
     sup = await db.supplier_profiles.find_one({"id": sid}, {"_id": 0})
+    # Alias/merge mapping: kalau supplier_id adalah duplikat yang sudah di-merge,
+    # redirect ke canonical supplier_id. JANGAN mapping ke ID duplikat/inactive.
+    hops = 0
+    while sup and sup.get("status") == "merged" and sup.get("merged_into") and hops < 10:
+        sid = sup["merged_into"]
+        sup = await db.supplier_profiles.find_one({"id": sid}, {"_id": 0})
+        hops += 1
     if not sup:
         return await _fail("supplier_not_found", supplier_id=sid,
                            reason="supplier_id tidak ada di master alyssa-dev")
