@@ -5972,6 +5972,12 @@ class SupplierPatchBody(BaseModel):
     no_hp: Optional[str] = None
     catatan: Optional[str] = None
     ringkasan_catatan: Optional[str] = None   # keterangan yang tampil di PDF Ringkasan (mis. selisih/hutang)
+    # ── Atribut master tambahan (ADDITIVE, buat verifikasi duplikat & transfer) ──
+    npwp: Optional[str] = None
+    email: Optional[str] = None
+    alamat: Optional[str] = None
+    bank_accounts: Optional[List[Dict[str, Any]]] = None   # [{bank, no_rek, atas_nama}] — boleh >1
+    aliases: Optional[List[str]] = None                     # nama lain yang sama orang/perusahaan
 
 
 class SupplierJobBody(BaseModel):
@@ -6085,6 +6091,17 @@ async def patch_supplier(supplier_id: str, body: SupplierPatchBody):
     if body.no_hp is not None: upd["no_hp"] = body.no_hp.strip()
     if body.catatan is not None: upd["catatan"] = body.catatan.strip()
     if body.ringkasan_catatan is not None: upd["ringkasan_catatan"] = body.ringkasan_catatan.strip()[:800]
+    if body.npwp is not None: upd["npwp"] = body.npwp.strip()[:40]
+    if body.email is not None: upd["email"] = body.email.strip()[:120]
+    if body.alamat is not None: upd["alamat"] = body.alamat.strip()[:400]
+    if body.bank_accounts is not None:
+        upd["bank_accounts"] = [{
+            "bank": str((b or {}).get("bank") or "").strip()[:60],
+            "no_rek": re.sub(r"\s+", "", str((b or {}).get("no_rek") or ""))[:40],
+            "atas_nama": str((b or {}).get("atas_nama") or "").strip()[:120],
+        } for b in (body.bank_accounts or []) if str((b or {}).get("no_rek") or "").strip()]
+    if body.aliases is not None:
+        upd["aliases"] = [str(a).strip()[:200] for a in (body.aliases or []) if str(a or "").strip()]
     if not upd:
         raise HTTPException(400, "Tidak ada field yang diupdate")
     res = await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": upd})
@@ -6790,6 +6807,30 @@ async def suppliers_dedup_merge(body: Dict[str, Any] = Body(...)):
 @api_router.post("/admin/suppliers/dedup/unmerge", dependencies=[Depends(require_admin_pin)])
 async def suppliers_dedup_unmerge(body: Dict[str, Any] = Body(...)):
     res = await supplier_dedup.unmerge(db, (body or {}).get("log_id"))
+    if isinstance(res, dict) and res.get("error"):
+        raise HTTPException(404, res["error"])
+    return res
+
+
+@api_router.get("/admin/contacts/dedup/audit", dependencies=[Depends(require_admin_pin)])
+async def contacts_dedup_audit():
+    """READ-ONLY. Kandidat duplikat buku alamat (contacts)."""
+    return await supplier_dedup.audit_contacts(db)
+
+
+@api_router.post("/admin/contacts/dedup/merge", dependencies=[Depends(require_admin_pin)])
+async def contacts_dedup_merge(body: Dict[str, Any] = Body(...)):
+    res = await supplier_dedup.merge_contacts(
+        db, body.get("canonical_id"), body.get("duplicate_ids") or [],
+        dry_run=bool(body.get("dry_run", True)), reason=body.get("reason", ""))
+    if isinstance(res, dict) and res.get("error"):
+        raise HTTPException(400, res["error"])
+    return res
+
+
+@api_router.post("/admin/contacts/dedup/unmerge", dependencies=[Depends(require_admin_pin)])
+async def contacts_dedup_unmerge(body: Dict[str, Any] = Body(...)):
+    res = await supplier_dedup.unmerge_contacts(db, (body or {}).get("log_id"))
     if isinstance(res, dict) and res.get("error"):
         raise HTTPException(404, res["error"])
     return res

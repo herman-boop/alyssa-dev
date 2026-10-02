@@ -53,6 +53,27 @@ def _norm_phone(s):
     return d
 
 
+def _norm_digits(s):
+    return re.sub(r"\D", "", str(s or ""))
+
+
+def _norm_email(s):
+    return str(s or "").strip().lower()
+
+
+def _rek_set(sup):
+    """Kumpulan nomor rekening (digit) dari bank_accounts[] + field no_rek (kalau ada)."""
+    out = set()
+    for b in (sup.get("bank_accounts") or []):
+        r = _norm_digits((b or {}).get("no_rek"))
+        if len(r) >= 6:
+            out.add(r)
+    r = _norm_digits(sup.get("no_rek"))
+    if len(r) >= 6:
+        out.add(r)
+    return out
+
+
 def _payments_count_sum(sup):
     cnt = tot = 0
     for j in (sup.get("jobs") or []):
@@ -122,9 +143,9 @@ async def audit_duplicates(db):
         seen_group_keys.add(ids)
         phones = {_norm_phone(m.get("no_hp")) for m in members if _norm_phone(m.get("no_hp"))}
         names = {_norm_name(m.get("nama")) for m in members}
-        # confidence
-        if basis == "phone" and len(phones) == 1:
-            confidence = "high"            # no_hp identik (sinyal kuat)
+        # confidence (grup npwp/rekening/email/phone = anggota pasti berbagi sinyal itu)
+        if basis in ("npwp", "rekening", "email", "phone"):
+            confidence = "high"            # sinyal identitas kuat identik
         elif basis == "name" and len(phones) <= 1:
             confidence = "high" if phones else "medium"
         elif basis == "name" and len(phones) > 1:
@@ -151,10 +172,24 @@ async def audit_duplicates(db):
             } for m in ranked],
         })
 
+    # Sinyal kuat (hanya untuk record yang punya datanya) — multi-key utk rekening.
+    by_npwp = _group(lambda s: _norm_digits(s.get("npwp")) if len(_norm_digits(s.get("npwp"))) >= 10 else "")
+    by_email = _group(lambda s: _norm_email(s.get("email")))
+    by_rek = {}
+    for s in sups:
+        for r in _rek_set(s):
+            by_rek.setdefault(r, []).append(s)
+    by_rek = {k: v for k, v in by_rek.items() if len(v) > 1}
+
+    for members in by_rek.values():
+        _emit(members, "rekening")
+    for members in by_npwp.values():
+        _emit(members, "npwp")
+    for members in by_email.values():
+        _emit(members, "email")
     for members in by_name.values():
         _emit(members, "name")
     for members in by_phone.values():
-        # hanya emit kalau belum tercakup grup nama
         _emit(members, "phone")
 
     empty_unused = [{"supplier_id": s["id"], "nama": s.get("nama")} for s in sups if u_by_id[s["id"]]["empty_unused"]]
@@ -326,3 +361,173 @@ async def resolve_canonical_id(db, supplier_id):
             return sid
         sid = d.get("merged_into")
     return sid
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# DEDUP CONTACTS (buku alamat) — tidak punya referensi transaksi, jadi merge =
+# gabung field + hapus duplikat (reversible via snapshot di contact_merge_log).
+# ══════════════════════════════════════════════════════════════════════════
+CONTACT_MERGE_LOG = "contact_merge_log"
+_CONTACT_FIELDS = ("perusahaan", "no_hp", "email", "alamat", "catatan")
+
+
+def _contact_completeness(c):
+    return sum(1 for k in _CONTACT_FIELDS if str(c.get(k) or "").strip())
+
+
+async def audit_contacts(db):
+    """READ-ONLY. Kandidat duplikat buku alamat (per jenis diperhatikan)."""
+    cs = []
+    async for c in db.contacts.find({"status": {"$ne": "merged"}}, {"_id": 0}):
+        cs.append(c)
+    total = len(cs)
+
+    def grp(keyfn):
+        g = {}
+        for c in cs:
+            k = keyfn(c)
+            if not k:
+                continue
+            g.setdefault(k, []).append(c)
+        return {k: v for k, v in g.items() if len(v) > 1}
+
+    # kelompokkan dalam jenis yang sama (pelanggan vs supplier beda buku)
+    by_name = grp(lambda c: (c.get("jenis"), _norm_name(c.get("nama"))))
+    by_phone = grp(lambda c: (c.get("jenis"), _norm_phone(c.get("no_hp"))))
+    by_email = grp(lambda c: (c.get("jenis"), _norm_email(c.get("email"))))
+
+    groups, seen = [], set()
+
+    def emit(members, basis):
+        ids = tuple(sorted(m["id"] for m in members))
+        if ids in seen:
+            return
+        seen.add(ids)
+        phones = {_norm_phone(m.get("no_hp")) for m in members if _norm_phone(m.get("no_hp"))}
+        if basis in ("phone", "email"):
+            conf = "high"
+        elif basis == "name" and len(phones) > 1:
+            conf = "needs_review"
+        elif basis == "name":
+            conf = "high" if phones else "medium"
+        else:
+            conf = "medium"
+        ranked = sorted(members, key=lambda m: (_contact_completeness(m), m.get("created_at") or ""), reverse=True)
+        master = ranked[0]
+        conflicts = []
+        for f in ("no_hp", "email"):
+            vals = sorted({str(m.get(f) or "").strip() for m in members if str(m.get(f) or "").strip()})
+            if len(vals) > 1:
+                conflicts.append({"field": f, "values": vals})
+        groups.append({
+            "basis": basis, "confidence": conf, "jenis": members[0].get("jenis"),
+            "names": sorted({_norm_name(m.get("nama")) for m in members}),
+            "suggested_master_id": master["id"],
+            "suggested_master_reason": "data terlengkap + terlama",
+            "conflicts": conflicts, "needs_review": conf == "needs_review",
+            "members": [{"contact_id": m["id"], "nama": m.get("nama"), "no_hp": m.get("no_hp") or "",
+                         "email": m.get("email") or "", "completeness": _contact_completeness(m),
+                         "is_suggested_master": m["id"] == master["id"]} for m in ranked],
+        })
+
+    for v in by_email.values():
+        emit(v, "email")
+    for v in by_phone.values():
+        emit(v, "phone")
+    for v in by_name.values():
+        emit(v, "name")
+
+    empty = [{"contact_id": c["id"], "nama": c.get("nama")} for c in cs if _contact_completeness(c) == 0]
+    return {
+        "total_contacts": total, "candidate_groups": len(groups),
+        "high_confidence": sum(1 for g in groups if g["confidence"] == "high"),
+        "medium_confidence": sum(1 for g in groups if g["confidence"] == "medium"),
+        "needs_review_groups": sum(1 for g in groups if g["needs_review"]),
+        "empty_count": len(empty), "empty": empty[:200], "groups": groups,
+        "note": "READ-ONLY. Contacts = buku alamat (tanpa referensi transaksi). "
+                "Nama sama ≠ otomatis duplikat. Merge manual & dry-run dulu.",
+    }
+
+
+async def merge_contacts(db, canonical_id, duplicate_ids, dry_run=True, reason="", by="admin"):
+    """Gabungkan contacts duplikat → canonical. Default DRY-RUN. Reversible
+    (snapshot di contact_merge_log). Contacts tanpa referensi → duplikat dihapus
+    setelah field berguna dipindah (snapshot disimpan utk unmerge)."""
+    canonical_id = str(canonical_id or "").strip()
+    dups = [str(d).strip() for d in (duplicate_ids or []) if str(d or "").strip() and str(d).strip() != canonical_id]
+    dups = list(dict.fromkeys(dups))
+    if not canonical_id or not dups:
+        return {"error": "canonical_id dan minimal 1 duplicate_id wajib"}
+    canonical = await db.contacts.find_one({"id": canonical_id}, {"_id": 0})
+    if not canonical:
+        return {"error": f"canonical contact {canonical_id} tidak ditemukan"}
+
+    dup_docs, plan = [], {"canonical_id": canonical_id, "dry_run": dry_run, "fill_fields": {}, "duplicates": [], "warnings": []}
+    for did in dups:
+        d = await db.contacts.find_one({"id": did}, {"_id": 0})
+        if not d:
+            plan["warnings"].append(f"contact {did} tidak ditemukan — dilewati"); continue
+        if d.get("jenis") != canonical.get("jenis"):
+            plan["warnings"].append(f"contact {did} jenis beda ({d.get('jenis')}) — dilewati (jangan gabung lintas jenis)"); continue
+        dup_docs.append(d)
+        plan["duplicates"].append({"contact_id": did, "nama": d.get("nama")})
+    for k in _CONTACT_FIELDS:
+        if not str(canonical.get(k) or "").strip():
+            for d in dup_docs:
+                if str(d.get(k) or "").strip():
+                    plan["fill_fields"][k] = d.get(k); break
+    for k in ("no_hp", "email"):
+        cv = str(canonical.get(k) or "").strip()
+        diff = {str(d.get(k) or "").strip() for d in dup_docs if str(d.get(k) or "").strip() and str(d.get(k) or "").strip() != cv}
+        if cv and diff:
+            plan["warnings"].append(f"konflik {k}: master='{cv}' vs {sorted(diff)} → disimpan sbg alias, perlu review")
+
+    if dry_run or not dup_docs:
+        return {"status": "dry_run" if dry_run else "noop", "plan": plan}
+
+    log_id = _gen_id()
+    log = {"id": log_id, "at": _now(), "reason": str(reason or "")[:300], "by": by,
+           "canonical_id": canonical_id, "canonical_before": dict(canonical), "duplicates": [], "status": "active"}
+    aliases = list(canonical.get("aliases") or [])
+    alias_phone = list(canonical.get("alias_no_hp") or [])
+    alias_email = list(canonical.get("alias_email") or [])
+    for d in dup_docs:
+        if _norm_name(d.get("nama")) != _norm_name(canonical.get("nama")) and d.get("nama") not in aliases:
+            aliases.append(d.get("nama"))
+        if str(d.get("no_hp") or "").strip() and str(d.get("no_hp")).strip() != str(canonical.get("no_hp") or "").strip() and d.get("no_hp") not in alias_phone:
+            alias_phone.append(d.get("no_hp"))
+        if str(d.get("email") or "").strip() and _norm_email(d.get("email")) != _norm_email(canonical.get("email")) and d.get("email") not in alias_email:
+            alias_email.append(d.get("email"))
+        log["duplicates"].append({"id": d["id"], "before": dict(d)})
+        await db.contacts.delete_one({"id": d["id"]})
+    cu = {"aliases": aliases, "alias_no_hp": alias_phone, "alias_email": alias_email}
+    cu.update(plan["fill_fields"])
+    await db.contacts.update_one({"id": canonical_id}, {"$set": cu})
+    await db[CONTACT_MERGE_LOG].insert_one(dict(log))
+    return {"status": "merged", "canonical_id": canonical_id, "merged": [d["id"] for d in dup_docs],
+            "log_id": log_id, "reversible": True, "plan": plan}
+
+
+async def unmerge_contacts(db, log_id):
+    log = await db[CONTACT_MERGE_LOG].find_one({"id": log_id}, {"_id": 0})
+    if not log:
+        return {"error": "contact merge log tidak ditemukan"}
+    if log.get("status") == "reverted":
+        return {"status": "already_reverted", "log_id": log_id}
+    cid = log["canonical_id"]
+    cb = dict(log["canonical_before"]); cb.pop("_id", None)
+    cur = await db.contacts.find_one({"id": cid}, {"_id": 0}) or {}
+    unset = {k: "" for k in cur.keys() if k not in cb}
+    ops = {"$set": cb}
+    if unset:
+        ops["$unset"] = unset
+    await db.contacts.update_one({"id": cid}, ops)
+    for dd in log.get("duplicates", []):
+        before = dict(dd["before"]); before.pop("_id", None)
+        exist = await db.contacts.find_one({"id": dd["id"]}, {"_id": 0})
+        if exist:
+            await db.contacts.update_one({"id": dd["id"]}, {"$set": before})
+        else:
+            await db.contacts.insert_one(dict(before))
+    await db[CONTACT_MERGE_LOG].update_one({"id": log_id}, {"$set": {"status": "reverted", "reverted_at": _now()}})
+    return {"status": "reverted", "log_id": log_id, "restored": [d["id"] for d in log.get("duplicates", [])]}
