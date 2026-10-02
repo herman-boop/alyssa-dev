@@ -13,6 +13,8 @@ from datetime import datetime, timezone, timedelta
 from odoo_client import OdooClient
 from playwright.async_api import async_playwright
 import ais  # modul AIS (posisi kapal) — provider-agnostic, aman tanpa key
+import rekon_sync  # integrasi pembayaran supplier dari Audit Rekon (isolated)
+import rekon_felis_client  # adapter PULL dari Felis (stub sampai kontrak final)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -148,6 +150,16 @@ async def _ensure_indexes():
         await db.doc_history.create_index([("created_at", -1)])
     except Exception as e:
         logger.warning(f"[startup] gagal bikin index doc_history.created_at: {e}")
+
+
+@app.on_event("startup")
+async def _rekon_startup():
+    """UNIQUE index anti-duplikat pembayaran dari Audit Rekon (bank_transaction_id).
+    Additive — tidak menyentuh collection existing."""
+    try:
+        await rekon_sync.ensure_indexes(db)
+    except Exception as e:
+        logger.warning(f"[startup] gagal bikin index rekon: {e}")
 
 
 @app.on_event("startup")
@@ -6521,6 +6533,74 @@ async def delete_supplier_job_tambahan(supplier_id: str, job_id: str, tambahan_i
         raise HTTPException(404, "Biaya tambahan tidak ditemukan")
     await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
     return _supplier_job_totals(jobs[idx])
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# AUDIT REKON → PEMBAYARAN SUPPLIER (integrasi dari Felis-Alyssa)
+# Isolated di rekon_sync.py. Endpoint di sini hanya tipis (terima payload →
+# panggil service). Anti-duplikat DB-enforced (unique bank_transaction_id).
+# ══════════════════════════════════════════════════════════════════════════
+@api_router.post("/admin/rekon/ingest", dependencies=[Depends(require_admin_pin)])
+async def rekon_ingest(body: Any = Body(...)):
+    """Terima transaksi bank terkonfirmasi dari Audit Rekon (1 objek atau list
+    objek) → otomatis buat Pembayaran Supplier. Idempoten per bank_transaction_id.
+    Dipakai oleh puller Felis nanti, atau manual untuk uji coba."""
+    items = body if isinstance(body, list) else [body]
+    results = []
+    for it in items:
+        try:
+            results.append(await rekon_sync.ingest_transaction(db, it))
+        except Exception as e:
+            logger.warning("[rekon] ingest gagal: %s", e)
+            results.append({"status": "error", "error": str(e),
+                            "bank_transaction_id": (it or {}).get("bank_transaction_id")})
+    summary = {}
+    for r in results:
+        summary[r.get("status")] = summary.get(r.get("status"), 0) + 1
+    return {"ok": True, "summary": summary, "results": results}
+
+
+@api_router.get("/admin/rekon/imports", dependencies=[Depends(require_admin_pin)])
+async def rekon_list_imports(status: Optional[str] = None, limit: int = 200):
+    """Daftar import rekon (audit trail). Filter opsional by status
+    (processed/supplier_not_found/reversed/processing/error)."""
+    filt = {}
+    if status:
+        filt["status"] = status.strip()
+    out = []
+    cur = db[rekon_sync.IMPORTS_COLLECTION].find(filt, {"_id": 0}).sort("created_at", -1).limit(max(1, min(limit, 1000)))
+    async for d in cur:
+        out.append(d)
+    return {"items": out, "count": len(out)}
+
+
+@api_router.post("/admin/rekon/imports/{bank_transaction_id}/reverse", dependencies=[Depends(require_admin_pin)])
+async def rekon_reverse_import(bank_transaction_id: str, body: Optional[Dict[str, Any]] = Body(None)):
+    """Koreksi/pembatalan pembayaran hasil rekon (audit trail dipertahankan;
+    bank_transaction_id tetap tercatat & tidak bisa re-import otomatis)."""
+    res = await rekon_sync.reverse_import(db, bank_transaction_id, (body or {}).get("reason", ""))
+    if res.get("status") == "not_found":
+        raise HTTPException(404, "Import rekon tidak ditemukan")
+    return res
+
+
+@api_router.post("/admin/rekon/pull", dependencies=[Depends(require_admin_pin)])
+async def rekon_pull_from_felis():
+    """Tarik transaksi READY dari Felis lalu ingest. BELUM aktif sampai kontrak
+    endpoint/auth Felis diberikan (lihat rekon_felis_client.py)."""
+    if not rekon_felis_client.is_configured():
+        return {"ok": False, "status": "not_configured",
+                "detail": "Koneksi Felis belum diset (FELIS_BASE_URL + FELIS_API_TOKEN) "
+                          "dan kontrak endpoint READY belum final."}
+    try:
+        ready = await rekon_felis_client.fetch_ready()
+    except NotImplementedError as e:
+        return {"ok": False, "status": "not_implemented", "detail": str(e)}
+    results = [await rekon_sync.ingest_transaction(db, it) for it in (ready or [])]
+    summary = {}
+    for r in results:
+        summary[r.get("status")] = summary.get(r.get("status"), 0) + 1
+    return {"ok": True, "summary": summary, "results": results}
 
 
 @api_router.get("/admin/suppliers/{supplier_id}/ringkasan")
