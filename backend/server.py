@@ -15,6 +15,7 @@ from playwright.async_api import async_playwright
 import ais  # modul AIS (posisi kapal) — provider-agnostic, aman tanpa key
 import rekon_sync  # integrasi pembayaran supplier dari Audit Rekon (isolated)
 import rekon_felis_client  # adapter PULL dari Felis (stub sampai kontrak final)
+import supplier_dedup  # AUDIT duplikat master supplier/contacts (READ-ONLY di deploy ini)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -6601,6 +6602,22 @@ async def rekon_pull_from_felis():
     for r in results:
         summary[r.get("status")] = summary.get(r.get("status"), 0) + 1
     return {"ok": True, "summary": summary, "results": results}
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# AUDIT DUPLIKAT MASTER (READ-ONLY). Deploy ini HANYA 2 endpoint baca di bawah.
+# TIDAK ada merge/delete/repoint/cleanup di produksi. Murni laporan.
+# ══════════════════════════════════════════════════════════════════════════
+@api_router.get("/admin/suppliers/dedup/audit", dependencies=[Depends(require_admin_pin)])
+async def suppliers_dedup_audit_readonly():
+    """READ-ONLY. Laporan kandidat duplikat supplier (tidak mengubah apa pun)."""
+    return await supplier_dedup.audit_duplicates(db)
+
+
+@api_router.get("/admin/contacts/dedup/audit", dependencies=[Depends(require_admin_pin)])
+async def contacts_dedup_audit_readonly():
+    """READ-ONLY. Laporan kandidat duplikat buku alamat/contacts."""
+    return await supplier_dedup.audit_contacts(db)
 
 
 @api_router.get("/admin/suppliers/{supplier_id}/ringkasan")

@@ -21,6 +21,7 @@ import CustomerGuidePage from "@/CustomerGuidePage";
 import MobileVendorPayment from "@/MobileVendorPayment";
 import TaskPage from "@/TaskPage";
 import RombonganCommandCenter from "@/RombonganCommandCenter";
+import DedupAudit from "@/DedupAudit";
 
 // Resolve path segment: /track/TRIP-XXX -> "TRIP-XXX"
 function pathSegment(pathname, prefix) {
@@ -37,6 +38,7 @@ function App() {
     // ── Path-based routing (new scheme) ────────────────────────────
     if (p === "/order")             return { route: "order" };
     if (p === "/admin")             return { route: "admin" };
+    if (p === "/audit-duplikat")    return { route: "audit-duplikat" };
     if (p === "/kalkulator")        return { route: "kalkulator" };
     if (p === "/drivers")           return { route: "drivers" };
     if (p === "/daftar-driver")     return { route: "daftar-driver" };
@@ -94,6 +96,7 @@ function App() {
   if (route === "home")   return <Homepage />;
   if (route === "guide")  return <OperationGuide />;
   if (route === "admin")  return <AdminDashboard />;
+  if (route === "audit-duplikat") return <DedupAudit />;
   if (route === "kalkulator") return <CostCalculator />;
   if (route === "drivers")        return <DriverData />;
   if (route === "daftar-driver")  return <DriverRegister />;
