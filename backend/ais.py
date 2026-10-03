@@ -477,6 +477,27 @@ async def position_for_legs(db, legs):
     }
 
 
+async def warm_ships(db, legs):
+    """Begitu admin menyimpan leg dengan MMSI/IMO baru, langsung ambil posisi
+    kapal dari VesselAPI (on-demand) supaya kapal LANGSUNG muncul di cache —
+    tidak perlu nunggu worker aisstream refresh (max 60 dtk) atau pelanggan buka
+    halaman tracking. Best-effort: aman kalau VesselAPI mati / belum ada posisi.
+    Dipanggil non-blocking (asyncio.create_task) dari endpoint simpan legs."""
+    if not vesselapi_enabled():
+        return
+    seen = set()
+    for lg in (legs or []):
+        mmsi, imo = _leg_ship_id(lg or {})
+        key = mmsi or imo
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        try:
+            await _vesselapi_refresh(db, mmsi, imo)
+        except Exception as e:
+            logger.warning("[ais] warm_ships gagal utk %s: %s", key, e)
+
+
 async def active_mmsis(db):
     """Kumpulkan MMSI dari leg kapal semua trip (yang akan kita 'tonton')."""
     out = set()
@@ -618,7 +639,9 @@ async def _run(db):
                     except Exception:
                         continue
                     await _handle(db, msg, watch)
-                    if time.monotonic() - last_refresh > 300:
+                    # Refresh daftar MMSI yang dipantau tiap 60 dtk supaya kapal
+                    # yang baru diinput admin cepat ikut terpantau (dulu 300 dtk).
+                    if time.monotonic() - last_refresh > 60:
                         watch = set(await active_mmsis(db))
                         last_refresh = time.monotonic()
         except Exception as e:

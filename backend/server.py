@@ -3358,6 +3358,13 @@ async def admin_patch_trip_legs(trip_id: str, body: LegsBody):
         legs.append(leg)
     now = datetime.utcnow().isoformat()
     await db.trips.update_one({"trip_id": trip_id}, {"$set": {"legs": legs, "updated_at": now}})
+    # Warm posisi kapal dari AIS begitu MMSI/IMO disimpan — biar kapal langsung
+    # muncul di cache tanpa nunggu worker/pelanggan. Non-blocking & best-effort.
+    try:
+        if any((lg.get("mmsi") or lg.get("imo")) for lg in legs):
+            asyncio.create_task(ais.warm_ships(db, legs))
+    except Exception as e:
+        logger.warning(f"[ais] gagal jadwalkan warm_ships: {e}")
     # Ingat pasangan nama kapal + IMO untuk autocomplete (master kapal). Additive,
     # tidak mengubah data trip; kalau gagal, simpan legs tetap sukses.
     try:
