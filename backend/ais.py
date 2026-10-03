@@ -98,11 +98,13 @@ def _vesselapi_use_sat() -> bool:
     return (os.environ.get("VESSELAPI_USE_SAT") or "").strip().lower() in ("1", "true", "yes", "on")
 
 
-def _vesselapi_get(path, params):
-    """HTTP GET ke VesselAPI (blocking; dipanggil via asyncio.to_thread)."""
+def _vesselapi_get(path, params, timeout=15):
+    """HTTP GET ke VesselAPI (blocking; dipanggil via asyncio.to_thread).
+    timeout: (connect, read) — query satelit bisa lambat, jadi proses latar
+    belakang (warm) boleh kasih read timeout lebih panjang."""
     import requests
     headers = {"Authorization": f"Bearer {vesselapi_key()}"}
-    return requests.get(f"{VESSELAPI_URL}{path}", params=params, headers=headers, timeout=15)
+    return requests.get(f"{VESSELAPI_URL}{path}", params=params, headers=headers, timeout=timeout)
 
 
 def _pluck(js, need_key):
@@ -283,10 +285,12 @@ async def _apply_berth_state(db, doc):
     return doc
 
 
-async def _vesselapi_refresh(db, mmsi, imo):
+async def _vesselapi_refresh(db, mmsi, imo, timeout=15):
     """Ambil posisi (+ETA) 1 kapal dari VesselAPI dan simpan ke cache.
     On-demand + throttle supaya kuota hemat. Return dokumen cache terbaru / None.
-    Aman kalau key kosong (langsung None)."""
+    Aman kalau key kosong (langsung None).
+    timeout: read timeout VesselAPI; proses latar belakang (warm) kasih lebih
+    panjang karena query satelit lambat, render halaman tetap pakai default."""
     if not vesselapi_enabled():
         return None
     ident = (mmsi or imo or "").strip()
@@ -306,7 +310,7 @@ async def _vesselapi_refresh(db, mmsi, imo):
         # NB: filter.satMaxAgeMinutes sengaja TIDAK dikirim (khusus paket berbayar;
         # di Free bikin 403). Default server (60 mnt) tetap berlaku.
     try:
-        r = await asyncio.to_thread(_vesselapi_get, f"/vessel/{ident}/position", params)
+        r = await asyncio.to_thread(_vesselapi_get, f"/vessel/{ident}/position", params, timeout)
     except Exception as e:
         logger.warning("[ais] VesselAPI position gagal: %s", e)
         return None
@@ -351,7 +355,7 @@ async def _vesselapi_refresh(db, mmsi, imo):
     if now_m - _last_eta_fetch.get(ident, 0) >= _ETA_FETCH_INTERVAL:
         _last_eta_fetch[ident] = now_m
         try:
-            re = await asyncio.to_thread(_vesselapi_get, f"/vessel/{ident}/eta", {"filter.idType": idtype})
+            re = await asyncio.to_thread(_vesselapi_get, f"/vessel/{ident}/eta", {"filter.idType": idtype}, timeout)
             if re.status_code == 200:
                 eta = _pluck(re.json(), "destination") or _pluck(re.json(), "eta") or {}
                 if isinstance(eta, dict):
@@ -493,7 +497,10 @@ async def warm_ships(db, legs):
             continue
         seen.add(key)
         try:
-            await _vesselapi_refresh(db, mmsi, imo)
+            # read timeout lebih panjang: warm jalan di latar belakang (tidak
+            # memblok respons simpan leg), jadi query satelit yang lambat tetap
+            # sempat selesai dan posisi masuk cache.
+            await _vesselapi_refresh(db, mmsi, imo, timeout=(5, 40))
         except Exception as e:
             logger.warning("[ais] warm_ships gagal utk %s: %s", key, e)
 
