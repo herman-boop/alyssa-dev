@@ -6666,6 +6666,12 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
   const [saveStatus, setSaveStatus] = useState("idle"); // idle | saving | saved | error
   const hydratedRef = useRef(false);
   const skipSaveRef = useRef(false);
+  // Simpan legs TERKINI + flag "ada perubahan belum tersimpan" supaya saat modal
+  // ditutup (unmount) kita bisa FLUSH simpan terakhir — kalau tidak, ketikan MMSI
+  // yang dibuat <700ms sebelum tutup akan hilang (clearTimeout membatalkan autosave).
+  const legsRef = useRef(legs);
+  const dirtyRef = useRef(false);
+  useEffect(() => { legsRef.current = legs; }, [legs]);
   useEffect(() => {
     if (!tripId) { hydratedRef.current = true; return; }
     let alive = true;
@@ -6685,9 +6691,11 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
     if (!tripId || !hydratedRef.current) return;
     if (skipSaveRef.current) { skipSaveRef.current = false; return; }
     setSaveStatus("saving");
+    dirtyRef.current = true;
     const t = setTimeout(async () => {
       try {
         const r = await axios.patch(`${API}/admin/trips/${tripId}/legs`, { legs }, { headers });
+        dirtyRef.current = false;
         const srv = r.data?.legs;
         // Sinkron HANYA ID baru (route_leg_id / driver id) ke state TERKINI — JANGAN
         // replace seluruh array (bisa nimpa ketikan yg masih berjalan). Merge by index,
@@ -6716,6 +6724,19 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
     return () => clearTimeout(t);
     // eslint-disable-next-line
   }, [legs, tripId]);
+  // FLUSH saat modal ditutup: kalau masih ada perubahan yang belum sempat kesimpan
+  // (mis. baru ketik MMSI lalu langsung Tutup), kirim simpan terakhir best-effort.
+  useEffect(() => {
+    return () => {
+      if (tripId && dirtyRef.current) {
+        try {
+          axios.patch(`${API}/admin/trips/${tripId}/legs`, { legs: legsRef.current }, { headers });
+          dirtyRef.current = false;
+        } catch { /* best-effort */ }
+      }
+    };
+    // eslint-disable-next-line
+  }, [tripId]);
   // Lanjutkan Tahap Berikutnya: bikin leg baru (asal = tujuan leg terakhir), histori
   // tahap sebelumnya tetap, nggak minta input kendaraan ulang. Persist ke backend.
   const nextLeg = async () => {
