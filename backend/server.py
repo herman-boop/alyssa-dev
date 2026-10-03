@@ -5895,6 +5895,7 @@ def _supplier_rekon_overview(sup: dict) -> dict:
     """
     rps = [p for p in (sup.get("rekon_payments") or []) if p.get("status") != "reversed"]
     alloc_by_job, total_rekon, total_alloc, out = {}, 0, 0, []
+    by_entity = {}   # pembukuan DIPISAH per source_entity (PT vs CV) — wajib kontrak
     for p in rps:
         amt = p.get("amount") or 0
         total_rekon += amt
@@ -5911,11 +5912,20 @@ def _supplier_rekon_overview(sup: dict) -> dict:
         pp["unallocated"] = max(0, amt - a_sum)
         pp["alloc_status"] = status
         out.append(pp)
+        # Agregasi per entitas — JANGAN gabung PT & CV (kewajiban terpisah).
+        ent = p.get("source_entity") or (p.get("rekon") or {}).get("source_entity") or "TANPA_ENTITAS"
+        e = by_entity.setdefault(ent, {"total_rekon": 0, "total_allocated": 0,
+                                       "total_unallocated": 0, "count": 0})
+        e["total_rekon"] += amt
+        e["total_allocated"] += a_sum
+        e["total_unallocated"] += max(0, amt - a_sum)
+        e["count"] += 1
     return {
         "alloc_by_job": alloc_by_job,
         "total_rekon": total_rekon,
         "total_rekon_allocated": total_alloc,
         "total_unallocated": max(0, total_rekon - total_alloc),
+        "by_entity": by_entity,
         "rekon_payments": out,
     }
 
@@ -6659,22 +6669,112 @@ async def rekon_allocate_payment(supplier_id: str, rekon_payment_id: str, body: 
 
 
 @api_router.post("/admin/rekon/pull", dependencies=[Depends(require_admin_pin)])
-async def rekon_pull_from_felis():
-    """Tarik transaksi READY dari Felis lalu ingest. BELUM aktif sampai kontrak
-    endpoint/auth Felis diberikan (lihat rekon_felis_client.py)."""
+async def rekon_pull_from_felis(entitas: Optional[str] = None, batas: Optional[int] = None):
+    """Tarik transaksi READY dari Felis → ingest (idempoten) → ACK HANYA yang
+    benar-benar tersimpan permanen. Alur sesuai kontrak final:
+      READY (baca) → simpan permanen → ACK (partial diperbolehkan).
+    supplier_not_found/error TIDAK di-ACK → muncul lagi di READY berikutnya."""
     if not rekon_felis_client.is_configured():
         return {"ok": False, "status": "not_configured",
-                "detail": "Koneksi Felis belum diset (FELIS_BASE_URL + FELIS_API_TOKEN) "
-                          "dan kontrak endpoint READY belum final."}
+                "detail": "Koneksi Felis belum diset (FELIS_BASE_URL + FELIS_API_TOKEN)."}
     try:
-        ready = await rekon_felis_client.fetch_ready()
-    except NotImplementedError as e:
-        return {"ok": False, "status": "not_implemented", "detail": str(e)}
-    results = [await rekon_sync.ingest_transaction(db, it) for it in (ready or [])]
+        ready = await rekon_felis_client.fetch_ready(entitas=entitas, batas=batas)
+    except rekon_felis_client.FelisError as e:
+        return {"ok": False, "status": "felis_error", "detail": str(e)}
+
+    batch = ready.get("batch")
+    data = ready.get("data") or []
+    results = []
+    for it in data:
+        try:
+            r = await rekon_sync.ingest_transaction(db, it)
+        except Exception as e:
+            logger.warning("[rekon] ingest gagal: %s", e)
+            r = {"status": "error", "error": str(e),
+                 "bank_transaction_id": (it or {}).get("bank_transaction_id")}
+        results.append(r)
+    # ACK HANYA yang tersimpan permanen (helper murni, lihat rekon_sync).
+    ack_ids = rekon_sync.pick_ack_ids(data, results)
+
     summary = {}
     for r in results:
         summary[r.get("status")] = summary.get(r.get("status"), 0) + 1
-    return {"ok": True, "summary": summary, "results": results}
+
+    ack_result = None
+    warning = None
+    if batch and ack_ids:
+        try:
+            ack_result = await rekon_felis_client.ack(batch, ack_ids)
+            if (ack_result or {}).get("sudah_batch_lain"):
+                # Dua penarik berjalan bersamaan — berhenti & periksa (kontrak §5).
+                warning = ("PERINGATAN: ada penarik lain berjalan bersamaan "
+                           "(sudah_batch_lain tidak kosong). Periksa sebelum menarik lagi.")
+            if (ack_result or {}).get("tidak_dikenal"):
+                warning = ((warning + " | ") if warning else "") + \
+                          "Ada transaksi_id tidak dikenal di Felis saat ACK."
+        except rekon_felis_client.FelisError as e:
+            # Sudah tersimpan permanen, tapi ACK gagal → aman: akan muncul lagi di
+            # READY & ditahan UNIQUE (already_processed). Tidak dobel.
+            warning = f"Tersimpan, tapi ACK gagal: {e}. Jalankan Tarik lagi untuk ACK ulang."
+
+    return {"ok": True, "batch": batch, "jumlah": ready.get("jumlah"),
+            "summary": summary, "acked": len(ack_ids), "ack_result": ack_result,
+            "warning": warning, "results": results}
+
+
+@api_router.get("/admin/rekon/koreksi", dependencies=[Depends(require_admin_pin)])
+async def rekon_koreksi_list():
+    """KOREKSI (read-only): daftar transaksi yang supplier_id-nya diubah di Felis
+    sesudah ditarik. TIDAK memindahkan apa pun — hanya menampilkan untuk ditinjau."""
+    if not rekon_felis_client.is_configured():
+        return {"ok": False, "status": "not_configured",
+                "detail": "Koneksi Felis belum diset (FELIS_BASE_URL + FELIS_API_TOKEN)."}
+    try:
+        kor = await rekon_felis_client.fetch_koreksi()
+    except rekon_felis_client.FelisError as e:
+        return {"ok": False, "status": "felis_error", "detail": str(e)}
+    return {"ok": True, "jumlah": kor.get("jumlah"), "data": kor.get("data") or []}
+
+
+@api_router.post("/admin/rekon/koreksi/apply", dependencies=[Depends(require_admin_pin)])
+async def rekon_koreksi_apply(body: Dict[str, Any] = Body(...)):
+    """Terapkan SATU koreksi (admin-triggered, per transaksi — bukan otomatis
+    massal). Alur: ambil koreksi otoritatif dari Felis → validasi → pindahkan
+    pembayaran ke supplier_id_baru → baru AKUI ke Felis. supplier_id_baru selalu
+    diambil dari Felis (bukan dari input), supaya tidak bisa salah ketik."""
+    btid = str((body or {}).get("bank_transaction_id") or "").strip()
+    if not btid:
+        raise HTTPException(400, "bank_transaction_id wajib diisi")
+    if not rekon_felis_client.is_configured():
+        return {"ok": False, "status": "not_configured",
+                "detail": "Koneksi Felis belum diset (FELIS_BASE_URL + FELIS_API_TOKEN)."}
+    # Ambil koreksi otoritatif dari Felis untuk btid ini.
+    try:
+        kor = await rekon_felis_client.fetch_koreksi()
+    except rekon_felis_client.FelisError as e:
+        return {"ok": False, "status": "felis_error", "detail": str(e)}
+    row = next((d for d in (kor.get("data") or [])
+                if str(d.get("bank_transaction_id") or "") == btid), None)
+    if not row:
+        return {"ok": False, "status": "koreksi_tidak_ada",
+                "detail": "Koreksi untuk transaksi ini tidak ada di Felis (mungkin sudah diakui)."}
+    sid_baru = str(row.get("supplier_id_baru") or "").strip()
+
+    # Validasi + pindahkan pembayaran (tidak buta — lihat apply_correction).
+    res = await rekon_sync.apply_correction(db, btid, sid_baru, reason=row.get("alasan", ""))
+    # "same_supplier" = pemindahan sudah pernah berhasil (AKUI sebelumnya gagal) →
+    # lanjut AKUI ulang (idempoten). Selain moved/same_supplier → jangan AKUI.
+    if res.get("status") not in ("moved", "same_supplier"):
+        return {"ok": False, "status": res.get("status"), "detail": res}
+
+    # Pemindahan sukses & tersimpan → AKUI ke Felis.
+    ack = None
+    warning = None
+    try:
+        ack = await rekon_felis_client.akui_koreksi([btid])
+    except rekon_felis_client.FelisError as e:
+        warning = f"Pembayaran sudah dipindah, tapi AKUI ke Felis gagal: {e}. Koreksi akan muncul lagi; jalankan Terapkan lagi (idempoten)."
+    return {"ok": True, "moved": res, "akui": ack, "warning": warning}
 
 
 # ══════════════════════════════════════════════════════════════════════════
