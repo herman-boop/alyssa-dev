@@ -699,15 +699,29 @@ export default function SupplierPage() {
   const [tarikLoading, setTarikLoading] = useState(false);
   const [tarikSel, setTarikSel] = useState({});
   const [tarikSaving, setTarikSaving] = useState(false);
+  // Set unit yang SUDAH ditarik ke supplier yang lagi dibuka — dipakai buat
+  // nandain "sudah ditarik" di modal (cegah tarik-ganda ke supplier yang sama).
+  const pulledUnitKeys = useMemo(() => {
+    const s = new Set();
+    for (const j of (selected?.jobs || [])) {
+      if (j.order_id && j.order_unit_id) s.add(`${j.order_id}:${j.order_unit_id}`);
+    }
+    return s;
+  }, [selected]);
   const orderUnitsOf = (o) => {
     const arr = (Array.isArray(o.units) && o.units.length) ? o.units
       : [{ unit_id: "legacy", vehicle_type: o.vehicle_type, tipe_model: o.tipe_model, nopol: o.nopol, no_rangka: o.no_rangka }];
-    return arr.map((u, i) => ({
-      key: `${o.order_id}:${u.unit_id || u.nopol || i}`,
-      vehicle_type: `${u.vehicle_type || ""}${u.tipe_model ? " " + u.tipe_model : ""}`.trim() || "Kendaraan",
-      nopol: (u.nopol || "").toUpperCase(), no_rangka: (u.no_rangka || "").toUpperCase(),
-      asal_kota: o.asal_kota || "", tujuan_kota: o.tujuan_kota || "", customer: o.customer_nama || "",
-    }));
+    return arr.map((u, i) => {
+      const unitId = u.unit_id || u.nopol || String(i);
+      return {
+        key: `${o.order_id}:${unitId}`,
+        order_id: o.order_id, order_unit_id: unitId,
+        vehicle_type: `${u.vehicle_type || ""}${u.tipe_model ? " " + u.tipe_model : ""}`.trim() || "Kendaraan",
+        nopol: (u.nopol || "").toUpperCase(), no_rangka: (u.no_rangka || "").toUpperCase(),
+        asal_kota: o.asal_kota || "", tujuan_kota: o.tujuan_kota || "", customer: o.customer_nama || "",
+        already: pulledUnitKeys.has(`${o.order_id}:${unitId}`),
+      };
+    });
   };
   // Ambil order dari master admin PO. Kirim kata kunci ke server (q) biar
   // nyari di SELURUH order (bukan cuma 100 terbaru) — cocok no PO, no rangka,
@@ -748,16 +762,29 @@ export default function SupplierPage() {
     setTarikSaving(true);
     try {
       const projectId = await resolveTargetProjectId(); // bikin projek baru sekali (kalau dipilih)
+      let okCount = 0, dupCount = 0;
       for (const r of valid) {
-        await axios.post(`${API}/admin/suppliers/${selected.id}/jobs`, {
-          vehicle_type: r.vehicle_type, nopol: r.nopol, no_rangka: r.no_rangka,
-          asal_kota: r.asal_kota, tujuan_kota: r.tujuan_kota, total_harga: pNum(r.total_harga), catatan: "", tanggal: todayStr(),
-          project_id: projectId, tag: jobTag.trim(),
-        }, { headers });
+        try {
+          await axios.post(`${API}/admin/suppliers/${selected.id}/jobs`, {
+            vehicle_type: r.vehicle_type, nopol: r.nopol, no_rangka: r.no_rangka,
+            asal_kota: r.asal_kota, tujuan_kota: r.tujuan_kota, total_harga: pNum(r.total_harga), catatan: "", tanggal: todayStr(),
+            project_id: projectId, tag: jobTag.trim(),
+            // referensi stabil ke unit asli di Penjualan (audit + cegah tarik-ganda)
+            order_id: r.order_id, order_unit_id: r.order_unit_id, customer_ref: r.customer || "",
+          }, { headers });
+          okCount++;
+        } catch (err) {
+          // 409 = unit ini sudah ditarik ke supplier ini → lewati, jangan gagalin semua
+          if (err?.response?.status === 409) { dupCount++; continue; }
+          throw err;
+        }
       }
       setTarikOpen(false); setTarikSel({}); resetProjPicker();
-      await reloadSelected(selected.id); setListRefreshTick((t) => t + 1); flash(`${valid.length} unit ditarik dari order`);
-    } catch (e) { if (!e?.__projErr) flash(e?.response?.data?.detail || "Gagal tarik unit"); }
+      await reloadSelected(selected.id); setListRefreshTick((t) => t + 1);
+      flash(dupCount
+        ? `${okCount} unit ditarik · ${dupCount} dilewati (sudah ditarik sebelumnya)`
+        : `${okCount} unit ditarik dari order`);
+    } catch (e) { if (!e?.__projErr) flash(e?.response?.data?.detail?.message || e?.response?.data?.detail || "Gagal tarik unit"); }
     finally { setTarikSaving(false); }
   };
 
@@ -1444,16 +1471,20 @@ export default function SupplierPage() {
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {tarikRows.map((row) => {
                 const on = !!tarikSel[row.key];
+                const taken = row.already;
                 return (
-                  <div key={row.key} style={{ border: `1px solid ${on ? C.gold : C.line}`, borderRadius: 10, padding: 12, background: on ? "#1a1408" : C.inpBg }}>
-                    <label style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer" }}>
-                      <input type="checkbox" checked={on} onChange={() => toggleTarik(row)} style={{ width: 20, height: 20, marginTop: 2, flexShrink: 0 }} />
+                  <div key={row.key} style={{ border: `1px solid ${on ? C.gold : C.line}`, borderRadius: 10, padding: 12, background: taken ? "#0e0e0e" : (on ? "#1a1408" : C.inpBg), opacity: taken ? 0.55 : 1 }}>
+                    <label style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: taken ? "not-allowed" : "pointer" }}>
+                      <input type="checkbox" checked={on} disabled={taken} onChange={() => toggleTarik(row)} style={{ width: 20, height: 20, marginTop: 2, flexShrink: 0 }} />
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 14, fontWeight: 700 }}>{row.nopol || row.no_rangka || "(tanpa nopol)"} · {row.vehicle_type}</div>
+                        <div style={{ fontSize: 14, fontWeight: 700 }}>
+                          {row.nopol || row.no_rangka || "(tanpa nopol)"} · {row.vehicle_type}
+                          {taken && <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 800, color: "#9a7b1a", background: "#2a2206", border: "1px solid #4a3b0a", borderRadius: 6, padding: "1px 6px" }}>SUDAH DITARIK</span>}
+                        </div>
                         <div style={{ fontSize: 12, color: C.mute }}>{row.asal_kota} → {row.tujuan_kota}{row.customer ? ` · ${row.customer}` : ""}</div>
                       </div>
                     </label>
-                    {on && <div style={{ marginTop: 8 }}><input style={I} inputMode="numeric" placeholder="HPP / Total Harga ke supplier (Rp)" value={fmtRpInput(tarikSel[row.key].total_harga)} onChange={(e) => setTarikHarga(row.key, onlyDigits(e.target.value))} /></div>}
+                    {on && !taken && <div style={{ marginTop: 8 }}><input style={I} inputMode="numeric" placeholder="HPP / Total Harga ke supplier (Rp)" value={fmtRpInput(tarikSel[row.key].total_harga)} onChange={(e) => setTarikHarga(row.key, onlyDigits(e.target.value))} /></div>}
                   </div>
                 );
               })}

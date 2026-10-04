@@ -15,6 +15,7 @@ from playwright.async_api import async_playwright
 import ais  # modul AIS (posisi kapal) — provider-agnostic, aman tanpa key
 import rekon_sync  # integrasi pembayaran supplier dari Audit Rekon (isolated)
 import rekon_felis_client  # adapter PULL dari Felis (stub sampai kontrak final)
+from purchase_units import find_pulled_unit  # cegah tarik-ganda unit (alur Pembelian)
 import supplier_dedup  # AUDIT duplikat master supplier/contacts (READ-ONLY di deploy ini)
 
 ROOT_DIR = Path(__file__).parent
@@ -6010,7 +6011,9 @@ class SupplierJobBody(BaseModel):
     # Referensi order/customer (dibawa otomatis dari Duplikat ke Vendor) — link ke
     # Order yang sama, TAPI ledger tetap terpisah dari Invoice Customer.
     order_id: Optional[str] = None
+    order_unit_id: Optional[str] = None   # unit_id asli di orders.units[] — referensi stabil biar 1 unit ga ketarik 2x ke supplier yang sama
     customer_ref: str = ""
+    allow_duplicate: bool = False         # override: izinkan unit yang sama ditarik lagi (mis. leg/rute lain) ke supplier ini
     # Pajak supplier (terpisah dari harga). Default: tanpa pajak (backward-compatible).
     ppn_enabled: bool = False
     ppn_rate: Optional[float] = None      # % dari DPP; None = pakai default
@@ -6143,6 +6146,22 @@ async def add_supplier_job(supplier_id: str, body: SupplierJobBody):
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", tgl):
         tgl = today_wib()
 
+    # ── Anti tarik-ganda ──────────────────────────────────────────────
+    # Kalau unit ini (order_id + order_unit_id) sudah pernah ditarik ke
+    # supplier YANG SAMA, tolak biar ga dobel. Antar supplier TETAP boleh
+    # (konsep leg/rute beda), dan bisa dipaksa dengan allow_duplicate=True.
+    order_id = (body.order_id or "").strip() or None
+    order_unit_id = (body.order_unit_id or "").strip() or None
+    if order_id and order_unit_id and not body.allow_duplicate:
+        dup = find_pulled_unit(doc.get("jobs"), order_id, order_unit_id)
+        if dup:
+            raise HTTPException(409, {
+                "code": "unit_already_pulled",
+                "message": "Unit ini sudah pernah ditarik ke supplier ini.",
+                "job_id": dup.get("id"),
+                "nopol": dup.get("nopol"),
+            })
+
     job = {
         "id": _gen_supplier_id(),
         "project_id": project_id,
@@ -6158,7 +6177,8 @@ async def add_supplier_job(supplier_id: str, body: SupplierJobBody):
         "selisih_deal": body.selisih_deal if (body.selisih_deal or 0) > 0 else None,
         "selisih_invoice": body.selisih_invoice if (body.selisih_invoice or 0) > 0 else None,
         # Referensi order/customer (dibawa dari Duplikat ke Vendor)
-        "order_id": (body.order_id or "").strip() or None,
+        "order_id": order_id,
+        "order_unit_id": order_unit_id,
         "customer_ref": (body.customer_ref or "").strip(),
         # Pajak supplier
         "ppn_enabled": bool(body.ppn_enabled),
