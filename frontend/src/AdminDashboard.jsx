@@ -1366,6 +1366,23 @@ function PengaturanPage({ dark, onToggleTheme, onLogout, fixHeicPhotos, fixingHe
   };
   const _rp = (n) => "Rp " + new Intl.NumberFormat("id-ID").format(Number(n || 0));
   const _wColor = (w) => w === "would_create" ? "#3fb950" : (w === "supplier_not_found" || w === "error") ? "#f85149" : "#f0a742";
+  // Tarik (PROSES): panggil /admin/rekon/pull (READY→simpan→ACK). Ada konfirmasi.
+  const [pullRes, setPullRes] = useState(null);
+  const [pullBusy, setPullBusy] = useState(false);
+  const runRekonPull = async () => {
+    if (!window.confirm(
+      "Tarik & PROSES transaksi Rekon dari Felis?\n\n" +
+      "• Pembayaran akan TERSIMPAN di supplier (status Belum Dialokasikan).\n" +
+      "• Transaksi di-ACK di Felis (keluar dari daftar siap-tarik).\n" +
+      "• Aman: idempoten (tidak dobel) & bisa di-Reverse.\n\nLanjut?")) return;
+    setPullBusy(true); setPullRes(null);
+    try {
+      const { data } = await axios.post(`${API}/admin/rekon/pull`, {}, { headers });
+      setPullRes(data);
+    } catch (e) {
+      setPullRes({ ok: false, status: e?.response?.status || "gagal", detail: e?.response?.data?.detail || e?.message });
+    } finally { setPullBusy(false); }
+  };
   const runAisDiag = async () => {
     setAisBusy(true); setAisDiag(null);
     try { const { data } = await axios.get(`${API}/admin/ais/diag`); setAisDiag(data); }
@@ -1502,6 +1519,40 @@ function PengaturanPage({ dark, onToggleTheme, onLogout, fixHeicPhotos, fixingHe
             )}
           </div>
         )}
+        {/* ── Tarik (PROSES) — simpan pembayaran + ACK ke Felis ── */}
+        <div style={{ marginTop: 12, borderTop: "1px solid #1a2130", paddingTop: 12 }}>
+          <button onClick={runRekonPull} disabled={pullBusy} style={{ padding: "9px 16px", borderRadius: 9, border: "1px solid #2ea043", background: "#0d2a17", color: "#3fb950", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }} data-testid="rekon-pull-run">
+            {pullBusy ? "⏳ Memproses..." : "⬇️ Tarik Rekon (proses)"}
+          </button>
+          <div style={{ fontSize: 10.5, color: "#6b7681", marginTop: 6 }}>Menyimpan pembayaran (Belum Dialokasikan) + ACK ke Felis. Alokasikan ke PO lewat Supplier → Riwayat.</div>
+          {pullRes && (
+            <div style={{ marginTop: 10 }}>
+              {pullRes.ok === false ? (
+                <div style={{ fontSize: 12, color: "#f85149" }}>
+                  {pullRes.status === "not_configured"
+                    ? "Belum tersambung: FELIS_BASE_URL / FELIS_TOKEN belum terbaca (cek ENV Railway)."
+                    : <>Gagal: {String(pullRes.status)} {pullRes.detail ? `— ${pullRes.detail}` : ""}</>}
+                </div>
+              ) : (
+                <div style={{ fontSize: 12.5, color: "#c9d1d9", lineHeight: 1.8 }}>
+                  <div style={{ color: "#3fb950", fontWeight: 700 }}>✓ Selesai diproses · batch {pullRes.batch || "-"}</div>
+                  <div style={{ marginTop: 2 }}>
+                    {Object.entries(pullRes.summary || {}).map(([k, v]) => (
+                      <span key={k} style={{ marginRight: 10 }}>
+                        {k === "created" ? "✅ baru disimpan" : k === "already_processed" ? "↩︎ sudah ada" : k === "supplier_not_found" ? "⚠️ supplier tak ada" : k === "error" ? "❌ error" : k}: <b>{v}</b>
+                      </span>
+                    ))}
+                  </div>
+                  <div>di-ACK ke Felis: <b>{pullRes.acked ?? 0}</b> transaksi</div>
+                  {pullRes.warning && <div style={{ color: "#f0a742", marginTop: 4 }}>⚠️ {pullRes.warning}</div>}
+                  {(pullRes.summary?.created > 0) && (
+                    <div style={{ color: "#8b949e", marginTop: 6 }}>→ Buka <b style={{ color: "#e6edf3" }}>Supplier → (nama) → tab Riwayat</b> untuk Alokasikan pembayaran ke PO.</div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
