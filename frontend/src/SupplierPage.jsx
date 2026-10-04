@@ -37,15 +37,33 @@ export function printSupplierA4(sup, jobsOverride, noDocOverride, tglOverride) {
     if (!b.ref && p.no_referensi) b.ref = String(p.no_referensi).trim();
     if (!b.tipe && p.tipe) b.tipe = String(p.tipe).trim();
   }));
-  const payTx = _bankOrder.map((k) => _bankMap.get(k)).sort((a, b) => String(a.tanggal).localeCompare(String(b.tanggal)));
-  // REFERENSI = data apa adanya dari DB (bank / no. referensi / kompensasi). Tidak
-  // mengarang: kalau kosong tampil "—".
+  const payTx = _bankOrder.map((k) => _bankMap.get(k));
+  // Pembayaran Rekon Bank yang SUDAH dialokasikan ikut Riwayat (porsi TERALOKASI
+  // saja). Unallocated TIDAK dihitung sebagai pembayaran tagihan. Rekon tersimpan
+  // di sup.rekon_payments[] — TERPISAH dari j.payments → tidak ada double-count.
+  (sup.rekon_payments || []).forEach((p) => {
+    if (p.status === "reversed") return;
+    const alloc = p.allocated != null ? p.allocated
+      : (p.allocations || []).reduce((a, x) => a + (x.amount || 0), 0);
+    if (alloc <= 0) return;   // unallocated: tetap terpisah, bukan pembayaran tagihan
+    payTx.push({
+      tanggal: p.tanggal || p.created_at || "", amount: alloc,
+      bank: (p.rekon && p.rekon.source_entity_label) || "", ref: p.bank_transaction_id || "",
+      tipe: "rekon",
+    });
+  });
+  payTx.sort((a, b) => String(a.tanggal).localeCompare(String(b.tanggal)));
+  // REFERENSI = data apa adanya dari DB (bank / no. referensi / kompensasi / rekon).
+  // Tidak mengarang: kalau kosong tampil "—".
   const refOf = (p) => {
     if (p.tipe === "kompensasi") return "Kompensasi";
+    if (p.tipe === "rekon") return "Rekon Bank" + (p.bank ? ` · ${p.bank}` : "");
     const parts = [p.bank, p.ref].filter(Boolean);
     return parts.length ? parts.join(" · ") : "—";
   };
-  const gBayar = jobs.reduce((s, j) => s + (j.payments || []).reduce((a, p) => a + (p.amount || 0), 0), 0);
+  // Total Pembayaran = manual (j.payments) + Rekon TERALOKASI. total_terbayar dari
+  // backend sudah termasuk alokasi rekon (extra_paid); unallocated TIDAK ikut.
+  const gBayar = jobs.reduce((s, j) => s + (j.total_terbayar || 0), 0);
   const gSisa = gHarga - gBayar;          // SISA = Total Tagihan - Total Pembayaran
   const over = gSisa < 0;                 // pembayaran > tagihan -> Lebih Bayar
   const lunas = gHarga > 0 && gSisa === 0;
@@ -214,10 +232,11 @@ export function printDriverRekapA4(sup, jobsOverride, noDocOverride, tglOverride
   const noDoc = (noDocOverride && String(noDocOverride).trim()) || supplierAutoDocNo();
   const jobs = (jobsOverride && jobsOverride.length) ? jobsOverride : (sup.jobs || []);
   const gHarga = jobs.reduce((s, j) => s + (j.total_harga || 0), 0);   // Total Ongkos (deal + tambahan)
-  // TOTAL PEMBAYARAN = SUM seluruh record payment aktual (= jumlah baris yang
-  // ditampilkan di Riwayat Pembayaran). Dihitung langsung dari payments biar
-  // tidak pernah nyimpang dari transaksi yang tampil.
-  const gBayar = jobs.reduce((s, j) => s + (j.payments || []).reduce((a, p) => a + (p.amount || 0), 0), 0);
+  // TOTAL PEMBAYARAN = manual (j.payments) + Rekon TERALOKASI. Pakai total_terbayar
+  // dari backend yang sudah termasuk alokasi rekon (extra_paid); Rekon yang belum
+  // dialokasikan TIDAK ikut. Baris yang ditampilkan di Riwayat (manual + alokasi
+  // rekon) jumlahnya sama dengan nilai ini → tidak nyimpang, tidak double-count.
+  const gBayar = jobs.reduce((s, j) => s + (j.total_terbayar || 0), 0);
   const gSisa = gHarga - gBayar;
   const lunas = gSisa <= 0;
 
@@ -277,6 +296,16 @@ export function printDriverRekapA4(sup, jobsOverride, noDocOverride, tglOverride
     _txMap.get(key).amount += (p.amount || 0);
   }));
   const payTx = _txOrder.map((k) => _txMap.get(k));
+  // Pembayaran Rekon Bank yang SUDAH dialokasikan ikut Riwayat (porsi TERALOKASI
+  // saja; unallocated tetap terpisah). Rekon tersimpan di sup.rekon_payments[] —
+  // terpisah dari j.payments → tidak double-count.
+  (sup.rekon_payments || []).forEach((p) => {
+    if (p.status === "reversed") return;
+    const alloc = p.allocated != null ? p.allocated
+      : (p.allocations || []).reduce((a, x) => a + (x.amount || 0), 0);
+    if (alloc <= 0) return;
+    payTx.push({ tanggal: p.tanggal || p.created_at || "", amount: alloc });
+  });
   payTx.sort((a, b) => String(a.tanggal).localeCompare(String(b.tanggal)));
   const payRows = payTx.map((t, i) => `<div class="pay-row">
       <span class="pay-chk">&#10003;</span>
