@@ -1415,16 +1415,19 @@ function PengaturanPage({ dark, onToggleTheme, onLogout, fixHeicPhotos, fixingHe
   const [postedTx, setPostedTx] = useState([]);
   const [expCats, setExpCats] = useState([]);
   const [biayaForm, setBiayaForm] = useState({});   // btid -> {kategori, deskripsi}
+  const [routeSummary, setRouteSummary] = useState(null);
   const _entLabel = (e) => e === "PT_ALYSSA_AUTO_LOGISTIK" ? "PT Alyssa" : e === "CV_ALYSSA_TRANS_UTAMA" ? "CV Alyssa Trans" : (e || "—");
   const loadBiaya = async () => {
     setBiayaBusy(true);
     try {
-      const [u, p, c] = await Promise.all([
+      const [u, p, c, s] = await Promise.all([
         axios.get(`${API}/admin/rekon/imports`, { params: { status: "supplier_not_found", limit: 200 }, headers }),
         axios.get(`${API}/admin/rekon/imports`, { params: { status: "posted_expense", limit: 200 }, headers }),
         axios.get(`${API}/admin/expense-categories`, { headers }),
+        axios.get(`${API}/admin/rekon/routing-summary`, { headers }),
       ]);
       setUnallocTx(u.data?.items || []); setPostedTx(p.data?.items || []); setExpCats(c.data?.items || []);
+      setRouteSummary(s.data?.counts || null);
       setBiayaOpen(true);
     } catch (e) { window.alert("Gagal memuat transaksi: " + (e?.response?.data?.detail || e?.message)); }
     finally { setBiayaBusy(false); }
@@ -1631,6 +1634,15 @@ function PengaturanPage({ dark, onToggleTheme, onLogout, fixHeicPhotos, fixingHe
 
         {biayaOpen && (
           <div style={{ marginTop: 12 }}>
+            {routeSummary && (
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 11.5, color: "#8b949e", marginBottom: 10 }}>
+                <span>Routing: </span>
+                <span style={{ color: "#3fb950" }}>Supplier <b>{routeSummary.supplier || 0}</b></span>
+                <span style={{ color: "#b392f0" }}>Biaya <b>{routeSummary.biaya || 0}</b></span>
+                <span style={{ color: "#f0a742" }}>Unallocated <b>{routeSummary.unallocated || 0}</b></span>
+                <span style={{ color: "#6b7681" }}>Reversed <b>{routeSummary.reversed || 0}</b></span>
+              </div>
+            )}
             {/* Belum ditentukan → bisa dirute jadi Biaya */}
             <div style={{ fontSize: 11, fontWeight: 700, color: "#8b949e", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>Unallocated ({unallocTx.length}) — belum jadi Supplier/Biaya</div>
             {unallocTx.length === 0 ? (

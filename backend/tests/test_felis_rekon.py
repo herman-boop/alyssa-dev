@@ -14,6 +14,7 @@ import os, sys, asyncio, types, re
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # backend/
 import rekon_sync as R
 from supplier_dedup import suggest_similar
+import ledger_status as LS
 import expenses as EXP
 
 
@@ -470,12 +471,46 @@ async def test_rekon_to_biaya():
     ok(R.can_post_as_expense(imp3)[0], "setelah balik Unallocated → bisa dirute ulang")
 
 
+async def test_tagihan_status_and_routing():
+    """Fase 5: status tagihan dari ledger (Belum/Sebagian/Lunas) + klasifikasi routing."""
+    print("test_tagihan_status_and_routing")
+    # status murni (dpp, net_transfer, terbayar)
+    ok(LS.tagihan_status(0, 0, 0) == "draft", "dpp 0 → draft")
+    ok(LS.tagihan_status(5000000, 5000000, 0) == "belum", "terbayar 0 → Belum Dibayar")
+    ok(LS.tagihan_status(5000000, 5000000, 2000000) == "sebagian", "bayar 2jt dari 5jt → Sebagian")
+    ok(LS.tagihan_status(5000000, 5000000, 5000000) == "lunas", "bayar penuh → Lunas")
+    ok(LS.tagihan_status(5000000, 5000000, 6000000) == "lunas", "lebih bayar → tetap Lunas")
+    ok(LS.status_label("belum") == "Belum Dibayar" and LS.status_label("lunas") == "Lunas", "label ramah-pengguna")
+    # Rekon alokasi MENGGERAKKAN status: terbayar = alokasi rekon (extra_paid)
+    ok(LS.tagihan_status(5000000, 5000000, 3000000) == "sebagian", "alokasi rekon 3jt → Sebagian (otomatis)")
+    # routing bucket
+    ok(R.routing_bucket({"status": "processed"}) == "supplier", "processed → Supplier")
+    ok(R.routing_bucket({"status": "posted_expense"}) == "biaya", "posted_expense → Biaya")
+    ok(R.routing_bucket({"status": "supplier_not_found"}) == "unallocated", "supplier_not_found → Unallocated")
+    ok(R.routing_bucket({"status": "error"}) == "unallocated", "error → Unallocated")
+    ok(R.routing_bucket({"status": "reversed"}) == "reversed", "reversed → Reversed")
+    # Integrasi: ingest → allocate → status mengikuti alokasi
+    db = FakeDB(); await R.ensure_indexes(db)
+    await _seed_supplier(db, jobs=[{"id": "jX", "total_harga": 5000000, "payments": []}])
+    r = await R.ingest_transaction(db, _payload(nominal=5000000))
+    pid = r["rekon_payment_id"]
+    await R.allocate_payment(db, "a3f9c1e2", pid, [{"job_id": "jX", "amount": 2000000}])
+    sup = await db.supplier_profiles.find_one({"id": "a3f9c1e2"})
+    alloc = sum(a["amount"] for p in sup["rekon_payments"] for a in (p.get("allocations") or []) if a["job_id"] == "jX")
+    ok(alloc == 2000000 and LS.tagihan_status(5000000, 5000000, alloc) == "sebagian", "alokasi 2jt → job Sebagian Dibayar")
+    await R.allocate_payment(db, "a3f9c1e2", pid, [{"job_id": "jX", "amount": 5000000}])
+    sup = await db.supplier_profiles.find_one({"id": "a3f9c1e2"})
+    alloc2 = sum(a["amount"] for p in sup["rekon_payments"] for a in (p.get("allocations") or []) if a["job_id"] == "jX")
+    ok(alloc2 == 5000000 and LS.tagihan_status(5000000, 5000000, alloc2) == "lunas", "alokasi penuh → job Lunas")
+
+
 async def main():
     for t in (test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,
-              test_expenses_helpers, test_rekon_to_biaya, test_felis_adapter):
+              test_expenses_helpers, test_rekon_to_biaya, test_tagihan_status_and_routing,
+              test_felis_adapter):
         await t()
     print(f"\nSEMUA LULUS — {PASS} assertions.")
 

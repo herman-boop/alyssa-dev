@@ -470,6 +470,23 @@ def can_post_as_expense(imp):
     return True, ""
 
 
+def routing_bucket(imp):
+    """Klasifikasi routing 1 transaksi bank (PURE) untuk ringkasan yang jelas:
+      supplier    → sudah jadi pembayaran supplier (status processed)
+      biaya       → sudah diposting Biaya/Beban (posted_expense)
+      reversed    → dibatalkan
+      unallocated → belum ditentukan (supplier_not_found/error/processing/lainnya)
+    """
+    st = (imp or {}).get("status")
+    if st == "processed":
+        return "supplier"
+    if st == "posted_expense":
+        return "biaya"
+    if st == "reversed":
+        return "reversed"
+    return "unallocated"
+
+
 def import_amount(imp):
     """Nominal transaksi dari import record (kontrak: field 'nominal'), fallback
     'amount' atau raw_payload.nominal. Tidak ketik ulang — selalu dari bank."""
