@@ -27,6 +27,16 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 ALLOWED_IMG = {'.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif'}
 ALLOWED_DOC = {'.pdf'}
 
+# Entitas badan usaha (pembukuan/dokumen). id SAMA dengan docTheme.js frontend &
+# modul expenses (pt-alyssa / cv-alyssa-trans). Dipakai agar transaksi PT/CV TIDAK
+# tercampur. Nilai lain / typo → "" (tidak di-set), tidak pernah menebak.
+DOC_ENTITIES_VALID = ("pt-alyssa", "cv-alyssa-trans")
+
+
+def _norm_doc_entity(v):
+    s = str(v or "").strip()
+    return s if s in DOC_ENTITIES_VALID else ""
+
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
@@ -3027,13 +3037,21 @@ async def admin_list_orders(
     q: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
+    entity_id: Optional[str] = None,
 ):
     """Search + filter list for admin dashboard.
     - status: filter by single status (or empty = all)
     - q: case-insensitive search in customer_nama, customer_hp, asal_kota, tujuan_kota, nopol, order_id
     - date_from / date_to: YYYY-MM-DD (inclusive), filter on created_at
+    - entity_id: PT/CV (pt-alyssa/cv-alyssa-trans), atau "none" = belum diisi
     Returns newest-first up to limit (clamped 1..500)."""
     filt = _admin_orders_filter(status, q, date_from, date_to)
+    if entity_id:
+        e = entity_id.strip()
+        if e == "none":
+            filt["entity_id"] = {"$in": [None, ""]}
+        elif e in DOC_ENTITIES_VALID:
+            filt["entity_id"] = e
     cur = db.orders.find(filt).sort("created_at", -1).limit(max(1, min(500, limit)))
     items = []
     async for d in cur:
@@ -3222,6 +3240,7 @@ class OrderPatchBody(BaseModel):
     pickup_arrival: Optional[str] = None  # aktual: kapan driver benar-benar sampai di lokasi jemput (ISO datetime-local)
     customer_nama: Optional[str] = None   # edit pelanggan dari kartu PO
     customer_hp: Optional[str] = None
+    entity_id: Optional[str] = None       # PT/CV (pembukuan) — additive, boleh diubah
 
 
 @api_router.patch("/admin/orders/{order_id}", dependencies=[Depends(require_admin_pin)])
@@ -3262,6 +3281,11 @@ async def admin_patch_order(order_id: str, payload: OrderPatchBody):
         upd["customer_nama"] = cn
     if payload.customer_hp is not None:
         upd["customer_hp"] = payload.customer_hp.strip()[:30]
+    if payload.entity_id is not None:
+        ent = _norm_doc_entity(payload.entity_id)
+        if payload.entity_id.strip() and not ent:
+            raise HTTPException(400, f"entity_id harus salah satu dari {list(DOC_ENTITIES_VALID)}")
+        upd["entity_id"] = ent
     if len(upd) == 1:
         raise HTTPException(400, "No fields to update")
     await db.orders.update_one({"order_id": order_id}, {"$set": upd})
@@ -6017,6 +6041,7 @@ class SupplierJobBody(BaseModel):
     project_id: Optional[str] = None
     tanggal: Optional[str] = None   # manual date (YYYY-MM-DD); kosong = hari ini
     tag: str = ""                   # Tag/Judul Kelompok laporan (pembatas visual PDF; TIDAK ikut hitungan)
+    entity_id: Optional[str] = None # PT/CV pembukuan (pt-alyssa/cv-alyssa-trans) — additive, HPP per entitas
     selisih_deal: Optional[int] = None    # Harga Deal (buat laporan Selisih format Supplier)
     selisih_invoice: Optional[int] = None # Harga Invoice; Selisih = Invoice - Deal (rumus existing)
     # Referensi order/customer (dibawa otomatis dari Duplikat ke Vendor) — link ke
@@ -6167,6 +6192,7 @@ async def add_supplier_job(supplier_id: str, body: SupplierJobBody):
         "catatan": body.catatan.strip(),
         "tanggal": tgl,
         "tag": (body.tag or "").strip()[:60],
+        "entity_id": _norm_doc_entity(body.entity_id),   # PT/CV (HPP per entitas); "" kalau belum diisi
         "selisih_deal": body.selisih_deal if (body.selisih_deal or 0) > 0 else None,
         "selisih_invoice": body.selisih_invoice if (body.selisih_invoice or 0) > 0 else None,
         # Referensi order/customer (dibawa dari Duplikat ke Vendor)
@@ -6184,6 +6210,30 @@ async def add_supplier_job(supplier_id: str, body: SupplierJobBody):
         upd["projects"] = projects
     await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": upd})
     return _supplier_job_totals(job)
+
+
+@api_router.patch("/admin/suppliers/{supplier_id}/jobs/{job_id}/entity", dependencies=[Depends(require_admin_pin)])
+async def set_supplier_job_entity(supplier_id: str, job_id: str, body: Dict[str, Any] = Body(...)):
+    """Set/ubah entitas PT/CV sebuah HPP/job (additive). Kosong = hapus penetapan.
+    Tidak mengubah nominal/pembayaran — cuma label pembukuan."""
+    ent = _norm_doc_entity((body or {}).get("entity_id"))
+    raw = str((body or {}).get("entity_id") or "").strip()
+    if raw and not ent:
+        raise HTTPException(400, f"entity_id harus salah satu dari {list(DOC_ENTITIES_VALID)}")
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0, "jobs": 1})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    jobs = doc.get("jobs") or []
+    found = False
+    for j in jobs:
+        if j.get("id") == job_id:
+            j["entity_id"] = ent
+            found = True
+            break
+    if not found:
+        raise HTTPException(404, "Unit/job tidak ditemukan")
+    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
+    return {"ok": True, "job_id": job_id, "entity_id": ent}
 
 
 @api_router.delete("/admin/suppliers/{supplier_id}/jobs/{job_id}", dependencies=[Depends(require_admin_pin)])

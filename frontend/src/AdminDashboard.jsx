@@ -2700,6 +2700,15 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
 
       {/* Footer actions */}
       <footer className="adm-card-foot">
+        {/* Entitas PT/CV (pembukuan Penjualan) — additive, buat Laba Rugi per entitas */}
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: "#8b949e" }} title="Pembukuan PT / CV untuk laporan Laba Rugi">
+          <span>PT/CV:</span>
+          <select value={order.entity_id || ""} onChange={(e) => onPatch({ entity_id: e.target.value })}
+            style={{ padding: "4px 8px", borderRadius: 7, border: "1px solid #1f2937", background: "#0e1420", color: "#e6edf3", fontSize: 11 }} data-testid={`adm-order-entity-${order.order_id}`}>
+            <option value="">— belum diisi —</option>
+            {Object.entries(DOC_ENTITIES).map(([id, ent]) => <option key={id} value={id}>{ent.footerName || id}</option>)}
+          </select>
+        </label>
         {order.status === "NEW" && (
           <button className="adm-btn adm-btn-gold adm-btn-sm" onClick={onConvert} data-testid={`adm-convert-${order.order_id}`}>
             <IcoTruck /> Konversi ke Trip
