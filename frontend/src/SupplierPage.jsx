@@ -444,6 +444,7 @@ export default function SupplierPage() {
   const [tab, setTab] = useState("pembayaran"); // default: Pembayaran (dipakai tiap hari)
   const [filter, setFilter] = useState("semua");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [idCopied, setIdCopied] = useState(false);
   // Rekap supplier: No. Dokumen (auto/manual) + cetak / simpan ke Histori Dokumen
   const [rekapOpen, setRekapOpen] = useState(false);
   const [rekapNo, setRekapNo] = useState("");
@@ -1033,6 +1034,16 @@ export default function SupplierPage() {
                   {selected.jenis || "Supplier"}{selected.no_hp ? ` · ${selected.no_hp}` : ""}
                   {unpaidJobs.length > 0 && <span> · <b style={{ color: C.red }}>{unpaidJobs.length} tagihan belum lunas</b></span>}
                   {lastPayDate && <span> · bayar terakhir {fDate(lastPayDate)}</span>}
+                </div>
+                {/* ID canonical 8-hex — untuk ditempel ke Felis (Hubungkan ke Supplier) */}
+                <div style={{ fontSize: 11.5, color: C.mute, marginTop: 5, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span>ID supplier: <b style={{ fontFamily: "monospace", fontSize: 13, color: C.ink, letterSpacing: 0.5 }}>{selected.id}</b></span>
+                  <button
+                    onClick={() => { try { navigator.clipboard?.writeText(String(selected.id || "")); setIdCopied(true); setTimeout(() => setIdCopied(false), 1500); } catch { /* ignore */ } }}
+                    style={{ fontSize: 11, fontWeight: 700, color: idCopied ? C.green : "#58a6ff", background: "none", border: `1px solid ${idCopied ? C.green : "#1f6feb"}`, borderRadius: 7, padding: "2px 9px", cursor: "pointer" }}
+                    data-testid="sup-copy-id"
+                  >{idCopied ? "✓ Tersalin" : "📋 Salin ID"}</button>
+                  <span style={{ fontSize: 10.5, color: C.mute }}>← tempel ke Felis (Hubungkan ke Supplier)</span>
                 </div>
               </div>
               <div style={{ position: "relative", flexShrink: 0 }}>
