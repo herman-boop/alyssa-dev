@@ -10,12 +10,13 @@ ENDPOINT (prefix /api di base):
   KOREKSI  GET  /api/integrasi/koreksi
   AKUI     POST /api/integrasi/koreksi/akui
 
-AUTENTIKASI: header `Authorization: Bearer <FELIS_API_TOKEN>`.
+AUTENTIKASI: header `Authorization: Bearer <FELIS_TOKEN>`.
   Token TIDAK di-hardcode, TIDAK di-log, TIDAK ditampilkan. Dari ENV.
 
-ENV:
-  FELIS_BASE_URL   = https://felis-alyssa-production.up.railway.app  (root, tanpa /api)
-  FELIS_API_TOKEN  = <token integrasi>  (diisi lewat jalur aman di Railway)
+ENV (kontrak V2):
+  FELIS_BASE_URL = https://felis-alyssa-production.up.railway.app  (root, tanpa /api)
+  FELIS_TOKEN    = <token integrasi>  (diisi lewat jalur aman di Railway)
+  (nama lama FELIS_API_TOKEN masih diterima sebagai fallback)
 
 Semua request blocking (requests) dijalankan via asyncio.to_thread agar tidak
 memblok event loop. Kesalahan dibungkus jadi FelisError dengan pesan jelas
@@ -45,7 +46,9 @@ def _base_url() -> str:
 
 
 def _token() -> str:
-    return (os.environ.get("FELIS_API_TOKEN") or "").strip()
+    # Kontrak V2: nama ENV = FELIS_TOKEN. Fallback ke nama lama FELIS_API_TOKEN
+    # supaya tidak mati diam-diam kalau ada yang terlanjur set nama lama.
+    return (os.environ.get("FELIS_TOKEN") or os.environ.get("FELIS_API_TOKEN") or "").strip()
 
 
 def is_configured() -> bool:
@@ -96,7 +99,7 @@ async def fetch_ready(entitas: str | None = None, dari: str | None = None,
     """READY (baca murni, tidak menandai apa pun). Return dict kontrak:
     {batch, dibuat_pada, jumlah, data:[...]}. Aman dipanggil berkali-kali."""
     if not is_configured():
-        raise FelisError("Koneksi Felis belum diset (FELIS_BASE_URL + FELIS_API_TOKEN).")
+        raise FelisError("Koneksi Felis belum diset (FELIS_BASE_URL + FELIS_TOKEN).")
     params = {}
     if entitas:
         params["entitas"] = entitas

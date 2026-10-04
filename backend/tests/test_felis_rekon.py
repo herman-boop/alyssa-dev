@@ -264,12 +264,17 @@ def _install_fake_requests(captured, resp_by_method):
 async def test_felis_adapter():
     print("test_felis_adapter")
     import rekon_felis_client as F
+    os.environ.pop("FELIS_API_TOKEN", None)
     os.environ["FELIS_BASE_URL"] = "https://felis-alyssa-production.up.railway.app/"
-    os.environ["FELIS_API_TOKEN"] = "x" * 40  # ≥32 → configured
-    ok(F.is_configured(), "ENV lengkap → configured")
-    os.environ["FELIS_API_TOKEN"] = "short"
+    os.environ["FELIS_TOKEN"] = "x" * 40  # nama ENV kontrak V2; ≥32 → configured
+    ok(F.is_configured(), "ENV lengkap (FELIS_TOKEN) → configured")
+    os.environ["FELIS_TOKEN"] = "short"
     ok(not F.is_configured(), "token < 32 char → dianggap tidak ada (mati)")
-    os.environ["FELIS_API_TOKEN"] = "x" * 40
+    os.environ["FELIS_TOKEN"] = "x" * 40
+    # fallback nama lama masih diterima
+    del os.environ["FELIS_TOKEN"]; os.environ["FELIS_API_TOKEN"] = "y" * 40
+    ok(F.is_configured(), "fallback FELIS_API_TOKEN masih diterima")
+    os.environ.pop("FELIS_API_TOKEN", None); os.environ["FELIS_TOKEN"] = "x" * 40
 
     cap = []
     _install_fake_requests(cap, {

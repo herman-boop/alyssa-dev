@@ -6676,7 +6676,7 @@ async def rekon_pull_from_felis(entitas: Optional[str] = None, batas: Optional[i
     supplier_not_found/error TIDAK di-ACK → muncul lagi di READY berikutnya."""
     if not rekon_felis_client.is_configured():
         return {"ok": False, "status": "not_configured",
-                "detail": "Koneksi Felis belum diset (FELIS_BASE_URL + FELIS_API_TOKEN)."}
+                "detail": "Koneksi Felis belum diset (FELIS_BASE_URL + FELIS_TOKEN)."}
     try:
         ready = await rekon_felis_client.fetch_ready(entitas=entitas, batas=batas)
     except rekon_felis_client.FelisError as e:
@@ -6728,7 +6728,7 @@ async def rekon_koreksi_list():
     sesudah ditarik. TIDAK memindahkan apa pun — hanya menampilkan untuk ditinjau."""
     if not rekon_felis_client.is_configured():
         return {"ok": False, "status": "not_configured",
-                "detail": "Koneksi Felis belum diset (FELIS_BASE_URL + FELIS_API_TOKEN)."}
+                "detail": "Koneksi Felis belum diset (FELIS_BASE_URL + FELIS_TOKEN)."}
     try:
         kor = await rekon_felis_client.fetch_koreksi()
     except rekon_felis_client.FelisError as e:
@@ -6747,7 +6747,7 @@ async def rekon_koreksi_apply(body: Dict[str, Any] = Body(...)):
         raise HTTPException(400, "bank_transaction_id wajib diisi")
     if not rekon_felis_client.is_configured():
         return {"ok": False, "status": "not_configured",
-                "detail": "Koneksi Felis belum diset (FELIS_BASE_URL + FELIS_API_TOKEN)."}
+                "detail": "Koneksi Felis belum diset (FELIS_BASE_URL + FELIS_TOKEN)."}
     # Ambil koreksi otoritatif dari Felis untuk btid ini.
     try:
         kor = await rekon_felis_client.fetch_koreksi()
