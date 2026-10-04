@@ -84,6 +84,28 @@ def pick_ack_ids(items, results):
     return ids
 
 
+def waterfall_allocations(job_sisa, amount):
+    """AUTO-ALOKASI: bagikan `amount` ke daftar (job_id, sisa) BERURUTAN sampai
+    uang habis. Tidak pernah melebihi sisa tiap job, total ≤ amount. Sisa uang
+    (kalau amount > total sisa) dibiarkan (tetap Belum Dialokasikan).
+    Murni/tanpa I/O supaya mudah diuji. Return list [{job_id, amount}]."""
+    out = []
+    remaining = _to_int(amount)
+    for jid, sisa in (job_sisa or []):
+        if remaining <= 0:
+            break
+        s = _to_int(sisa)
+        jid = str(jid or "").strip()
+        if not jid or s <= 0:
+            continue
+        give = min(remaining, s)
+        if give <= 0:
+            continue
+        out.append({"job_id": jid, "amount": give})
+        remaining -= give
+    return out
+
+
 # Field aman yang ditampilkan di preview (TANPA token/credential).
 _PREVIEW_FIELDS = (
     "bank_transaction_id", "supplier_id", "supplier_name", "source_entity",

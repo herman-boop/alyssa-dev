@@ -376,11 +376,32 @@ async def test_preview_readonly():
     ok(pv4["would_status"] == "already_processed", "yang sudah tersimpan → would already_processed")
 
 
+async def test_waterfall_auto_alloc():
+    print("test_waterfall_auto_alloc")
+    # Pas: 700rb ke 2 PO @350rb → dua-duanya penuh.
+    a = R.waterfall_allocations([("job1", 350000), ("job2", 350000)], 700000)
+    ok(a == [{"job_id": "job1", "amount": 350000}, {"job_id": "job2", "amount": 350000}],
+       "700rb → 2 PO @350rb: dua-duanya lunas (auto)")
+    # Kurang: 500rb → job1 penuh (350rb), job2 sebagian (150rb).
+    b = R.waterfall_allocations([("job1", 350000), ("job2", 350000)], 500000)
+    ok(b == [{"job_id": "job1", "amount": 350000}, {"job_id": "job2", "amount": 150000}],
+       "500rb → job1 lunas, job2 sebagian 150rb")
+    # Lebih: 900rb → 2 PO penuh (700rb), sisa 200rb TIDAK dipaksa (tetap unallocated).
+    c = R.waterfall_allocations([("job1", 350000), ("job2", 350000)], 900000)
+    ok(sum(x["amount"] for x in c) == 700000, "900rb → alokasi max 700rb, sisa 200rb unallocated")
+    # Job yg sudah lunas (sisa 0) dilewati.
+    d = R.waterfall_allocations([("job1", 0), ("job2", 350000)], 350000)
+    ok(d == [{"job_id": "job2", "amount": 350000}], "job sisa 0 dilewati, alokasi ke job2")
+    # Tidak ada tagihan → tidak ada alokasi (uang tetap unallocated).
+    e = R.waterfall_allocations([], 700000)
+    ok(e == [], "tidak ada tagihan → alokasi kosong (tetap Belum Dialokasikan)")
+
+
 async def main():
     for t in (test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
-              test_preview_readonly, test_felis_adapter):
+              test_preview_readonly, test_waterfall_auto_alloc, test_felis_adapter):
         await t()
     print(f"\nSEMUA LULUS — {PASS} assertions.")
 
