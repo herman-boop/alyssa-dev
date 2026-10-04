@@ -1288,7 +1288,9 @@ export default function SupplierPage() {
           {/* ═══ TAB RIWAYAT (timeline) ═══ */}
           {tab === "riwayat" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {(selected.rekon_payments || []).length > 0 && (
+              {(selected.rekon_payments || []).length > 0 && (() => {
+                const jobById = Object.fromEntries((selected.jobs || []).map((j) => [j.id, j]));
+                return (
                 <div style={{ background: "#1a1408", border: `1px solid ${C.gold}`, borderRadius: 12, padding: 12 }}>
                   <div style={{ fontSize: 13, fontWeight: 800, color: C.gold, marginBottom: 8 }}>🏦 Pembayaran dari Audit Rekon Bank</div>
                   {selected.rekon_payments.map((p) => {
@@ -1299,6 +1301,13 @@ export default function SupplierPage() {
                         <div style={{ minWidth: 0 }}>
                           <div style={{ fontSize: 13.5, fontWeight: 800 }}>{fRp(p.amount)} <span style={{ fontSize: 11, fontWeight: 700, color: badge.c }}>· {badge.t}</span></div>
                           <div style={{ fontSize: 11, color: C.mute, marginTop: 2 }}>{fDate(p.tanggal)}{p.catatan ? ` · ${p.catatan}` : ""} · btx {p.bank_transaction_id}</div>
+                          {(p.allocations || []).length > 0 ? (
+                            <div style={{ fontSize: 11.5, color: C.green, marginTop: 3 }}>
+                              → Bayar: {p.allocations.map((a) => { const j = jobById[a.job_id]; const nm = (j && (j.nopol || j.vehicle_type)) || a.job_id; return `${nm} ${fRp(a.amount)}`; }).join("  ·  ")}
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: 11.5, color: C.gold, marginTop: 3 }}>→ Belum dialokasikan ke tagihan</div>
+                          )}
                         </div>
                         <div style={{ display: "flex", gap: 6 }}>
                           <button style={{ ...BTN_GHOST, padding: "6px 10px" }} onClick={() => openAlloc(p)} data-testid={`sup-rekon-alloc-${p.id}`}>Alokasikan</button>
@@ -1309,7 +1318,8 @@ export default function SupplierPage() {
                   })}
                   <div style={{ fontSize: 10.5, color: C.mute, marginTop: 8 }}>Uang ini sudah ditransfer ke supplier. Alokasikan ke PO/tagihan supaya mengurangi Sisa unit. Pembatalan lewat <b style={{ color: C.ink }}>Reverse</b> (bukan hapus).</div>
                 </div>
-              )}
+                );
+              })()}
               {txns.length === 0 && (selected.rekon_payments || []).length === 0 && <div style={{ textAlign: "center", padding: 30, color: C.mute }}>Belum ada pembayaran.</div>}
               {txns.map((tx) => (
                 <button key={tx.key} onClick={() => setTxnDetail(tx)} style={{ textAlign: "left", background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 14, cursor: "pointer", color: C.ink }} data-testid={`sup-txn-${tx.key}`}>
