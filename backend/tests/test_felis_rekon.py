@@ -9,11 +9,12 @@ Unallocated Payment, alokasi audit-only, reverse, koreksi) + rekon_felis_client
 Tanpa MongoDB sungguhan: pakai Fake async DB in-memory. Tanpa jaringan: `requests`
 dipalsukan. Jalankan: python3 backend/tests/test_felis_rekon.py
 """
-import os, sys, asyncio, types
+import os, sys, asyncio, types, re
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # backend/
 import rekon_sync as R
 from supplier_dedup import suggest_similar
+import expenses as EXP
 
 
 # ── Fake async Mongo (cukup untuk yang dipakai rekon_sync) ───────────────────
@@ -415,12 +416,30 @@ async def test_dedup_suggest():
     ok(all(x["supplier_id"] != "a4" for x in suggest_similar("PT Lama", "", rows)), "merged dilewati")
 
 
+async def test_expenses_helpers():
+    """Biaya/Beban (Fase 3): helper murni — validasi entity PT/CV, nominal, tanggal,
+    filter. Memastikan Biaya terpisah & entity wajib jelas."""
+    print("test_expenses_helpers")
+    ok(EXP._norm_entity("pt-alyssa") == "pt-alyssa", "entity PT valid")
+    ok(EXP._norm_entity("cv-alyssa-trans") == "cv-alyssa-trans", "entity CV valid")
+    ok(EXP._norm_entity("ngawur") == "", "entity tak dikenal → ditolak (kosong)")
+    ok(EXP._norm_entity("") == "", "entity kosong → ditolak")
+    ok(EXP._to_int("150000") == 150000 and EXP._to_int("x") == 0, "nominal parse aman")
+    ok(EXP._valid_date("2026-10-04") == "2026-10-04", "tanggal valid dipakai")
+    ok(re.match(r"^\d{4}-\d{2}-\d{2}$", EXP._valid_date("ngawur")), "tanggal ngawur → hari ini (format benar)")
+    # filter: void tidak ikut default; entity & periode tersaring
+    f = EXP._build_filter(entity_id="pt-alyssa", date_from="2026-01-01", date_to="2026-12-31", kategori="Listrik", status="active")
+    ok(f["status"] == "active" and f["entity_id"] == "pt-alyssa" and f["kategori"] == "Listrik", "filter entity/status/kategori")
+    ok(f["tanggal"]["$gte"] == "2026-01-01" and f["tanggal"]["$lte"] == "2026-12-31", "filter periode")
+    ok("status" not in EXP._build_filter(status="all"), "status=all → tidak difilter (lihat semua)")
+
+
 async def main():
     for t in (test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,
-              test_felis_adapter):
+              test_expenses_helpers, test_felis_adapter):
         await t()
     print(f"\nSEMUA LULUS — {PASS} assertions.")
 

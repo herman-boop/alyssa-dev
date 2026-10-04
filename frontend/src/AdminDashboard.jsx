@@ -7,6 +7,7 @@ import CostCalculator from "@/CostCalculator";
 import DriverData from "@/DriverData";
 import SupplierPage, { printSupplierA4 } from "@/SupplierPage";
 import SelisihPage from "@/SelisihPage";
+import ExpensesPage from "@/ExpensesPage";
 import KompensasiPage from "@/KompensasiPage";
 import MobileVendorPayment from "@/MobileVendorPayment";
 import PermintaanHargaPage from "@/PermintaanHargaPage";
@@ -418,6 +419,7 @@ function Dashboard({ pin, onLogout }) {
     koordinator:  { title: "Koordinator", sub: "Kelola akun koordinator lapangan" },
     supplier:     { title: "Supplier", sub: "Kelola unit titipan & selisih harga supplier" },
     selisih:      { title: "Selisih Harga", sub: "Bandingkan HPP vs harga deal pelanggan" },
+    biaya:        { title: "Biaya / Beban", sub: "Biaya operasional (non-HPP) per PT/CV — terpisah dari tagihan supplier" },
     "pembayaran-vendor": { title: "Pembayaran Vendor", sub: "Bayar beberapa PO per vendor sekaligus (Keuangan)" },
     kompensasi:   { title: "Kompensasi", sub: "Kompensasi hutang piutang antar pihak" },
     "minta-harga":{ title: "Minta Harga", sub: "Permintaan harga ke perwakilan supplier" },
@@ -510,6 +512,10 @@ function Dashboard({ pin, onLogout }) {
 
       {activeTab === "selisih" && (
         <SelisihPage />
+      )}
+
+      {activeTab === "biaya" && (
+        <ExpensesPage />
       )}
 
       {activeTab === "kompensasi" && (
@@ -837,6 +843,7 @@ const SIDEBAR_ICON = {
   pesanan: "▦", "route-leg": "🧭", drivers: "👤", supplier: "🌿", koordinator: "🧑‍💼",
   kendaraan: "🚙", dokumen: "📄", histori: "🗂️", laporan: "📑", kalkulator: "🧮", selisih: "📊",
   kompensasi: "🔄", "minta-harga": "📩", pengaturan: "⚙️", "pembayaran-vendor": "🏢",
+  biaya: "🧾",
 };
 
 /* ════════════════════════════════════════
@@ -1094,6 +1101,9 @@ const SIDEBAR_GROUPS = [
     { key: "kalkulator", label: "Kalkulator HPP" },
     { key: "selisih", label: "Selisih Harga" },
     { key: "kompensasi", label: "Kompensasi" },
+  ] },
+  { title: "Biaya / Beban", items: [
+    { key: "biaya", label: "Biaya / Beban" },
   ] },
   { title: "Arsip & Laporan", items: [
     { key: "dokumen", label: "Dokumen" },
