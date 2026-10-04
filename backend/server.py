@@ -17,6 +17,7 @@ import rekon_sync  # integrasi pembayaran supplier dari Audit Rekon (isolated)
 import rekon_felis_client  # adapter PULL dari Felis (stub sampai kontrak final)
 import expenses as expenses_mod  # Biaya Umum & Administratif (Fase 3, isolated, terpisah dari HPP)
 import ledger_status  # status tagihan supplier (Belum/Sebagian/Lunas) dari ledger — pure
+import pnl  # Laporan Laba Rugi (Pendapatan − HPP − Biaya) — bagian pure/agregasi
 import supplier_dedup  # AUDIT duplikat master supplier/contacts (READ-ONLY di deploy ini)
 
 ROOT_DIR = Path(__file__).parent
@@ -7035,6 +7036,70 @@ async def expenses_list(entity_id: Optional[str] = None, date_from: Optional[str
 @api_router.get("/admin/expenses/summary", dependencies=[Depends(require_admin_pin)])
 async def expenses_summary(entity_id: Optional[str] = None, date_from: Optional[str] = None, date_to: Optional[str] = None):
     return await expenses_mod.summary(db, entity_id=entity_id, date_from=date_from, date_to=date_to)
+
+
+async def _laba_rugi(date_from=None, date_to=None, entity_id=None):
+    """Laba Rugi dari transaksi AKTUAL (tidak ada input ulang):
+      Pendapatan = trip.finance.invoice_total (join order utk entitas & tanggal)
+      HPP        = supplier jobs (DPP = total_harga + biaya tambahan)
+      Biaya      = expenses (status active)
+    Dikelompokkan per entitas PT/CV (belum diisi = 'none'); filter periode & entitas.
+    READ-ONLY — tidak mengubah data apa pun."""
+    want = (entity_id or "").strip()
+    valid = DOC_ENTITIES_VALID
+    agg = {}
+
+    def bucket(e):
+        return agg.setdefault(pnl.entity_key(e or "", valid), {"pendapatan": 0, "hpp": 0, "biaya": 0})
+
+    # Pendapatan — trip.finance.invoice_total, entitas & tanggal dari order terkait.
+    order_meta = {}
+    async for o in db.orders.find({}, {"_id": 0, "order_id": 1, "entity_id": 1, "created_at": 1}):
+        order_meta[o.get("order_id")] = o
+    async for t in db.trips.find({}, {"_id": 0, "order_id": 1, "finance": 1}):
+        inv = int((t.get("finance") or {}).get("invoice_total") or 0)
+        if inv <= 0:
+            continue
+        om = order_meta.get(t.get("order_id")) or {}
+        e = om.get("entity_id") or ""
+        if not pnl.entity_match(e, want, valid):
+            continue
+        if not pnl.in_period(om.get("created_at"), date_from, date_to):
+            continue
+        bucket(e)["pendapatan"] += inv
+
+    # HPP — supplier jobs (DPP), tanggal job + entitas job.
+    async for sup in db.supplier_profiles.find({}, {"_id": 0, "jobs": 1}):
+        for j in (sup.get("jobs") or []):
+            e = j.get("entity_id") or ""
+            if not pnl.entity_match(e, want, valid):
+                continue
+            if not pnl.in_period(j.get("tanggal"), date_from, date_to):
+                continue
+            dpp = int(j.get("total_harga") or 0) + sum(int(x.get("amount") or 0) for x in (j.get("tambahan") or []))
+            if dpp <= 0:
+                continue
+            bucket(e)["hpp"] += dpp
+
+    # Biaya/Beban — expenses active.
+    async for ex in db[expenses_mod.EXPENSES].find({"status": "active"}, {"_id": 0, "entity_id": 1, "tanggal": 1, "nominal": 1}):
+        e = ex.get("entity_id") or ""
+        if not pnl.entity_match(e, want, valid):
+            continue
+        if not pnl.in_period(ex.get("tanggal"), date_from, date_to):
+            continue
+        bucket(e)["biaya"] += int(ex.get("nominal") or 0)
+
+    res = pnl.compute_pnl(agg)
+    res["periode"] = {"dari": date_from or "", "sampai": date_to or ""}
+    res["filter_entity"] = want
+    return res
+
+
+@api_router.get("/admin/reports/laba-rugi", dependencies=[Depends(require_admin_pin)])
+async def report_laba_rugi(date_from: Optional[str] = None, date_to: Optional[str] = None, entity_id: Optional[str] = None):
+    """Laporan Laba Rugi per entitas PT/CV + periode. Angka dari transaksi aktual."""
+    return await _laba_rugi(date_from=date_from, date_to=date_to, entity_id=entity_id)
 
 
 @api_router.post("/admin/expenses", dependencies=[Depends(require_admin_pin)])
