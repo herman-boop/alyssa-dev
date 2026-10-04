@@ -54,6 +54,19 @@ IMPORTS_COLLECTION = "bank_payment_imports"
 # Entitas sumber dana yang SAH menurut kontrak. Tidak ada nilai lain / bawaan.
 VALID_ENTITIES = ("PT_ALYSSA_AUTO_LOGISTIK", "CV_ALYSSA_TRANS_UTAMA")
 
+# Map entitas rekon (kontrak) → id entitas DOKUMEN (dipakai modul expenses /
+# docTheme). Dipakai saat 1 transaksi bank diposting jadi Biaya/Beban: entity
+# WAJIB ikut rekening sumber (PT/CV), tidak boleh ketik ulang / salah.
+DOC_ENTITY_MAP = {
+    "PT_ALYSSA_AUTO_LOGISTIK": "pt-alyssa",
+    "CV_ALYSSA_TRANS_UTAMA": "cv-alyssa-trans",
+}
+
+# Status import yang BOLEH diposting jadi Biaya: transaksi yang BUKAN pembayaran
+# supplier (tidak ketemu supplier / error). processed=supplier, reversed, dan
+# posted_expense TIDAK boleh (anti double-post).
+EXPENSE_ELIGIBLE_STATUS = ("supplier_not_found", "error")
+
 # Field kontrak Felis yang disimpan apa adanya di import record (audit/telusur).
 _CONTRACT_FIELDS = (
     "idempotency_key", "bank_transaction_id", "bank_transaction_sidik",
@@ -267,6 +280,12 @@ async def ingest_transaction(db, payload):
         if st in _FINAL_STATUS:
             return {"status": "already_processed" if st == "processed" else "reversed",
                     "bank_transaction_id": btid, "import": existing}
+        # Sudah diposting sebagai Biaya/Beban → JANGAN jadikan pembayaran supplier
+        # (anti double-post). Transaksi tetap milik Biaya sampai di-reverse.
+        if st == "posted_expense":
+            return {"status": "already_processed", "bank_transaction_id": btid,
+                    "reason": "transaksi sudah diposting sebagai Biaya/Beban",
+                    "import": existing}
 
     async def _fail(status, **extra):
         await db[IMPORTS_COLLECTION].update_one(
@@ -425,6 +444,56 @@ async def reverse_import(db, bank_transaction_id, reason=""):
                   "reversal_reason": str(reason or "")[:300], "reversed_payment_snapshot": snapshot}})
     return {"status": "reversed", "bank_transaction_id": btid, "supplier_id": sid,
             "rekon_payment_id": pid, "removed": snapshot is not None}
+
+
+# ── Routing transaksi bank → Biaya/Beban (expenses) ─────────────────────────
+def doc_entity_for(source_entity):
+    """Map entitas rekon (PT_ALYSSA_AUTO_LOGISTIK/CV_ALYSSA_TRANS_UTAMA) → id
+    entitas dokumen (pt-alyssa/cv-alyssa-trans). "" kalau tidak dikenal."""
+    return DOC_ENTITY_MAP.get(str(source_entity or "").strip(), "")
+
+
+def can_post_as_expense(imp):
+    """(ok, reason) — PURE. Boleh posting transaksi bank jadi Biaya kalau BUKAN
+    pembayaran supplier & belum jadi Biaya (anti double-post)."""
+    if not imp:
+        return False, "transaksi tidak ditemukan"
+    if imp.get("expense_id") or imp.get("status") == "posted_expense":
+        return False, "transaksi sudah diposting sebagai Biaya/Beban"
+    st = imp.get("status")
+    if st == "processed":
+        return False, "transaksi sudah jadi pembayaran Supplier (tidak bisa jadi Biaya)"
+    if st == "reversed":
+        return False, "transaksi sudah di-reverse"
+    if st not in EXPENSE_ELIGIBLE_STATUS:
+        return False, f"status '{st or '(kosong)'}' belum bisa diposting sebagai Biaya"
+    return True, ""
+
+
+def import_amount(imp):
+    """Nominal transaksi dari import record (kontrak: field 'nominal'), fallback
+    'amount' atau raw_payload.nominal. Tidak ketik ulang — selalu dari bank."""
+    for v in (imp.get("nominal"), imp.get("amount"), (imp.get("raw_payload") or {}).get("nominal")):
+        n = _to_int(v)
+        if n > 0:
+            return n
+    return 0
+
+
+async def mark_import_as_expense(db, btid, expense_id):
+    """Tandai transaksi CONSUMED sebagai Biaya (anti double-post)."""
+    await db[IMPORTS_COLLECTION].update_one(
+        {"bank_transaction_id": str(btid or "").strip()},
+        {"$set": {"status": "posted_expense", "consumed_as": "expense",
+                  "expense_id": expense_id, "updated_at": _now_iso(), "posted_expense_at": _now_iso()}})
+
+
+async def unmark_import_expense(db, btid):
+    """Balikin transaksi ke Unallocated (supplier_not_found) setelah expense di-void."""
+    await db[IMPORTS_COLLECTION].update_one(
+        {"bank_transaction_id": str(btid or "").strip()},
+        {"$set": {"status": "supplier_not_found", "consumed_as": None,
+                  "expense_id": None, "updated_at": _now_iso()}})
 
 
 async def apply_correction(db, bank_transaction_id, supplier_id_baru, reason=""):

@@ -1406,6 +1406,45 @@ function PengaturanPage({ dark, onToggleTheme, onLogout, fixHeicPhotos, fixingHe
       setPullRes({ ok: false, status: e?.response?.status || "gagal", detail: e?.response?.data?.detail || e?.message });
     } finally { setPullBusy(false); }
   };
+  // ── Rekon → Biaya/Beban: transaksi yang BUKAN pembayaran supplier (belum
+  // ketemu supplier) bisa diposting jadi Biaya. Entity ikut rekening (PT/CV),
+  // nominal & tanggal dari bank. Anti double-post + reversible. ──
+  const [biayaOpen, setBiayaOpen] = useState(false);
+  const [biayaBusy, setBiayaBusy] = useState(false);
+  const [unallocTx, setUnallocTx] = useState([]);
+  const [postedTx, setPostedTx] = useState([]);
+  const [expCats, setExpCats] = useState([]);
+  const [biayaForm, setBiayaForm] = useState({});   // btid -> {kategori, deskripsi}
+  const _entLabel = (e) => e === "PT_ALYSSA_AUTO_LOGISTIK" ? "PT Alyssa" : e === "CV_ALYSSA_TRANS_UTAMA" ? "CV Alyssa Trans" : (e || "—");
+  const loadBiaya = async () => {
+    setBiayaBusy(true);
+    try {
+      const [u, p, c] = await Promise.all([
+        axios.get(`${API}/admin/rekon/imports`, { params: { status: "supplier_not_found", limit: 200 }, headers }),
+        axios.get(`${API}/admin/rekon/imports`, { params: { status: "posted_expense", limit: 200 }, headers }),
+        axios.get(`${API}/admin/expense-categories`, { headers }),
+      ]);
+      setUnallocTx(u.data?.items || []); setPostedTx(p.data?.items || []); setExpCats(c.data?.items || []);
+      setBiayaOpen(true);
+    } catch (e) { window.alert("Gagal memuat transaksi: " + (e?.response?.data?.detail || e?.message)); }
+    finally { setBiayaBusy(false); }
+  };
+  const postBiaya = async (btid) => {
+    const f = biayaForm[btid] || {};
+    if (!f.kategori) { window.alert("Pilih kategori biaya dulu"); return; }
+    try {
+      await axios.post(`${API}/admin/rekon/imports/${encodeURIComponent(btid)}/to-expense`,
+        { kategori: f.kategori, deskripsi: f.deskripsi || "" }, { headers });
+      await loadBiaya();
+    } catch (e) { window.alert(e?.response?.data?.detail || "Gagal posting biaya"); }
+  };
+  const reverseBiaya = async (btid) => {
+    if (!window.confirm("Batalkan posting Biaya ini?\nExpense akan di-void (audit tetap) & transaksi kembali Unallocated.")) return;
+    try {
+      await axios.post(`${API}/admin/rekon/imports/${encodeURIComponent(btid)}/to-expense/reverse`, {}, { headers });
+      await loadBiaya();
+    } catch (e) { window.alert(e?.response?.data?.detail || "Gagal membatalkan"); }
+  };
   const runAisDiag = async () => {
     setAisBusy(true); setAisDiag(null);
     try { const { data } = await axios.get(`${API}/admin/ais/diag`); setAisDiag(data); }
@@ -1576,6 +1615,70 @@ function PengaturanPage({ dark, onToggleTheme, onLogout, fixHeicPhotos, fixingHe
             </div>
           )}
         </div>
+      </div>
+
+      {/* ── Rekon → Biaya / Beban (transaksi bank yang BUKAN pembayaran supplier) ── */}
+      <div style={{ padding: "16px 18px", borderRadius: 12, background: "#0e1420", border: "1px solid #1a2130", marginBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 13.5, fontWeight: 700, color: "#e6edf3" }}>Rekon → Biaya / Beban 🧾</div>
+            <div style={{ fontSize: 11, color: "#6b7681", marginTop: 2 }}>Transaksi bank yang belum ketemu supplier bisa diposting jadi Biaya (bukan HPP). Entity ikut rekening (PT/CV), nominal &amp; tanggal dari bank — tinggal pilih kategori.</div>
+          </div>
+          <button onClick={loadBiaya} disabled={biayaBusy} style={{ padding: "9px 16px", borderRadius: 9, border: "1px solid #6e40c9", background: "#1a1033", color: "#b392f0", fontWeight: 700, fontSize: 12.5, cursor: "pointer", flexShrink: 0 }} data-testid="rekon-biaya-load">
+            {biayaBusy ? "⏳ Memuat..." : "🔎 Muat Transaksi"}
+          </button>
+        </div>
+
+        {biayaOpen && (
+          <div style={{ marginTop: 12 }}>
+            {/* Belum ditentukan → bisa dirute jadi Biaya */}
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#8b949e", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>Unallocated ({unallocTx.length}) — belum jadi Supplier/Biaya</div>
+            {unallocTx.length === 0 ? (
+              <div style={{ fontSize: 12, color: "#6b7681", marginBottom: 10 }}>Tidak ada transaksi menunggu. 👍</div>
+            ) : unallocTx.map((t) => {
+              const f = biayaForm[t.bank_transaction_id] || {};
+              const amt = t.nominal != null ? t.nominal : (t.raw_payload && t.raw_payload.nominal);
+              return (
+                <div key={t.bank_transaction_id} style={{ border: "1px solid #1f2937", borderRadius: 10, padding: 10, marginBottom: 8, background: "#0b0f17" }}>
+                  <div style={{ fontSize: 12.5, color: "#c9d1d9" }}>
+                    <b>{_rp(amt)}</b> · {_entLabel(t.source_entity)} · {t.tanggal || "-"}
+                  </div>
+                  <div style={{ fontSize: 11, color: "#8b949e", marginTop: 2 }}>{t.deskripsi_bank || "(tanpa deskripsi)"} <span style={{ color: "#6b7681" }}>· id: {t.bank_transaction_id}</span></div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                    <select value={f.kategori || ""} onChange={(e) => setBiayaForm((s) => ({ ...s, [t.bank_transaction_id]: { ...f, kategori: e.target.value } }))}
+                      style={{ flex: "1 1 160px", padding: "7px 10px", borderRadius: 8, border: "1px solid #1f2937", background: "#0e1420", color: "#e6edf3", fontSize: 12 }} data-testid="rekon-biaya-kat">
+                      <option value="">— pilih kategori —</option>
+                      {expCats.map((c) => <option key={c.id} value={c.nama}>{c.nama}</option>)}
+                    </select>
+                    <input value={f.deskripsi || ""} onChange={(e) => setBiayaForm((s) => ({ ...s, [t.bank_transaction_id]: { ...f, deskripsi: e.target.value } }))}
+                      placeholder="keterangan (opsional)" style={{ flex: "2 1 180px", padding: "7px 10px", borderRadius: 8, border: "1px solid #1f2937", background: "#0e1420", color: "#e6edf3", fontSize: 12 }} />
+                    <button onClick={() => postBiaya(t.bank_transaction_id)} style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid #2ea043", background: "#0d2a17", color: "#3fb950", fontWeight: 700, fontSize: 12, cursor: "pointer", flexShrink: 0 }} data-testid="rekon-biaya-post">
+                      Posting → Biaya
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Sudah diposting jadi Biaya → reversible */}
+            {postedTx.length > 0 && (
+              <>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#8b949e", textTransform: "uppercase", letterSpacing: 0.5, margin: "12px 0 6px" }}>Sudah jadi Biaya ({postedTx.length})</div>
+                {postedTx.map((t) => (
+                  <div key={t.bank_transaction_id} style={{ border: "1px solid #1f2937", borderRadius: 10, padding: 10, marginBottom: 8, background: "#0b0f17", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                    <div style={{ fontSize: 12.5, color: "#c9d1d9" }}>
+                      🧾 <b>{_rp(t.nominal != null ? t.nominal : (t.raw_payload && t.raw_payload.nominal))}</b> · {_entLabel(t.source_entity)} · {t.tanggal || "-"}
+                      <span style={{ color: "#6b7681", fontSize: 11 }}> · id: {t.bank_transaction_id}</span>
+                    </div>
+                    <button onClick={() => reverseBiaya(t.bank_transaction_id)} style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid #6e3030", background: "#2a1010", color: "#f0a0a0", fontWeight: 700, fontSize: 11.5, cursor: "pointer", flexShrink: 0 }} data-testid="rekon-biaya-reverse">
+                      Batalkan (→ Unallocated)
+                    </button>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

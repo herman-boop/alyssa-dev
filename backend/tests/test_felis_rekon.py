@@ -434,12 +434,48 @@ async def test_expenses_helpers():
     ok("status" not in EXP._build_filter(status="all"), "status=all → tidak difilter (lihat semua)")
 
 
+async def test_rekon_to_biaya():
+    """Rekon → Biaya/Beban: entity map (PT/CV), guard anti double-post,
+    nominal dari bank, reversible void → Unallocated."""
+    print("test_rekon_to_biaya")
+    ok(R.doc_entity_for("PT_ALYSSA_AUTO_LOGISTIK") == "pt-alyssa", "PT → pt-alyssa")
+    ok(R.doc_entity_for("CV_ALYSSA_TRANS_UTAMA") == "cv-alyssa-trans", "CV → cv-alyssa-trans")
+    ok(R.doc_entity_for("ngawur") == "", "entity tak dikenal → kosong (ditolak)")
+    ok(R.can_post_as_expense({"status": "supplier_not_found"})[0], "supplier_not_found → boleh Biaya")
+    ok(not R.can_post_as_expense({"status": "processed"})[0], "processed (supplier) → tolak")
+    ok(not R.can_post_as_expense({"status": "reversed"})[0], "reversed → tolak")
+    ok(not R.can_post_as_expense({"status": "posted_expense", "expense_id": "x"})[0], "sudah Biaya → tolak (anti dobel)")
+    ok(not R.can_post_as_expense(None)[0], "tidak ada → tolak")
+    ok(R.import_amount({"nominal": 750000}) == 750000, "nominal dari import")
+    ok(R.import_amount({"raw_payload": {"nominal": 400000}}) == 400000, "fallback raw_payload.nominal")
+    # Integrasi (fake DB): transaksi tanpa supplier → supplier_not_found → Biaya → anti double-post
+    db = FakeDB(); await R.ensure_indexes(db)
+    btid = "bt-biaya-1"
+    r = await R.ingest_transaction(db, _payload(bank_transaction_id=btid, idempotency_key=btid, supplier_id="", supplier_name=""))
+    ok(r["status"] == "supplier_not_found", "tanpa supplier → supplier_not_found (kandidat Biaya)")
+    imp = await db[R.IMPORTS_COLLECTION].find_one({"bank_transaction_id": btid})
+    ok(R.can_post_as_expense(imp)[0] and R.import_amount(imp) == 5000000, "import layak Biaya, nominal 5jt dari bank")
+    await R.mark_import_as_expense(db, btid, "exp-1")
+    imp2 = await db[R.IMPORTS_COLLECTION].find_one({"bank_transaction_id": btid})
+    ok(imp2["status"] == "posted_expense" and imp2["expense_id"] == "exp-1", "import CONSUMED sbg Biaya")
+    ok(not R.can_post_as_expense(imp2)[0], "tidak bisa diposting Biaya 2x")
+    await _seed_supplier(db)
+    r2 = await R.ingest_transaction(db, _payload(bank_transaction_id=btid, idempotency_key=btid))
+    ok(r2["status"] == "already_processed", "re-ingest transaksi Biaya → already_processed (bukan supplier)")
+    sup = await db.supplier_profiles.find_one({"id": "a3f9c1e2"})
+    ok(len(sup.get("rekon_payments") or []) == 0, "anti double-post: TIDAK ada pembayaran supplier dibuat")
+    await R.unmark_import_expense(db, btid)
+    imp3 = await db[R.IMPORTS_COLLECTION].find_one({"bank_transaction_id": btid})
+    ok(imp3["status"] == "supplier_not_found" and not imp3.get("expense_id"), "void expense → transaksi balik Unallocated")
+    ok(R.can_post_as_expense(imp3)[0], "setelah balik Unallocated → bisa dirute ulang")
+
+
 async def main():
     for t in (test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,
-              test_expenses_helpers, test_felis_adapter):
+              test_expenses_helpers, test_rekon_to_biaya, test_felis_adapter):
         await t()
     print(f"\nSEMUA LULUS — {PASS} assertions.")
 

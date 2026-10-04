@@ -6695,6 +6695,58 @@ async def rekon_reverse_import(bank_transaction_id: str, body: Optional[Dict[str
     return res
 
 
+@api_router.post("/admin/rekon/imports/{bank_transaction_id}/to-expense", dependencies=[Depends(require_admin_pin)])
+async def rekon_import_to_expense(bank_transaction_id: str, body: Dict[str, Any] = Body(...)):
+    """Posting 1 transaksi bank (yang BUKAN pembayaran supplier) sebagai Biaya/Beban.
+    - Entity WAJIB ikut rekening sumber (PT/CV) — tidak ketik ulang.
+    - Nominal & tanggal diambil langsung dari transaksi bank.
+    - User cukup pilih kategori + keterangan.
+    - Transaksi jadi CONSUMED (anti double-post ke Supplier/Biaya lain)."""
+    btid = str(bank_transaction_id or "").strip()
+    imp = await db[rekon_sync.IMPORTS_COLLECTION].find_one({"bank_transaction_id": btid}, {"_id": 0})
+    ok, reason = rekon_sync.can_post_as_expense(imp)
+    if not ok:
+        raise HTTPException(409, reason)
+    entity = rekon_sync.doc_entity_for(imp.get("source_entity"))
+    if not entity:
+        raise HTTPException(400, f"source_entity rekening tidak dikenal: {imp.get('source_entity') or '(kosong)'}")
+    nominal = rekon_sync.import_amount(imp)
+    if nominal <= 0:
+        raise HTTPException(400, "nominal transaksi bank tidak valid")
+    payload = {
+        "entity_id": entity,
+        "nominal": nominal,
+        "tanggal": imp.get("tanggal"),
+        "kategori": (body or {}).get("kategori"),
+        "deskripsi": (body or {}).get("deskripsi") or imp.get("deskripsi_bank") or "",
+        "metode": "Transfer (Rekon Bank)",
+        "referensi": btid,
+    }
+    res = await expenses_mod.create_expense(db, payload, created_by="rekon")
+    if isinstance(res, dict) and res.get("error"):
+        raise HTTPException(400, res["error"])
+    # Tautkan balik ke transaksi bank + tandai CONSUMED (anti double-post).
+    await db[expenses_mod.EXPENSES].update_one(
+        {"id": res["id"]}, {"$set": {"source_bank_transaction_id": btid}})
+    await rekon_sync.mark_import_as_expense(db, btid, res["id"])
+    res["source_bank_transaction_id"] = btid
+    return {"ok": True, "expense": res, "bank_transaction_id": btid}
+
+
+@api_router.post("/admin/rekon/imports/{bank_transaction_id}/to-expense/reverse", dependencies=[Depends(require_admin_pin)])
+async def rekon_import_to_expense_reverse(bank_transaction_id: str, body: Optional[Dict[str, Any]] = Body(None)):
+    """Batalkan posting Biaya dari transaksi bank: void expense-nya (soft, audit
+    trail) → transaksi bank kembali Unallocated (bisa dirute ulang)."""
+    btid = str(bank_transaction_id or "").strip()
+    imp = await db[rekon_sync.IMPORTS_COLLECTION].find_one({"bank_transaction_id": btid}, {"_id": 0})
+    if not imp or imp.get("status") != "posted_expense" or not imp.get("expense_id"):
+        raise HTTPException(409, "Transaksi ini tidak sedang diposting sebagai Biaya")
+    reason = (body or {}).get("reason", "Dibatalkan dari Rekon → kembali Unallocated")
+    void_res = await expenses_mod.void_expense(db, imp["expense_id"], reason=reason, by="rekon")
+    await rekon_sync.unmark_import_expense(db, btid)
+    return {"ok": True, "bank_transaction_id": btid, "status": "unallocated", "void": void_res}
+
+
 @api_router.post("/admin/suppliers/{supplier_id}/rekon-payments/{rekon_payment_id}/allocate", dependencies=[Depends(require_admin_pin)])
 async def rekon_allocate_payment(supplier_id: str, rekon_payment_id: str, body: Dict[str, Any] = Body(...)):
     """Alokasikan pembayaran Rekon (yang Belum Dialokasikan) ke 1+ tagihan/job.
