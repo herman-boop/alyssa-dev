@@ -1546,7 +1546,7 @@ function PengaturanPage({ dark, onToggleTheme, onLogout, fixHeicPhotos, fixingHe
                   <div>di-ACK ke Felis: <b>{pullRes.acked ?? 0}</b> transaksi</div>
                   {pullRes.warning && <div style={{ color: "#f0a742", marginTop: 4 }}>⚠️ {pullRes.warning}</div>}
                   {(pullRes.summary?.created > 0) && (
-                    <div style={{ color: "#8b949e", marginTop: 6 }}>→ Buka <b style={{ color: "#e6edf3" }}>Supplier → (nama) → tab Riwayat</b> untuk Alokasikan pembayaran ke PO.</div>
+                    <div style={{ color: "#8b949e", marginTop: 6 }}>→ Pembayaran <b style={{ color: "#3fb950" }}>otomatis dialokasikan</b> ke tagihan (lunas). Cek di <b style={{ color: "#e6edf3" }}>Supplier → (nama)</b>. Perlu koreksi? Tab <b style={{ color: "#e6edf3" }}>Riwayat</b> → <b>Alokasikan</b> (edit) / <b>Reverse</b> (batal).</div>
                   )}
                 </div>
               )}

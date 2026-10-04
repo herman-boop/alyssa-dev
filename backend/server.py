@@ -6668,12 +6668,37 @@ async def rekon_allocate_payment(supplier_id: str, rekon_payment_id: str, body: 
     return res
 
 
+async def _auto_allocate_rekon(supplier_id: str, rekon_payment_id: str, amount) -> dict:
+    """AUTO-ALOKASI saat Tarik: bagikan pembayaran Rekon ke tagihan supplier yang
+    BELUM lunas (berurutan), sampai uang habis. Tidak melebihi sisa tiap PO; sisa
+    uang tetap Belum Dialokasikan. Reversible & bisa di-edit manual (Alokasikan)."""
+    sup = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not sup:
+        return {"allocated": 0}
+    rk = _supplier_rekon_overview(sup)
+    alloc_by_job = dict(rk.get("alloc_by_job") or {})   # alokasi lain (pembayaran ini msh 0)
+    job_sisa = []
+    for job in (sup.get("jobs") or []):
+        jid = job.get("id")
+        if not jid:
+            continue
+        tot = _supplier_job_totals(job, extra_paid=alloc_by_job.get(jid, 0))
+        job_sisa.append((jid, tot.get("sisa") or 0))
+    allocs = rekon_sync.waterfall_allocations(job_sisa, amount)
+    if allocs:
+        await rekon_sync.allocate_payment(db, supplier_id, rekon_payment_id, allocs)
+    total = sum(a["amount"] for a in allocs)
+    return {"allocated": total, "unallocated": int(amount or 0) - total, "allocations": allocs}
+
+
 @api_router.post("/admin/rekon/pull", dependencies=[Depends(require_admin_pin)])
-async def rekon_pull_from_felis(entitas: Optional[str] = None, batas: Optional[int] = None):
-    """Tarik transaksi READY dari Felis → ingest (idempoten) → ACK HANYA yang
-    benar-benar tersimpan permanen. Alur sesuai kontrak final:
-      READY (baca) → simpan permanen → ACK (partial diperbolehkan).
-    supplier_not_found/error TIDAK di-ACK → muncul lagi di READY berikutnya."""
+async def rekon_pull_from_felis(entitas: Optional[str] = None, batas: Optional[int] = None,
+                                auto_allocate: bool = True):
+    """Tarik transaksi READY dari Felis → ingest (idempoten) → AUTO-ALOKASI ke
+    tagihan supplier (bikin lunas otomatis) → ACK HANYA yang tersimpan permanen.
+    Alur: READY (baca) → simpan permanen → alokasi → ACK (partial diperbolehkan).
+    supplier_not_found/error TIDAK di-ACK → muncul lagi di READY berikutnya.
+    auto_allocate=false → masuk Belum Dialokasikan (alokasi manual lewat Supplier)."""
     if not rekon_felis_client.is_configured():
         return {"ok": False, "status": "not_configured",
                 "detail": "Koneksi Felis belum diset (FELIS_BASE_URL + FELIS_TOKEN)."}
@@ -6688,6 +6713,14 @@ async def rekon_pull_from_felis(entitas: Optional[str] = None, batas: Optional[i
     for it in data:
         try:
             r = await rekon_sync.ingest_transaction(db, it)
+            # Auto-alokasi ke tagihan supplier (hanya utk yang BARU dibuat).
+            if auto_allocate and r.get("status") == "created" and r.get("rekon_payment_id"):
+                try:
+                    aa = await _auto_allocate_rekon(r.get("supplier_id"), r.get("rekon_payment_id"), r.get("amount"))
+                    r["auto_alloc"] = aa
+                except Exception as e:
+                    logger.warning("[rekon] auto-alokasi gagal: %s", e)
+                    r["auto_alloc"] = {"error": str(e)}
         except Exception as e:
             logger.warning("[rekon] ingest gagal: %s", e)
             r = {"status": "error", "error": str(e),
