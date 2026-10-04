@@ -6876,6 +6876,22 @@ async def contacts_dedup_audit_readonly():
     return await supplier_dedup.audit_contacts(db)
 
 
+@api_router.get("/admin/pelanggan/dedup/suggest", dependencies=[Depends(require_admin_pin)])
+async def pelanggan_dedup_suggest(nama: str = "", no_hp: str = ""):
+    """READ-ONLY. Sebelum bikin master Pelanggan baru, cek yang MIRIP (cegah
+    duplikat gara-gara beda penulisan nama). Reuse logika dedup supplier.
+    Tidak mengubah data apa pun."""
+    if not (nama or "").strip():
+        return {"candidates": []}
+    rows = []
+    async for p in db.pelanggan_profiles.find({}, {"_id": 0, "id": 1, "nama_pt": 1, "pic_hp": 1}):
+        rows.append({"id": p.get("id"), "nama": p.get("nama_pt"), "no_hp": p.get("pic_hp")})
+    cands = supplier_dedup.suggest_similar(nama, no_hp, rows)
+    for c in cands:
+        c["pelanggan_id"] = c.pop("supplier_id")   # samakan penamaan sisi pelanggan
+    return {"candidates": cands}
+
+
 @api_router.get("/admin/suppliers/{supplier_id}/ringkasan")
 async def supplier_ringkasan_data(supplier_id: str, pin: str = Query(...)):
     """Data buat halaman kartu Ringkasan Pembayaran (dirender Chromium headless

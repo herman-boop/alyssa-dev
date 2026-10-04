@@ -207,10 +207,25 @@ export default function CostCalculator() {
   };
 
   const createNewPt = async () => {
-    if (!ptQuery.trim()) { alert("Masukkan nama PT terlebih dahulu"); return; }
+    const nama = ptQuery.trim();
+    if (!nama) { alert("Masukkan nama PT terlebih dahulu"); return; }
     try {
+      // Cegah master Pelanggan dobel: cek yang MIRIP dulu (read-only). Kalau ada,
+      // tanya — Batal = buka yang sudah ada, OK = tetap buat baru.
+      try {
+        const sug = await axios.get(`${API}/admin/pelanggan/dedup/suggest`,
+          { params: { nama }, headers: { "x-admin-pin": adminPin } });
+        const cands = sug.data?.candidates || [];
+        if (cands.length) {
+          const list = cands.map((c) => `• ${c.nama}${c.no_hp ? ` (${c.no_hp})` : ""} — ${c.reason}`).join("\n");
+          const buatBaru = window.confirm(
+            `Pelanggan mirip sudah ada:\n\n${list}\n\nOK = TETAP buat "${nama}" sebagai pelanggan baru.\nBatal = buka pelanggan yang sudah ada.`
+          );
+          if (!buatBaru) { await selectPt({ id: cands[0].pelanggan_id, nama_pt: cands[0].nama }); return; }
+        }
+      } catch (_) { /* suggest gagal → jangan blokir pembuatan */ }
       const res = await axios.post(`${API}/admin/pelanggan`,
-        { nama_pt: ptQuery.trim() },
+        { nama_pt: nama },
         { headers: { "x-admin-pin": adminPin } }
       );
       setSelectedPt(res.data);
@@ -240,10 +255,8 @@ export default function CostCalculator() {
       if (exact) { selectPt(exact); return; }
       // Masih ada saran cocok → jangan bikin nama setengah jadi (tinggal klik saran).
       if (ptDropdown.length > 0) return;
-      try {
-        const res = await axios.post(`${API}/admin/pelanggan`, { nama_pt: nama }, { headers: { "x-admin-pin": adminPin } });
-        setSelectedPt(res.data); setPtDropdown([]);
-      } catch (_) { /* diamkan — user masih bisa klik + PT Baru manual */ }
+      // Lewat createNewPt biar kena cek duplikat (peringatan sebelum bikin master).
+      await createNewPt();
     }, 250);
   };
 

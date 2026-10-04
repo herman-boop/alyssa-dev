@@ -13,6 +13,7 @@ import os, sys, asyncio, types
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # backend/
 import rekon_sync as R
+from supplier_dedup import suggest_similar
 
 
 # ── Fake async Mongo (cukup untuk yang dipakai rekon_sync) ───────────────────
@@ -397,11 +398,29 @@ async def test_waterfall_auto_alloc():
     ok(e == [], "tidak ada tagihan → alokasi kosong (tetap Belum Dialokasikan)")
 
 
+async def test_dedup_suggest():
+    """suggest_similar: dipakai dedup Supplier & Pelanggan (cegah master dobel)."""
+    print("test_dedup_suggest")
+    rows = [
+        {"id": "a1", "nama": "PT ABC", "no_hp": "0811"},
+        {"id": "a2", "nama": "CV Maju Jaya", "no_hp": ""},
+        {"id": "a4", "nama": "PT Lama", "no_hp": "", "status": "merged"},
+    ]
+    for q in ("PT. ABC", "abc pt", "ABC", "  pt   abc "):
+        c = suggest_similar(q, "", rows)
+        ok(any(x["supplier_id"] == "a1" and x["confidence"] == "high" for x in c), f"'{q}' → mirip PT ABC (high)")
+    ok(any(x["supplier_id"] == "a1" and x["confidence"] == "high" for x in suggest_similar("Toko X", "0811", rows)), "HP sama → high")
+    ok(any(x["supplier_id"] == "a2" for x in suggest_similar("Maju", "", rows)), "'Maju' ⊂ 'CV Maju Jaya'")
+    ok(suggest_similar("Sumber Rezeki", "", rows) == [], "nama beda total → tidak ada")
+    ok(all(x["supplier_id"] != "a4" for x in suggest_similar("PT Lama", "", rows)), "merged dilewati")
+
+
 async def main():
     for t in (test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
-              test_preview_readonly, test_waterfall_auto_alloc, test_felis_adapter):
+              test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,
+              test_felis_adapter):
         await t()
     print(f"\nSEMUA LULUS — {PASS} assertions.")
 
