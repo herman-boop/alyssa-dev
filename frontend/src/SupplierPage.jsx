@@ -834,6 +834,22 @@ export default function SupplierPage() {
     setAllocRows((p.allocations && p.allocations.length) ? p.allocations.map((a) => ({ job_id: a.job_id, amount: String(a.amount || "") })) : [{ job_id: "", amount: "" }]);
   };
   const allocTotal = allocRows.reduce((s, r) => s + pNum(r.amount), 0);
+  // Isi otomatis: bagikan nominal pembayaran ke tagihan yang belum lunas
+  // (berurutan) sampai habis — biar admin TIDAK perlu ketik nominal manual.
+  const autoFillAlloc = () => {
+    if (!allocPay) return;
+    let remaining = allocPay.amount || 0;
+    const rows = [];
+    for (const j of (selected.jobs || [])) {
+      if (remaining <= 0) break;
+      const sisa = j.sisa || 0;
+      if (sisa <= 0) continue;
+      const give = Math.min(remaining, sisa);
+      rows.push({ job_id: j.id, amount: String(give) });
+      remaining -= give;
+    }
+    setAllocRows(rows.length ? rows : [{ job_id: "", amount: "" }]);
+  };
   const saveAlloc = async () => {
     if (!allocPay) return;
     const rows = allocRows.filter((r) => r.job_id && pNum(r.amount) > 0).map((r) => ({ job_id: r.job_id, amount: pNum(r.amount) }));
@@ -1364,6 +1380,9 @@ export default function SupplierPage() {
             Belum dialokasi: <b style={{ color: allocTotal > allocPay.amount ? C.red : C.gold }}>{fRp(Math.max(0, allocPay.amount - allocTotal))}</b>
             {allocTotal > allocPay.amount && <span style={{ color: C.red }}> · melebihi nominal!</span>}
           </div>
+          <button style={{ ...BTN, background: C.green, borderColor: C.green, marginBottom: 12, width: "100%" }} onClick={autoFillAlloc} data-testid="sup-alloc-autofill">
+            ⚡ Isi Otomatis (bagi ke tagihan belum lunas)
+          </button>
           {allocRows.map((r, i) => (
             <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8 }}>
               <select style={{ ...I, flex: 1.6 }} value={r.job_id} onChange={(e) => setAllocRows((rows) => rows.map((x, k) => k === i ? { ...x, job_id: e.target.value } : x))} data-testid={`sup-alloc-job-${i}`}>
