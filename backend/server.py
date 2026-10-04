@@ -6722,6 +6722,29 @@ async def rekon_pull_from_felis(entitas: Optional[str] = None, batas: Optional[i
             "warning": warning, "results": results}
 
 
+@api_router.get("/admin/rekon/preview", dependencies=[Depends(require_admin_pin)])
+async def rekon_preview(batas: int = 1, entitas: Optional[str] = None):
+    """PREVIEW READ-ONLY (untuk test pertama): baca transaksi READY dari Felis dan
+    tampilkan data yang AKAN diproses, TANPA menyimpan pembayaran, TANPA mengubah
+    supplier, TANPA ACK, TANPA mengubah status Felis / data production apa pun.
+    READY bersifat baca murni (tidak meng-ACK) — status transaksi di Felis tetap
+    'siap'. Default `batas=1` → cukup 1 transaksi untuk tes awal. Token tidak
+    pernah ditampilkan."""
+    if not rekon_felis_client.is_configured():
+        return {"ok": False, "status": "not_configured",
+                "detail": "Koneksi Felis belum diset (FELIS_BASE_URL + FELIS_TOKEN)."}
+    try:
+        ready = await rekon_felis_client.fetch_ready(entitas=entitas, batas=max(1, int(batas or 1)))
+    except rekon_felis_client.FelisError as e:
+        return {"ok": False, "status": "felis_error", "detail": str(e)}
+    data = ready.get("data") or []
+    preview = [await rekon_sync.preview_item(db, it) for it in data]
+    return {"ok": True, "mode": "preview-read-only",
+            "catatan": "READ-ONLY: tidak menyimpan, tidak ACK, tidak mengubah supplier/Felis/data production.",
+            "batch": ready.get("batch"), "dibuat_pada": ready.get("dibuat_pada"),
+            "jumlah": ready.get("jumlah"), "preview": preview}
+
+
 @api_router.get("/admin/rekon/koreksi", dependencies=[Depends(require_admin_pin)])
 async def rekon_koreksi_list():
     """KOREKSI (read-only): daftar transaksi yang supplier_id-nya diubah di Felis

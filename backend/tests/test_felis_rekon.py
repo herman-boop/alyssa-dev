@@ -335,10 +335,52 @@ async def test_pull_ack_selection():
        "ACK ulang: created+already_processed dua-duanya ikut (aman, idempoten)")
 
 
+async def test_preview_readonly():
+    print("test_preview_readonly")
+    db = FakeDB(); await R.ensure_indexes(db); await _seed_supplier(db, sid="a3f9c1e2")
+    # snapshot keadaan sebelum preview
+    sup_before = await db.supplier_profiles.find_one({"id": "a3f9c1e2"})
+    imports_before = len(db["bank_payment_imports"].docs)
+
+    pv = await R.preview_item(db, _payload())
+    # field aman tampil, token TIDAK ada
+    for f in ("bank_transaction_id", "supplier_id", "supplier_name", "source_entity",
+              "tanggal", "nominal", "beneficiary_name_raw", "deskripsi_bank", "alokasi"):
+        ok(f in pv, f"preview menampilkan {f}")
+    ok("FELIS_TOKEN" not in str(pv) and "Bearer" not in str(pv), "preview tak membocorkan token/credential")
+    ok(pv["would_status"] == "would_create", "supplier ada + valid → would_create")
+    ok(pv["supplier_found"] is True and pv["supplier_nama_master"] == "MARTHEN RUTURAMBE",
+       "preview tunjukkan nama master utk verifikasi")
+
+    # BUKTI READ-ONLY: tidak ada tulisan ke DB
+    sup_after = await db.supplier_profiles.find_one({"id": "a3f9c1e2"})
+    ok(sup_after.get("rekon_payments", []) == sup_before.get("rekon_payments", []) == [],
+       "preview TIDAK menyimpan pembayaran")
+    ok(len(db["bank_payment_imports"].docs) == imports_before == 0,
+       "preview TIDAK membuat import record (tidak lock, tidak ACK)")
+
+    # alokasi [] → tetap would_create (Unallocated)
+    pv2 = await R.preview_item(db, _payload(alokasi=[]))
+    ok(pv2["alokasi"] == [] and pv2["would_status"] == "would_create", "alokasi [] → would_create (Unallocated)")
+
+    # supplier tak ada → would supplier_not_found (tanpa efek samping)
+    pv3 = await R.preview_item(db, _payload(supplier_id="zzzz9999"))
+    ok(pv3["would_status"] == "supplier_not_found" and pv3["supplier_found"] is False,
+       "supplier tak ada → would supplier_not_found")
+    none = await db.supplier_profiles.find_one({"id": "zzzz9999"})
+    ok(none is None, "preview supplier_not_found TIDAK membuat supplier baru")
+
+    # sudah processed → would already_processed
+    await R.ingest_transaction(db, _payload())
+    pv4 = await R.preview_item(db, _payload())
+    ok(pv4["would_status"] == "already_processed", "yang sudah tersimpan → would already_processed")
+
+
 async def main():
     for t in (test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
-              test_allocate, test_koreksi, test_pull_ack_selection, test_felis_adapter):
+              test_allocate, test_koreksi, test_pull_ack_selection,
+              test_preview_readonly, test_felis_adapter):
         await t()
     print(f"\nSEMUA LULUS — {PASS} assertions.")
 

@@ -84,6 +84,61 @@ def pick_ack_ids(items, results):
     return ids
 
 
+# Field aman yang ditampilkan di preview (TANPA token/credential).
+_PREVIEW_FIELDS = (
+    "bank_transaction_id", "supplier_id", "supplier_name", "source_entity",
+    "tanggal", "nominal", "beneficiary_name_raw", "deskripsi_bank", "alokasi",
+)
+
+
+async def preview_item(db, payload):
+    """READ-ONLY: perlihatkan apa yang AKAN terjadi untuk 1 item READY, TANPA
+    menyimpan, TANPA ACK, TANPA mengubah supplier/import/Felis. Hanya SELECT.
+
+    Mengembalikan field aman (lihat _PREVIEW_FIELDS) + `would_status` = perkiraan
+    hasil kalau nanti diproses: would_create | already_processed | reversed |
+    supplier_not_found | error. Tidak menulis apa pun ke DB."""
+    payload = dict(payload or {})
+    out = {k: payload.get(k) for k in _PREVIEW_FIELDS}
+    # alokasi selalu tampil sebagai array (kontrak).
+    if not isinstance(out.get("alokasi"), list):
+        out["alokasi"] = [out["alokasi"]] if isinstance(out.get("alokasi"), dict) else []
+
+    btid = str(payload.get("bank_transaction_id") or payload.get("idempotency_key") or "").strip()
+    sid = str(payload.get("supplier_id") or "").strip()
+    entity = str(payload.get("source_entity") or "").strip()
+    amount = _to_int(payload.get("nominal"))
+
+    # Cek status import yang sudah ada (read-only).
+    rec = await db[IMPORTS_COLLECTION].find_one({"bank_transaction_id": btid}, {"_id": 0, "status": 1}) if btid else None
+    st = (rec or {}).get("status")
+    # Cek supplier di master (read-only) — match canonical, tanpa matching nama.
+    sup = await db.supplier_profiles.find_one({"id": sid}, {"_id": 0, "id": 1, "nama": 1}) if sid else None
+
+    if not btid:
+        would = "error"; reason = "bank_transaction_id/idempotency_key kosong"
+    elif st == "processed":
+        would = "already_processed"; reason = "sudah pernah tersimpan (tidak akan dobel)"
+    elif st == "reversed":
+        would = "reversed"; reason = "sudah pernah dibatalkan (final)"
+    elif not sid or not sup:
+        would = "supplier_not_found"; reason = "supplier_id tidak ada di master alyssa-dev (tidak akan dibuat baru, tidak akan di-ACK)"
+    elif entity not in VALID_ENTITIES:
+        would = "error"; reason = f"source_entity tidak sah: {entity or '(kosong)'}"
+    elif amount <= 0:
+        would = "error"; reason = "nominal harus > 0"
+    else:
+        would = "would_create"
+        reason = ("akan disimpan sebagai Unallocated Payment"
+                  if not out["alokasi"] else "akan disimpan (alokasi hanya catatan audit)")
+
+    out["supplier_found"] = bool(sup)
+    out["supplier_nama_master"] = (sup or {}).get("nama")   # nama resmi di alyssa-dev (verifikasi)
+    out["would_status"] = would
+    out["note"] = reason
+    return out
+
+
 def _now_iso():
     return datetime.now(timezone.utc).isoformat()
 
