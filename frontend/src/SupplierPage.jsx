@@ -922,6 +922,13 @@ export default function SupplierPage() {
     try { await axios.patch(`${API}/admin/suppliers/${selected.id}/projects/${g.id}/rename`, { nama: nama.trim() }, { headers }); await reloadSelected(selected.id); flash("Nama projek diperbarui"); }
     catch (e) { flash(e?.response?.data?.detail || "Gagal ganti nama projek"); }
   };
+  const genNoFaktur = async (g) => {
+    if (!selected || !g || g.id === "_none") return;
+    try {
+      await axios.post(`${API}/admin/suppliers/${selected.id}/projects/${g.id}/no-faktur`, {}, { headers });
+      await reloadSelected(selected.id); flash("✓ No. Faktur dibuat");
+    } catch (e) { flash(e?.response?.data?.detail || "Gagal buat No. Faktur"); }
+  };
 
   const resolveUrl = (u) => {
     if (!u) return "";
@@ -1001,7 +1008,7 @@ export default function SupplierPage() {
   const jobsGrouped = useMemo(() => {
     const projs = selected?.projects || [];
     const map = new Map();
-    projs.forEach((p) => map.set(p.id, { id: p.id, nama: p.nama, status: p.status, jobs: [] }));
+    projs.forEach((p) => map.set(p.id, { id: p.id, nama: p.nama, status: p.status, no_faktur: p.no_faktur || "", jobs: [] }));
     filteredJobs.forEach((j) => {
       const pid = j.project_id || "_none";
       if (!map.has(pid)) map.set(pid, { id: pid, nama: pid === "_none" ? "Tanpa Grup" : "Grup", status: "open", jobs: [] });
@@ -1200,7 +1207,8 @@ export default function SupplierPage() {
                 const gTotal = g.jobs.reduce((s, j) => s + (j.total_harga || 0), 0);
                 return (
                 <div key={g.id} style={{ marginBottom: 16 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "8px 12px", background: "#1a1f2e", border: `1px solid ${C.line}`, borderRadius: 10, marginBottom: 8 }}>
+                  <div style={{ padding: "8px 12px", background: "#1a1f2e", border: `1px solid ${C.line}`, borderRadius: 10, marginBottom: 8 }}>
+                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                     <div style={{ fontWeight: 800, fontSize: 13, color: C.gold, display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
                       <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>📁 {g.nama}</span>
                       {g.id !== "_none" && (
@@ -1210,6 +1218,18 @@ export default function SupplierPage() {
                       <span style={{ color: C.mute, fontWeight: 600, whiteSpace: "nowrap" }}>· {g.jobs.length} unit</span>
                     </div>
                     <div style={{ fontSize: 11, color: C.mute, whiteSpace: "nowrap" }}>Total {fRp(gTotal)} · Sisa <b style={{ color: gSisa > 0 ? C.red : C.green }}>{fRp(gSisa)}</b></div>
+                   </div>
+                   {g.id !== "_none" && (
+                    <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 11.5 }}>
+                      {g.no_faktur ? (<>
+                        <span style={{ color: C.mute }}>No. Faktur: <b style={{ fontFamily: "monospace", color: C.ink, letterSpacing: 0.3 }}>{g.no_faktur}</b></span>
+                        <button onClick={() => { try { navigator.clipboard?.writeText(String(g.no_faktur)); flash("✓ No. Faktur disalin"); } catch { /* ignore */ } }} style={{ fontSize: 10.5, fontWeight: 700, color: C.blue, background: "none", border: `1px solid ${C.blue}`, borderRadius: 6, padding: "1px 8px", cursor: "pointer" }} data-testid={`sup-copy-faktur-${g.id}`}>📋 Salin</button>
+                        <span style={{ color: C.mute, fontSize: 10 }}>← tempel di Rekon untuk pembayaran s/d lunas</span>
+                      </>) : (
+                        <button onClick={() => genNoFaktur(g)} style={{ fontSize: 10.5, fontWeight: 700, color: C.gold, background: "none", border: `1px solid ${C.gold}`, borderRadius: 6, padding: "1px 8px", cursor: "pointer" }} data-testid={`sup-gen-faktur-${g.id}`}>➕ Buat No. Faktur</button>
+                      )}
+                    </div>
+                   )}
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {g.jobs.map((j) => (

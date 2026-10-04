@@ -5774,6 +5774,15 @@ def _gen_supplier_id() -> str:
     return uuid.uuid4().hex[:8]
 
 
+async def _gen_no_faktur(db) -> str:
+    """No. Faktur Pembelian auto-naik (FP-AAL-000123). Counter atomik di
+    doc_counters. 1 faktur = 1 projek supplier (boleh banyak unit)."""
+    await db.doc_counters.update_one({"_id": "faktur-beli"}, {"$inc": {"seq": 1}}, upsert=True)
+    doc = await db.doc_counters.find_one({"_id": "faktur-beli"})
+    seq = int((doc or {}).get("seq") or 1)
+    return f"FP-AAL-{seq:06d}"
+
+
 # Default tarif pajak (bisa dioverride per tagihan; jangan hard-code di UI).
 PPN_RATE_DEFAULT = 1.1    # % dari DPP (PPN yang ditagih supplier, on top harga)
 PPH23_RATE_DEFAULT = 2.0  # % dari DPP (PPh 23 dipotong dari transfer supplier)
@@ -6336,11 +6345,29 @@ async def add_supplier_project(supplier_id: str, body: SupplierProjectBody):
     nama = body.nama.strip() or f"Projek {len(projects) + 1}"
     new_proj = {
         "id": _gen_supplier_id(), "nama": nama, "status": "open",
+        "no_faktur": await _gen_no_faktur(db),   # No. Faktur Pembelian otomatis
         "created_at": datetime.utcnow().isoformat(), "closed_at": None,
     }
     projects = projects + [new_proj]
     await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"projects": projects}})
     return new_proj
+
+
+@api_router.post("/admin/suppliers/{supplier_id}/projects/{project_id}/no-faktur", dependencies=[Depends(require_admin_pin)])
+async def gen_project_no_faktur(supplier_id: str, project_id: str):
+    """Beri No. Faktur ke projek yang belum punya (buat projek lama / backfill).
+    Additive: tidak mengubah unit/pembayaran. Idempoten (kalau sudah ada, pakai yg ada)."""
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    projects = doc.get("projects") or []
+    tgt = next((p for p in projects if p.get("id") == project_id), None)
+    if not tgt:
+        raise HTTPException(404, "Projek tidak ditemukan")
+    if not tgt.get("no_faktur"):
+        tgt["no_faktur"] = await _gen_no_faktur(db)
+        await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"projects": projects}})
+    return {"ok": True, "no_faktur": tgt["no_faktur"]}
 
 
 @api_router.patch("/admin/suppliers/{supplier_id}/projects/{project_id}/close", dependencies=[Depends(require_admin_pin)])
