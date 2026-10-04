@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import axios from "axios";
-import { DOC_BRAND, DOC_BASE_CSS, docHeader, docFooter } from "./docTheme";
+import { DOC_BRAND, DOC_BASE_CSS, docHeader, docFooter, DOC_ENTITIES } from "./docTheme";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "";
 const API = `${BACKEND_URL}/api`;
@@ -807,6 +807,13 @@ export default function SupplierPage() {
     setDetailTag(job.tag || "");
   };
   const detailJobLive = useMemo(() => detailJob && jobs.find((j) => j.id === detailJob.id), [detailJob, jobs]);
+  const setJobEntity = async (ent) => {
+    const job = detailJob; if (!job || !selected) return;
+    try {
+      await axios.patch(`${API}/admin/suppliers/${selected.id}/jobs/${job.id}/entity`, { entity_id: ent }, { headers });
+      await reloadSelected(selected.id);
+    } catch (e) { flash(e?.response?.data?.detail || "Gagal set entitas"); }
+  };
   const submitDetailPay = async () => {
     const job = detailJob; if (!job) return;
     const amt = pNum(dpAmount);
@@ -1649,6 +1656,16 @@ export default function SupplierPage() {
               <button style={{ ...BTN, padding: "0 16px" }} disabled={tagSaving || detailTag.trim() === (detailJobLive.tag || "").trim()} onClick={saveJobTag} data-testid="sup-detail-tag-save">{tagSaving ? "…" : "Simpan"}</button>
             </div>
             <div style={{ fontSize: 11, color: C.mute, marginTop: 5 }}>Unit dengan tag sama tampil di bawah satu header di PDF. Kosongkan = tanpa tag. Tidak mengubah hitungan.</div>
+          </div>
+
+          {/* ── Entitas PT/CV (HPP per badan usaha) — additive, buat Laba Rugi ── */}
+          <div style={{ borderTop: `1px solid ${C.line}`, paddingTop: 10, marginBottom: 12 }}>
+            <div style={{ ...L }}>Entitas (PT / CV)</div>
+            <select style={I} value={detailJobLive.entity_id || ""} onChange={(e) => setJobEntity(e.target.value)} data-testid="sup-job-entity">
+              <option value="">— Belum diisi —</option>
+              {Object.entries(DOC_ENTITIES).map(([id, e]) => <option key={id} value={id}>{e.footerName || id}</option>)}
+            </select>
+            <div style={{ fontSize: 11, color: C.mute, marginTop: 5 }}>HPP unit ini masuk pembukuan PT atau CV. Tidak mengubah nominal — cuma label buat laporan Laba Rugi.</div>
           </div>
 
           {(detailJobLive.payments || []).length > 0 && (
