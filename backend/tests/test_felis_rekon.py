@@ -13,6 +13,8 @@ import os, sys, asyncio, types
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # backend/
 import rekon_sync as R
+from purchase_units import find_pulled_unit
+from supplier_dedup import suggest_similar
 
 
 # ── Fake async Mongo (cukup untuk yang dipakai rekon_sync) ───────────────────
@@ -397,11 +399,53 @@ async def test_waterfall_auto_alloc():
     ok(e == [], "tidak ada tagihan → alokasi kosong (tetap Belum Dialokasikan)")
 
 
+async def test_anti_double_pull():
+    """find_pulled_unit: cegah 1 unit ketarik 2x ke supplier yang sama."""
+    print("test_anti_double_pull")
+    jobs = [
+        {"id": "a1", "order_id": "ORD1", "order_unit_id": "u1", "nopol": "B1"},
+        {"id": "a2", "order_id": "ORD1", "order_unit_id": "u2", "nopol": "B2"},
+        {"id": "legacy", "nopol": "B9"},  # job lama tanpa referensi unit
+    ]
+    ok(find_pulled_unit(jobs, "ORD1", "u1")["id"] == "a1", "unit sudah ditarik → ketemu")
+    ok(find_pulled_unit(jobs, "ORD1", "u3") is None, "unit beda → boleh ditarik")
+    ok(find_pulled_unit(jobs, "ORD2", "u1") is None, "order beda → boleh (leg/order lain)")
+    ok(find_pulled_unit(jobs, "ORD1", None) is None, "tanpa order_unit_id → tdk pernah dianggap dobel")
+    ok(find_pulled_unit(jobs, None, "u1") is None, "tanpa order_id → tdk pernah dianggap dobel")
+    ok(find_pulled_unit([], "ORD1", "u1") is None, "supplier kosong → aman")
+
+
+async def test_supplier_dedup_suggest():
+    """suggest_similar: cegah master dobel karena beda penulisan nama."""
+    print("test_supplier_dedup_suggest")
+    sups = [
+        {"id": "s1", "nama": "PT ABC", "no_hp": "0811"},
+        {"id": "s2", "nama": "CV Maju Jaya", "no_hp": ""},
+        {"id": "s3", "nama": "Bagus Hardianto", "no_hp": "0822"},
+        {"id": "s4", "nama": "PT Lama", "no_hp": "", "status": "merged"},
+    ]
+    # beda PT/titik/urutan/besar-kecil → tetap kena (high)
+    for q in ("PT. ABC", "abc pt", "ABC", "  pt   abc "):
+        c = suggest_similar(q, "", sups)
+        ok(any(x["supplier_id"] == "s1" and x["confidence"] == "high" for x in c), f"'{q}' → mirip PT ABC (high)")
+    # nomor HP sama → high walau nama beda
+    c = suggest_similar("Toko Lain", "0811", sups)
+    ok(any(x["supplier_id"] == "s1" and x["confidence"] == "high" for x in c), "HP sama → high")
+    # nama bagian dari yang lain → medium
+    c = suggest_similar("Maju", "", sups)
+    ok(any(x["supplier_id"] == "s2" for x in c), "'Maju' ⊂ 'CV Maju Jaya' → kandidat")
+    # beda total → tidak ada kandidat
+    ok(suggest_similar("Sumber Rezeki", "", sups) == [], "nama beda total → tidak ada")
+    # supplier merged dilewati
+    ok(all(x["supplier_id"] != "s4" for x in suggest_similar("PT Lama", "", sups)), "merged dilewati")
+
+
 async def main():
     for t in (test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
-              test_preview_readonly, test_waterfall_auto_alloc, test_felis_adapter):
+              test_preview_readonly, test_waterfall_auto_alloc, test_anti_double_pull,
+              test_supplier_dedup_suggest, test_felis_adapter):
         await t()
     print(f"\nSEMUA LULUS — {PASS} assertions.")
 

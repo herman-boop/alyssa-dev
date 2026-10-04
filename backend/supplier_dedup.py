@@ -61,6 +61,59 @@ def _norm_email(s):
     return str(s or "").strip().lower()
 
 
+# Token bentuk badan usaha — dibuang saat banding "kata nama" biar
+# "PT ABC" ≈ "ABC PT" ≈ "PT. ABC" dianggap mirip (bukan 3 supplier beda).
+_LEGAL_TOKENS = {"pt", "cv", "ud", "tbk", "persero", "pd", "koperasi", "firma"}
+
+
+def _name_tokens(s):
+    return {t for t in _norm_name(s).split(" ") if t and t not in _LEGAL_TOKENS}
+
+
+def suggest_similar(nama, no_hp, suppliers, limit=5):
+    """READ-ONLY, murni (tanpa DB). Cari master supplier yang MIRIP dengan calon
+    (nama, no_hp) SEBELUM bikin baru — cegah duplikat gara-gara beda penulisan
+    (huruf besar/kecil, titik, spasi, urutan kata, PT/CV).
+
+    Return list kandidat terurut (yakin dulu):
+      [{supplier_id, nama, no_hp, reason, confidence}]
+    confidence: "high" (nama persis / HP sama / kata nama sama) atau "medium"
+    (satu nama bagian dari yang lain). BUKAN vonis — cuma peringatan buat user.
+    Supplier berstatus 'merged' dilewati.
+    """
+    nn = _norm_name(nama)
+    nph = _norm_phone(no_hp)
+    ntok = _name_tokens(nama)
+    out = []
+    for s in (suppliers or []):
+        if (s or {}).get("status") == "merged":
+            continue
+        sname = s.get("nama") or ""
+        reasons, conf = [], None
+        if nn and _norm_name(sname) == nn:
+            reasons.append("nama sama persis (abaikan besar/kecil, titik, spasi)")
+            conf = "high"
+        else:
+            stok = _name_tokens(sname)
+            if ntok and stok:
+                if ntok == stok:
+                    reasons.append("kata nama sama (urutan / PT-CV beda)")
+                    conf = "high"
+                elif ntok <= stok or stok <= ntok:
+                    reasons.append("nama satu bagian dari yang lain")
+                    conf = conf or "medium"
+        if nph and _norm_phone(s.get("no_hp")) == nph:
+            reasons.append("nomor HP sama")
+            conf = "high"
+        if reasons:
+            out.append({
+                "supplier_id": s.get("id"), "nama": sname, "no_hp": s.get("no_hp") or "",
+                "reason": "; ".join(reasons), "confidence": conf or "medium",
+            })
+    out.sort(key=lambda c: 0 if c["confidence"] == "high" else 1)
+    return out[:limit]
+
+
 def _rek_set(sup):
     """Kumpulan nomor rekening (digit) dari bank_accounts[] + field no_rek (kalau ada)."""
     out = set()
