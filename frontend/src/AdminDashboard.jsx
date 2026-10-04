@@ -531,7 +531,7 @@ function Dashboard({ pin, onLogout }) {
       )}
 
       {activeTab === "pengaturan" && (
-        <PengaturanPage dark={dark} onToggleTheme={() => { toggleTheme(); setDark(d => !d); }} onLogout={onLogout} fixHeicPhotos={fixHeicPhotos} fixingHeic={fixingHeic} />
+        <PengaturanPage dark={dark} onToggleTheme={() => { toggleTheme(); setDark(d => !d); }} onLogout={onLogout} fixHeicPhotos={fixHeicPhotos} fixingHeic={fixingHeic} headers={headers} />
       )}
 
       {activeTab === "route-leg" && (
@@ -1344,12 +1344,28 @@ function LaporanPage({ stats, onExportCsv }) {
 /* ════════════════════════════════════════
    PENGATURAN PAGE
 ════════════════════════════════════════ */
-function PengaturanPage({ dark, onToggleTheme, onLogout, fixHeicPhotos, fixingHeic }) {
+function PengaturanPage({ dark, onToggleTheme, onLogout, fixHeicPhotos, fixingHeic, headers }) {
   const row = { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 18px", borderRadius: 12, background: "#0e1420", border: "1px solid #1a2130", marginBottom: 12, gap: 12, flexWrap: "wrap" };
   const [aisDiag, setAisDiag] = useState(null);
   const [aisBusy, setAisBusy] = useState(false);
   const [aisProbe, setAisProbe] = useState(null);
   const [probeBusy, setProbeBusy] = useState(false);
+  // Preview Rekon (READ-ONLY): hanya memanggil endpoint preview yang sudah diaudit.
+  // TIDAK pull, TIDAK simpan pembayaran, TIDAK ACK, TIDAK ubah data.
+  const [rekonPrev, setRekonPrev] = useState(null);
+  const [rekonBusy, setRekonBusy] = useState(false);
+  const runRekonPreview = async () => {
+    setRekonBusy(true); setRekonPrev(null);
+    try {
+      const { data } = await axios.get(`${API}/admin/rekon/preview?batas=1`, { headers });
+      setRekonPrev(data);
+    } catch (e) {
+      setRekonPrev({ ok: false, status: e?.response?.status || "gagal",
+                     detail: e?.response?.data?.detail || e?.message });
+    } finally { setRekonBusy(false); }
+  };
+  const _rp = (n) => "Rp " + new Intl.NumberFormat("id-ID").format(Number(n || 0));
+  const _wColor = (w) => w === "would_create" ? "#3fb950" : (w === "supplier_not_found" || w === "error") ? "#f85149" : "#f0a742";
   const runAisDiag = async () => {
     setAisBusy(true); setAisDiag(null);
     try { const { data } = await axios.get(`${API}/admin/ais/diag`); setAisDiag(data); }
@@ -1434,6 +1450,58 @@ function PengaturanPage({ dark, onToggleTheme, onLogout, fixHeicPhotos, fixingHe
             </pre>
           )}
         </div>
+      </div>
+
+      {/* Preview Rekon — READ-ONLY (uji baca 1 transaksi READY dari Felis) */}
+      <div style={{ ...row, display: "block" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 13.5, fontWeight: 700, color: "#e6edf3" }}>Preview Rekon (uji baca) 🔒</div>
+            <div style={{ fontSize: 11.5, color: "#6b7688", marginTop: 3 }}>Baca 1 transaksi READY dari Felis & lihat yang AKAN diproses. TIDAK menyimpan, TIDAK ACK, TIDAK ubah data. Token tidak ditampilkan.</div>
+          </div>
+          <button onClick={runRekonPreview} disabled={rekonBusy} style={{ padding: "9px 16px", borderRadius: 9, border: "1px solid #1f6feb", background: "#0d2340", color: "#58a6ff", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }} data-testid="rekon-preview-run">
+            {rekonBusy ? "⏳ Membaca..." : "🔍 Preview (uji baca)"}
+          </button>
+        </div>
+        {rekonPrev && (
+          <div style={{ marginTop: 12 }}>
+            {rekonPrev.ok === false ? (
+              <div style={{ fontSize: 12, color: "#f85149" }}>
+                {rekonPrev.status === "not_configured"
+                  ? "Belum tersambung: FELIS_BASE_URL / FELIS_TOKEN belum terbaca di server (cek ENV Railway & restart)."
+                  : <>Gagal: {String(rekonPrev.status)} {rekonPrev.detail ? `— ${rekonPrev.detail}` : ""}</>}
+              </div>
+            ) : (
+              <div style={{ fontSize: 12.5, color: "#c9d1d9", lineHeight: 1.8 }}>
+                <div style={{ color: "#3fb950", marginBottom: 6 }}>✓ Tersambung ke Felis (READ-ONLY, tidak ada data yang diubah).</div>
+                <div style={{ color: "#8b949e" }}>batch: {rekonPrev.batch || "-"} · siap ditarik: <b>{rekonPrev.jumlah ?? 0}</b></div>
+                {(rekonPrev.preview || []).length === 0 ? (
+                  <div style={{ marginTop: 6, color: "#8b949e" }}>Tidak ada transaksi READY saat ini.</div>
+                ) : (rekonPrev.preview || []).map((p, i) => (
+                  <div key={i} style={{ marginTop: 8, padding: 10, background: "#0a0e16", border: "1px solid #1a2130", borderRadius: 8 }}>
+                    <div style={{ fontWeight: 800, color: _wColor(p.would_status) }}>
+                      {p.would_status === "would_create" ? "AKAN DISIMPAN (Unallocated)"
+                        : p.would_status === "supplier_not_found" ? "SUPPLIER TIDAK DITEMUKAN — jangan proses"
+                        : p.would_status === "already_processed" ? "SUDAH PERNAH (tidak akan dobel)"
+                        : p.would_status === "reversed" ? "SUDAH DIBATALKAN"
+                        : "TIDAK VALID"}
+                      {p.note ? <span style={{ color: "#6b7688", fontWeight: 500 }}> · {p.note}</span> : null}
+                    </div>
+                    <div style={{ marginTop: 4 }}>supplier_id: <b>{p.supplier_id || "-"}</b> {p.supplier_found
+                      ? <span style={{ color: "#3fb950" }}>✓ {p.supplier_nama_master}</span>
+                      : <span style={{ color: "#f85149" }}>✗ tidak ada di master</span>}</div>
+                    <div>entitas: <b>{p.source_entity || "-"}</b> · tanggal: {p.tanggal || "-"}</div>
+                    <div>nominal: <b>{_rp(p.nominal)}</b></div>
+                    <div style={{ color: "#8b949e" }}>nama bank (audit): {p.supplier_name || "-"} · penerima(raw): {p.beneficiary_name_raw || "-"}</div>
+                    <div style={{ color: "#8b949e" }}>deskripsi: {p.deskripsi_bank || "-"}</div>
+                    <div style={{ color: "#8b949e" }}>alokasi: {Array.isArray(p.alokasi) ? p.alokasi.length : 0} catatan</div>
+                    <div style={{ fontSize: 11, color: "#6b7688", marginTop: 4 }}>id: {p.bank_transaction_id}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
