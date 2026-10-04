@@ -6890,6 +6890,20 @@ async def suppliers_dedup_audit_readonly():
     return await supplier_dedup.audit_duplicates(db)
 
 
+@api_router.get("/admin/suppliers/dedup/suggest", dependencies=[Depends(require_admin_pin)])
+async def suppliers_dedup_suggest(nama: str = "", no_hp: str = ""):
+    """READ-ONLY. Sebelum bikin supplier baru, cek master yang MIRIP (cegah
+    duplikat gara-gara beda penulisan). Tidak mengubah data apa pun."""
+    if not (nama or "").strip():
+        return {"candidates": []}
+    sups = []
+    async for s in db.supplier_profiles.find(
+        {"status": {"$ne": "merged"}}, {"_id": 0, "id": 1, "nama": 1, "no_hp": 1, "status": 1}
+    ):
+        sups.append(s)
+    return {"candidates": supplier_dedup.suggest_similar(nama, no_hp, sups)}
+
+
 @api_router.get("/admin/contacts/dedup/audit", dependencies=[Depends(require_admin_pin)])
 async def contacts_dedup_audit_readonly():
     """READ-ONLY. Laporan kandidat duplikat buku alamat/contacts."""

@@ -513,9 +513,23 @@ export default function SupplierPage() {
   };
   const selectSupplier = async (s) => { clearTimeout(autoSaveTimer.current); setDropdown([]); setQuery(s.nama); setPaySel({}); await reloadSelected(s.id); };
   const createOrOpenSupplier = async () => {
-    if (!query.trim()) { flash("Masukkan nama supplier dulu"); return; }
+    const nama = query.trim();
+    if (!nama) { flash("Masukkan nama supplier dulu"); return; }
     try {
-      const r = await axios.post(`${API}/admin/suppliers`, { nama: query.trim() }, { headers });
+      // Cegah duplikat: cek master yang MIRIP dulu (read-only). Kalau ada,
+      // tanya — Batal = buka yang sudah ada, OK = tetap buat baru.
+      try {
+        const sug = await axios.get(`${API}/admin/suppliers/dedup/suggest`, { params: { nama }, headers });
+        const cands = sug.data?.candidates || [];
+        if (cands.length) {
+          const list = cands.map((c) => `• ${c.nama}${c.no_hp ? ` (${c.no_hp})` : ""} — ${c.reason}`).join("\n");
+          const buatBaru = window.confirm(
+            `Supplier mirip sudah ada:\n\n${list}\n\nOK = TETAP buat "${nama}" sebagai supplier baru.\nBatal = buka supplier yang sudah ada.`
+          );
+          if (!buatBaru) { await selectSupplier({ id: cands[0].supplier_id, nama: cands[0].nama }); return; }
+        }
+      } catch { /* suggest gagal → jangan blokir pembuatan */ }
+      const r = await axios.post(`${API}/admin/suppliers`, { nama }, { headers });
       setQuery(r.data.nama); await reloadSelected(r.data.id); setListRefreshTick((t) => t + 1); flash("Supplier tersimpan");
     } catch (e) { flash(e?.response?.data?.detail || "Gagal simpan supplier"); }
   };
