@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) 
 import rekon_sync as R
 from supplier_dedup import suggest_similar
 import ledger_status as LS
+import pnl as PNL
 import expenses as EXP
 
 
@@ -504,13 +505,44 @@ async def test_tagihan_status_and_routing():
     ok(alloc2 == 5000000 and LS.tagihan_status(5000000, 5000000, alloc2) == "lunas", "alokasi penuh → job Lunas")
 
 
+async def test_pnl():
+    """Fase 6: Laba Rugi — filter periode/entitas + rumus Pendapatan−HPP−Biaya."""
+    print("test_pnl")
+    V = ("pt-alyssa", "cv-alyssa-trans")
+    # periode
+    ok(PNL.in_period("2026-06-15", "2026-01-01", "2026-12-31"), "dalam periode")
+    ok(not PNL.in_period("2025-12-31", "2026-01-01", "2026-12-31"), "sebelum periode → keluar")
+    ok(not PNL.in_period("2027-01-01", "2026-01-01", "2026-12-31"), "sesudah periode → keluar")
+    ok(PNL.in_period("2026-06-15T10:00:00", "2026-06-01", "2026-06-30"), "ISO datetime diperlakukan by-date")
+    ok(PNL.in_period("ngawur", None, None), "tanpa filter → tanggal invalid tetap ikut")
+    ok(not PNL.in_period("ngawur", "2026-01-01", None), "ada filter → tanggal invalid dikecualikan")
+    # entity
+    ok(PNL.entity_key("pt-alyssa", V) == "pt-alyssa" and PNL.entity_key("", V) == "none", "entity_key normal/none")
+    ok(PNL.entity_match("pt-alyssa", "", V), "want kosong → semua lolos")
+    ok(PNL.entity_match("", "none", V) and not PNL.entity_match("pt-alyssa", "none", V), "filter 'none' = belum diisi")
+    ok(PNL.entity_match("cv-alyssa-trans", "cv-alyssa-trans", V) and not PNL.entity_match("pt-alyssa", "cv-alyssa-trans", V), "filter entitas spesifik")
+    # rumus
+    r = PNL.compute_pnl({
+        "pt-alyssa": {"pendapatan": 10000000, "hpp": 6000000, "biaya": 1500000},
+        "cv-alyssa-trans": {"pendapatan": 4000000, "hpp": 3000000, "biaya": 200000},
+    })
+    pt = r["per_entity"]["pt-alyssa"]
+    ok(pt["laba_kotor"] == 4000000, "PT Laba Kotor = 10jt − 6jt = 4jt")
+    ok(pt["laba_bersih"] == 2500000, "PT Laba Bersih = 4jt − 1.5jt = 2.5jt")
+    gt = r["grand_total"]
+    ok(gt["pendapatan"] == 14000000 and gt["hpp"] == 9000000, "grand pendapatan/HPP dijumlah")
+    ok(gt["laba_kotor"] == 5000000 and gt["laba_bersih"] == 3300000, "grand Laba Kotor 5jt, Bersih 3.3jt")
+    neg = PNL.compute_pnl({"pt-alyssa": {"pendapatan": 1000000, "hpp": 1500000, "biaya": 100000}})
+    ok(neg["grand_total"]["laba_bersih"] == -600000, "rugi → laba_bersih negatif (-600rb)")
+
+
 async def main():
     for t in (test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,
               test_expenses_helpers, test_rekon_to_biaya, test_tagihan_status_and_routing,
-              test_felis_adapter):
+              test_pnl, test_felis_adapter):
         await t()
     print(f"\nSEMUA LULUS — {PASS} assertions.")
 
