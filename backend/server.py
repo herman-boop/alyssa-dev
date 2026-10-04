@@ -16,6 +16,7 @@ import ais  # modul AIS (posisi kapal) — provider-agnostic, aman tanpa key
 import rekon_sync  # integrasi pembayaran supplier dari Audit Rekon (isolated)
 import rekon_felis_client  # adapter PULL dari Felis (stub sampai kontrak final)
 import expenses as expenses_mod  # Biaya Umum & Administratif (Fase 3, isolated, terpisah dari HPP)
+import ledger_status  # status tagihan supplier (Belum/Sebagian/Lunas) dari ledger — pure
 import supplier_dedup  # AUDIT duplikat master supplier/contacts (READ-ONLY di deploy ini)
 
 ROOT_DIR = Path(__file__).parent
@@ -5892,14 +5893,10 @@ def _supplier_job_totals(job: dict, extra_paid: int = 0) -> dict:
     job["sisa_kewajiban"] = sisa_kewajiban
     # Status pembayaran supplier (basis NET TRANSFER). Status pajak/CLOSED penuh
     # menyusul di Fase 3; ini status dasar yang aman & backward-compatible.
-    if dpp <= 0:
-        job["pay_status"] = "draft"        # Harga Belum Lengkap
-    elif terbayar <= 0:
-        job["pay_status"] = "belum"
-    elif terbayar < net_transfer:
-        job["pay_status"] = "sebagian"
-    else:
-        job["pay_status"] = "lunas"        # supplier terbayar (net selesai)
+    # Status pembayaran dari LEDGER (satu sumber kebenaran). terbayar sudah
+    # termasuk alokasi Rekon → status otomatis naik belum→sebagian→lunas.
+    job["pay_status"] = ledger_status.tagihan_status(dpp, net_transfer, terbayar)
+    job["pay_status_label"] = ledger_status.status_label(job["pay_status"])
     # Status pajak: none (tanpa PPh23) | pending (belum dipotong/net belum lunas)
     #             | dipotong (sudah dipotong; administrasi bukti potong = Fase 3)
     if not pph_on:
@@ -6743,6 +6740,18 @@ async def rekon_reverse_import(bank_transaction_id: str, body: Optional[Dict[str
     if res.get("status") == "not_found":
         raise HTTPException(404, "Import rekon tidak ditemukan")
     return res
+
+
+@api_router.get("/admin/rekon/routing-summary", dependencies=[Depends(require_admin_pin)])
+async def rekon_routing_summary():
+    """READ-ONLY. Ringkasan jelas: berapa transaksi bank yang sudah dirute ke
+    Supplier / Biaya-Beban / Unallocated / Reversed."""
+    counts = {"supplier": 0, "biaya": 0, "unallocated": 0, "reversed": 0}
+    async for d in db[rekon_sync.IMPORTS_COLLECTION].find({}, {"_id": 0, "status": 1}):
+        b = rekon_sync.routing_bucket(d)
+        counts[b] = counts.get(b, 0) + 1
+    counts["total"] = sum(v for k, v in counts.items() if k != "total")
+    return {"counts": counts}
 
 
 @api_router.post("/admin/rekon/imports/{bank_transaction_id}/to-expense", dependencies=[Depends(require_admin_pin)])
