@@ -1069,27 +1069,38 @@ function CreateSheet({ onClose, onJadwalGab, onInvoiceGab, onNav, flash }) {
 /* ════════════════════════════════════════
    SIDEBAR
 ════════════════════════════════════════ */
-const SIDEBAR_PRIMARY = [
-  { key: "beranda", label: "Beranda" },
-  { key: "pesanan", label: "Dashboard" },
-  { key: "pesanan", label: "Pesanan" },
-  { key: "route-leg", label: "Route Leg" },
-  { key: "drivers", label: "Driver" },
-  { key: "supplier", label: "Supplier" },
-  { key: "kontak", label: "Kontak" },
-  { key: "koordinator", label: "Koordinator" },
-  { key: "kendaraan", label: "Kendaraan" },
-  { key: "dokumen", label: "Dokumen" },
-  { key: "histori", label: "Histori Dokumen" },
-  { key: "rekap-invoice", label: "Rekap Invoice Ditagih" },
-  { key: "laporan", label: "Laporan" },
-];
-const SIDEBAR_TOOLS = [
-  { key: "kalkulator", label: "Kalkulator HPP" },
-  { key: "selisih", label: "Selisih Harga" },
-  { key: "pembayaran-vendor", label: "Pembayaran Vendor" },
-  { key: "kompensasi", label: "Kompensasi" },
-  { key: "minta-harga", label: "Minta Harga" },
+// ARSITEKTUR MENU (Fase 1): modul yang SUDAH ADA dikelompokkan mengikuti alur
+// bisnis — Penjualan → Pembelian → Arsip/Laporan. KEY tab TIDAK diubah (konten
+// & routing tab tetap sama) — cuma label, urutan, dan header grup yang dirapikan
+// biar tidak muter-muter. BIAYA/BEBAN menyusul di Fase 3 (modulnya belum ada,
+// jadi belum dibuatkan menu kosong). Tidak ada halaman baru / tanpa tujuan.
+const SIDEBAR_GROUPS = [
+  { title: "", items: [
+    { key: "beranda", label: "Beranda" },
+  ] },
+  { title: "Penjualan", items: [
+    { key: "pesanan", label: "Dashboard" },
+    { key: "pesanan", label: "Pesanan" },
+    { key: "route-leg", label: "Route Leg" },
+    { key: "kontak", label: "Pelanggan & Kontak" },
+    { key: "koordinator", label: "Koordinator" },
+    { key: "drivers", label: "Driver" },
+    { key: "kendaraan", label: "Kendaraan" },
+    { key: "minta-harga", label: "Minta Harga" },
+  ] },
+  { title: "Pembelian", items: [
+    { key: "supplier", label: "Supplier" },
+    { key: "pembayaran-vendor", label: "Pembayaran Supplier" },
+    { key: "kalkulator", label: "Kalkulator HPP" },
+    { key: "selisih", label: "Selisih Harga" },
+    { key: "kompensasi", label: "Kompensasi" },
+  ] },
+  { title: "Arsip & Laporan", items: [
+    { key: "dokumen", label: "Dokumen" },
+    { key: "histori", label: "Histori Dokumen" },
+    { key: "rekap-invoice", label: "Rekap Invoice Ditagih" },
+    { key: "laporan", label: "Laporan" },
+  ] },
 ];
 
 function Sidebar({ activeTab, setActiveTab, open, onNavigate }) {
@@ -1123,10 +1134,12 @@ function Sidebar({ activeTab, setActiveTab, open, onNavigate }) {
       </div>
 
       <nav style={{ flex: 1 }}>
-        {SIDEBAR_PRIMARY.map((item, i) => <NavItem item={item} i={i} key={i} />)}
-
-        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.6, color: "#495267", textTransform: "uppercase", margin: "18px 10px 8px" }}>Tools</div>
-        {SIDEBAR_TOOLS.map((item, i) => <NavItem item={item} i={i} key={i} />)}
+        {SIDEBAR_GROUPS.map((grp, gi) => (
+          <div key={gi}>
+            {grp.title ? <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.6, color: "#495267", textTransform: "uppercase", margin: "18px 10px 8px" }}>{grp.title}</div> : null}
+            {grp.items.map((item, i) => <NavItem item={item} i={`${gi}-${i}`} key={`${gi}-${i}`} />)}
+          </div>
+        ))}
       </nav>
 
       <div>
