@@ -1070,7 +1070,7 @@ export default function CustomerTracking() {
             const kS = { color: "#8b949e" };
             return (
               <div style={{ marginBottom: 16 }}>
-                <div className="trk-section-title" style={{ marginBottom: 10 }}>🚢 Posisi Kapal</div>
+                <div className="trk-section-title" style={{ marginBottom: 10 }}>🚢 Posisi &amp; Perjalanan Kapal</div>
                 <div style={{ background: "#11161f", border: "1px solid #232a36", borderRadius: 10, padding: 14 }} data-testid="trk-ais-panel">
                   {/* Header: nama kapal + badge kesegaran */}
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
@@ -1078,29 +1078,47 @@ export default function CustomerTracking() {
                     <span style={{ fontSize: 11, fontWeight: 800, padding: "3px 10px", borderRadius: 12, background: b.bg, color: b.color, border: `1px solid ${b.bd}` }}>{b.label}</span>
                   </div>
 
-                  {/* Info leg kapal aktif — OTOMATIS dari jaringan AIS:
-                      Pelabuhan (nama dari leg), ETA (AIS), & tanggal Sandar
-                      (terdeteksi otomatis saat kapal benar-benar sandar). */}
+                  {/* STATUS PERJALANAN LAUT — gabungin pelabuhan asal/tujuan (dari leg),
+                      fase perjalanan, ETA/Sandar (AIS), & posisi terakhir yang JUJUR soal
+                      kesegaran. Selalu masuk akal walau AIS stale/kosong, jadi perjalanan
+                      laut nggak pernah keliatan "mati". Tanpa provider berbayar. */}
                   {(() => {
-                    const port = (activeShipLeg && activeShipLeg.tujuan) || (shipInfo && shipInfo.destination) || "";
+                    const asal = (activeShipLeg && activeShipLeg.asal) || "";
+                    const tujuan = (activeShipLeg && activeShipLeg.tujuan) || (shipInfo && shipInfo.destination) || "";
+                    const legSt = String((activeShipLeg && activeShipLeg.status) || "").toLowerCase();
                     const sandarTxt = shipInfo ? fmtLegDate(shipInfo.berthed_at) : "";
-                    const etaOk = shipInfo && aisEtaFuture(shipInfo.eta);
-                    const etaTxt = etaOk ? fmtAisEta(shipInfo.eta) : "";
-                    // Kapal dianggap sudah berangkat kalau ada data AIS & belum sandar.
-                    const berangkat = !!shipInfo && !sandarTxt;
-                    if (!port && !sandarTxt && !etaTxt && !berangkat) return null;
+                    const tiba = !!sandarTxt || /selesai|tiba|arrived/.test(legSt);
+                    const jalan = !tiba && (!!shipInfo || /berlangsung|berangkat|jalan|transit/.test(legSt));
+                    const etaTxt = (shipInfo && aisEtaFuture(shipInfo.eta)) ? fmtAisEta(shipInfo.eta) : "";
+                    if (!asal && !tujuan && !shipInfo) return null;
+                    const fase = tiba
+                      ? { t: "Kapal sudah tiba / sandar", c: "#7ee2b8", bg: "#0f2d1f", bd: "#1f6f47", ic: "🛳️" }
+                      : jalan
+                      ? { t: "Dalam perjalanan laut", c: "#9db8e8", bg: "#0d2340", bd: "#1f3a5a", ic: "🚢" }
+                      : { t: "Menyiapkan keberangkatan", c: "#e8c99d", bg: "#2b1d0e", bd: "#5a411f", ic: "⚓" };
+                    const frC = shipInfo ? (shipInfo.freshness === "fresh" ? "#3fb950" : shipInfo.freshness === "recent" ? "#d29922" : "#f0a742") : "#8b949e";
                     return (
-                      <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }} data-testid="trk-ais-leg-port">
-                        {port ? (
-                          <span style={{ fontSize: 11, fontWeight: 700, color: "#7ee2b8", background: "#0f2d1f", border: "1px solid #1f6f47", borderRadius: 8, padding: "3px 8px" }}>⚓ {port}</span>
+                      <div style={{ marginTop: 10, background: "#0d121b", border: "1px solid #232a36", borderRadius: 10, padding: 12 }} data-testid="trk-ais-journey">
+                        {(asal || tujuan) ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12.5, fontWeight: 700 }} data-testid="trk-ais-leg-port">
+                            <span style={{ color: "#7ee2b8" }}>⚓ {asal || "—"}</span>
+                            <span style={{ color: "#6e7681" }}>──🚢──▶</span>
+                            <span style={{ color: "#7ee2b8" }}>🎯 {tujuan || "—"}</span>
+                          </div>
                         ) : null}
-                        {sandarTxt ? (
-                          <span style={{ fontSize: 11, fontWeight: 700, color: "#e8c99d", background: "#2b1d0e", border: "1px solid #5a411f", borderRadius: 8, padding: "3px 8px" }}>🛳️ Sandar {sandarTxt}</span>
-                        ) : etaTxt ? (
-                          <span style={{ fontSize: 11, fontWeight: 700, color: "#9db8e8", background: "#0d2340", border: "1px solid #1f3a5a", borderRadius: 8, padding: "3px 8px" }}>ETA {etaTxt}</span>
-                        ) : berangkat ? (
-                          <span style={{ fontSize: 11, fontWeight: 700, color: "#9db8e8", background: "#0d2340", border: "1px solid #1f3a5a", borderRadius: 8, padding: "3px 8px" }}>🚢 Kapal sudah berangkat</span>
-                        ) : null}
+                        <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
+                          <span style={{ fontSize: 11, fontWeight: 800, padding: "4px 10px", borderRadius: 12, background: fase.bg, color: fase.c, border: `1px solid ${fase.bd}` }}>{fase.ic} {fase.t}</span>
+                          {sandarTxt ? (
+                            <span style={{ fontSize: 11, fontWeight: 700, color: "#e8c99d", background: "#2b1d0e", border: "1px solid #5a411f", borderRadius: 8, padding: "3px 8px" }}>🛳️ Sandar {sandarTxt}</span>
+                          ) : etaTxt ? (
+                            <span style={{ fontSize: 11, fontWeight: 700, color: "#9db8e8", background: "#0d2340", border: "1px solid #1f3a5a", borderRadius: 8, padding: "3px 8px" }}>Perkiraan tiba {etaTxt}</span>
+                          ) : null}
+                        </div>
+                        <div style={{ marginTop: 8, fontSize: 12, color: "#8b949e", lineHeight: 1.5 }}>
+                          {shipInfo
+                            ? <>📍 Posisi terakhir AIS: <b style={{ color: frC }}>{aisAgeText(shipInfo.age_seconds)}</b>{shipInfo.freshness !== "fresh" ? " — bukan real-time (sinyal laut terbatas)" : ""}.</>
+                            : <>📡 Posisi kapal lagi belum ketangkep AIS. Perjalanan laut dipantau lewat <b style={{ color: "#c9d1d9" }}>checkpoint petugas kapal</b> & update di bawah.</>}
+                        </div>
                       </div>
                     );
                   })()}
