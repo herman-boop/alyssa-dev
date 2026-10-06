@@ -303,7 +303,10 @@ export default function MobileVendorPayment({ embedded = false }) {
     } finally { setBooting(false); }
   }, []);
 
-  useEffect(() => { if (pin) doBootstrap(pin); }, []); // eslint-disable-line
+  // Embedded di dashboard admin: coba bootstrap otomatis walau PIN kosong
+  // (admin mode terbuka menerima PIN kosong) → tidak minta PIN dua kali. Kalau
+  // backend ternyata terkunci, bootstrap 401 dan gate PIN tetap muncul.
+  useEffect(() => { if (pin || embedded) doBootstrap(pin); }, []); // eslint-disable-line
 
   const logout = () => { localStorage.removeItem(PIN_KEY); setPin(""); setAuthed(false); setPinInput(""); };
 
