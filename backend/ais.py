@@ -91,11 +91,54 @@ def vesselapi_enabled() -> bool:
 
 
 def any_provider_enabled() -> bool:
-    return provider_enabled() or vesselapi_enabled()
+    return provider_enabled() or vesselapi_enabled() or vesselfinder_enabled()
 
 
 def _vesselapi_use_sat() -> bool:
     return (os.environ.get("VESSELAPI_USE_SAT") or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+# ── Provider tambahan (berbayar, opsional): VesselFinder API ──────────────
+# Sumber data SAMA dengan vesselfinder.com. On-demand saat cache kosong/basi &
+# provider lain belum dapat. Terrestrial default (sat=0 → 1 kredit, cocok untuk
+# kapal sandar/pesisir); sat=1 opsional (10 kredit) via VESSELFINDER_USE_SAT.
+# Dormant total kalau VESSELFINDER_API_KEY belum diset.
+VESSELFINDER_URL = "https://api.vesselfinder.com"
+
+
+def vesselfinder_key() -> str:
+    """API key (userkey) VesselFinder — HANYA dari env backend. Jangan diekspos."""
+    return (os.environ.get("VESSELFINDER_API_KEY") or "").strip()
+
+
+def vesselfinder_enabled() -> bool:
+    return bool(vesselfinder_key())
+
+
+def _vesselfinder_use_sat() -> bool:
+    return (os.environ.get("VESSELFINDER_USE_SAT") or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _vesselfinder_get(params, timeout=15):
+    """HTTP GET ke VesselFinder /vessels (blocking; via asyncio.to_thread).
+    userkey disuntik dari env — jangan pernah diterima dari parameter publik."""
+    import requests
+    p = dict(params or {})
+    p["userkey"] = vesselfinder_key()
+    p.setdefault("format", "json")
+    return requests.get(f"{VESSELFINDER_URL}/vessels", params=p, timeout=timeout)
+
+
+def _vf_ts(s):
+    """Normalisasi TIMESTAMP VesselFinder ('YYYY-MM-DD HH:MM:SS UTC') -> ISO."""
+    if not s:
+        return None
+    t = str(s).strip()
+    if t.upper().endswith(" UTC"):
+        t = t[:-4].strip()
+    t = t.replace(" ", "T", 1)
+    parsed = _parse_ts(t)
+    return parsed.isoformat() if parsed else None
 
 
 def _vesselapi_get(path, params, timeout=15):
@@ -398,6 +441,101 @@ async def _vesselapi_refresh(db, mmsi, imo, timeout=15):
         return None
 
 
+def _vf_pick(arr):
+    """Ambil objek AIS dari respons VesselFinder /vessels (array of {AIS, ...})."""
+    if isinstance(arr, dict):
+        arr = arr.get("vessels") or arr.get("data") or [arr]
+    rec = arr[0] if isinstance(arr, list) and arr else None
+    if not isinstance(rec, dict):
+        return None
+    ais = rec.get("AIS")
+    if isinstance(ais, dict):
+        return ais
+    return rec  # sebagian respons datar tanpa pembungkus 'AIS'
+
+
+async def _vesselfinder_refresh(db, mmsi, imo, timeout=15):
+    """Ambil posisi 1 kapal dari VesselFinder API (sumber sama dgn vesselfinder.com)
+    dan simpan ke cache. On-demand + throttle (hemat kredit). Terrestrial default
+    (sat=0, 1 kredit); sat=1 opsional (10 kredit) via VESSELFINDER_USE_SAT.
+    Aman kalau key kosong (langsung None)."""
+    if not vesselfinder_enabled():
+        return None
+    ident = (mmsi or imo or "").strip()
+    if not ident:
+        return None
+    import time as _t
+    now_m = _t.monotonic()
+    tkey = "vf:" + ident
+    if now_m - _last_pos_fetch.get(tkey, 0) < _MIN_FETCH_INTERVAL:
+        return None  # baru saja diambil — jangan boros kredit
+    _last_pos_fetch[tkey] = now_m
+
+    params = {"extradata": "voyage"}
+    if mmsi:
+        params["mmsi"] = str(mmsi)
+    elif imo:
+        params["imo"] = str(imo)
+    if _vesselfinder_use_sat():
+        params["sat"] = "1"
+    try:
+        r = await asyncio.to_thread(_vesselfinder_get, params, timeout)
+    except Exception as e:
+        logger.warning("[ais] VesselFinder gagal utk %s: %s", ident, e)
+        return None
+    if r.status_code != 200:
+        logger.warning("[ais] VesselFinder HTTP %s utk %s.", r.status_code, ident)
+        return None
+    try:
+        ais = _vf_pick(r.json())
+    except Exception:
+        ais = None
+    if not isinstance(ais, dict):
+        return None
+    lat, lon = _num(ais.get("LATITUDE")), _num(ais.get("LONGITUDE"))
+    if lat is None or lon is None:
+        return None
+
+    now = datetime.now(timezone.utc).isoformat()
+    src = "vesselfinder-satellite" if str(ais.get("SRC") or "").upper().startswith("SAT") else "vesselfinder"
+    key_mmsi = str(ais.get("MMSI") or mmsi or "").strip()
+    if not key_mmsi:
+        return None
+    upd = {"mmsi": key_mmsi, "source": src, "updated_at": now, "latitude": lat, "longitude": lon}
+    if ais.get("IMO"):
+        upd["imo"] = str(ais.get("IMO"))
+    nm = str(ais.get("NAME") or "").strip()
+    if nm:
+        upd["ship_name"] = nm
+    if _num(ais.get("SPEED")) is not None:
+        upd["speed"] = _num(ais.get("SPEED"))
+    if _num(ais.get("COURSE")) is not None:
+        upd["course"] = _num(ais.get("COURSE"))
+    hd = _num(ais.get("HEADING"))
+    if hd is not None and hd != 511:
+        upd["heading"] = hd
+    if ais.get("NAVSTAT") is not None:
+        try:
+            upd["nav_status"] = int(ais.get("NAVSTAT"))
+        except Exception:
+            pass
+    dest = str(ais.get("DESTINATION") or "").strip()
+    if dest:
+        upd["destination"] = dest
+    if ais.get("ETA"):
+        upd["eta"] = str(ais.get("ETA"))
+    dr = _num(ais.get("DRAUGHT"))
+    if dr is not None:
+        upd["draught"] = dr
+    upd["position_timestamp"] = _vf_ts(ais.get("TIMESTAMP")) or now
+    try:
+        await db.ais_positions.update_one({"mmsi": key_mmsi}, {"$set": upd}, upsert=True)
+        return await db.ais_positions.find_one({"mmsi": key_mmsi}, {"_id": 0})
+    except Exception as e:
+        logger.warning("[ais] VesselFinder upsert gagal: %s", e)
+        return None
+
+
 # Status leg: nilai kanonik "Menunggu"/"Berlangsung"/"Selesai" (default Menunggu).
 _LEG_ACTIVE_RE = re.compile(r"berlangsung|berjalan|berangkat|sedang|on\s*trip|in\s*transit", re.I)
 _LEG_DONE_RE = re.compile(r"selesai|tiba|delivered|done|complete|arrived", re.I)
@@ -485,6 +623,16 @@ async def position_for_legs(db, legs):
         age = _doc_age_seconds(doc)
         if doc is None or age is None or age > VESSELAPI_MAX_AGE_MIN * 60:
             fresh = await _vesselapi_refresh(db, chosen["mmsi"], chosen["imo"])
+            if fresh:
+                doc = fresh
+
+    # Fallback terakhir: VesselFinder API (sumber sama dgn vesselfinder.com) kalau
+    # masih kosong/basi — paling ampuh utk kapal sandar/pesisir (terrestrial).
+    # Dipanggil cuma kalau provider sebelumnya belum dapat → hemat kredit.
+    if vesselfinder_enabled():
+        age = _doc_age_seconds(doc)
+        if doc is None or age is None or age > VESSELAPI_MAX_AGE_MIN * 60:
+            fresh = await _vesselfinder_refresh(db, chosen["mmsi"], chosen["imo"])
             if fresh:
                 doc = fresh
 
@@ -700,11 +848,41 @@ async def diag(db):
         "worker_running": worker_running(),
         "vesselapi_configured": vesselapi_enabled(),   # VesselAPI: yes/no saja
         "vesselapi_sat": _vesselapi_use_sat(),
+        "vesselfinder_configured": vesselfinder_enabled(),   # VesselFinder: yes/no saja
+        "vesselfinder_sat": _vesselfinder_use_sat(),
         "watched_mmsi_count": len(watched),
         "watched_sample": watched[:20],
         "cache_count": cache_count,
         "cache_sample": sample,
     }
+
+
+async def probe_vesselfinder(mmsi, imo=None):
+    """Diagnostik: panggil VesselFinder /vessels mentah untuk lihat status + bentuk
+    respons (TANPA menampilkan userkey). Terrestrial (sat=0) seperti sumber publik."""
+    if not vesselfinder_enabled():
+        return {"error": "VESSELFINDER_API_KEY belum diset di backend"}
+    params = {"extradata": "voyage"}
+    if str(mmsi or "").strip():
+        params["mmsi"] = str(mmsi).strip()
+    elif str(imo or "").strip():
+        params["imo"] = str(imo).strip()
+    else:
+        return {"error": "tidak ada mmsi/imo untuk diuji"}
+    try:
+        r = await asyncio.to_thread(_vesselfinder_get, params, 15)
+        try:
+            body = r.json()
+        except Exception:
+            body = {"_text": (r.text or "")[:800]}
+        return {
+            "status": r.status_code,
+            "ratelimit_remaining": r.headers.get("X-RateLimit-Remaining"),
+            "has_position": bool(isinstance(_vf_pick(body), dict) and _num(_vf_pick(body).get("LATITUDE")) is not None),
+            "body": body,
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 
 async def probe_vesselapi(mmsi, imo=None):
@@ -798,7 +976,7 @@ async def trace(db, probe_missing=True, max_probe=8):
     except Exception as e:
         logger.warning("[ais] trace scan gagal: %s", e)
 
-    probes_left = max_probe if (probe_missing and vesselapi_enabled()) else 0
+    probes_left = max_probe if (probe_missing and (vesselapi_enabled() or vesselfinder_enabled())) else 0
     for r in rows:
         doc = None
         try:
@@ -814,13 +992,27 @@ async def trace(db, probe_missing=True, max_probe=8):
         r["freshness"] = pub.get("freshness") if pub else None
         r["age_seconds"] = (pub.get("age_seconds") if pub else _doc_age_seconds(doc))
         r["provider"] = None
-        # Probe VesselAPI HANYA utk kapal yang belum ada posisi (kapal bermasalah).
+        # Probe provider berbayar HANYA utk kapal yang belum ada posisi (bermasalah).
         if probes_left > 0 and not pub:
             probes_left -= 1
-            try:
-                r["provider"] = _summarize_probe(await probe_vesselapi(r["mmsi"], r["imo"]))
-            except Exception as e:
-                r["provider"] = [{"error": str(e)[:160]}]
+            prov = []
+            if vesselapi_enabled():
+                try:
+                    prov += _summarize_probe(await probe_vesselapi(r["mmsi"], r["imo"]))
+                except Exception as e:
+                    prov.append({"idtype": "vesselapi", "error": str(e)[:160]})
+            if vesselfinder_enabled():
+                try:
+                    vf = await probe_vesselfinder(r["mmsi"], r["imo"])
+                    prov.append({
+                        "idtype": "vesselfinder", "id": r["mmsi"] or r["imo"],
+                        "status": vf.get("status"), "has_position": vf.get("has_position"),
+                        "source": "vesselfinder", "ratelimit_remaining": vf.get("ratelimit_remaining"),
+                        "error": vf.get("error"),
+                    })
+                except Exception as e:
+                    prov.append({"idtype": "vesselfinder", "error": str(e)[:160]})
+            r["provider"] = prov
     # urut: yang belum ada posisi di atas, lalu by nama
     rows.sort(key=lambda x: (x["cache_has_position"], x.get("kapal") or ""))
     return {

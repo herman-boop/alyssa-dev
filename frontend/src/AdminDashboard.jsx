@@ -1526,6 +1526,7 @@ function PengaturanPage({ dark, onToggleTheme, onLogout, fixHeicPhotos, fixingHe
                 <div>aisstream (gratis) terpasang: <b style={{ color: aisDiag.configured ? "#3fb950" : "#f85149" }}>{aisDiag.configured ? "YA" : "TIDAK"}</b></div>
                 <div>Worker aisstream jalan: <b style={{ color: aisDiag.worker_running ? "#3fb950" : "#f0a742" }}>{aisDiag.worker_running ? "YA" : "TIDAK"}</b></div>
                 <div>VesselAPI (berbayar) terpasang: <b style={{ color: aisDiag.vesselapi_configured ? "#3fb950" : "#f0a742" }}>{aisDiag.vesselapi_configured ? "YA" : "TIDAK"}</b>{aisDiag.vesselapi_configured ? <span style={{ color: "#8b949e" }}> · satelit: {aisDiag.vesselapi_sat ? "aktif" : "nonaktif"}</span> : null}</div>
+                <div>VesselFinder (berbayar) terpasang: <b style={{ color: aisDiag.vesselfinder_configured ? "#3fb950" : "#f0a742" }}>{aisDiag.vesselfinder_configured ? "YA" : "TIDAK"}</b>{aisDiag.vesselfinder_configured ? <span style={{ color: "#8b949e" }}> · satelit: {aisDiag.vesselfinder_sat ? "aktif" : "nonaktif (hemat kredit)"}</span> : null}</div>
                 <div>MMSI dipantau: <b>{aisDiag.watched_mmsi_count}</b> {aisDiag.watched_sample?.length ? `(${aisDiag.watched_sample.join(", ")})` : ""}</div>
                 <div>Kapal di cache: <b>{aisDiag.cache_count}</b></div>
                 {aisDiag.cache_sample?.length ? (

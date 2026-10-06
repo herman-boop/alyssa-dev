@@ -676,13 +676,82 @@ async def test_vesselapi_terrestrial_fallback():
         AIS._last_pos_fetch.clear(); AIS._last_eta_fetch.clear()
 
 
+async def test_vesselfinder_refresh():
+    """Adapter VesselFinder: parse respons /vessels, simpan posisi ke cache,
+    normalisasi timestamp, deteksi sumber terrestrial vs satelit, dormant tanpa key."""
+    print("test_vesselfinder_refresh")
+
+    # _vf_ts: normalisasi 'YYYY-MM-DD HH:MM:SS UTC' -> ISO
+    ok(AIS._vf_ts("2026-10-06 13:40:00 UTC").startswith("2026-10-06T13:40:00"), "_vf_ts normalisasi UTC -> ISO")
+    ok(AIS._vf_ts(None) is None, "_vf_ts kosong -> None")
+
+    class _Resp:
+        def __init__(self, status, body=None, headers=None):
+            self.status_code = status; self._body = body; self.headers = headers or {}
+        def json(self): return self._body
+
+    # Dormant tanpa key
+    saved = (AIS.vesselfinder_enabled, AIS._vesselfinder_use_sat, AIS._vesselfinder_get)
+    AIS.vesselfinder_enabled = lambda: False
+    try:
+        ok(await AIS._vesselfinder_refresh(FakeDB(), "525701831", "1071056") is None, "tanpa key → dormant (None)")
+    finally:
+        AIS.vesselfinder_enabled = saved[0]
+
+    calls = []
+    def fake_get(params, timeout=15):
+        calls.append(dict(params))
+        return _Resp(200, [{"AIS": {
+            "MMSI": 525701831, "IMO": 1071056, "NAME": "FAJAR BAHARI VIII",
+            "LATITUDE": -6.05, "LONGITUDE": 106.92, "SPEED": 0.0, "COURSE": 180.0,
+            "HEADING": 179, "NAVSTAT": 5, "DESTINATION": "JAKARTA",
+            "ETA": "2026-10-06 10:50", "DRAUGHT": 3.6, "SRC": "TER",
+            "TIMESTAMP": "2026-10-06 13:40:00 UTC"}}], headers={"X-RateLimit-Remaining": "9999"})
+
+    AIS.vesselfinder_enabled = lambda: True
+    AIS._vesselfinder_use_sat = lambda: False
+    AIS._vesselfinder_get = fake_get
+    AIS._last_pos_fetch.clear()
+    try:
+        db = FakeDB()
+        doc = await AIS._vesselfinder_refresh(db, "525701831", "1071056")
+        ok(doc is not None, "VesselFinder: dapet posisi")
+        ok(abs(doc["latitude"] + 6.05) < 1e-6 and abs(doc["longitude"] - 106.92) < 1e-6, "lat/lon benar")
+        ok(doc["source"] == "vesselfinder", "SRC TER → source vesselfinder (terrestrial)")
+        ok(doc["ship_name"] == "FAJAR BAHARI VIII" and doc["imo"] == "1071056", "nama + IMO ke-parse")
+        ok(doc["nav_status"] == 5 and doc["destination"] == "JAKARTA", "nav_status + tujuan ke-parse")
+        ok(str(doc["position_timestamp"]).startswith("2026-10-06T13:40:00"), "timestamp ternormalisasi")
+        ok(calls and calls[0].get("mmsi") == "525701831" and "sat" not in calls[0], "query pakai mmsi, sat OFF (hemat kredit)")
+        cached = await db.ais_positions.find_one({"mmsi": "525701831"})
+        ok(cached is not None and cached.get("latitude") is not None, "posisi tersimpan di cache")
+
+        # Throttle: panggil kedua langsung → None (hemat kredit)
+        doc2 = await AIS._vesselfinder_refresh(db, "525701831", "1071056")
+        ok(doc2 is None and len(calls) == 1, "throttle: tak query lagi dalam interval")
+
+        # SRC SAT → source satelit; sat=1 saat USE_SAT on
+        AIS._vesselfinder_use_sat = lambda: True
+        AIS._last_pos_fetch.clear(); calls.clear()
+        def fake_sat(params, timeout=15):
+            calls.append(dict(params))
+            return _Resp(200, [{"AIS": {"MMSI": 525005194, "LATITUDE": 1.0, "LONGITUDE": 118.0, "SRC": "SAT", "TIMESTAMP": "2026-10-06 13:00:00 UTC"}}], headers={})
+        AIS._vesselfinder_get = fake_sat
+        d3 = await AIS._vesselfinder_refresh(FakeDB(), "525005194", None)
+        ok(d3 is not None and d3["source"] == "vesselfinder-satellite", "SRC SAT → source satelit")
+        ok(calls and calls[0].get("sat") == "1", "USE_SAT on → sat=1")
+    finally:
+        AIS.vesselfinder_enabled, AIS._vesselfinder_use_sat, AIS._vesselfinder_get = saved
+        AIS._last_pos_fetch.clear()
+
+
 async def main():
     for t in (test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,
               test_expenses_helpers, test_rekon_to_biaya, test_tagihan_status_and_routing,
-              test_pnl, test_ais_trace, test_vesselapi_terrestrial_fallback, test_felis_adapter):
+              test_pnl, test_ais_trace, test_vesselapi_terrestrial_fallback,
+              test_vesselfinder_refresh, test_felis_adapter):
         await t()
     print(f"\nSEMUA LULUS — {PASS} assertions.")
 
