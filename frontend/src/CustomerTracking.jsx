@@ -1041,15 +1041,19 @@ export default function CustomerTracking() {
                         )}
                         {cp.status && <div className="trk-cp-status">{cp.status}</div>}
                         {cp.keterangan && <div className="trk-cp-note">{cp.keterangan}</div>}
-                        {/* Thumbnail */}
-                        {selectedCp?.id === cp.id && cp.url && (
+                        {/* Thumbnail (kalau ada foto) / pesan kalau checkpoint tanpa foto */}
+                        {selectedCp?.id === cp.id && (cp.url ? (
                           <div className="trk-cp-thumb-wrap" style={{ position: "relative" }}>
                             <div onClick={() => openDocPreview(cp.url, `Checkpoint ${cpNum}`)} style={{ cursor: "pointer" }}>
                               <img src={resolveUrl(cp.url)} alt={`CP-${cpNum}`} className="trk-cp-thumb" />
                             </div>
                             <WaShareBtn url={resolveUrl(cp.url)} label={`Checkpoint ${cpNum}`} />
                           </div>
-                        )}
+                        ) : (
+                          <div style={{ marginTop: 6, fontSize: 11.5, color: "var(--trk-muted, #6b7280)", background: "var(--trk-chip-bg, rgba(0,0,0,.04))", border: "1px dashed var(--trk-line, #cbd5e1)", borderRadius: 8, padding: "7px 10px" }}>
+                            📷 Checkpoint ini dikirim tanpa foto (lokasi &amp; status saja).
+                          </div>
+                        ))}
                       </div>
                     </div>
                   );
