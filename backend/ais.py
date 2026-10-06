@@ -718,6 +718,103 @@ async def probe_vesselapi(mmsi, imo=None):
     return out or {"error": "tidak ada mmsi/imo untuk diuji"}
 
 
+def _summarize_probe(pr):
+    """Ringkas hasil probe_vesselapi jadi info aman (TANPA key, TANPA dump body
+    besar): per idtype → {idtype, id, status, has_position, source, ratelimit}."""
+    out = []
+    if not isinstance(pr, dict):
+        return out
+    for label in ("mmsi", "imo"):
+        d = pr.get(label)
+        if not isinstance(d, dict):
+            continue
+        has_pos = False
+        body = d.get("body")
+        try:
+            p = _pluck(body, "latitude") if isinstance(body, dict) else None
+            has_pos = bool(p and p.get("latitude") is not None)
+        except Exception:
+            has_pos = False
+        out.append({
+            "idtype": label, "id": d.get("id"), "status": d.get("status"),
+            "has_position": has_pos, "source": d.get("x_data_source"),
+            "ratelimit_remaining": d.get("ratelimit_remaining"),
+            "error": d.get("error"),
+        })
+    if pr.get("error") and not out:
+        out.append({"error": pr.get("error")})
+    return out
+
+
+async def trace(db, probe_missing=True, max_probe=8):
+    """TRACE per kapal dari Route Leg (read-only, TANPA API key, TANPA ubah data).
+    Untuk tiap leg kapal (punya mmsi/imo) di semua trip: identitas, status leg,
+    apakah MMSI dipantau worker, apakah ada posisi di cache (+kesegaran), dan —
+    khusus kapal yang BELUM ada posisi — hasil probe VesselAPI (status 200/404/…)
+    biar jelas 'provider belum punya posisi' vs 'ada masalah'. Probe dibatasi
+    (max_probe) biar hemat kuota."""
+    watched = set(await active_mmsis(db))
+    rows, seen = [], set()
+    try:
+        cur = db.trips.find({"legs": {"$exists": True}}, {"_id": 0, "trip_id": 1, "order_id": 1, "legs": 1})
+        async for t in cur:
+            for lg in (t.get("legs") or []):
+                if not _leg_is_ship(lg):
+                    continue
+                mmsi, imo = _leg_ship_id(lg)
+                if not (mmsi or imo):
+                    continue
+                k = (t.get("trip_id"), mmsi or imo, str((lg or {}).get("route_leg_id") or ""))
+                if k in seen:
+                    continue
+                seen.add(k)
+                rows.append({
+                    "trip_id": t.get("trip_id"), "order_id": t.get("order_id"),
+                    "kapal": str((lg or {}).get("kapal") or "").strip(),
+                    "mmsi": mmsi, "imo": imo,
+                    "leg_status": str((lg or {}).get("status") or "").strip(),
+                    "leg_kind": _leg_status_kind(lg),
+                    "watched": bool(mmsi) and mmsi in watched,
+                })
+    except Exception as e:
+        logger.warning("[ais] trace scan gagal: %s", e)
+
+    probes_left = max_probe if (probe_missing and vesselapi_enabled()) else 0
+    for r in rows:
+        doc = None
+        try:
+            if r["mmsi"]:
+                doc = await db.ais_positions.find_one({"mmsi": r["mmsi"]}, {"_id": 0})
+            if not doc and r["imo"]:
+                doc = await db.ais_positions.find_one({"imo": r["imo"]}, {"_id": 0})
+        except Exception:
+            doc = None
+        pub = public_ais(doc)
+        r["cache"] = bool(doc)
+        r["cache_has_position"] = bool(pub)
+        r["freshness"] = pub.get("freshness") if pub else None
+        r["age_seconds"] = (pub.get("age_seconds") if pub else _doc_age_seconds(doc))
+        r["provider"] = None
+        # Probe VesselAPI HANYA utk kapal yang belum ada posisi (kapal bermasalah).
+        if probes_left > 0 and not pub:
+            probes_left -= 1
+            try:
+                r["provider"] = _summarize_probe(await probe_vesselapi(r["mmsi"], r["imo"]))
+            except Exception as e:
+                r["provider"] = [{"error": str(e)[:160]}]
+    # urut: yang belum ada posisi di atas, lalu by nama
+    rows.sort(key=lambda x: (x["cache_has_position"], x.get("kapal") or ""))
+    return {
+        "vesselapi_configured": vesselapi_enabled(),
+        "aisstream_configured": provider_enabled(),
+        "worker_running": worker_running(),
+        "watched_count": len(watched),
+        "ship_count": len(rows),
+        "probed": max_probe - probes_left if (probe_missing and vesselapi_enabled()) else 0,
+        "ships": rows,
+    }
+
+
 def start_worker(db):
     """Start worker sekali. Aman dipanggil walau key kosong (langsung no-op)."""
     global _worker_task

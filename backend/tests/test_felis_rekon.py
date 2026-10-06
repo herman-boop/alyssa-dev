@@ -16,12 +16,31 @@ import rekon_sync as R
 from supplier_dedup import suggest_similar
 import ledger_status as LS
 import pnl as PNL
+import ais as AIS
 import expenses as EXP
 
 
 # ── Fake async Mongo (cukup untuk yang dipakai rekon_sync) ───────────────────
 class DupKey(Exception):
     pass
+
+
+class FakeCursor:
+    def __init__(self, docs):
+        self._docs = docs
+
+    def sort(self, *a, **k):
+        return self
+
+    def limit(self, n):
+        self._docs = self._docs[:n]
+        return self
+
+    def __aiter__(self):
+        async def gen():
+            for d in self._docs:
+                yield d
+        return gen()
 
 
 class FakeColl:
@@ -46,7 +65,31 @@ class FakeColl:
 
     @staticmethod
     def _match(d, filt):
-        return all(d.get(k) == v for k, v in (filt or {}).items())
+        for k, v in (filt or {}).items():
+            if isinstance(v, dict):
+                if "$exists" in v:
+                    if "." in k:
+                        top, sub = k.split(".", 1)
+                        arr = d.get(top)
+                        present = isinstance(arr, list) and any(
+                            isinstance(x, dict) and x.get(sub) not in (None, "") for x in arr)
+                    else:
+                        present = (k in d and d.get(k) is not None)
+                    if bool(v["$exists"]) != present:
+                        return False
+                if "$ne" in v and d.get(k) == v["$ne"]:
+                    return False
+            else:
+                if d.get(k) != v:
+                    return False
+        return True
+
+    def find(self, filt=None, proj=None):
+        out = []
+        for d in self.docs:
+            if self._match(d, filt or {}):
+                r = dict(d); r.pop("_id", None); out.append(r)
+        return FakeCursor(out)
 
     async def find_one(self, filt, proj=None):
         for d in self.docs:
@@ -536,13 +579,46 @@ async def test_pnl():
     ok(neg["grand_total"]["laba_bersih"] == -600000, "rugi → laba_bersih negatif (-600rb)")
 
 
+async def test_ais_trace():
+    """Patch G-1: trace per kapal (Route Leg → watchlist → cache → provider)."""
+    print("test_ais_trace")
+    # _summarize_probe (pure) — tanpa key, ringkas status + ada/tidak posisi
+    pr = {"mmsi": {"id": "525701831", "status": 404, "body": {"_text": "not found"}},
+          "imo": {"id": "1071056", "status": 200, "body": {"vesselPosition": {"latitude": 1.2, "longitude": 120.0}}}}
+    s = AIS._summarize_probe(pr)
+    ok(any(x["idtype"] == "mmsi" and x["status"] == 404 and not x["has_position"] for x in s), "probe MMSI 404 → kosong")
+    ok(any(x["idtype"] == "imo" and x["status"] == 200 and x["has_position"] for x in s), "probe IMO 200 → ada posisi")
+    # trace via fake DB (tanpa VesselAPI key → tidak probe)
+    db = FakeDB()
+    await db.trips.insert_one({"trip_id": "T1", "order_id": "O1", "legs": [
+        {"route_leg_id": "l1", "tipe": "Self Drive", "status": "Berlangsung"},
+        {"route_leg_id": "l2", "tipe": "Kapal RoRo", "kapal": "FAJAR BAHARI VIII", "mmsi": "525701831", "imo": "1071056", "status": "Berlangsung"},
+        {"route_leg_id": "l3", "tipe": "Self Drive", "status": "Menunggu"},
+    ]})
+    await db.trips.insert_one({"trip_id": "T2", "legs": [
+        {"route_leg_id": "m1", "tipe": "Kapal RoRo", "kapal": "KALIMANTAN ECO", "mmsi": "525015993", "status": "Selesai"},
+    ]})
+    await db.ais_positions.insert_one({"mmsi": "525015993", "ship_name": "KALIMANTAN ECO",
+                                       "latitude": 1.0, "longitude": 118.0, "position_timestamp": "2026-10-06T00:00:00+00:00"})
+    res = await AIS.trace(db, probe_missing=False)
+    ships = {x["mmsi"]: x for x in res["ships"]}
+    ok("525701831" in ships and "525015993" in ships, "dua kapal ter-trace dari Route Leg")
+    fb = ships["525701831"]
+    ok(fb["kapal"] == "FAJAR BAHARI VIII" and fb["imo"] == "1071056", "identitas dari leg (nama + IMO)")
+    ok(fb["watched"] is True, "FAJAR BAHARI dipantau (leg punya MMSI)")
+    ok(fb["cache_has_position"] is False, "FAJAR BAHARI belum ada posisi di cache")
+    ok(ships["525015993"]["cache_has_position"] is True, "KALIMANTAN ECO ada posisi cache")
+    ok(res["ship_count"] == 2 and res["probed"] == 0, "probe dilewati saat probe_missing=False")
+    ok(res["watched_count"] == 2, "watchlist = 2 MMSI dari leg")
+
+
 async def main():
     for t in (test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,
               test_expenses_helpers, test_rekon_to_biaya, test_tagihan_status_and_routing,
-              test_pnl, test_felis_adapter):
+              test_pnl, test_ais_trace, test_felis_adapter):
         await t()
     print(f"\nSEMUA LULUS — {PASS} assertions.")
 
