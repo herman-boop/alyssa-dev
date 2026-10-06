@@ -1469,6 +1469,14 @@ function PengaturanPage({ dark, onToggleTheme, onLogout, fixHeicPhotos, fixingHe
     catch (e) { setAisProbe({ error: e?.response?.status || "gagal", detail: e?.message }); }
     finally { setProbeBusy(false); }
   };
+  const [aisTrace, setAisTrace] = useState(null);
+  const [traceBusy, setTraceBusy] = useState(false);
+  const runAisTrace = async () => {
+    setTraceBusy(true); setAisTrace(null);
+    try { const { data } = await axios.get(`${API}/admin/ais/trace`); setAisTrace(data); }
+    catch (e) { setAisTrace({ error: e?.response?.status || "gagal", detail: e?.message }); }
+    finally { setTraceBusy(false); }
+  };
   return (
     <div style={{ maxWidth: 640 }}>
       <div style={row}>
@@ -1540,6 +1548,48 @@ function PengaturanPage({ dark, onToggleTheme, onLogout, fixHeicPhotos, fixingHe
 {JSON.stringify(aisProbe, null, 2)}
             </pre>
           )}
+        </div>
+
+        {/* TRACE per kapal: Route Leg → watchlist → cache → provider (1 klik) */}
+        <div style={{ marginTop: 12, borderTop: "1px solid #1a2130", paddingTop: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 12, color: "#8b949e" }}>Trace per kapal: MMSI/IMO dari leg · dipantau? · ada posisi? · status provider.</div>
+            <button onClick={runAisTrace} disabled={traceBusy} style={{ padding: "8px 14px", borderRadius: 9, border: "1px solid #6e40c9", background: "#1a1033", color: "#b392f0", fontWeight: 700, fontSize: 12, cursor: "pointer" }} data-testid="ais-trace-run">
+              {traceBusy ? "⏳ Trace..." : "🧭 Trace per Kapal"}
+            </button>
+          </div>
+          {aisTrace && (aisTrace.error ? (
+            <div style={{ marginTop: 10, fontSize: 12, color: "#f85149" }}>Gagal: {String(aisTrace.error)} {aisTrace.detail ? `(${aisTrace.detail})` : ""}</div>
+          ) : (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ fontSize: 11, color: "#8b949e", marginBottom: 8 }}>{aisTrace.ship_count} kapal dari Route Leg · {aisTrace.watched_count} dipantau · {aisTrace.probed || 0} di-tes provider</div>
+              {(aisTrace.ships || []).map((s, i) => {
+                const posColor = s.cache_has_position ? "#3fb950" : "#f0a742";
+                const kindColor = s.leg_kind === "active" ? "#EF9F27" : s.leg_kind === "done" ? "#56d364" : "#8b949e";
+                return (
+                  <div key={i} style={{ border: "1px solid #1f2937", borderRadius: 10, padding: 10, marginBottom: 8, background: "#0b0f17" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 700, color: "#e6edf3" }}>{s.kapal || "(tanpa nama)"}</div>
+                      <span style={{ fontSize: 10.5, fontWeight: 700, color: kindColor }}>{s.leg_status || s.leg_kind}</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: "#8b949e", marginTop: 3, lineHeight: 1.7 }}>
+                      <div>MMSI: <b style={{ color: s.mmsi ? "#c9d1d9" : "#f85149" }}>{s.mmsi || "— kosong —"}</b> · IMO: <b style={{ color: "#c9d1d9" }}>{s.imo || "—"}</b></div>
+                      <div>Dipantau worker: <b style={{ color: s.watched ? "#3fb950" : "#f85149" }}>{s.watched ? "YA" : "TIDAK"}</b> · Ada posisi (cache): <b style={{ color: posColor }}>{s.cache_has_position ? `YA (${s.freshness})` : "TIDAK"}</b></div>
+                      {s.provider && s.provider.length ? (
+                        <div>Provider VesselAPI: {s.provider.map((p, j) => (
+                          <span key={j} style={{ marginRight: 8, color: p.has_position ? "#3fb950" : "#f0a742" }}>
+                            {p.error ? `error` : `${p.idtype} → HTTP ${p.status}${p.has_position ? " (ada posisi)" : " (kosong)"}`}
+                          </span>
+                        ))}</div>
+                      ) : (s.cache_has_position ? null : <div style={{ color: "#6b7681" }}>Provider: (tidak di-tes)</div>)}
+                      <div style={{ color: "#6b7681" }}>trip: {s.trip_id || "—"}</div>
+                    </div>
+                  </div>
+                );
+              })}
+              {(aisTrace.ships || []).length === 0 && <div style={{ fontSize: 12, color: "#6b7681" }}>Belum ada leg kapal ber-MMSI/IMO.</div>}
+            </div>
+          ))}
         </div>
       </div>
 

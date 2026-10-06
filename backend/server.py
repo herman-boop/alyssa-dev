@@ -1817,6 +1817,13 @@ async def admin_ais_probe(mmsi: Optional[str] = None, imo: Optional[str] = None)
     return {"probed": out}
 
 
+@api_router.get("/admin/ais/trace", dependencies=[Depends(require_admin_pin)])
+async def admin_ais_trace(probe: int = 1):
+    """TRACE per kapal (Route Leg → watchlist → cache → provider). Read-only,
+    tidak menampilkan API key, tidak mengubah data. probe=0 untuk skip tes VesselAPI."""
+    return await ais.trace(db, probe_missing=bool(probe))
+
+
 @api_router.get("/admin/trips/{trip_id}/ais", dependencies=[Depends(require_admin_pin)])
 async def admin_trip_ais(trip_id: str):
     """Cek per-trip: identitas kapal tiap leg (MMSI tersimpan atau belum) + ship_ais."""
