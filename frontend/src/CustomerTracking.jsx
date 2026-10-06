@@ -1121,7 +1121,12 @@ export default function CustomerTracking() {
                       )}
                     </>
                   ) : (
-                    <div style={{ fontSize: 12.5, color: "#8b949e", marginTop: 10 }}>Belum ada data posisi AIS terbaru untuk kapal ini. Coba beberapa saat lagi.</div>
+                    <div style={{ marginTop: 10 }}>
+                      <div style={{ fontSize: 12.5, color: "#8b949e" }}>Posisi live kapal lagi belum terpantau di jaringan AIS kami saat ini. Lihat posisi terkini kapal di peta pelacakan publik:</div>
+                      {extUrl && (
+                        <a href={extUrl} target="_blank" rel="noreferrer" style={{ display: "block", textAlign: "center", marginTop: 10, padding: "10px 12px", borderRadius: 8, border: "1px solid #1f6feb", background: "#0d2340", color: "#58a6ff", fontWeight: 700, fontSize: 13, textDecoration: "none" }} data-testid="trk-ais-public">📍 Lihat posisi kapal live (peta publik)</a>
+                      )}
+                    </div>
                   )}
 
                   {/* Detail kapal (disembunyikan) — MMSI/IMO + sumber AIS */}
