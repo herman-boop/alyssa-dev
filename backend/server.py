@@ -1696,9 +1696,14 @@ async def _merge_task_media(trip_id: str, view: dict):
     if not trip_id:
         return
     album = view.get("album") or {"asal": [], "kapal": [], "tujuan": [], "dokumen": []}
+    # 'seen' HANYA dari bucket yang DITAMPILKAN (asal/kapal/tujuan/dokumen).
+    # Jangan ikutkan bucket tersembunyi (mis. 'pelabuhan' dari album_key tugas),
+    # supaya foto yang terlanjur masuk bucket tak-tampil TETAP dipindah ke bucket
+    # tampil yang benar lewat task.photos (petugas pelabuhan dulu hilang di sini).
+    _DISPLAYED_BUCKETS = ("asal", "kapal", "tujuan", "dokumen")
     seen = set()
-    for arr in album.values():
-        for p in (arr or []):
+    for bname in _DISPLAYED_BUCKETS:
+        for p in (album.get(bname) or []):
             if p.get("url"):
                 seen.add(p["url"])
     async for t in db.leg_tasks.find({"trip_id": trip_id}):
