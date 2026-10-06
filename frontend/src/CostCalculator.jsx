@@ -707,7 +707,15 @@ export default function CostCalculator() {
             ))}
             {moda && <button type="button" onClick={() => { setModaManual(false); }} style={{ padding: "4px 8px", borderRadius: 5, fontSize: 10, cursor: "pointer", background: "none", border: "1px solid #f85149", color: "#f85149" }}>↻ Auto</button>}
           </div>
-          {moda && <div style={{ marginTop: 4, fontSize: 11, color: "#58a6ff" }}>→ {moda}</div>}
+          {/* Input manual bebas — bisa ketik metode apa saja (mis. tambah Car Carrier) */}
+          <input
+            style={{ ...I, marginTop: 6 }}
+            value={moda}
+            onChange={(e) => { setModaManual(true); setModa(e.target.value); }}
+            placeholder="atau ketik manual, mis. Kapal Laut + Car Carrier"
+            data-testid="cc-moda-manual"
+          />
+          <div style={{ marginTop: 3, fontSize: 10.5, color: "#6e7681" }}>Klik chip untuk cepat, atau ketik bebas di kotak ini. Teks ini yang tampil di kolom METODE penawaran.</div>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
           <div><label style={LBL}>Term of Payment</label>
