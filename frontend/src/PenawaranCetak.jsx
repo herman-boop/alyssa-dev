@@ -312,6 +312,7 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
                 color:#9ca3af !important; -webkit-text-fill-color:#9ca3af !important; opacity:1 !important;
               }
             `}</style>
+            <datalist id="pnw-metode-dl">{METODE_LIST.map((m) => <option key={m} value={m} />)}</datalist>
             <div style={{ fontSize: 16, fontWeight: 900, color: navy, marginBottom: 3 }}>Cetak Penawaran</div>
             <div style={{ fontSize: 11.5, color: gray, marginBottom: 12 }}>Centang rute yang mau dicetak, isi penanda tangan &amp; stempel. Format A4, tajam buat di-screenshot / print.</div>
 
@@ -383,10 +384,10 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
                               {mode === "final" && (
                                 <input type="radio" name={`pnw-sel-${i}`} checked={picked} onChange={() => setSelMap((m) => ({ ...m, [i]: ki }))} title="Pilih metode ini" data-testid={`pnw-opt-pick-${i}-${ki}`} style={{ width: 15, height: 15, flexShrink: 0 }} />
                               )}
-                              <select value={k.metode} onChange={(ev) => setOpt(i, ki, { metode: ev.target.value })} data-testid={`pnw-opt-metode-${i}-${ki}`}
-                                style={{ flex: "1 1 110px", minWidth: 0, padding: "6px 8px", borderRadius: 7, border: `1px solid ${border}`, fontSize: 12 }}>
-                                {METODE_LIST.map((m) => <option key={m} value={m}>{m}</option>)}
-                              </select>
+                              {/* Metode: input bebas + saran (datalist) — bisa pilih preset ATAU ketik manual (mis. Car Carrier / kombinasi) */}
+                              <input value={k.metode} onChange={(ev) => setOpt(i, ki, { metode: ev.target.value })} data-testid={`pnw-opt-metode-${i}-${ki}`}
+                                list="pnw-metode-dl" placeholder="metode (pilih / ketik)"
+                                style={{ flex: "1 1 110px", minWidth: 0, padding: "6px 8px", borderRadius: 7, border: `1px solid ${border}`, fontSize: 12 }} />
                               <input inputMode="numeric" value={k.harga ? Number(pNum(k.harga)).toLocaleString("id-ID") : ""} onChange={(ev) => setOpt(i, ki, { harga: ev.target.value.replace(/[^0-9]/g, "") })} placeholder="Harga" data-testid={`pnw-opt-harga-${i}-${ki}`}
                                 style={{ flex: "1 1 90px", minWidth: 0, padding: "6px 8px", borderRadius: 7, border: `1px solid ${border}`, fontSize: 12, textAlign: "right" }} />
                               <button onClick={() => delOpt(i, ki)} title="Hapus opsi"
