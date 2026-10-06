@@ -203,7 +203,7 @@ export default function KompensasiPage() {
   const fileRef = useRef();
 
   const addItem = async () => {
-    if (!selected) return;
+    if (!selected) { flash("Pilih supplier/kompensasi dulu di atas"); return; }
     const nilai = pNum(itemForm.nilai);
     if (nilai <= 0) { flash("Nilai wajib diisi"); return; }
     setItemSaving(true);
@@ -575,7 +575,7 @@ export default function KompensasiPage() {
               <button type="button" style={{ ...BTN_GHOST, fontSize: 12, borderColor: "#EF9F27", color: "#EF9F27" }} onClick={openTarik} data-testid="komp-tarik-open">
                 📥 Tarik dari Order (isi otomatis dari PO)
               </button>
-              <span style={{ fontSize: 11, color: "#8b949e", marginLeft: 8 }}>← unit &amp; rute keisi sendiri, tinggal isi Nilai</span>
+              <span style={{ fontSize: 11, color: "#8b949e", marginLeft: 8 }}>← cara cepat dari PO. <b style={{ color: "#c9d1d9" }}>Atau isi manual langsung di bawah</b> (tanpa tarik PO).</span>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
               <input style={I} placeholder="Keterangan / No. Invoice" value={itemForm.keterangan} onChange={(e) => setItemForm((f) => ({ ...f, keterangan: e.target.value }))} data-testid="komp-item-keterangan" />
@@ -584,7 +584,7 @@ export default function KompensasiPage() {
               <input style={I} placeholder="No. Pol / No. Rangka (opsional)" value={itemForm.no_unit} onChange={(e) => setItemForm((f) => ({ ...f, no_unit: e.target.value.toUpperCase() }))} />
               <input style={I} placeholder="Kota asal (opsional)" value={itemForm.asal_kota} onChange={(e) => setItemForm((f) => ({ ...f, asal_kota: e.target.value }))} />
               <input style={I} placeholder="Kota tujuan (opsional)" value={itemForm.tujuan_kota} onChange={(e) => setItemForm((f) => ({ ...f, tujuan_kota: e.target.value }))} />
-              <input style={I} inputMode="numeric" placeholder="Nilai kompensasi (Rp)" value={itemForm.nilai} onChange={(e) => setItemForm((f) => ({ ...f, nilai: e.target.value }))} data-testid="komp-item-nilai" />
+              <input style={I} inputMode="numeric" placeholder="Nilai kompensasi (Rp) — wajib" value={itemForm.nilai ? Number(pNum(itemForm.nilai)).toLocaleString("id-ID") : ""} onChange={(e) => setItemForm((f) => ({ ...f, nilai: e.target.value.replace(/[^0-9]/g, "") }))} data-testid="komp-item-nilai" />
               <input style={I} placeholder="Catatan (opsional)" value={itemForm.catatan} onChange={(e) => setItemForm((f) => ({ ...f, catatan: e.target.value }))} />
             </div>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
