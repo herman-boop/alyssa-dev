@@ -612,13 +612,77 @@ async def test_ais_trace():
     ok(res["watched_count"] == 2, "watchlist = 2 MMSI dari leg")
 
 
+async def test_vesselapi_terrestrial_fallback():
+    """Fallback terestrial: kalau query SATELIT kosong (mis. kapal lagi SANDAR di
+    pelabuhan, posisi cuma ada di jaringan AIS darat), otomatis coba lagi TANPA
+    filter.sat — posisi terestrial tetap ke-cache. Kalau satelit sudah ada posisi,
+    terestrial TIDAK dipanggil (hemat kuota)."""
+    print("test_vesselapi_terrestrial_fallback")
+
+    class _Resp:
+        def __init__(self, status, body=None, headers=None):
+            self.status_code = status
+            self._body = body or {}
+            self.headers = headers or {}
+        def json(self):
+            return self._body
+
+    calls = []
+
+    def fake_get(path, params, timeout=15):
+        calls.append((path, dict(params)))
+        if path.endswith("/eta"):
+            return _Resp(404)
+        if params.get("filter.sat") == "true":
+            return _Resp(404)   # satelit tak punya posisi kapal sandar
+        return _Resp(200, {"vesselPosition": {
+            "mmsi": "525701831", "imo": "1071056", "vessel_name": "FAJAR BAHARI VIII",
+            "latitude": -6.02, "longitude": 106.92, "sog": 0.0}}, headers={})
+
+    orig = (AIS.vesselapi_enabled, AIS._vesselapi_use_sat, AIS._vesselapi_get)
+    AIS.vesselapi_enabled = lambda: True
+    AIS._vesselapi_use_sat = lambda: True
+    AIS._vesselapi_get = fake_get
+    AIS._last_pos_fetch.clear(); AIS._last_eta_fetch.clear()
+    try:
+        db = FakeDB()
+        doc = await AIS._vesselapi_refresh(db, "525701831", "1071056")
+        ok(doc is not None, "fallback: dapet posisi walau satelit kosong")
+        ok(abs(doc["latitude"] + 6.02) < 1e-6 and abs(doc["longitude"] - 106.92) < 1e-6, "posisi dari query terestrial")
+        ok(doc["source"] == "vesselapi", "source = vesselapi (terestrial), bukan satelit")
+        pos_calls = [c for c in calls if c[0].endswith("/position")]
+        ok(len(pos_calls) == 2, "dua percobaan query posisi (satelit → terestrial)")
+        ok(pos_calls[0][1].get("filter.sat") == "true", "percobaan 1 = satelit")
+        ok("filter.sat" not in pos_calls[1][1], "percobaan 2 = terestrial (tanpa filter.sat)")
+        cached = await db.ais_positions.find_one({"mmsi": "525701831"})
+        ok(cached is not None and cached.get("latitude") is not None, "posisi tersimpan di cache")
+
+        # Satelit SUDAH ada posisi → terestrial tak perlu dipanggil.
+        calls.clear(); AIS._last_pos_fetch.clear(); AIS._last_eta_fetch.clear()
+        def fake_sat_ok(path, params, timeout=15):
+            calls.append((path, dict(params)))
+            if path.endswith("/eta"):
+                return _Resp(404)
+            return _Resp(200, {"vesselPosition": {"mmsi": "525005194", "latitude": 1.0, "longitude": 118.0}},
+                         headers={"X-Data-Source": "satellite"})
+        AIS._vesselapi_get = fake_sat_ok
+        db2 = FakeDB()
+        doc2 = await AIS._vesselapi_refresh(db2, "525005194", None)
+        ok(doc2 is not None and doc2["source"] == "vesselapi-satellite", "satelit ada → source satelit")
+        pos_calls2 = [c for c in calls if c[0].endswith("/position")]
+        ok(len(pos_calls2) == 1, "satelit ada → tidak fallback (1 query posisi saja)")
+    finally:
+        AIS.vesselapi_enabled, AIS._vesselapi_use_sat, AIS._vesselapi_get = orig
+        AIS._last_pos_fetch.clear(); AIS._last_eta_fetch.clear()
+
+
 async def main():
     for t in (test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,
               test_expenses_helpers, test_rekon_to_biaya, test_tagihan_status_and_routing,
-              test_pnl, test_ais_trace, test_felis_adapter):
+              test_pnl, test_ais_trace, test_vesselapi_terrestrial_fallback, test_felis_adapter):
         await t()
     print(f"\nSEMUA LULUS — {PASS} assertions.")
 

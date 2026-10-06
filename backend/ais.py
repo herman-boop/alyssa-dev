@@ -303,27 +303,46 @@ async def _vesselapi_refresh(db, mmsi, imo, timeout=15):
         return None  # baru saja diambil — jangan boros kuota
     _last_pos_fetch[ident] = now_m
 
-    params = {"filter.idType": idtype}
+    # Daftar percobaan query. Kalau mode satelit nyala, coba SATELIT dulu; kalau
+    # balik kosong/404/error (mis. kapal lagi SANDAR di pelabuhan — posisinya cuma
+    # ada di jaringan AIS DARAT/terestrial, bukan satelit), FALLBACK ke query
+    # terestrial (tanpa filter.sat) — persis sumber yang bikin situs AIS publik
+    # tetap dapet posisi kapal sandar/dekat pantai. Kalau mode satelit mati,
+    # langsung query terestrial seperti perilaku lama.
+    base = {"filter.idType": idtype}
+    attempts = []
     if _vesselapi_use_sat():
-        params["filter.sat"] = "true"
-        params["filter.satLookbackMinutes"] = str(VESSELAPI_SAT_LOOKBACK)  # aman di Free
+        sat = dict(base)
+        sat["filter.sat"] = "true"
+        sat["filter.satLookbackMinutes"] = str(VESSELAPI_SAT_LOOKBACK)  # aman di Free
         # NB: filter.satMaxAgeMinutes sengaja TIDAK dikirim (khusus paket berbayar;
         # di Free bikin 403). Default server (60 mnt) tetap berlaku.
-    try:
-        r = await asyncio.to_thread(_vesselapi_get, f"/vessel/{ident}/position", params, timeout)
-    except Exception as e:
-        logger.warning("[ais] VesselAPI position gagal: %s", e)
-        return None
-    if r.status_code == 404:
-        logger.info("[ais] VesselAPI: belum ada posisi untuk %s (404).", ident)
-        return None
-    if r.status_code != 200:
-        logger.warning("[ais] VesselAPI position HTTP %s untuk %s.", r.status_code, ident)
-        return None
-    try:
-        pos = _pluck(r.json(), "latitude")
-    except Exception:
-        pos = None
+        attempts.append(("satelit", sat))
+        attempts.append(("terestrial", dict(base)))   # fallback saat satelit kosong
+    else:
+        attempts.append(("terestrial", dict(base)))
+
+    r = None
+    pos = None
+    for label, params in attempts:
+        try:
+            r = await asyncio.to_thread(_vesselapi_get, f"/vessel/{ident}/position", params, timeout)
+        except Exception as e:
+            logger.warning("[ais] VesselAPI position (%s) gagal utk %s: %s", label, ident, e)
+            continue
+        if r.status_code == 404:
+            logger.info("[ais] VesselAPI (%s): belum ada posisi untuk %s (404).", label, ident)
+            continue
+        if r.status_code != 200:
+            logger.warning("[ais] VesselAPI position (%s) HTTP %s utk %s.", label, r.status_code, ident)
+            continue
+        try:
+            cand = _pluck(r.json(), "latitude")
+        except Exception:
+            cand = None
+        if cand and cand.get("latitude") is not None and cand.get("longitude") is not None:
+            pos = cand
+            break   # dapet posisi (dari satelit ATAU terestrial) — pakai ini
     if not pos or pos.get("latitude") is None or pos.get("longitude") is None:
         return None
 
