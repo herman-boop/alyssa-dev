@@ -1397,7 +1397,7 @@ function VpStyle() {
     .vp-empty { text-align:center; color:var(--vp-mute); font-size:15px; padding:48px 20px; }
 
     /* Bottom sheet */
-    .vp-sheet-bg { position:fixed; inset:0; background:rgba(15,23,42,.5); z-index:100; display:flex; align-items:flex-end; }
+    .vp-sheet-bg { position:fixed; inset:0; background:rgba(15,23,42,.5); z-index:150; display:flex; align-items:flex-end; }
     .vp-sheet { width:100%; background:#fff; border-radius:20px 20px 0 0; padding:8px 16px calc(env(safe-area-inset-bottom) + 18px);
       max-height:86vh; overflow-y:auto; animation:vpup .22s ease; }
     @keyframes vpup { from { transform:translateY(100%);} to { transform:translateY(0);} }
