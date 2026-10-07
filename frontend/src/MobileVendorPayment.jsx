@@ -287,13 +287,16 @@ export default function MobileVendorPayment({ embedded = false }) {
   }, [dark, embedded]);
   const toggleDark = () => setDark((d) => !d);
 
-  const headers = { "X-Admin-Pin": pin };
+  // Dari dalam dashboard admin kirim penanda X-Admin-Embedded: server menerima tanpa PIN
+  // kalau admin lagi mode terbuka (admin sudah masuk); kalau admin dikunci, PIN tetap dipakai.
+  const embedHdr = embedded ? { "X-Admin-Embedded": "1" } : {};
+  const headers = { "X-Admin-Pin": pin, ...embedHdr };
   const flash = (m) => { setToast(m); setTimeout(() => setToast(""), 2600); };
 
   const doBootstrap = useCallback(async (usePin) => {
     setBooting(true); setPinErr("");
     try {
-      const r = await axios.get(`${API}/vendor-mobile/bootstrap`, { headers: { "X-Admin-Pin": usePin } });
+      const r = await axios.get(`${API}/vendor-mobile/bootstrap`, { headers: { "X-Admin-Pin": usePin, ...embedHdr } });
       setBoot({ kategori: r.data.kategori || [], metode: r.data.metode || [], vendors: r.data.vendors || [] });
       localStorage.setItem(PIN_KEY, usePin); setPin(usePin); setAuthed(true);
     } catch (e) {
@@ -301,11 +304,11 @@ export default function MobileVendorPayment({ embedded = false }) {
       setPinErr(code === 401 ? "PIN salah. Coba lagi." : "Gagal terhubung. Cek internet / server.");
       setAuthed(false);
     } finally { setBooting(false); }
-  }, []);
+  }, [embedded]);
 
-  // Embedded di dashboard admin: coba bootstrap otomatis walau PIN kosong
-  // (admin mode terbuka menerima PIN kosong) → tidak minta PIN dua kali. Kalau
-  // backend ternyata terkunci, bootstrap 401 dan gate PIN tetap muncul.
+  // Embedded di dashboard admin: coba bootstrap otomatis (header X-Admin-Embedded) →
+  // tidak minta PIN dua kali saat admin mode terbuka. Kalau admin dikunci & PIN
+  // tersimpan salah/kosong, bootstrap 401 dan gate PIN tetap muncul.
   useEffect(() => { if (pin || embedded) doBootstrap(pin); }, []); // eslint-disable-line
 
   const logout = () => { localStorage.removeItem(PIN_KEY); setPin(""); setAuthed(false); setPinInput(""); };

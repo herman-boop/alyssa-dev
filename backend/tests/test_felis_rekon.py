@@ -745,6 +745,54 @@ async def test_vesselfinder_refresh():
         AIS._last_pos_fetch.clear()
 
 
+async def test_vendor_pin_embedded():
+    """Penjaga PIN 'Catat Bayar Vendor': dari dalam dashboard admin (header X-Admin-Embedded)
+    TIDAK minta PIN saat admin mode terbuka; halaman vendor mandiri tetap wajib PIN;
+    saat admin dikunci PIN kembali wajib. Memakai kode ASLI server.py (diambil via AST)."""
+    print("test_vendor_pin_embedded")
+    import ast
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "server.py"), encoding="utf-8").read()
+    want = {"_admin_locked", "_admin_is_open", "require_vendor_pin"}
+    code = "\n".join(ast.get_source_segment(src, n) for n in ast.parse(src).body if isinstance(n, ast.FunctionDef) and n.name in want)
+
+    class _HTTPException(Exception):
+        def __init__(self, status_code, detail=""): self.status_code = status_code; self.detail = detail
+    ns = {"os": os, "Optional": __import__("typing").Optional, "Header": lambda **k: None, "HTTPException": _HTTPException}
+    exec(code, ns)
+    rv = ns["require_vendor_pin"]
+
+    def call(pin=None, emb=None):
+        try:
+            return rv(x_admin_pin=pin, x_admin_embedded=emb) is True
+        except _HTTPException as e:
+            return e.status_code
+
+    saved = {k: os.environ.get(k) for k in ("ADMIN_LOCK", "ADMIN_PIN", "VENDOR_PIN")}
+    try:
+        # Admin TERBUKA (ADMIN_LOCK mati) + PIN terpasang untuk halaman vendor
+        os.environ.pop("ADMIN_LOCK", None); os.environ["ADMIN_PIN"] = "1234"; os.environ["VENDOR_PIN"] = "9999"
+        ok(call("", "1") is True, "terbuka + dari dashboard admin: tanpa PIN diterima")
+        ok(call(None, "1") is True, "terbuka + dashboard: header PIN tidak ada → diterima")
+        ok(call("0000", "1") is True, "terbuka + dashboard: PIN lama/salah di browser tidak memblokir")
+        ok(call("", None) == 401, "halaman vendor mandiri tanpa PIN → ditolak")
+        ok(call("0000", None) == 401, "halaman vendor mandiri PIN salah → ditolak")
+        ok(call("1234", None) is True and call("9999", None) is True, "ADMIN_PIN & VENDOR_PIN tetap diterima")
+        # Admin DIKUNCI
+        os.environ["ADMIN_LOCK"] = "1"
+        ok(call("", "1") == 401, "terkunci + dashboard tanpa PIN → ditolak")
+        ok(call("0000", "1") == 401, "terkunci + dashboard PIN salah → ditolak")
+        ok(call("1234", "1") is True, "terkunci + dashboard + PIN admin benar → diterima")
+        ok(call("", None) == 401 and call("9999", None) is True, "terkunci: halaman vendor tetap pakai PIN")
+        # ADMIN_LOCK nyala tapi ADMIN_PIN kosong = admin terbuka (sama dgn require_admin_pin)
+        os.environ.pop("ADMIN_PIN", None)
+        ok(call("", "1") is True, "ADMIN_PIN kosong = admin terbuka → dashboard diterima")
+        ok(call("", None) == 401, "...tapi halaman vendor mandiri tetap wajib PIN")
+    finally:
+        for k, v in saved.items():
+            if v is None: os.environ.pop(k, None)
+            else: os.environ[k] = v
+
+
 async def test_auto_refresh_cycle():
     """Cek otomatis berkala: kapal 'Berlangsung' tanpa posisi segar dicek SEKALI per
     kapal unik, jeda makin lama kalau kosong, kapal segar dilewati, data basi bukan sukses."""
@@ -924,7 +972,7 @@ async def test_invoice_payments():
 
 
 async def main():
-    for t in (test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
+    for t in (test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,

@@ -252,20 +252,35 @@ def require_admin_pin(x_admin_pin: Optional[str] = Header(default=None, alias="X
     return True
 
 
-def require_vendor_pin(x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin")) -> bool:
+def _admin_is_open() -> bool:
+    """True kalau admin lagi mode TERBUKA (tanpa PIN) — sama dengan syarat require_admin_pin:
+    ADMIN_LOCK mati, atau ADMIN_PIN tidak di-set."""
+    return (not _admin_locked()) or not (os.environ.get("ADMIN_PIN") or "").strip()
+
+
+def require_vendor_pin(
+    x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
+    x_admin_embedded: Optional[str] = Header(default=None, alias="X-Admin-Embedded"),
+) -> bool:
     """Role khusus 'Catat Bayar Vendor' (mobile). Menerima VENDOR_PIN (akses
     terbatas: HANYA endpoint /vendor-mobile/*) atau ADMIN_PIN (admin penuh juga
     boleh). PIN vendor tidak bisa dipakai di endpoint admin lain karena hanya
-    grup /vendor-mobile/* yang memakai dependency ini."""
+    grup /vendor-mobile/* yang memakai dependency ini.
+
+    Pengecualian: halaman ini dibuka dari DALAM dashboard admin (header
+    X-Admin-Embedded: 1) saat admin lagi mode TERBUKA (tanpa PIN). Admin sudah
+    'masuk' dan seluruh endpoint /admin/* memang terbuka di mode itu, jadi tidak
+    perlu minta PIN lagi. Halaman vendor mandiri (tanpa header itu) tetap wajib PIN,
+    dan begitu admin dikunci (ADMIN_LOCK + ADMIN_PIN) PIN kembali wajib."""
     given = (x_admin_pin or "").strip()
-    if not given:
-        raise HTTPException(401, "Missing PIN")
     admin = (os.environ.get("ADMIN_PIN") or "").strip()
     vendor = (os.environ.get("VENDOR_PIN") or "").strip()
-    if admin and given == admin:
+    if given and ((admin and given == admin) or (vendor and given == vendor)):
         return True
-    if vendor and given == vendor:
+    if (x_admin_embedded or "").strip() == "1" and _admin_is_open():
         return True
+    if not given:
+        raise HTTPException(401, "Missing PIN")
     raise HTTPException(401, "Invalid PIN")
 
 
