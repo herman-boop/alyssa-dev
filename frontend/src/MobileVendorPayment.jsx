@@ -851,19 +851,24 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
     setTbSup(r.data);
     return r.data;
   };
+  // Cari rekon di vendor lain + jejak impor (paralel, ringan). Hanya otomatis kalau vendor ini TIDAK punya
+  // rekon aktif; kalau sudah ada, dimuat on-demand lewat tombol (sheet cepat tampil).
+  const loadOthers = async () => {
+    setTbOtherState("loading");
+    const [a, b] = await Promise.allSettled([
+      axios.get(`${API}/admin/rekon/other-payments`, { headers, params: { exclude_supplier_id: vendor.supplier_id, limit: 60 } }),
+      axios.get(`${API}/admin/rekon/imports`, { headers, params: { limit: 100, exclude_status: "processed", compact: true } }),
+    ]);
+    if (a.status === "fulfilled") { setTbOther(a.value.data.items || []); setTbOtherState("done"); } else setTbOtherState("error");
+    setTbTrail(b.status === "fulfilled" ? (b.value.data.items || []).filter((x) => x.status) : []);
+  };
   const openTembak = async () => {
     if (selAll.length === 0) { flash("Centang minimal 1 PO dulu"); return; }
     setTbIds(selAll.map((j) => j.job_id)); setTbMsg(""); setTbDone(false); setTbSup(null); setTbOpen(true);
-    setTbOther([]); setTbOtherState("loading"); setTbTrail([]);
-    try { await loadTbSup(); } catch { flash("Gagal memuat pembayaran Rekon"); setTbOpen(false); return; }
-    try {
-      const r = await axios.get(`${API}/admin/rekon/other-payments`, { headers, params: { exclude_supplier_id: vendor.supplier_id, limit: 60 } });
-      setTbOther(r.data.items || []); setTbOtherState("done");
-    } catch (_) { setTbOtherState("error"); }
-    try {
-      const r2 = await axios.get(`${API}/admin/rekon/imports`, { headers, params: { limit: 150 } });
-      setTbTrail((r2.data.items || []).filter((x) => x.status && x.status !== "processed"));
-    } catch (_) { setTbTrail([]); }
+    setTbOther([]); setTbOtherState("idle"); setTbTrail([]);
+    let doc;
+    try { doc = await loadTbSup(); } catch { flash("Gagal memuat pembayaran Rekon"); setTbOpen(false); return; }
+    if (!(doc.rekon_payments || []).length) loadOthers();
   };
   // Rekon tercatat di vendor lain → pindahkan ke vendor ini (jalur koreksi resmi), lalu tembak + PDF.
   const doPindahTembak = async (o) => {
@@ -1151,6 +1156,9 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
               <div className="vp-card-nopol" style={{ fontSize: 14 }}>🏦 Biaya admin bank — dikecualikan ({(tbSup.rekon_payments || []).filter(isFee).length})</div>
               <div className="vp-card-rute">Ditanggung Alyssa, tidak dihitung sebagai pembayaran ke vendor. Total {fmtRp((tbSup.rekon_payments || []).filter(isFee).reduce((a, p) => a + (p.amount || 0), 0))}.</div>
             </div>
+          )}
+          {tbSup && tbOtherState === "idle" && (tbSup.rekon_payments || []).length > 0 && (
+            <button className="vp-btn vp-btn-ghost" style={{ marginBottom: 8 }} onClick={loadOthers} data-testid="vp-cek-vendor-lain">🔎 Cek rekon yang tercatat di vendor lain</button>
           )}
           {tbSup && tbOtherState === "loading" && <div className="vp-hint" style={{ textAlign: "center", marginTop: 8 }}>Mencari rekon di vendor lain…</div>}
           {tbSup && tbOtherState === "done" && tbOther.length === 0 && (
@@ -1518,9 +1526,11 @@ function VpStyle() {
 
     /* Bottom sheet */
     .vp-sheet-bg { position:fixed; inset:0; background:rgba(15,23,42,.5); z-index:150; display:flex; align-items:flex-end; }
-    .vp-sheet { width:100%; background:#fff; border-radius:20px 20px 0 0; padding:8px 16px calc(env(safe-area-inset-bottom) + 18px);
+    .vp-sheet { width:100%; max-width:100vw; min-width:0; box-sizing:border-box; overflow-x:hidden; background:#fff; border-radius:20px 20px 0 0; padding:8px 16px calc(env(safe-area-inset-bottom) + 18px);
       max-height:86vh; overflow-y:auto; animation:vpup .22s ease; }
     @keyframes vpup { from { transform:translateY(100%);} to { transform:translateY(0);} }
+    .vp-sheet-body { min-width:0; overflow-wrap:anywhere; }
+    .vp-sheet .vp-card-top { flex-wrap:wrap; gap:4px 10px; }
     .vp-sheet-grip { width:44px; height:5px; background:#d5d9e2; border-radius:3px; margin:6px auto 10px; }
     .vp-sheet-head { display:flex; align-items:center; justify-content:space-between; font-size:17px; font-weight:800; margin-bottom:12px; }
     .vp-sheet-x { background:#f0f2f6; border:none; border-radius:50%; width:36px; height:36px; font-size:15px; }

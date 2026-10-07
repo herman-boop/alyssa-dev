@@ -1241,8 +1241,37 @@ async def test_pisah_faktur():
     ok(SF.reusable_project(nj, np_, {"J0", "J1"}) is None, "sebagian unit faktur → tidak dipakai ulang")
 
 
+async def test_imports_exclude_compact():
+    """Daftar impor rekon: exclude_status membuang 1 status (jejak = bukan 'processed'); compact
+    mengirim proyeksi tanpa raw_payload. Kode ASLI endpoint (AST)."""
+    print("test_imports_exclude_compact")
+    import ast, typing
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "server.py"), encoding="utf-8").read()
+    node = next(n for n in ast.parse(src).body if isinstance(n, ast.AsyncFunctionDef) and n.name == "rekon_list_imports")
+    code = ast.get_source_segment(src, node)
+    seen = {}
+    class _Coll(FakeColl):
+        def find(self, filt=None, proj=None):
+            seen["proj"] = proj
+            return super().find(filt, proj)
+    class _DB(dict): pass
+    d = _DB(); d[R.IMPORTS_COLLECTION] = _Coll()
+    for i, st in enumerate(["processed", "reversed", "supplier_not_found", "processed", "posted_expense"]):
+        await d[R.IMPORTS_COLLECTION].insert_one({"bank_transaction_id": f"b{i}", "status": st, "raw_payload": {"x": 1}, "created_at": f"2026-10-0{i+1}"})
+    ns = {"db": d, "rekon_sync": R, "Optional": typing.Optional}
+    exec(code, ns)
+    fn = ns["rekon_list_imports"]
+    r = await fn(exclude_status="processed", compact=True)
+    ok(sorted(x["status"] for x in r["items"]) == ["posted_expense", "reversed", "supplier_not_found"], "exclude_status=processed → hanya yang BUKAN pembayaran aktif")
+    ok(seen["proj"] == {"_id": 0, "raw_payload": 0}, "compact → proyeksi tanpa raw_payload")
+    r = await fn()
+    ok(len(r["items"]) == 5 and seen["proj"] == {"_id": 0}, "default tetap sama (semua status, penuh) — backward-compatible")
+    r = await fn(status="reversed", exclude_status="processed")
+    ok([x["status"] for x in r["items"]] == ["reversed"], "status eksplisit menang atas exclude_status")
+
+
 async def main():
-    for t in (test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
+    for t in (test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,

@@ -6919,14 +6919,19 @@ async def rekon_ingest(body: Any = Body(...)):
 
 
 @api_router.get("/admin/rekon/imports", dependencies=[Depends(require_admin_pin)])
-async def rekon_list_imports(status: Optional[str] = None, limit: int = 200):
+async def rekon_list_imports(status: Optional[str] = None, limit: int = 200,
+                             exclude_status: Optional[str] = None, compact: bool = False):
     """Daftar import rekon (audit trail). Filter opsional by status
-    (processed/supplier_not_found/reversed/processing/error)."""
+    (processed/supplier_not_found/reversed/processing/error). `exclude_status` = buang 1 status
+    (mis. processed → hanya yang BUKAN pembayaran aktif); `compact` = tanpa raw_payload (jauh lebih ringan)."""
     filt = {}
     if status:
         filt["status"] = status.strip()
+    elif exclude_status:
+        filt["status"] = {"$ne": exclude_status.strip()}
     out = []
-    cur = db[rekon_sync.IMPORTS_COLLECTION].find(filt, {"_id": 0}).sort("created_at", -1).limit(max(1, min(limit, 1000)))
+    proj = {"_id": 0, "raw_payload": 0} if compact else {"_id": 0}
+    cur = db[rekon_sync.IMPORTS_COLLECTION].find(filt, proj).sort("created_at", -1).limit(max(1, min(limit, 1000)))
     async for d in cur:
         out.append(d)
     return {"items": out, "count": len(out)}
