@@ -452,7 +452,8 @@ function FakturBaruScreen({ boot, headers, onBack, onToVendors, setLoading, flas
   const selArr = Object.values(sel);
   const valid = selArr.filter((x) => (Number(onlyDigits(x.harga)) || 0) > 0);
   const total = valid.reduce((a, x) => a + (Number(onlyDigits(x.harga)) || 0), 0);
-  const toggle = (r) => setSel((s0) => { const n = { ...s0 }; if (n[r.key]) delete n[r.key]; else n[r.key] = { row: r, harga: "" }; return n; });
+  const toggle = (r) => setSel((s0) => { const n = { ...s0 }; if (n[r.key]) delete n[r.key]; else n[r.key] = { row: r, harga: "", asal: r.asal_kota || "", tujuan: r.tujuan_kota || "" }; return n; });
+  const setRute = (k, f, v) => setSel((s0) => ({ ...s0, [k]: { ...s0[k], [f]: v } }));   // asal/tujuan bisa diketik manual per unit
   const setHarga = (k, v) => setSel((s0) => ({ ...s0, [k]: { ...s0[k], harga: onlyDigits(v) } }));
   const applySama = () => { const v = onlyDigits(hargaSama); if (!v) { flash("Isi HPP dulu"); return; } setSel((s0) => Object.fromEntries(Object.entries(s0).map(([k, x]) => [k, { ...x, harga: v }]))); };
   const vendorsFiltered = (boot.vendors || []).filter((v) => !vendorFilter.trim() || (v.nama || "").toLowerCase().includes(vendorFilter.trim().toLowerCase()));
@@ -466,7 +467,7 @@ function FakturBaruScreen({ boot, headers, onBack, onToVendors, setLoading, flas
       for (const x of valid) {
         await axios.post(`${API}/admin/suppliers/${vendor.id}/jobs`, {
           vehicle_type: x.row.vehicle_type, nopol: x.row.nopol, no_rangka: x.row.no_rangka,
-          asal_kota: x.row.asal_kota, tujuan_kota: x.row.tujuan_kota, total_harga: Number(onlyDigits(x.harga)) || 0,
+          asal_kota: (x.asal || "").trim() || x.row.asal_kota, tujuan_kota: (x.tujuan || "").trim() || x.row.tujuan_kota, total_harga: Number(onlyDigits(x.harga)) || 0,
           catatan: "", tanggal: todayIso(), project_id: proj.id, tag: "",
         }, { headers });
         made += 1;
@@ -545,8 +546,21 @@ function FakturBaruScreen({ boot, headers, onBack, onToVendors, setLoading, flas
                     <span className="vp-card-nopol">{r.nopol || r.no_rangka || "(tanpa nopol)"}</span>
                     {dup && <span className="vp-stchip vp-st-sebagian">Sudah ada di vendor ini</span>}
                   </div>
-                  <div className="vp-card-rute">{r.vehicle_type} · {r.asal_kota || "-"} → {r.tujuan_kota || "-"}</div>
+                  <div className="vp-card-rute">{r.vehicle_type} · {on ? `${sel[r.key].asal || "-"} → ${sel[r.key].tujuan || "-"}` : `${r.asal_kota || "-"} → ${r.tujuan_kota || "-"}`}</div>
                   {r.customer && <div className="vp-card-rute">👤 {r.customer}</div>}
+                  {on && (
+                    <div className="vp-rute-edit" style={{ marginTop: 8 }} onClick={(e) => e.stopPropagation()}>
+                      <div className="vp-rute-col">
+                        <label className="vp-label vp-label-sm">Asal</label>
+                        <input className="vp-input" value={sel[r.key].asal} onChange={(e) => setRute(r.key, "asal", e.target.value)} placeholder="Kota asal" />
+                      </div>
+                      <span className="vp-rute-arrow">→</span>
+                      <div className="vp-rute-col">
+                        <label className="vp-label vp-label-sm">Tujuan</label>
+                        <input className="vp-input" value={sel[r.key].tujuan} onChange={(e) => setRute(r.key, "tujuan", e.target.value)} placeholder="Kota tujuan" />
+                      </div>
+                    </div>
+                  )}
                   {on && (
                     <div className="vp-rp" style={{ marginTop: 8 }} onClick={(e) => e.stopPropagation()}>
                       <span className="vp-rp-tag">Rp</span>
