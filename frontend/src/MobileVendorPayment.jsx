@@ -338,7 +338,10 @@ export default function MobileVendorPayment({ embedded = false }) {
       {loading && <div className="vp-loading"><div className="vp-spinner" /></div>}
       {toast && <div className="vp-toast">{toast}</div>}
 
-      {screen === "home" && <HomeScreen go={setScreen} onLogout={logout} dark={dark} toggleDark={toggleDark} showThemeToggle={!embedded} />}
+      {screen === "home" && <HomeScreen go={setScreen} onLogout={logout} dark={dark} toggleDark={toggleDark} showThemeToggle={!embedded} showFaktur={embedded} />}
+      {screen === "faktur" && (
+        <FakturBaruScreen boot={boot} headers={headers} onBack={() => setScreen("home")} onToVendors={() => setScreen("vendors")} setLoading={setLoading} flash={flash} />
+      )}
       {screen === "vendors" && (
         <VendorsScreen embedded={embedded} headers={headers} onBack={() => setScreen("home")} setLoading={setLoading} flash={flash} />
       )}
@@ -362,8 +365,9 @@ export default function MobileVendorPayment({ embedded = false }) {
 }
 
 /* ══════════════ HOME (3 menu besar) ══════════════ */
-function HomeScreen({ go, onLogout, dark, toggleDark, showThemeToggle }) {
+function HomeScreen({ go, onLogout, dark, toggleDark, showThemeToggle, showFaktur }) {
   const menus = [
+    ...(showFaktur ? [{ key: "faktur", icon: "📄", title: "Faktur Baru", sub: "Pilih vendor, tarik unit dari PO, isi HPP — No. Faktur otomatis", cls: "vp-m-gold" }] : []),
     { key: "vendors", icon: "🏢", title: "Bayar per Vendor", sub: "Pilih vendor, centang PO, bayar sekaligus", cls: "vp-m-blue" },
     { key: "form", icon: "📝", title: "Catat Pembayaran", sub: "Input pembayaran ke vendor", cls: "vp-m-blue" },
     { key: "unpaid", icon: "⏳", title: "Belum Dibayar", sub: "Daftar tagihan vendor belum lunas", cls: "vp-m-gold" },
@@ -392,6 +396,197 @@ function HomeScreen({ go, onLogout, dark, toggleDark, showThemeToggle }) {
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ══════════════ FAKTUR BARU — pilih vendor, tarik unit dari PO, isi HPP → No. Faktur OTOMATIS ══════════════ */
+function FakturBaruScreen({ boot, headers, onBack, onToVendors, setLoading, flash }) {
+  const [vendor, setVendor] = useState(null);
+  const [sheetVendor, setSheetVendor] = useState(false);
+  const [vendorFilter, setVendorFilter] = useState("");
+  const [judul, setJudul] = useState("");                // judul/nama faktur (opsional) — No. Faktur tetap otomatis
+  const [q, setQ] = useState("");
+  const [orders, setOrders] = useState([]);
+  const [loadingOrders, setLoadingOrders] = useState(false);
+  const [sel, setSel] = useState({});                    // key -> { row, harga }
+  const [hargaSama, setHargaSama] = useState("");
+  const [existing, setExisting] = useState(new Set());   // unit yang SUDAH ada di vendor ini (penanda anti-dobel)
+  const [confirm, setConfirm] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const unitsOf = (o) => {
+    const arr = (Array.isArray(o.units) && o.units.length) ? o.units
+      : [{ unit_id: "legacy", vehicle_type: o.vehicle_type, tipe_model: o.tipe_model, nopol: o.nopol, no_rangka: o.no_rangka }];
+    return arr.map((u, i) => ({
+      key: `${o.order_id}:${u.unit_id || u.nopol || i}`,
+      vehicle_type: `${u.vehicle_type || ""}${u.tipe_model ? " " + u.tipe_model : ""}`.trim() || "Kendaraan",
+      nopol: (u.nopol || "").toUpperCase(), no_rangka: (u.no_rangka || "").toUpperCase(),
+      asal_kota: o.asal_kota || "", tujuan_kota: o.tujuan_kota || "", customer: o.customer_nama || "",
+    }));
+  };
+
+  useEffect(() => {        // cari PO (debounce) — seluruh order, bukan cuma terbaru
+    let alive = true; setLoadingOrders(true);
+    const t = setTimeout(async () => {
+      try {
+        const params = { limit: 200 }; if (q.trim()) params.q = q.trim();
+        const r = await axios.get(`${API}/admin/orders`, { headers, params });
+        if (alive) setOrders(r.data?.items || []);
+      } catch { if (alive) { setOrders([]); flash("Gagal memuat PO"); } }
+      finally { if (alive) setLoadingOrders(false); }
+    }, q.trim() ? 300 : 0);
+    return () => { alive = false; clearTimeout(t); };
+  }, [q]); // eslint-disable-line
+
+  useEffect(() => {        // unit yang sudah ada di vendor terpilih → ditandai
+    if (!vendor || !vendor.id) { setExisting(new Set()); return; }
+    let alive = true;
+    axios.get(`${API}/admin/suppliers/${vendor.id}`, { headers })
+      .then((r) => { if (alive) setExisting(new Set((r.data.jobs || []).map((j) => String(j.nopol || j.no_rangka || "").toUpperCase()).filter(Boolean))); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [vendor]); // eslint-disable-line
+
+  const rows = orders.flatMap(unitsOf);
+  const selArr = Object.values(sel);
+  const valid = selArr.filter((x) => (Number(onlyDigits(x.harga)) || 0) > 0);
+  const total = valid.reduce((a, x) => a + (Number(onlyDigits(x.harga)) || 0), 0);
+  const toggle = (r) => setSel((s0) => { const n = { ...s0 }; if (n[r.key]) delete n[r.key]; else n[r.key] = { row: r, harga: "" }; return n; });
+  const setHarga = (k, v) => setSel((s0) => ({ ...s0, [k]: { ...s0[k], harga: onlyDigits(v) } }));
+  const applySama = () => { const v = onlyDigits(hargaSama); if (!v) { flash("Isi HPP dulu"); return; } setSel((s0) => Object.fromEntries(Object.entries(s0).map(([k, x]) => [k, { ...x, harga: v }]))); };
+  const vendorsFiltered = (boot.vendors || []).filter((v) => !vendorFilter.trim() || (v.nama || "").toLowerCase().includes(vendorFilter.trim().toLowerCase()));
+
+  const doCreate = async () => {
+    setConfirm(false); setLoading(true);
+    let proj = null, made = 0;
+    try {
+      const pr = await axios.post(`${API}/admin/suppliers/${vendor.id}/projects`, { nama: judul.trim() }, { headers });   // No. Faktur otomatis dari server
+      proj = pr.data;
+      for (const x of valid) {
+        await axios.post(`${API}/admin/suppliers/${vendor.id}/jobs`, {
+          vehicle_type: x.row.vehicle_type, nopol: x.row.nopol, no_rangka: x.row.no_rangka,
+          asal_kota: x.row.asal_kota, tujuan_kota: x.row.tujuan_kota, total_harga: Number(onlyDigits(x.harga)) || 0,
+          catatan: "", tanggal: todayIso(), project_id: proj.id, tag: "",
+        }, { headers });
+        made += 1;
+      }
+      setResult({ ok: true, no_faktur: proj.no_faktur, nama: proj.nama, vendor: vendor.nama, units: made, total });
+    } catch (e) {
+      flash(e?.response?.data?.detail || "Gagal membuat faktur");
+      if (proj) setResult({ ok: false, no_faktur: proj.no_faktur, nama: proj.nama, vendor: vendor.nama, units: made, total, partial: true });
+    } finally { setLoading(false); }
+  };
+
+  if (result) {
+    return (
+      <div className="vp-screen vp-center">
+        <div className="vp-success">
+          <div className="vp-success-check">{result.ok ? "✓" : "!"}</div>
+          <div className="vp-success-title">{result.ok ? "Faktur Dibuat" : "Faktur Dibuat Sebagian"}</div>
+          <div className="vp-card" style={{ textAlign: "left" }}>
+            <div className="vp-card-lbl">No. Faktur (otomatis)</div>
+            <div className="vp-card-nopol" style={{ fontFamily: "monospace", fontSize: 20 }}>{result.no_faktur || "-"}</div>
+            <div className="vp-card-rute" style={{ marginTop: 6 }}>{result.vendor}{result.nama && result.nama !== result.no_faktur ? ` · ${result.nama}` : ""}</div>
+            <div className="vp-card-rute">{result.units} unit · Total HPP {fmtRp(result.total)}</div>
+            {result.partial && <div className="vp-hint" style={{ color: "#b45309" }}>Hanya {result.units} dari {valid.length} unit yang masuk. Tambahkan sisanya lewat Supplier → Tarik Unit dari PO (pilih faktur ini).</div>}
+          </div>
+          <button className="vp-btn vp-btn-primary" onClick={onToVendors}>💰 Bayar Faktur Ini</button>
+          <button className="vp-btn vp-btn-ghost" style={{ marginTop: 8 }} onClick={() => { setResult(null); setSel({}); setJudul(""); }}>＋ Buat Faktur Lain</button>
+          <button className="vp-btn vp-btn-ghost" style={{ marginTop: 8 }} onClick={onBack}>Beranda</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="vp-screen">
+      <div className="vp-topbar">
+        <button className="vp-back" onClick={onBack}>‹ Kembali</button>
+        <div className="vp-topbar-title">Faktur Baru</div><div style={{ width: 64 }} />
+      </div>
+      <div className="vp-body" style={{ paddingBottom: 130 }}>
+        <div className="vp-field">
+          <label className="vp-label">Vendor / Supplier</label>
+          <button className={`vp-select ${vendor ? "" : "vp-placeholder"}`} onClick={() => setSheetVendor(true)}>
+            {vendor ? vendor.nama : "Pilih vendor"}<span className="vp-select-caret">▾</span>
+          </button>
+        </div>
+        <div className="vp-field">
+          <label className="vp-label">Judul Faktur (opsional)</label>
+          <input className="vp-input" placeholder="mis. Pengiriman Sulawesi 0001" value={judul} onChange={(e) => setJudul(e.target.value)} />
+          <div className="vp-hint">No. Faktur dibuat otomatis (FP-AAL-…), tidak bisa diketik manual.</div>
+        </div>
+        <div className="vp-field">
+          <label className="vp-label">Tarik Unit dari PO</label>
+          <input className="vp-input" inputMode="search" placeholder="Cari no PO / no rangka / nopol / pelanggan / kota…" value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+        {selArr.length > 0 && (
+          <div className="vp-card" style={{ padding: 12 }}>
+            <div className="vp-card-lbl">HPP sama untuk semua yang dicentang</div>
+            <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+              <div className="vp-rp" style={{ flex: 1 }}><span className="vp-rp-tag">Rp</span>
+                <input className="vp-input vp-rp-input" inputMode="numeric" placeholder="0" value={fmtRpInput(hargaSama)} onChange={(e) => setHargaSama(onlyDigits(e.target.value))} /></div>
+              <button className="vp-btn vp-btn-ghost" style={{ width: "auto", padding: "0 16px" }} onClick={applySama}>Terapkan</button>
+            </div>
+          </div>
+        )}
+        {loadingOrders && <div className="vp-hint" style={{ textAlign: "center" }}>Memuat PO…</div>}
+        {!loadingOrders && rows.length === 0 && <div className="vp-empty">Tidak ada unit ditemukan.</div>}
+        {rows.slice(0, 120).map((r) => {
+          const on = !!sel[r.key];
+          const dup = existing.has(String(r.nopol || r.no_rangka || "").toUpperCase());
+          return (
+            <div key={r.key} className={`vp-card vp-po-card ${on ? "vp-po-on" : ""}`} onClick={() => toggle(r)}>
+              <div className="vp-po-row">
+                <span className={`vp-check ${on ? "vp-check-on" : ""}`}>{on ? "✓" : ""}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="vp-card-top" style={{ marginBottom: 2 }}>
+                    <span className="vp-card-nopol">{r.nopol || r.no_rangka || "(tanpa nopol)"}</span>
+                    {dup && <span className="vp-stchip vp-st-sebagian">Sudah ada di vendor ini</span>}
+                  </div>
+                  <div className="vp-card-rute">{r.vehicle_type} · {r.asal_kota || "-"} → {r.tujuan_kota || "-"}</div>
+                  {r.customer && <div className="vp-card-rute">👤 {r.customer}</div>}
+                  {on && (
+                    <div className="vp-rp" style={{ marginTop: 8 }} onClick={(e) => e.stopPropagation()}>
+                      <span className="vp-rp-tag">Rp</span>
+                      <input className="vp-input vp-rp-input" inputMode="numeric" placeholder="HPP (biaya ke vendor)" value={fmtRpInput(sel[r.key].harga)} onChange={(e) => setHarga(r.key, e.target.value)} />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        {rows.length > 120 && <div className="vp-hint" style={{ textAlign: "center" }}>Menampilkan 120 pertama — persempit pencarian.</div>}
+      </div>
+      <div className="vp-sticky">
+        <div className="vp-selbar">
+          <div><div className="vp-selbar-lbl">{valid.length} unit siap{selArr.length > valid.length ? ` (${selArr.length - valid.length} belum diisi HPP)` : ""}</div><div className="vp-selbar-amt">{fmtRp(total)}</div></div>
+        </div>
+        <button className="vp-btn vp-btn-primary" disabled={!vendor || valid.length === 0} onClick={() => setConfirm(true)} data-testid="faktur-buat">📄 Buat Faktur</button>
+      </div>
+
+      <BottomSheet open={sheetVendor} title="Pilih Vendor" onClose={() => setSheetVendor(false)}>
+        <input className="vp-input" placeholder="Cari vendor…" value={vendorFilter} onChange={(e) => setVendorFilter(e.target.value)} />
+        <div className="vp-sheet-list">
+          {vendorsFiltered.map((v) => (
+            <button key={v.id} className="vp-sheet-item" onClick={() => { setVendor(v); setSheetVendor(false); setVendorFilter(""); }}>{v.nama}</button>
+          ))}
+          {vendorsFiltered.length === 0 && <div className="vp-hint" style={{ padding: 8 }}>Vendor tidak ada.</div>}
+        </div>
+      </BottomSheet>
+      <BottomSheet open={confirm} title="Konfirmasi Faktur Baru" onClose={() => setConfirm(false)}>
+        <div className="vp-confirm">
+          <Row k="Vendor" v={vendor?.nama || "-"} />
+          <Row k="Judul" v={judul.trim() || "-"} />
+          <Row k="Jumlah Unit" v={String(valid.length)} />
+          <Row k="Total HPP" v={fmtRp(total)} big />
+          <Row k="No. Faktur" v="Otomatis (FP-AAL-…)" />
+        </div>
+        <button className="vp-btn vp-btn-primary" onClick={doCreate}>✅ Ya, Buat Faktur</button>
+        <button className="vp-btn vp-btn-ghost" style={{ marginTop: 8 }} onClick={() => setConfirm(false)}>Batal</button>
+      </BottomSheet>
     </div>
   );
 }
