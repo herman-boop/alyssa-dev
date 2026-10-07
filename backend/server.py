@@ -18,6 +18,7 @@ import rekon_felis_client  # adapter PULL dari Felis (stub sampai kontrak final)
 import expenses as expenses_mod  # Biaya Umum & Administratif (Fase 3, isolated, terpisah dari HPP)
 import ledger_status  # status tagihan supplier (Belum/Sebagian/Lunas) dari ledger — pure
 import pnl  # Laporan Laba Rugi (Pendapatan − HPP − Biaya) — bagian pure/agregasi
+import invoice_payments  # pembayaran customer per faktur (additive, pure helper)
 import supplier_dedup  # AUDIT duplikat master supplier/contacts (READ-ONLY di deploy ini)
 
 ROOT_DIR = Path(__file__).parent
@@ -1142,6 +1143,7 @@ async def list_doc_history(jenis: Optional[str] = None, limit: int = 300):
         "meta.asal_kota": 1, "meta.tujuan_kota": 1, "meta.order_id": 1,
         "meta.pesan": 1, "meta.no_invoice": 1, "meta.customer_nama": 1,
         "meta.ttdNama": 1, "meta.ttdJabatan": 1, "meta.entity_id": 1,
+        "payments": 1,   # pembayaran customer per faktur (ringan: id/tanggal/metode/nominal)
     }
     items = []
     # allow_disk_use=True: record lama bawa stempel base64 gede, sort by created_at
@@ -1186,6 +1188,47 @@ async def add_doc_history(body: DocHistoryBody):
     await db.doc_history.insert_one(doc)
     doc.pop("_id", None)
     return doc
+
+
+class DocPaymentBody(BaseModel):
+    amount: int
+    tanggal: Optional[str] = ""
+    metode: Optional[str] = ""
+    catatan: Optional[str] = ""
+
+
+@api_router.post("/admin/doc-history/{doc_id}/payments", dependencies=[Depends(require_admin_pin)])
+async def add_invoice_payment(doc_id: str, body: DocPaymentBody):
+    """Catat 1 pembayaran customer untuk 1 FAKTUR (termasuk faktur gabungan
+    beberapa PO). ADDITIVE: total & baris faktur asli tidak diubah — sisa tagihan
+    dihitung dari total faktur − pembayaran. Hanya untuk jenis=invoice."""
+    try:
+        pay = invoice_payments.make_payment(
+            body.amount, body.tanggal or "", body.metode or "", body.catatan or "", today_wib())
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    res = await db.doc_history.update_one(
+        {"id": doc_id, "jenis": "invoice"}, {"$push": {"payments": pay}})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Faktur tidak ditemukan")
+    d = await db.doc_history.find_one({"id": doc_id}, {"_id": 0, "payments": 1})
+    pays = (d or {}).get("payments") or []
+    return {"ok": True, "payment": pay, "payments": pays,
+            "total_diterima": invoice_payments.total_paid(pays)}
+
+
+@api_router.delete("/admin/doc-history/{doc_id}/payments/{payment_id}", dependencies=[Depends(require_admin_pin)])
+async def delete_invoice_payment(doc_id: str, payment_id: str):
+    """Koreksi salah input: hapus 1 catatan pembayaran dari faktur (faktur tetap utuh)."""
+    res = await db.doc_history.update_one(
+        {"id": doc_id, "jenis": "invoice"}, {"$pull": {"payments": {"id": payment_id}}})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Faktur tidak ditemukan")
+    if res.modified_count == 0:
+        raise HTTPException(404, "Pembayaran tidak ditemukan")
+    d = await db.doc_history.find_one({"id": doc_id}, {"_id": 0, "payments": 1})
+    pays = (d or {}).get("payments") or []
+    return {"ok": True, "payments": pays, "total_diterima": invoice_payments.total_paid(pays)}
 
 
 @api_router.delete("/admin/doc-history/{doc_id}", dependencies=[Depends(require_admin_pin)])

@@ -17,6 +17,7 @@ from supplier_dedup import suggest_similar
 import ledger_status as LS
 import pnl as PNL
 import ais as AIS
+import invoice_payments as IP
 import expenses as EXP
 
 
@@ -744,8 +745,47 @@ async def test_vesselfinder_refresh():
         AIS._last_pos_fetch.clear()
 
 
+async def test_invoice_payments():
+    """Pembayaran customer per faktur: validasi, total, sisa & status."""
+    print("test_invoice_payments")
+    # Skenario nyata: faktur gabungan 5 PO = Rp54.600.000, customer bayar Rp8.500.000.
+    p1 = IP.make_payment(8500000, "2026-10-07", "Transfer BCA", "DP awal", today="2026-10-07")
+    ok(p1["amount"] == 8500000 and p1["tanggal"] == "2026-10-07", "pembayaran 8,5jt tercatat (nominal+tanggal)")
+    ok(p1["metode"] == "Transfer BCA" and p1["catatan"] == "DP awal" and p1["id"].startswith("PAY-"), "metode, catatan, id")
+    s = IP.summarize(54600000, [p1])
+    ok(s["diterima"] == 8500000 and s["sisa"] == 46100000 and s["status"] == "Sebagian", "sisa 46,1jt, status Sebagian")
+    # Cicilan kedua → akumulasi (rincian terpisah, total berkurang)
+    p2 = IP.make_payment("46100000", "", "", "", today="2026-10-20")
+    ok(p2["tanggal"] == "2026-10-20" and p2["metode"] == "Transfer BCA", "tanggal kosong → today; metode default")
+    s2 = IP.summarize(54600000, [p1, p2])
+    ok(s2["sisa"] == 0 and s2["status"] == "Lunas" and s2["diterima"] == 54600000, "dua cicilan → Lunas, sisa 0")
+    # Belum bayar & lebih bayar
+    ok(IP.summarize(1000000, [])["status"] == "Belum Bayar", "tanpa pembayaran → Belum Bayar")
+    ok(IP.summarize(1000000, None)["sisa"] == 1000000, "payments None aman")
+    sl = IP.summarize(1000000, [IP.make_payment(1500000, today="2026-10-07")])
+    ok(sl["status"] == "Lebih Bayar" and sl["sisa"] == -500000, "kelebihan bayar terdeteksi (sisa negatif)")
+    # Validasi input
+    for bad in (0, -5, "abc", None, 10 ** 14):
+        try:
+            IP.make_payment(bad, today="2026-10-07"); okk = False
+        except ValueError:
+            okk = True
+        ok(okk, f"nominal tak sah ditolak: {bad!r}")
+    pj = IP.make_payment(100, "bukan-tanggal", "x" * 99, "c" * 999, today="2026-10-07")
+    ok(pj["tanggal"] == "2026-10-07" and len(pj["metode"]) == 40 and len(pj["catatan"]) == 300, "tanggal rusak → today; teks dipotong")
+    ok(IP.total_paid([{"amount": 5}, {"amount": "x"}, None, {"amount": 7}]) == 12, "entri rusak diabaikan")
+
+    # Alur DB (fake): push → hitung → pull, faktur asli (lines/meta) TIDAK berubah.
+    db = FakeDB()
+    await db.doc_history.insert_one({"id": "DOC-1", "jenis": "invoice", "lines": [{"harga": 54600000, "qty": 1}], "meta": {"x": 1}})
+    await db.doc_history.update_one({"id": "DOC-1"}, {"$set": {"payments": [p1]}})
+    d = await db.doc_history.find_one({"id": "DOC-1"})
+    ok(d["lines"][0]["harga"] == 54600000 and d["meta"] == {"x": 1}, "faktur asli tidak berubah")
+    ok(IP.summarize(54600000, d["payments"])["sisa"] == 46100000, "sisa dihitung dari record faktur")
+
+
 async def main():
-    for t in (test_ingest_basic, test_idempotent, test_idempotency_key_only,
+    for t in (test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,
