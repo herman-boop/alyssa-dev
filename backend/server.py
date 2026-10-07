@@ -1483,11 +1483,14 @@ async def import_contacts_from_orders():
     async for c in db.contacts.find({"jenis": "pelanggan"}, {"nama": 1}):
         existing.add(_norm_contact_name(c.get("nama")))
     seen = {}
+    src_keys = set()   # semua nama pelanggan unik di PO (buat laporan "sudah ada")
     async for o in db.orders.find({}, {"customer_nama": 1, "customer_hp": 1, "customer_email": 1}):
         nm = (o.get("customer_nama") or "").strip()
         if not nm:
             continue
         k = _norm_contact_name(nm)
+        if k:
+            src_keys.add(k)
         if not k or k in existing:
             continue
         cur = seen.get(k)
@@ -1508,7 +1511,7 @@ async def import_contacts_from_orders():
     } for v in seen.values()]
     if docs:
         await db.contacts.insert_many(docs)
-    return {"imported": len(docs)}
+    return {"imported": len(docs), "sumber": len(src_keys), "sudah_ada": len(src_keys) - len(docs)}
 
 
 @api_router.post("/admin/contacts/import-suppliers", dependencies=[Depends(require_admin_pin)])
@@ -1519,9 +1522,12 @@ async def import_contacts_from_suppliers():
         existing.add(_norm_contact_name(c.get("nama")))
     now = datetime.now(timezone.utc).isoformat()
     docs = []
+    src_keys = set()   # semua nama supplier unik di modul Supplier
     async for s in db.supplier_profiles.find({}, {"nama": 1, "no_hp": 1, "jenis": 1}):
         nm = (s.get("nama") or "").strip()
         k = _norm_contact_name(nm)
+        if k:
+            src_keys.add(k)
         if not nm or k in existing:
             continue
         existing.add(k)
@@ -1532,7 +1538,7 @@ async def import_contacts_from_suppliers():
         })
     if docs:
         await db.contacts.insert_many(docs)
-    return {"imported": len(docs)}
+    return {"imported": len(docs), "sumber": len(src_keys), "sudah_ada": len(src_keys) - len(docs)}
 
 
 class BASTKBody(BaseModel):

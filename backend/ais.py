@@ -342,7 +342,8 @@ async def _vesselapi_refresh(db, mmsi, imo, timeout=15):
     idtype = "mmsi" if mmsi else "imo"
     import time as _t
     now_m = _t.monotonic()
-    if now_m - _last_pos_fetch.get(ident, 0) < _MIN_FETCH_INTERVAL:
+    _lp = _last_pos_fetch.get(ident)
+    if _lp is not None and now_m - _lp < _MIN_FETCH_INTERVAL:
         return None  # baru saja diambil — jangan boros kuota
     _last_pos_fetch[ident] = now_m
 
@@ -414,7 +415,8 @@ async def _vesselapi_refresh(db, mmsi, imo, timeout=15):
     upd["position_timestamp"] = pos.get("timestamp") or now
 
     # ETA/tujuan/draught — endpoint terpisah, throttle lebih longgar (jarang berubah)
-    if now_m - _last_eta_fetch.get(ident, 0) >= _ETA_FETCH_INTERVAL:
+    _le = _last_eta_fetch.get(ident)
+    if _le is None or now_m - _le >= _ETA_FETCH_INTERVAL:
         _last_eta_fetch[ident] = now_m
         try:
             re = await asyncio.to_thread(_vesselapi_get, f"/vessel/{ident}/eta", {"filter.idType": idtype}, timeout)
@@ -467,7 +469,8 @@ async def _vesselfinder_refresh(db, mmsi, imo, timeout=15):
     import time as _t
     now_m = _t.monotonic()
     tkey = "vf:" + ident
-    if now_m - _last_pos_fetch.get(tkey, 0) < _MIN_FETCH_INTERVAL:
+    _lp = _last_pos_fetch.get(tkey)
+    if _lp is not None and now_m - _lp < _MIN_FETCH_INTERVAL:
         return None  # baru saja diambil — jangan boros kredit
     _last_pos_fetch[tkey] = now_m
 
