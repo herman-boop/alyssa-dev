@@ -783,6 +783,11 @@ async def test_invoice_payments():
     ok(d["lines"][0]["harga"] == 54600000 and d["meta"] == {"x": 1}, "faktur asli tidak berubah")
     ok(IP.summarize(54600000, d["payments"])["sisa"] == 46100000, "sisa dihitung dari record faktur")
 
+    # Kwitansi: nomor format + cari pembayaran
+    ok(IP.kwitansi_no(1, "2026-10-07") == "KWT0001_07102026_2026", "nomor kwitansi format KWT0001_DDMMYYYY_YYYY")
+    ok(IP.kwitansi_no(123, "2026-01-05") == "KWT0123_05012026_2026", "nomor kwitansi urut 3 digit")
+    ok(IP.find_payment([p1, p2], p2["id"]) is p2 and IP.find_payment([p1], "x") is None and IP.find_payment(None, "x") is None, "find_payment")
+
 
 async def main():
     for t in (test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,

@@ -4543,12 +4543,14 @@ function InvoicePaymentModal({ rec, headers, onClose, onChanged, onPrint }) {
           ) : (
             <div style={{ marginBottom: 12 }}>
               {pays.map((p) => (
-                <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid var(--border)", fontSize: 13 }} data-testid="invpay-row">
-                  <div style={{ flex: 1, minWidth: 0 }}>
+                <div key={p.id} style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 10, padding: "8px 0", borderBottom: "1px solid var(--border)", fontSize: 13 }} data-testid="invpay-row">
+                  <div style={{ flex: 1, minWidth: 140 }}>
                     <div style={{ fontWeight: 700 }}>{fmtTglP(p.tanggal)} · {p.metode || "—"}</div>
                     {p.catatan ? <div style={{ fontSize: 12, color: "var(--text-mute)" }}>{p.catatan}</div> : null}
+                    {p.no_kwitansi ? <div style={{ fontSize: 11, color: "var(--text-mute)" }}>Kwitansi {p.no_kwitansi}</div> : null}
                   </div>
                   <b>{rp(p.amount)}</b>
+                  <button className="adm-btn adm-btn-sm adm-btn-ghost" onClick={() => printKwitansi(rec.id, p.id, headers)} title="Cetak kwitansi pembayaran ini" data-testid="invpay-kwitansi">🧾 Kwitansi</button>
                   <button className="adm-btn adm-btn-sm adm-btn-ghost" onClick={() => remove(p)} disabled={busy} title="Hapus (koreksi salah input)" data-testid="invpay-del">🗑️</button>
                 </div>
               ))}
@@ -5054,6 +5056,118 @@ async function printInvoiceDoc(lines, withTax, extra) {
   </body></html>`;
   if (w) { w.document.write(html); w.document.close(); }
   return noInvoice;
+}
+
+/* ── Kwitansi / Tanda Terima Pembayaran customer (1 kwitansi per pembayaran) ──
+   Dibuat dari catatan pembayaran di faktur. Nomor kwitansi tetap per pembayaran
+   (cetak ulang = nomor sama). Sisa tagihan dihitung KUMULATIF sampai pembayaran
+   ini, jadi cetak ulang kwitansi lama tetap konsisten walau ada pembayaran baru. */
+function buildKwitansiHtml(rec, pay, kwNo) {
+  const meta = rec.meta || {};
+  const fRp = (n) => (Number(n) || 0).toLocaleString("id-ID") + ",00";
+  const fmtTgl = (iso) => { if (!iso || !/^\d{4}-\d{2}-\d{2}/.test(iso)) return "—"; const [y, m, d] = iso.slice(0, 10).split("-"); return `${d}-${m}-${y}`; };
+  const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const total = invTotalFromRec(rec).total;
+  const sorted = [...(rec.payments || [])].sort((a, b) => (a.tanggal || "").localeCompare(b.tanggal || "") || (a.created_at || "").localeCompare(b.created_at || ""));
+  const idx = sorted.findIndex((p) => p.id === pay.id);
+  const upto = idx >= 0 ? sorted.slice(0, idx + 1) : [pay];
+  const cum = upto.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const sisa = total - cum;
+  const amount = Number(pay.amount) || 0;
+  const noInv = meta.no_invoice || rec.no_dokumen || "—";
+  const orders = (rec.order_ids && rec.order_ids.length) ? rec.order_ids.join(", ") : (meta.order_id || "");
+  const customer = rec.customer || meta.customer_nama || "";
+  const { stempel, ttdNama, ttdJabatan } = meta;
+  const untuk = `Pembayaran Faktur ${noInv}${orders ? ` (No. Pesanan: ${orders})` : ""}`;
+  const statusTxt = sisa <= 0 ? "LUNAS" : `Pembayaran sebagian — sisa tagihan Rp ${fRp(sisa)}`;
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(kwNo)}</title>
+  <style>
+    ${DOC_BASE_CSS}
+    @page { size: A4 portrait; margin: 12mm; }
+    html { print-color-adjust: exact; -webkit-print-color-adjust: exact; text-rendering: geometricPrecision; -webkit-font-smoothing: antialiased; }
+    .doc-sheet { padding: 0; max-width: 186mm; margin: 0 auto; }
+    .doc-title { font-size: 23px; }
+    .doc-title, .doc-brand-name { color: #000 !important; }
+    .doc-footer { font-size: 9px; }
+    .kw-meta { display:flex; justify-content:space-between; gap:16px; margin:2px 0 14px; font-size:11px; }
+    .kw-meta b { font-weight:800; }
+    .kw-body { border:1px solid ${DOC_BRAND.line}; border-radius:8px; padding:4px 16px; margin-bottom:14px; }
+    .kw-row { display:flex; gap:10px; padding:9px 0; border-bottom:1px dashed ${DOC_BRAND.line}; font-size:11.5px; }
+    .kw-row:last-child { border-bottom:0; }
+    .kw-k { width:130px; flex-shrink:0; color:${DOC_BRAND.muted}; }
+    .kw-v { flex:1; font-weight:700; }
+    .kw-v.terb { font-style:italic; }
+    .kw-amount { display:flex; justify-content:space-between; align-items:center; background:${DOC_BRAND.navyDeep}; color:#fff; padding:12px 18px; border-radius:6px; margin-bottom:14px; }
+    .kw-amount span:first-child { font-size:10.5px; font-weight:700; letter-spacing:.6px; text-transform:uppercase; opacity:.85; }
+    .kw-amount span:last-child { font-size:22px; font-weight:900; }
+    table.kw-sum { width:100%; border-collapse:collapse; margin-bottom:10px; font-size:10.5px; }
+    table.kw-sum td { padding:6px 8px; border-bottom:1px solid ${DOC_BRAND.line}; background:${DOC_BRAND.paperMist}; }
+    table.kw-sum td.num { text-align:right; font-weight:700; }
+    table.kw-sum tr.last td { font-weight:900; font-size:11.5px; border-bottom:1.5px solid ${DOC_BRAND.navy}; }
+    .kw-status { display:inline-block; padding:3px 12px; border:1.5px solid ${DOC_BRAND.navy}; border-radius:12px; font-weight:800; font-size:10px; margin-bottom:6px; }
+    .kw-note { font-size:9.5px; color:${DOC_BRAND.muted}; line-height:1.6; }
+    .kw-sign-row { display:flex; justify-content:space-between; align-items:flex-end; margin-top:22px; }
+    .kw-materai { width:96px; height:64px; border:1.5px dashed #888; display:flex; flex-direction:column; align-items:center; justify-content:center; font-size:8.5px; text-align:center; color:#444; line-height:1.4; }
+    .kw-sign-cell { width:260px; text-align:center; }
+    .kw-sign-lbl { font-size:10px; color:${DOC_BRAND.muted}; margin-bottom:6px; }
+    .kw-sign-stamp { height:78px; display:flex; align-items:center; justify-content:center; margin-bottom:2px; }
+    .kw-sign-stamp img { max-height:78px; max-width:200px; object-fit:contain; }
+    .kw-sign-stamp.empty { height:56px; }
+    .kw-sign-pt { font-size:11px; font-weight:800; color:${DOC_BRAND.ink}; }
+    .kw-sign-name { font-size:11px; font-weight:800; color:${DOC_BRAND.ink}; margin-top:2px; }
+    .kw-sign-jab { font-size:9.5px; color:${DOC_BRAND.muted}; margin-top:2px; }
+  </style></head><body>
+  <div class="doc-sheet">
+    ${docHeader({ docTitle: "KWITANSI", logoUrl: "/logo.png" })}
+    <div class="kw-meta">
+      <div>No. Kwitansi: <b>${esc(kwNo)}</b></div>
+      <div>Tanggal: <b>${fmtTgl(pay.tanggal)}</b></div>
+    </div>
+    <div class="kw-body">
+      <div class="kw-row"><span class="kw-k">Telah terima dari</span><span class="kw-v">${esc(customer) || "&nbsp;"}</span></div>
+      <div class="kw-row"><span class="kw-k">Uang sejumlah</span><span class="kw-v terb">${terbilangRupiah(amount)}</span></div>
+      <div class="kw-row"><span class="kw-k">Untuk pembayaran</span><span class="kw-v">${esc(untuk)}</span></div>
+      <div class="kw-row"><span class="kw-k">Metode pembayaran</span><span class="kw-v">${esc(pay.metode) || "—"}</span></div>
+      ${pay.catatan ? `<div class="kw-row"><span class="kw-k">Keterangan</span><span class="kw-v">${esc(pay.catatan)}</span></div>` : ""}
+    </div>
+    <div class="kw-amount"><span>Jumlah diterima</span><span>Rp ${fRp(amount)}</span></div>
+    <table class="kw-sum">
+      <tr><td>Total Tagihan Faktur</td><td class="num">Rp ${fRp(total)}</td></tr>
+      <tr><td>Total Diterima (sampai kwitansi ini)</td><td class="num">Rp ${fRp(cum)}</td></tr>
+      <tr class="last"><td>${sisa < 0 ? "Kelebihan Bayar" : "Sisa Tagihan"}</td><td class="num">Rp ${fRp(Math.abs(sisa))}</td></tr>
+    </table>
+    <div class="kw-status">${statusTxt}</div>
+    <div class="kw-note">Kwitansi ini merupakan bukti penerimaan pembayaran atas faktur tersebut di atas.</div>
+    <div class="kw-sign-row">
+      ${amount > 5000000 ? `<div class="kw-materai"><b>Meterai Rp10.000</b><span>(nominal di atas Rp5 juta)</span></div>` : "<div></div>"}
+      <div class="kw-sign-cell">
+        <div class="kw-sign-lbl">Hormat Kami,</div>
+        <div class="kw-sign-stamp ${stempel ? "" : "empty"}">${stempel ? `<img src="${stempel}" alt="stempel">` : ""}</div>
+        <div class="kw-sign-pt">PT. Alyssa Auto Logistik</div>
+        ${ttdNama ? `<div class="kw-sign-name">( ${esc(ttdNama)} )</div>` : ""}
+        ${ttdJabatan ? `<div class="kw-sign-jab">${esc(ttdJabatan)}</div>` : ""}
+      </div>
+    </div>
+    ${docFooter({ docNo: `Kwitansi ${esc(kwNo)}` })}
+  </div>
+  <script>window.onload=()=>window.print()<\/script>
+  </body></html>`;
+}
+
+async function printKwitansi(recId, payId, headers) {
+  const w = window.open("", "aal_print"); // buka dulu (gesture) biar nggak keblok popup
+  try {
+    const { data: rec } = await axios.get(`${API}/admin/doc-history/${recId}`, { headers });
+    const pay = (rec.payments || []).find((p) => p.id === payId);
+    if (!pay) throw new Error("Pembayaran tidak ditemukan");
+    const { data: nk } = await axios.post(`${API}/admin/doc-history/${recId}/payments/${payId}/kwitansi-no`, {}, { headers });
+    const html = buildKwitansiHtml(rec, pay, nk.no_kwitansi);
+    if (!w) { alert("Popup diblokir browser. Izinkan popup untuk mencetak kwitansi."); return; }
+    w.document.write(html); w.document.close();
+  } catch (e) {
+    if (w) w.close();
+    alert(e?.response?.data?.detail || e?.message || "Gagal membuat kwitansi.");
+  }
 }
 
 /* ── Cetak Jadwal Pengiriman per-PO (fungsi modul, bisa dicetak ulang) ──
