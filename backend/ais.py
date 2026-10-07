@@ -852,6 +852,8 @@ async def diag(db):
         "worker_running": worker_running(),
         "vesselapi_configured": vesselapi_enabled(),   # VesselAPI: yes/no saja
         "vesselapi_sat": _vesselapi_use_sat(),
+        "vesselapi_sat_lookback_min": VESSELAPI_SAT_LOOKBACK,   # jendela umur posisi satelit (menit)
+        "auto_refresh_running": auto_refresh_running(),
         "vesselfinder_configured": vesselfinder_enabled(),   # VesselFinder: yes/no saja
         "vesselfinder_sat": _vesselfinder_use_sat(),
         "watched_mmsi_count": len(watched),
@@ -1050,6 +1052,122 @@ async def trace(db, probe_missing=True, max_probe=8):
         "probed": max_probe - probes_left if (probe_missing and (vesselapi_enabled() or vesselfinder_enabled())) else 0,
         "ships": rows,
     }
+
+
+# ── Cek otomatis berkala (background) ───────────────────────────────────────
+# Kapal yang legnya "Berlangsung" tapi belum/ tidak punya posisi segar dicek ke
+# provider (VesselAPI → VesselFinder) secara berkala, TANPA nunggu ada yang buka
+# halaman tracking. Dicek SEKALI per kapal unik (bukan per unit/trip) dan jaraknya
+# makin lama kalau terus kosong (hemat kuota call): 1 jam → 2 → 4 → maks 6 jam.
+# Mati total kalau tidak ada provider berbayar, atau env AIS_AUTO_REFRESH=off.
+AUTO_REFRESH_TICK = int(os.environ.get("AIS_AUTO_REFRESH_TICK") or "600")   # detik antar putaran
+_AUTO_BACKOFF = (3600, 7200, 14400, 21600)
+_auto_task = None
+
+
+def _auto_backoff_seconds(fails):
+    """Jeda sebelum cek ulang setelah `fails` kali gagal berturut-turut."""
+    n = max(int(fails or 1), 1)
+    return _AUTO_BACKOFF[min(n, len(_AUTO_BACKOFF)) - 1]
+
+
+def _auto_refresh_enabled():
+    off = (os.environ.get("AIS_AUTO_REFRESH") or "on").strip().lower() in ("off", "0", "false", "no")
+    return (vesselapi_enabled() or vesselfinder_enabled()) and not off
+
+
+def auto_refresh_running():
+    return bool(_auto_task and not _auto_task.done())
+
+
+async def auto_refresh_cycle(db, state, now_m, max_ships=10):
+    """Satu putaran cek otomatis. `state` = {ident: {"fails", "next"}} (in-memory),
+    `now_m` = time.monotonic(). Return ringkasan putaran (buat log & tes)."""
+    res = {"candidates": 0, "attempted": 0, "ok": 0, "fail": 0, "skipped_fresh": 0, "skipped_backoff": 0}
+    ships = {}
+    try:
+        cur = db.trips.find({"legs": {"$exists": True}}, {"_id": 0, "legs": 1})
+        async for t in cur:
+            for lg in (t.get("legs") or []):
+                if not _leg_is_ship(lg) or _leg_status_kind(lg) != "active":
+                    continue
+                mmsi, imo = _leg_ship_id(lg)
+                ident = mmsi or imo
+                if ident and ident not in ships:
+                    ships[ident] = (mmsi, imo)
+    except Exception as e:
+        logger.warning("[ais] auto-refresh scan gagal: %s", e)
+        return res
+    res["candidates"] = len(ships)
+    max_age = VESSELAPI_MAX_AGE_MIN * 60
+    for ident, (mmsi, imo) in ships.items():
+        if res["attempted"] >= max_ships:
+            break
+        doc = None
+        try:
+            if mmsi:
+                doc = await db.ais_positions.find_one({"mmsi": mmsi}, {"_id": 0})
+            if not doc and imo:
+                doc = await db.ais_positions.find_one({"imo": imo}, {"_id": 0})
+        except Exception:
+            doc = None
+        age = _doc_age_seconds(doc) if (doc and doc.get("latitude") is not None) else None
+        if age is not None and age <= max_age:
+            state.pop(ident, None)
+            res["skipped_fresh"] += 1
+            continue
+        st = state.get(ident)
+        if st and now_m < st["next"]:
+            res["skipped_backoff"] += 1
+            continue
+        res["attempted"] += 1
+        fresh = None
+        try:
+            if vesselapi_enabled():
+                fresh = await _vesselapi_refresh(db, mmsi, imo)
+            if not fresh and vesselfinder_enabled():
+                fresh = await _vesselfinder_refresh(db, mmsi, imo)
+        except Exception as e:
+            logger.warning("[ais] auto-refresh %s gagal: %s", ident, e)
+            fresh = None
+        fage = _doc_age_seconds(fresh) if (fresh and fresh.get("latitude") is not None) else None
+        if fage is not None and fage <= max_age:      # dapat posisi yang benar-benar segar
+            state.pop(ident, None)
+            res["ok"] += 1
+        else:                                          # kosong / masih basi → jeda makin lama
+            fails = (st["fails"] if st else 0) + 1
+            state[ident] = {"fails": fails, "next": now_m + _auto_backoff_seconds(fails)}
+            res["fail"] += 1
+    return res
+
+
+async def _auto_refresh_run(db):
+    import time
+    state = {}
+    await asyncio.sleep(120)          # biar server selesai start dulu
+    while True:
+        try:
+            r = await auto_refresh_cycle(db, state, time.monotonic())
+            if r["attempted"]:
+                logger.info("[ais] auto-refresh: %s", r)
+        except Exception as e:
+            logger.warning("[ais] auto-refresh error: %s", e)
+        await asyncio.sleep(AUTO_REFRESH_TICK)
+
+
+def start_auto_refresh(db):
+    """Start cek otomatis berkala sekali. Aman dipanggil berkali-kali / tanpa key."""
+    global _auto_task
+    if not _auto_refresh_enabled():
+        logger.info("[ais] auto-refresh tidak aktif (tanpa provider berbayar atau AIS_AUTO_REFRESH=off).")
+        return
+    if _auto_task and not _auto_task.done():
+        return
+    try:
+        _auto_task = asyncio.create_task(_auto_refresh_run(db))
+        logger.info("[ais] auto-refresh dimulai (tiap %ss, kapal 'Berlangsung' tanpa posisi segar).", AUTO_REFRESH_TICK)
+    except Exception as e:
+        logger.warning("[ais] gagal start auto-refresh: %s", e)
 
 
 def start_worker(db):
