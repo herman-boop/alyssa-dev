@@ -448,6 +448,57 @@ async def ingest_transaction(db, payload):
             "allocated": 0, "unallocated": amount}
 
 
+_BANK_FEE_RE = re.compile(r"\bBIAYA\s*(TXN|TRX|TRANSAKSI|ADM|ADMIN)\b", re.IGNORECASE)
+
+
+def is_bank_fee(payment):
+    """True kalau pembayaran Rekon ini BIAYA ADMIN BANK (mis. 'BIF BIAYA TXN KE 002 ...'),
+    bukan transfer ke supplier. Biaya admin ditanggung kita → tidak boleh dihitung sebagai
+    pembayaran tagihan supplier. Berdasar deskripsi bank (catatan) — murni, tanpa I/O."""
+    p = payment or {}
+    text = " ".join(str(x or "") for x in (p.get("catatan"), (p.get("rekon") or {}).get("referensi_bank")))
+    return bool(_BANK_FEE_RE.search(text))
+
+
+def plan_tembak_semua(rows, payments, chosen_ids, release_fee=True):
+    """TEMBAK SEMUA (PURE): arahkan SEMUA pembayaran Rekon aktif (kecuali biaya admin bank)
+    ke unit yang dicentang, berurutan menurut tanggal, tiap pembayaran pakai pembagian pintar
+    atas SISA yang tersisa. Alokasi LAMA tiap pembayaran diganti total (dilepas dari unit lain).
+    Biaya admin bank: alokasinya dilepas (tidak dihitung sebagai pembayaran supplier).
+    rows = [(job_id, sisa_tanpa_alokasi_pembayaran_ini, project_id)] — sisa dihitung dengan
+    alokasi semua pembayaran target DIKELUARKAN. Return (payments_baru, ringkasan)."""
+    chosen = set(chosen_ids or [])
+    remaining, order = {}, []
+    for jid, sisa, pid in rows:
+        if jid in chosen and (sisa or 0) > 0:
+            remaining[jid] = int(sisa); order.append((jid, pid))
+    new = [dict(p) for p in (payments or [])]
+    targets = [p for p in new if p.get("status") != "reversed" and not is_bank_fee(p) and _to_int(p.get("amount")) > 0]
+    targets.sort(key=lambda p: str(p.get("tanggal") or ""))
+    per, total_alloc, total_amount = [], 0, 0
+    for p in targets:
+        amt = _to_int(p.get("amount"))
+        res = smart_allocations([(j, remaining[j], pid) for j, pid in order if remaining.get(j, 0) > 0], amt)
+        allocs = res["allocations"]
+        for a in allocs:
+            remaining[a["job_id"]] -= a["amount"]
+        p["allocations"] = allocs
+        got = sum(a["amount"] for a in allocs)
+        total_alloc += got; total_amount += amt
+        per.append({"id": p.get("id"), "amount": amt, "allocated": got, "method": res.get("method"), "units": len(allocs)})
+    released = 0
+    if release_fee:
+        for p in new:
+            if p.get("status") != "reversed" and is_bank_fee(p) and (p.get("allocations") or []):
+                p["allocations"] = []; released += 1
+    return new, {"payments": per, "allocated": total_alloc, "amount": total_amount,
+                 "unallocated": total_amount - total_alloc,
+                 "fee_count": sum(1 for p in new if p.get("status") != "reversed" and is_bank_fee(p)),
+                 "fee_released": released,
+                 "sisa_unit": sum(v for v in remaining.values() if v > 0),
+                 "units_open": sum(1 for v in remaining.values() if v > 0)}
+
+
 async def allocate_payment(db, supplier_id, rekon_payment_id, allocations):
     """Alokasikan (atau re-alokasi) 1 pembayaran rekon ke 1+ tagihan/job.
     - TIDAK membuat pembayaran baru, TIDAK mengubah bank_transaction_id.

@@ -1181,8 +1181,41 @@ async def test_rekon_other_payments():
     ok([x["id"] for x in r2] == ["p3"], "vendor yang dikecualikan tidak ikut")
 
 
+async def test_tembak_semua():
+    """Tembak SEMUA: semua rekon aktif → unit terpilih, biaya admin bank dikecualikan (dilepas),
+    alokasi lama ke unit lain diganti, total tak melebihi nominal/sisa. Fungsi murni asli."""
+    print("test_tembak_semua")
+    ok(R.is_bank_fee({"catatan": "BIF BIAYA TXN KE 002 MARTHEN RUNTURAMBI KBB"}), "BIAYA TXN = biaya admin bank")
+    ok(R.is_bank_fee({"catatan": "BIAYA ADM BULANAN"}) and not R.is_bank_fee({"catatan": "BIF TRANSFER KE 002 MARTHEN RUNTURAMBI KBB"}), "transfer biasa bukan biaya")
+    ok(not R.is_bank_fee({}) and not R.is_bank_fee(None), "kosong aman")
+    # 3 unit terpilih (U1 5jt, U2 3jt, U3 2jt) + 1 unit lain (X 9jt) yang salah dibayar rekon lama
+    rows = [("X", 9000000, "PX"), ("U1", 5000000, "PA"), ("U2", 3000000, "PA"), ("U3", 2000000, "PB")]
+    pays = [
+        {"id": "f1", "amount": 2500, "tanggal": "2026-08-18", "catatan": "BIF BIAYA TXN KE 002 MARTHEN", "allocations": [{"job_id": "U1", "amount": 2500}]},
+        {"id": "t1", "amount": 5000000, "tanggal": "2026-08-18", "catatan": "BIF TRANSFER KE 002 MARTHEN", "allocations": [{"job_id": "X", "amount": 5000000}]},
+        {"id": "t2", "amount": 3000000, "tanggal": "2026-08-19", "catatan": "BIF TRANSFER KE 002 MARTHEN", "allocations": []},
+        {"id": "t3", "amount": 2000000, "tanggal": "2026-08-20", "catatan": "BIF TRANSFER KE 002 MARTHEN", "allocations": []},
+        {"id": "r1", "amount": 123, "status": "reversed", "catatan": "x"},
+    ]
+    new, sm = R.plan_tembak_semua(rows, pays, ["U1", "U2", "U3"])
+    by = {p["id"]: p for p in new}
+    ok(by["f1"]["allocations"] == [] and sm["fee_released"] == 1 and sm["fee_count"] == 1, "biaya admin dilepas dari tagihan & dihitung sbg biaya")
+    ok(by["t1"]["allocations"] == [{"job_id": "U1", "amount": 5000000}], "5jt pas ke U1 (bukan ke unit lain X)")
+    ok(by["t2"]["allocations"] == [{"job_id": "U2", "amount": 3000000}] and by["t3"]["allocations"] == [{"job_id": "U3", "amount": 2000000}], "3jt→U2, 2jt→U3")
+    ok(not any(a["job_id"] == "X" for p in new for a in (p.get("allocations") or [])), "tidak ada yang ke unit di luar centang")
+    ok(sm["allocated"] == 10000000 and sm["unallocated"] == 0 and sm["sisa_unit"] == 0 and sm["units_open"] == 0, "total 10jt = tagihan 10jt, lunas semua, tanpa sisa")
+    ok(by["r1"].get("status") == "reversed" and "allocations" not in by["r1"], "rekon reversed tidak disentuh")
+    # uang kurang dari tagihan → sisa unit tetap terbuka; uang lebih → sisa uang belum dialokasikan
+    new2, sm2 = R.plan_tembak_semua(rows, [{"id": "a", "amount": 4000000, "tanggal": "2026-08-01", "catatan": "TRANSFER"}], ["U1", "U2", "U3"])
+    ok(sm2["allocated"] == 4000000 and sm2["sisa_unit"] == 6000000, "uang < tagihan → sisa tagihan terbuka")
+    new3, sm3 = R.plan_tembak_semua(rows, [{"id": "a", "amount": 12000000, "tanggal": "2026-08-01", "catatan": "TRANSFER"}], ["U1", "U2", "U3"])
+    ok(sm3["allocated"] == 10000000 and sm3["unallocated"] == 2000000, "uang > tagihan → selisih tetap belum dialokasikan")
+    _, sm4 = R.plan_tembak_semua(rows, pays, ["U1", "U2", "U3"], release_fee=False)
+    ok(sm4["fee_released"] == 0, "release_fee=False → alokasi biaya admin dibiarkan")
+
+
 async def main():
-    for t in (test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
+    for t in (test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,
