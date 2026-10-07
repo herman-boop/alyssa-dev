@@ -1235,6 +1235,27 @@ async def delete_invoice_payment(doc_id: str, payment_id: str):
     return {"ok": True, "payments": pays, "total_diterima": invoice_payments.total_paid(pays)}
 
 
+@api_router.post("/admin/doc-history/{doc_id}/payments/{payment_id}/bukti", dependencies=[Depends(require_admin_pin)])
+async def upload_invoice_payment_bukti(doc_id: str, payment_id: str, bukti: UploadFile = File(...)):
+    """Upload (atau ganti) BUKTI TRANSFER untuk 1 pembayaran faktur. Foto/PDF; HEIC
+    otomatis dikonversi. Pembayarannya sendiri tidak berubah — hanya menambah bukti_url."""
+    d = await db.doc_history.find_one({"id": doc_id, "jenis": "invoice"}, {"_id": 0, "payments": 1})
+    if not d:
+        raise HTTPException(404, "Faktur tidak ditemukan")
+    if not invoice_payments.find_payment(d.get("payments"), payment_id):
+        raise HTTPException(404, "Pembayaran tidak ditemukan")
+    if bukti is None or not bukti.filename:
+        raise HTTPException(400, "File bukti belum dipilih")
+    url, warn = _save_upload_soft(doc_id, "invoice-payment", bukti, ALLOWED_IMG | ALLOWED_DOC)
+    if not url:
+        raise HTTPException(400, warn or "Bukti gagal diupload")
+    await db.doc_history.update_one(
+        {"id": doc_id, "jenis": "invoice", "payments.id": payment_id},
+        {"$set": {"payments.$.bukti_url": url}})
+    d2 = await db.doc_history.find_one({"id": doc_id}, {"_id": 0, "payments": 1})
+    return {"ok": True, "bukti_url": url, "payments": (d2 or {}).get("payments") or []}
+
+
 @api_router.post("/admin/doc-history/{doc_id}/payments/{payment_id}/kwitansi-no", dependencies=[Depends(require_admin_pin)])
 async def ensure_kwitansi_no(doc_id: str, payment_id: str):
     """Nomor kwitansi untuk 1 pembayaran. Diberikan SEKALI (urut otomatis, KWT0001_…)

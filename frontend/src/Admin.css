@@ -46,6 +46,7 @@
   --text:       #EBF1FA;
   --text-2:     #C0CFDF;
   --text-mute:  #7A95B5;
+  --text-3:     #9DB1CB;   /* label/teks sekunder (dulu dipakai tapi tak terdefinisi → jatuh ke warna gelap) */
   --text-dim:   #4A6280;
   --gold:       #C88A10;
   --gold-l:     #D4A847;
@@ -80,6 +81,7 @@
   --text:       #0C1422;
   --text-2:     #1E2D42;
   --text-mute:  #536A88;
+  --text-3:     #3F5573;
   --text-dim:   #8AA0B8;
   --gold-bg:    #FEF8E8;
   --gold-bd:    #F0CC60;
