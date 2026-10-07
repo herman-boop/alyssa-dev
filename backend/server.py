@@ -7026,6 +7026,47 @@ async def rekon_suggest_allocation(supplier_id: str, rekon_payment_id: str):
     return {"amount": amount, **res, "total": sum(a["amount"] for a in res["allocations"])}
 
 
+@api_router.post("/admin/suppliers/{supplier_id}/rekon-payments/{rekon_payment_id}/tembak", dependencies=[Depends(require_admin_pin)])
+async def rekon_tembak_to_units(supplier_id: str, rekon_payment_id: str, body: Dict[str, Any] = Body(...)):
+    """TEMBAK 1 pembayaran Rekon ke unit-unit yang dicentang di Rekap (supaya langsung
+    muncul di PDF Ringkasan). Pembagian pintar (faktur pas / unit pas / berurutan) tapi
+    HANYA ke unit terpilih & hanya yang masih ada sisa. Menggantikan alokasi pembayaran
+    INI saja (rekon lain tak disentuh). Reversible lewat Alokasikan/Reverse."""
+    job_ids = [str(j) for j in ((body or {}).get("job_ids") or []) if j]
+    if not job_ids:
+        raise HTTPException(400, "Centang minimal 1 unit dulu")
+    sup = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not sup:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    pay = next((p for p in (sup.get("rekon_payments") or []) if p.get("id") == rekon_payment_id), None)
+    if not pay:
+        raise HTTPException(404, "Pembayaran Rekon tidak ditemukan")
+    if pay.get("status") == "reversed":
+        raise HTTPException(400, "Pembayaran ini sudah dibatalkan (reversed) — pulihkan dulu.")
+    own = {a.get("job_id"): int(a.get("amount") or 0) for a in (pay.get("allocations") or []) if a.get("job_id")}
+    amount = int(pay.get("amount") or 0)
+    chosen = set(job_ids)
+    rows = [r for r in _rekon_job_rows(sup, own) if r[0] in chosen]
+    open_rows = [r for r in rows if (r[1] or 0) > 0]
+    if not open_rows:
+        return {"ok": True, "allocated": 0, "unallocated": amount, "units": 0, "method": "kosong",
+                "note": "Unit yang dicentang sudah tidak punya sisa tagihan (sudah lunas dari pembayaran lain)."}
+    res = rekon_sync.smart_allocations(open_rows, amount)
+    allocs = res["allocations"]
+    # Alokasi pembayaran ini ke unit LAIN (di luar centang) dipertahankan; hanya unit terpilih diganti.
+    keep = [a for a in (pay.get("allocations") or []) if a.get("job_id") not in chosen]
+    kept_total = sum(int(a.get("amount") or 0) for a in keep)
+    if kept_total + sum(a["amount"] for a in allocs) > amount:
+        # sisakan ruang untuk alokasi lama di unit lain
+        allocs = rekon_sync.smart_allocations(open_rows, max(0, amount - kept_total))["allocations"]
+    out = await rekon_sync.allocate_payment(db, supplier_id, rekon_payment_id, keep + allocs)
+    if isinstance(out, dict) and out.get("error"):
+        raise HTTPException(400, out["error"])
+    total = sum(a["amount"] for a in allocs)
+    return {"ok": True, "allocated": total, "unallocated": out.get("unallocated"), "units": len(allocs),
+            "method": res.get("method"), "note": res.get("note")}
+
+
 @api_router.post("/admin/rekon/imports/{bank_transaction_id}/restore", dependencies=[Depends(require_admin_pin)])
 async def rekon_restore_import(bank_transaction_id: str):
     """Pulihkan pembayaran Rekon yang sudah di-Reverse → kembali Belum Dialokasikan."""
