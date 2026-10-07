@@ -3548,7 +3548,7 @@ function KontakBox({ headers }) {
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
   const [serverMode, setServerMode] = useState(null); // null=cek, true=server, false=lokal
-  const flash = (m) => { setToast(m); setTimeout(() => setToast(""), 2600); };
+  const flash = (m, ms = 2600) => { setToast(m); setTimeout(() => setToast(""), ms); };
   const persistLocal = (next) => { setAll(next); saveContacts(next); };
 
   // Saat mount: coba server dulu. Kalau backend belum ada → fallback lokal.
@@ -3651,7 +3651,12 @@ function KontakBox({ headers }) {
       if (serverMode) {
         const r = await axios.post(`${API}/admin/contacts/import-orders`, {}, { headers });
         await reloadServer();
-        flash(r.data?.imported ? `✓ ${r.data.imported} pelanggan ditarik dari PO` : "Semua pelanggan sudah ada");
+        const d = r.data || {};
+        flash(d.imported
+          ? `✓ ${d.imported} pelanggan baru ditarik dari PO${d.sudah_ada ? ` (${d.sudah_ada} lainnya sudah ada)` : ""}`
+          : (d.sumber
+            ? `Tidak ada pelanggan baru — ${d.sumber} pelanggan di PO semuanya sudah ada di Kontak`
+            : "Belum ada nama pelanggan di PO Penjualan untuk ditarik"), 6000);
       } else {
         const r = await axios.get(`${API}/admin/orders`, { headers, params: { limit: 500 } });
         const orders = r.data?.items || [];
@@ -3668,7 +3673,7 @@ function KontakBox({ headers }) {
         if (add.length) persistLocal([...all, ...add]);
         flash(add.length ? `✓ ${add.length} pelanggan ditarik dari PO` : "Semua pelanggan sudah ada");
       }
-    } catch { flash("Gagal menarik dari PO"); } finally { setBusy(false); }
+    } catch (e) { flash(`Gagal menarik dari PO${e?.response?.status ? ` (kode ${e.response.status})` : ""} — coba lagi`, 6000); } finally { setBusy(false); }
   };
 
   const importSupplier = async () => {
@@ -3677,7 +3682,12 @@ function KontakBox({ headers }) {
       if (serverMode) {
         const r = await axios.post(`${API}/admin/contacts/import-suppliers`, {}, { headers });
         await reloadServer();
-        flash(r.data?.imported ? `✓ ${r.data.imported} supplier ditarik` : "Semua supplier sudah ada");
+        const d = r.data || {};
+        flash(d.imported
+          ? `✓ ${d.imported} supplier baru ditarik${d.sudah_ada ? ` (${d.sudah_ada} lainnya sudah ada)` : ""}`
+          : (d.sumber
+            ? `Tidak ada supplier baru — ${d.sumber} supplier di modul Supplier semuanya sudah ada di Kontak`
+            : "Belum ada supplier di modul Supplier untuk ditarik"), 6000);
       } else {
         const r = await axios.get(`${API}/admin/suppliers`, { headers });
         const sups = r.data?.items || [];
@@ -3687,7 +3697,7 @@ function KontakBox({ headers }) {
         if (add.length) persistLocal([...all, ...add]);
         flash(add.length ? `✓ ${add.length} supplier ditarik` : "Semua supplier sudah ada");
       }
-    } catch { flash("Gagal menarik supplier"); } finally { setBusy(false); }
+    } catch (e) { flash(`Gagal menarik supplier${e?.response?.status ? ` (kode ${e.response.status})` : ""} — coba lagi`, 6000); } finally { setBusy(false); }
   };
 
   const countP = all.filter((c) => c.jenis === "pelanggan").length;
