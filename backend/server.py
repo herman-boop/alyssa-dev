@@ -1231,6 +1231,31 @@ async def delete_invoice_payment(doc_id: str, payment_id: str):
     return {"ok": True, "payments": pays, "total_diterima": invoice_payments.total_paid(pays)}
 
 
+@api_router.post("/admin/doc-history/{doc_id}/payments/{payment_id}/kwitansi-no", dependencies=[Depends(require_admin_pin)])
+async def ensure_kwitansi_no(doc_id: str, payment_id: str):
+    """Nomor kwitansi untuk 1 pembayaran. Diberikan SEKALI (urut otomatis, KWT0001_…)
+    lalu tetap — cetak ulang kwitansi selalu memakai nomor yang sama. Idempotent."""
+    d = await db.doc_history.find_one({"id": doc_id, "jenis": "invoice"}, {"_id": 0, "payments": 1})
+    if not d:
+        raise HTTPException(404, "Faktur tidak ditemukan")
+    pay = invoice_payments.find_payment(d.get("payments"), payment_id)
+    if not pay:
+        raise HTTPException(404, "Pembayaran tidak ditemukan")
+    if pay.get("no_kwitansi"):
+        return {"no_kwitansi": pay["no_kwitansi"], "new": False}
+    await db.doc_counters.update_one({"_id": "kwitansi"}, {"$inc": {"seq": 1}}, upsert=True)
+    c = await db.doc_counters.find_one({"_id": "kwitansi"})
+    no = invoice_payments.kwitansi_no(int((c or {}).get("seq") or 1), today_wib())
+    # Set hanya kalau belum ada nomor (anti-timpa kalau 2 klik bersamaan).
+    await db.doc_history.update_one(
+        {"id": doc_id, "jenis": "invoice",
+         "payments": {"$elemMatch": {"id": payment_id, "no_kwitansi": {"$exists": False}}}},
+        {"$set": {"payments.$.no_kwitansi": no}})
+    d2 = await db.doc_history.find_one({"id": doc_id}, {"_id": 0, "payments": 1})
+    pay2 = invoice_payments.find_payment((d2 or {}).get("payments"), payment_id) or {}
+    return {"no_kwitansi": pay2.get("no_kwitansi") or no, "new": True}
+
+
 @api_router.delete("/admin/doc-history/{doc_id}", dependencies=[Depends(require_admin_pin)])
 async def delete_doc_history(doc_id: str):
     """Hapus 1 record arsip dokumen."""

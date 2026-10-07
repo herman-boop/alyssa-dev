@@ -64,3 +64,19 @@ def summarize(total, payments):
     else:
         status = "Lebih Bayar"
     return {"total": total, "diterima": paid, "sisa": sisa, "status": status}
+
+
+def find_payment(payments, payment_id):
+    """Cari 1 pembayaran by id (None kalau tidak ada)."""
+    for p in payments or []:
+        if (p or {}).get("id") == payment_id:
+            return p
+    return None
+
+
+def kwitansi_no(seq, iso_date):
+    """Nomor kwitansi: KWT0001_DDMMYYYY_YYYY (gaya sama dgn nomor faktur).
+    iso_date = 'YYYY-MM-DD' (tanggal terbit)."""
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})$", iso_date or "")
+    yyyy, mm, dd = m.groups() if m else ("0000", "00", "00")
+    return f"KWT{int(seq):04d}_{dd}{mm}{yyyy}_{yyyy}"
