@@ -826,30 +826,46 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
   const loadTbSup = async () => {
     const r = await axios.get(`${API}/admin/suppliers/${vendor.supplier_id}`, { headers });
     setTbSup(r.data);
+    return r.data;
   };
   const openTembak = async () => {
     if (selJobs.length === 0) { flash("Centang minimal 1 PO dulu"); return; }
     setTbIds(selJobs.map((j) => j.job_id)); setTbMsg(""); setTbDone(false); setTbSup(null); setTbOpen(true);
     try { await loadTbSup(); } catch { flash("Gagal memuat pembayaran Rekon"); setTbOpen(false); }
   };
+  // Tembak 1 pembayaran Rekon ke PO terpilih lalu LANGSUNG buka PDF A4 (kalau ada yang masuk).
   const doTembak = async (p) => {
     setTbBusy(p.id); setTbMsg("");
     try {
       const { data } = await axios.post(`${API}/admin/suppliers/${vendor.supplier_id}/rekon-payments/${p.id}/tembak`, { job_ids: tbIds }, { headers });
-      await loadTbSup();
+      const doc = await loadTbSup();
       setTbDone(data.allocated > 0);
       setTbMsg(data.allocated > 0
         ? `✓ ${fmtRp(data.allocated)} masuk ke ${data.units} PO${data.unallocated ? ` · sisa ${fmtRp(data.unallocated)} belum dialokasikan` : ""}${data.note ? ` — ${data.note}` : ""}`
         : (data.note || "Tidak ada PO yang bisa dibayar"));
+      if (data.allocated > 0) cetakTembak(doc);
     } catch (e) { setTbMsg(e?.response?.data?.detail || "Gagal tembak rekon"); }
     finally { setTbBusy(""); }
   };
-  const cetakTembak = () => {
-    if (!tbSup) return;
+  // Rekon yang pernah di-Reverse: Pulihkan + Tembak + PDF dalam 1 klik.
+  const doPulihTembak = async (r) => {
+    setTbBusy(r.id); setTbMsg("");
+    try {
+      await axios.post(`${API}/admin/rekon/imports/${encodeURIComponent(r.bank_transaction_id)}/restore`, {}, { headers });
+      const doc = await loadTbSup();
+      const pay = (doc.rekon_payments || []).find((x) => x.bank_transaction_id === r.bank_transaction_id);
+      if (!pay) { setTbMsg("Dipulihkan, tapi pembayarannya tidak ditemukan — coba lagi."); return; }
+      await doTembak(pay);
+    } catch (e) { setTbMsg(e?.response?.data?.detail || "Gagal memulihkan rekon"); }
+    finally { setTbBusy(""); }
+  };
+  const cetakTembak = (docArg) => {
+    const doc = (docArg && docArg.jobs) ? docArg : tbSup;
+    if (!doc) return;
     const ids = new Set(tbIds);
-    const jobs = (tbSup.jobs || []).filter((j) => ids.has(j.id));
+    const jobs = (doc.jobs || []).filter((j) => ids.has(j.id));
     if (!jobs.length) { flash("PO tidak ditemukan"); return; }
-    printSupplierA4(tbSup, jobs, supplierAutoDocNo(), "");
+    printSupplierA4(doc, jobs, supplierAutoDocNo(), "");
   };
   const closeTembak = () => { setTbOpen(false); if (tbDone) { setMode("list"); } };
 
@@ -971,9 +987,24 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
         </div>
         <BottomSheet open={tbOpen} title={`Tembak Rekon · ${tbIds.length} PO`} onClose={closeTembak}>
           {!tbSup && <div className="vp-hint" style={{ textAlign: "center" }}>Memuat pembayaran Rekon…</div>}
-          {tbSup && (tbSup.rekon_payments || []).length === 0 && (
-            <div className="vp-hint" style={{ textAlign: "center" }}>Belum ada pembayaran Rekon untuk vendor ini. Tarik dulu dari Audit Rekon (atau Pulihkan yang di-Reverse di Supplier → Riwayat).</div>
+          {tbSup && (tbSup.rekon_payments || []).length === 0 && (tbSup.rekon_reversed || []).length === 0 && (
+            <div className="vp-hint" style={{ textAlign: "center" }}>Belum ada pembayaran Rekon untuk vendor ini. Tarik dulu dari Audit Rekon.</div>
           )}
+          {tbSup && (tbSup.rekon_payments || []).length === 0 && (tbSup.rekon_reversed || []).length > 0 && (
+            <div className="vp-hint" style={{ textAlign: "center" }}>Rekon vendor ini sebelumnya dibatalkan (Reverse). Pulihkan langsung dari sini:</div>
+          )}
+          {tbSup && (tbSup.rekon_reversed || []).map((r) => (
+            <div key={r.id} className="vp-card" style={{ marginBottom: 8, borderStyle: "dashed" }}>
+              <div className="vp-card-top" style={{ marginBottom: 2 }}>
+                <span className="vp-card-nopol">{fmtRp(r.amount)}</span>
+                <span className="vp-card-rute" style={{ margin: 0 }}>↩️ Dibatalkan</span>
+              </div>
+              <div className="vp-card-rute">{r.tanggal || ""}{r.reversal_reason ? ` · ${r.reversal_reason}` : ""}</div>
+              <button className="vp-btn vp-btn-primary" style={{ marginTop: 8 }} disabled={!!tbBusy} onClick={() => doPulihTembak(r)} data-testid={`vp-pulih-tembak-${r.id}`}>
+                {tbBusy === r.id ? "Memproses…" : "↩️ Pulihkan + Tembak + PDF"}
+              </button>
+            </div>
+          ))}
           {tbSup && (tbSup.rekon_payments || []).map((p) => (
             <div key={p.id} className="vp-card" style={{ marginBottom: 8 }}>
               <div className="vp-card-top" style={{ marginBottom: 2 }}>
@@ -982,12 +1013,12 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
               </div>
               <div className="vp-card-rute">{p.tanggal || ""}{p.catatan ? ` · ${p.catatan}` : ""}</div>
               <button className="vp-btn vp-btn-primary" style={{ marginTop: 8 }} disabled={!!tbBusy} onClick={() => doTembak(p)} data-testid={`vp-tembak-${p.id}`}>
-                {tbBusy === p.id ? "Menembak…" : "🎯 Tembak ke PO terpilih"}
+                {tbBusy === p.id ? "Menembak…" : "🎯 Tembak + Buka PDF"}
               </button>
             </div>
           ))}
           {tbMsg && <div className="vp-hint" style={{ margin: "8px 0", fontWeight: 700 }}>{tbMsg}</div>}
-          {tbSup && <button className="vp-btn vp-btn-ghost" onClick={cetakTembak} data-testid="vp-tembak-cetak">🖨️ Cetak A4 ({tbIds.length} PO)</button>}
+          {tbSup && <button className="vp-btn vp-btn-ghost" onClick={() => cetakTembak()} data-testid="vp-tembak-cetak">🖨️ Cetak A4 ({tbIds.length} PO)</button>}
           <div className="vp-hint" style={{ marginTop: 8 }}>Nominal dicocokkan ke faktur/PO yang pas (kalau tidak ada → berurutan), hanya ke PO yang dicentang.</div>
         </BottomSheet>
       </div>
