@@ -7102,6 +7102,8 @@ async def rekon_tembak_semua(supplier_id: str, body: Dict[str, Any] = Body(...))
                 combined[a["job_id"]] = combined.get(a["job_id"], 0) + int(a.get("amount") or 0)
     rows = _rekon_job_rows(sup, combined)
     new, summary = rekon_sync.plan_tembak_semua(rows, rps, job_ids, release_fee=release_fee)
+    if bool((body or {}).get("dry_run")):
+        return {"ok": True, "dry_run": True, **summary}   # hitung saja, TIDAK menyimpan
     await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"rekon_payments": new}})
     return {"ok": True, **summary}
 

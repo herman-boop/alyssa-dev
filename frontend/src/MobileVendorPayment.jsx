@@ -806,7 +806,7 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
   const readSel = (v) => {
     try {
       const ids = JSON.parse(localStorage.getItem(SEL_KEY(v.supplier_id)) || "[]");
-      const ok = new Set((v.jobs || []).filter((j) => (j.sisa || 0) > 0).map((j) => j.job_id));
+      const ok = new Set((v.jobs || []).map((j) => j.job_id));
       const out = {}; (Array.isArray(ids) ? ids : []).forEach((id) => { if (ok.has(id)) out[id] = true; });
       return out;
     } catch (_) { return {}; }
@@ -821,7 +821,8 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
     } catch (_) { /* storage diblokir: abaikan */ }
   }, [sel, vendor, mode]); // eslint-disable-line
   const payableJobs = (vendor?.jobs || []).filter((j) => (j.sisa || 0) > 0);
-  const selJobs = payableJobs.filter((j) => sel[j.job_id]);
+  const selJobs = payableJobs.filter((j) => sel[j.job_id]);                  // yang masih ada sisa → untuk BAYAR
+  const selAll = (vendor?.jobs || []).filter((j) => sel[j.job_id]);          // termasuk yang sudah Lunas → untuk TEMBAK/PDF
   const totalSel = selJobs.reduce((a, j) => a + (j.sisa || 0), 0);
 
   const toggle = (jid) => setSel((s) => ({ ...s, [jid]: !s[jid] }));
@@ -850,8 +851,8 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
     return r.data;
   };
   const openTembak = async () => {
-    if (selJobs.length === 0) { flash("Centang minimal 1 PO dulu"); return; }
-    setTbIds(selJobs.map((j) => j.job_id)); setTbMsg(""); setTbDone(false); setTbSup(null); setTbOpen(true);
+    if (selAll.length === 0) { flash("Centang minimal 1 PO dulu"); return; }
+    setTbIds(selAll.map((j) => j.job_id)); setTbMsg(""); setTbDone(false); setTbSup(null); setTbOpen(true);
     setTbOther([]); setTbOtherState("loading"); setTbTrail([]);
     try { await loadTbSup(); } catch { flash("Gagal memuat pembayaran Rekon"); setTbOpen(false); return; }
     try {
@@ -901,15 +902,23 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
   // Tembak SEMUA rekon aktif (kecuali biaya admin) ke PO terpilih, sekali jalan → langsung PDF.
   const doTembakSemua = async () => {
     const real = (tbSup?.rekon_payments || []).filter((p) => !isFee(p));
-    const total = real.reduce((a, p) => a + (p.amount || 0), 0);
-    if (!window.confirm(
-      `Tembak SEMUA rekon (${real.length} transfer · ${fmtRp(total)}) ke ${tbIds.length} PO terpilih?\n\n` +
-      `• Biaya admin bank dikecualikan (alokasinya dilepas dari tagihan).\n` +
-      `• Alokasi lama rekon ini ke unit LAIN diganti — dipakai untuk ${tbIds.length} PO ini.\n` +
-      `• Kalau semua PO lunas, otomatis dipisah jadi FAKTUR baru (No. Faktur otomatis) & keluar dari daftar belum-dibayar.\n` +
-      `• Bisa diubah lagi lewat Supplier → Riwayat → Alokasikan / Reverse.`)) return;
     setTbBusy("ALL"); setTbMsg("");
     try {
+      // 1) hitung dulu (tidak menyimpan) → konfirmasi dengan angka & dampak yang jelas
+      const { data: dr } = await axios.post(`${API}/admin/suppliers/${vendor.supplier_id}/rekon-payments/tembak-semua`, { job_ids: tbIds, release_fee: true, dry_run: true }, { headers });
+      const nameOf = (id) => ((vendor.jobs || []).find((j) => j.job_id === id) || {}).nopol || id;
+      const openTxt = (dr.open_units || []).length
+        ? `\n• BELUM lunas ${dr.open_units.length} PO: ${dr.open_units.slice(0, 6).map((u) => `${nameOf(u.job_id)} (kurang ${fmtRp(u.sisa)})`).join(", ")}${dr.open_units.length > 6 ? ", …" : ""}`
+        : "\n• Semua PO lunas.";
+      const ok = window.confirm(
+        `Tembak SEMUA rekon (${real.length} transfer · ${fmtRp(dr.amount)}) ke ${tbIds.length} PO terpilih?\n\n` +
+        `• Uang yang masuk ke PO: ${fmtRp(dr.allocated)}${dr.unallocated > 0 ? ` (lebih ${fmtRp(dr.unallocated)} belum dialokasikan)` : ""}.` + openTxt + `\n` +
+        (dr.released_other_units > 0 ? `• ⚠️ ${dr.released_other_units} PO LAIN (di luar centang) yang tadinya dibayar rekon ini (${fmtRp(dr.released_other_amount)}) akan DILEPAS — kembali belum terbayar.\n` : "") +
+        `• Biaya admin bank dikecualikan (${dr.fee_count}).\n` +
+        `• Kalau semua PO lunas, otomatis dipisah jadi FAKTUR baru (No. Faktur otomatis).\n` +
+        `• Bisa diubah lagi lewat Supplier → Riwayat → Alokasikan / Reverse.`);
+      if (!ok) { setTbBusy(""); return; }
+      // 2) jalankan
       const { data } = await axios.post(`${API}/admin/suppliers/${vendor.supplier_id}/rekon-payments/tembak-semua`, { job_ids: tbIds, release_fee: true }, { headers });
       let fak = null;
       if (data.allocated > 0 && data.sisa_unit === 0) {
@@ -919,7 +928,7 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
       setTbDone(data.allocated > 0);
       setTbMsg(`✓ ${fmtRp(data.allocated)} dari ${data.payments.length} transfer masuk ke PO terpilih`
         + (data.fee_count ? ` · ${data.fee_count} biaya admin dikecualikan` : "")
-        + (data.sisa_unit > 0 ? ` · PO masih kurang ${fmtRp(data.sisa_unit)} (belum dipisah jadi faktur)` : " · semua PO lunas")
+        + (data.sisa_unit > 0 ? ` · ${data.open_units.length} PO masih kurang ${fmtRp(data.sisa_unit)}: ${data.open_units.slice(0, 5).map((u) => `${nameOf(u.job_id)} (${fmtRp(u.sisa)})`).join(", ")} (belum dipisah jadi faktur)` : " · semua PO lunas")
         + (fak ? ` · 📑 dipisah jadi faktur ${fak.no_faktur}` : "")
         + (data.unallocated > 0 ? ` · uang lebih ${fmtRp(data.unallocated)} belum dialokasikan` : ""));
       if (data.allocated > 0) cetakTembak(doc);
@@ -1063,10 +1072,10 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
             const disabled = (j.sisa || 0) <= 0;
             const on = !!sel[j.job_id];
             return (
-              <div key={j.job_id} className={`vp-card vp-po-card ${on ? "vp-po-on" : ""} ${disabled ? "vp-po-off" : ""}`}
-                onClick={() => !disabled && toggle(j.job_id)}>
+              <div key={j.job_id} className={`vp-card vp-po-card ${on ? "vp-po-on" : ""} ${disabled && !on ? "vp-po-off" : ""}`}
+                onClick={() => toggle(j.job_id)}>
                 <div className="vp-po-row">
-                  <span className={`vp-check ${on ? "vp-check-on" : ""} ${disabled ? "vp-check-dis" : ""}`}>{on ? "✓" : ""}</span>
+                  <span className={`vp-check ${on ? "vp-check-on" : ""} ${disabled && !on ? "vp-check-dis" : ""}`}>{on ? "✓" : ""}</span>
                   <div style={{ flex: 1 }}>
                     <div className="vp-card-top" style={{ marginBottom: 2 }}>
                       <span className="vp-card-nopol">{j.nopol || "(tanpa nopol)"}</span>
@@ -1087,10 +1096,10 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
         {/* Sticky total + bayar */}
         <div className="vp-sticky">
           <div className="vp-selbar">
-            <div><div className="vp-selbar-lbl">{selJobs.length} PO dipilih</div><div className="vp-selbar-amt">{fmtRp(totalSel)}</div></div>
+            <div><div className="vp-selbar-lbl">{selAll.length} PO dipilih{selAll.length > selJobs.length ? ` (${selAll.length - selJobs.length} sudah Lunas)` : ""}</div><div className="vp-selbar-amt">{fmtRp(totalSel)}</div></div>
           </div>
           <button className="vp-btn vp-btn-primary" disabled={selJobs.length === 0} onClick={goPay}>💰 Bayar yang Dipilih</button>
-          {embedded && <button className="vp-btn vp-btn-ghost" style={{ marginTop: 8 }} disabled={selJobs.length === 0} onClick={openTembak} data-testid="vp-tembak-open">🎯 Tembak Rekon ke yang Dipilih</button>}
+          {embedded && <button className="vp-btn vp-btn-ghost" style={{ marginTop: 8 }} disabled={selAll.length === 0} onClick={openTembak} data-testid="vp-tembak-open">🎯 Tembak Rekon ke yang Dipilih</button>}
         </div>
         <BottomSheet open={tbOpen} title={`Tembak Rekon · ${tbIds.length} PO`} onClose={closeTembak}>
           {!tbSup && <div className="vp-hint" style={{ textAlign: "center" }}>Memuat pembayaran Rekon…</div>}

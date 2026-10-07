@@ -1210,6 +1210,11 @@ async def test_tembak_semua():
     ok(sm2["allocated"] == 4000000 and sm2["sisa_unit"] == 6000000, "uang < tagihan → sisa tagihan terbuka")
     new3, sm3 = R.plan_tembak_semua(rows, [{"id": "a", "amount": 12000000, "tanggal": "2026-08-01", "catatan": "TRANSFER"}], ["U1", "U2", "U3"])
     ok(sm3["allocated"] == 10000000 and sm3["unallocated"] == 2000000, "uang > tagihan → selisih tetap belum dialokasikan")
+    ok(sm["released_other_units"] == 1 and sm["released_other_amount"] == 5000000, "dampak: alokasi lama 5jt ke unit LUAR centang (X) akan dilepas")
+    ok(sm["open_units"] == [] and sm["units_total"] == 3, "tidak ada unit yang tersisa terbuka")
+    _o, smo = R.plan_tembak_semua(rows, [{"id": "a", "amount": 4000000, "tanggal": "2026-08-01", "catatan": "TRANSFER"}], ["U1", "U2", "U3"])
+    ok(sorted(x["job_id"] for x in smo["open_units"]) == ["U2", "U3"] or sorted(x["job_id"] for x in smo["open_units"]) == ["U1", "U2", "U3"], "unit yang masih terbuka disebutkan (buat diagnosa 'kenapa kurang')")
+    ok(sum(x["sisa"] for x in smo["open_units"]) == smo["sisa_unit"], "jumlah sisa unit terbuka konsisten")
     _, sm4 = R.plan_tembak_semua(rows, pays, ["U1", "U2", "U3"], release_fee=False)
     ok(sm4["fee_released"] == 0, "release_fee=False → alokasi biaya admin dibiarkan")
 
