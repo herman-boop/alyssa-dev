@@ -882,6 +882,20 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
     } catch (e) { setTbMsg(e?.response?.data?.detail || "Gagal memindahkan rekon"); }
     finally { setTbBusy(""); }
   };
+  // Pisahkan PO terpilih jadi FAKTUR baru (No. Faktur otomatis). Lunas semua → faktur ditutup & PO keluar dari daftar belum-dibayar.
+  const doPisahFaktur = async () => {
+    const { data } = await axios.post(`${API}/admin/suppliers/${vendor.supplier_id}/pisah-faktur`, { job_ids: tbIds }, { headers });
+    return data;
+  };
+  const pisahManual = async () => {
+    setTbBusy("PISAH"); setTbMsg("");
+    try {
+      const f = await doPisahFaktur();
+      await loadTbSup(); setTbDone(true);
+      setTbMsg(`📑 ${f.reused ? "Sudah terpisah di" : "Faktur baru"} ${f.no_faktur} · ${f.units} PO${f.closed ? " · lunas, keluar dari daftar belum-dibayar" : ""}`);
+    } catch (e) { setTbMsg(e?.response?.data?.detail || "Gagal memisahkan faktur"); }
+    finally { setTbBusy(""); }
+  };
   // Biaya admin bank (mis. "BIF BIAYA TXN KE 002 …") ditanggung kita — bukan pembayaran ke supplier.
   const isFee = (p) => /\bBIAYA\s*(TXN|TRX|TRANSAKSI|ADM|ADMIN)\b/i.test(`${p.catatan || ""} ${(p.rekon || {}).referensi_bank || ""}`);
   // Tembak SEMUA rekon aktif (kecuali biaya admin) ke PO terpilih, sekali jalan → langsung PDF.
@@ -892,15 +906,21 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
       `Tembak SEMUA rekon (${real.length} transfer · ${fmtRp(total)}) ke ${tbIds.length} PO terpilih?\n\n` +
       `• Biaya admin bank dikecualikan (alokasinya dilepas dari tagihan).\n` +
       `• Alokasi lama rekon ini ke unit LAIN diganti — dipakai untuk ${tbIds.length} PO ini.\n` +
+      `• Kalau semua PO lunas, otomatis dipisah jadi FAKTUR baru (No. Faktur otomatis) & keluar dari daftar belum-dibayar.\n` +
       `• Bisa diubah lagi lewat Supplier → Riwayat → Alokasikan / Reverse.`)) return;
     setTbBusy("ALL"); setTbMsg("");
     try {
       const { data } = await axios.post(`${API}/admin/suppliers/${vendor.supplier_id}/rekon-payments/tembak-semua`, { job_ids: tbIds, release_fee: true }, { headers });
+      let fak = null;
+      if (data.allocated > 0 && data.sisa_unit === 0) {
+        try { fak = await doPisahFaktur(); } catch (_) { fak = null; }   // lunas semua → pisah jadi faktur sendiri
+      }
       const doc = await loadTbSup();
       setTbDone(data.allocated > 0);
       setTbMsg(`✓ ${fmtRp(data.allocated)} dari ${data.payments.length} transfer masuk ke PO terpilih`
         + (data.fee_count ? ` · ${data.fee_count} biaya admin dikecualikan` : "")
-        + (data.sisa_unit > 0 ? ` · PO masih kurang ${fmtRp(data.sisa_unit)}` : " · semua PO lunas")
+        + (data.sisa_unit > 0 ? ` · PO masih kurang ${fmtRp(data.sisa_unit)} (belum dipisah jadi faktur)` : " · semua PO lunas")
+        + (fak ? ` · 📑 dipisah jadi faktur ${fak.no_faktur}` : "")
         + (data.unallocated > 0 ? ` · uang lebih ${fmtRp(data.unallocated)} belum dialokasikan` : ""));
       if (data.allocated > 0) cetakTembak(doc);
     } catch (e) { setTbMsg(e?.response?.data?.detail || "Gagal tembak semua"); }
@@ -1171,6 +1191,7 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
             </>
           )}
           {tbMsg && <div className="vp-hint" style={{ margin: "8px 0", fontWeight: 700 }}>{tbMsg}</div>}
+          {tbSup && <button className="vp-btn vp-btn-ghost" style={{ marginBottom: 8 }} disabled={!!tbBusy} onClick={pisahManual} data-testid="vp-pisah-faktur">{tbBusy === "PISAH" ? "Memisahkan…" : `📑 Pisahkan ${tbIds.length} PO jadi Faktur baru`}</button>}
           {tbSup && <button className="vp-btn vp-btn-ghost" onClick={() => cetakTembak()} data-testid="vp-tembak-cetak">🖨️ Cetak A4 ({tbIds.length} PO)</button>}
           <div className="vp-hint" style={{ marginTop: 8 }}>Nominal dicocokkan ke faktur/PO yang pas (kalau tidak ada → berurutan), hanya ke PO yang dicentang.</div>
         </BottomSheet>
