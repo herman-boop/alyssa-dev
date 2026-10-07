@@ -888,24 +888,36 @@ async def probe_vesselfinder(mmsi, imo=None):
         return {"error": str(e)}
 
 
-async def probe_vesselapi(mmsi, imo=None):
+async def probe_vesselapi(mmsi, imo=None, sat=False, primary_only=False):
     """Diagnostik: panggil VesselAPI /position mentah untuk lihat status + bentuk
-    respons (TANPA menampilkan API key). Coba mmsi dulu, lalu imo kalau 404."""
+    respons (TANPA menampilkan API key). Default: coba mmsi dulu, lalu imo kalau
+    belum 200 (perilaku lama). sat=True → ikut filter satelit (sama dgn jalur
+    halaman tracking). primary_only=True → cukup 1 call ke ident yang DIPAKAI app
+    (mmsi kalau ada, kalau tidak imo) — hemat kuota."""
     if not vesselapi_enabled():
         return {"error": "VESSEL_API_KEY belum diset di backend"}
+    cands = (("mmsi", mmsi, "mmsi"), ("imo", imo, "imo"))
+    if primary_only:
+        first = next((c for c in cands if str(c[1] or "").strip()), None)
+        cands = (first,) if first else ()
     out = {}
-    for label, ident, idtype in (("mmsi", mmsi, "mmsi"), ("imo", imo, "imo")):
+    for label, ident, idtype in cands:
         ident = str(ident or "").strip()
         if not ident:
             continue
+        params = {"filter.idType": idtype}
+        if sat:
+            params["filter.sat"] = "true"
+            params["filter.satLookbackMinutes"] = str(VESSELAPI_SAT_LOOKBACK)
         try:
-            r = await asyncio.to_thread(_vesselapi_get, f"/vessel/{ident}/position", {"filter.idType": idtype})
+            r = await asyncio.to_thread(_vesselapi_get, f"/vessel/{ident}/position", params)
             try:
                 body = r.json()
             except Exception:
                 body = {"_text": (r.text or "")[:800]}
             out[label] = {
                 "id": ident,
+                "mode": "satelit" if sat else "darat",
                 "status": r.status_code,
                 "ratelimit_remaining": r.headers.get("X-RateLimit-Remaining"),
                 "x_data_source": r.headers.get("X-Data-Source"),
@@ -914,7 +926,7 @@ async def probe_vesselapi(mmsi, imo=None):
             if r.status_code == 200:
                 break
         except Exception as e:
-            out[label] = {"id": ident, "error": str(e)}
+            out[label] = {"id": ident, "mode": "satelit" if sat else "darat", "error": str(e)}
     return out or {"error": "tidak ada mmsi/imo untuk diuji"}
 
 
@@ -936,7 +948,7 @@ def _summarize_probe(pr):
         except Exception:
             has_pos = False
         out.append({
-            "idtype": label, "id": d.get("id"), "status": d.get("status"),
+            "idtype": label, "id": d.get("id"), "mode": d.get("mode"), "status": d.get("status"),
             "has_position": has_pos, "source": d.get("x_data_source"),
             "ratelimit_remaining": d.get("ratelimit_remaining"),
             "error": d.get("error"),
@@ -980,6 +992,7 @@ async def trace(db, probe_missing=True, max_probe=8):
         logger.warning("[ais] trace scan gagal: %s", e)
 
     probes_left = max_probe if (probe_missing and (vesselapi_enabled() or vesselfinder_enabled())) else 0
+    probe_cache = {}   # ident kapal (mmsi/imo) -> hasil probe; 1 kapal dites SEKALI walau muncul di banyak trip
     for r in rows:
         doc = None
         try:
@@ -996,26 +1009,35 @@ async def trace(db, probe_missing=True, max_probe=8):
         r["age_seconds"] = (pub.get("age_seconds") if pub else _doc_age_seconds(doc))
         r["provider"] = None
         # Probe provider berbayar HANYA utk kapal yang belum ada posisi (bermasalah).
-        if probes_left > 0 and not pub:
-            probes_left -= 1
-            prov = []
-            if vesselapi_enabled():
-                try:
-                    prov += _summarize_probe(await probe_vesselapi(r["mmsi"], r["imo"]))
-                except Exception as e:
-                    prov.append({"idtype": "vesselapi", "error": str(e)[:160]})
-            if vesselfinder_enabled():
-                try:
-                    vf = await probe_vesselfinder(r["mmsi"], r["imo"])
-                    prov.append({
-                        "idtype": "vesselfinder", "id": r["mmsi"] or r["imo"],
-                        "status": vf.get("status"), "has_position": vf.get("has_position"),
-                        "source": "vesselfinder", "ratelimit_remaining": vf.get("ratelimit_remaining"),
-                        "error": vf.get("error"),
-                    })
-                except Exception as e:
-                    prov.append({"idtype": "vesselfinder", "error": str(e)[:160]})
-            r["provider"] = prov
+        if not pub and (probe_missing and (vesselapi_enabled() or vesselfinder_enabled())):
+            ident = r["mmsi"] or r["imo"]
+            if ident in probe_cache:
+                r["provider"] = probe_cache[ident]
+                r["provider_shared"] = True     # hasil sama dgn baris kapal yang sama di atas
+            elif probes_left > 0:
+                probes_left -= 1
+                prov = []
+                if vesselapi_enabled():
+                    # Darat dulu (probe lama), lalu satelit kalau mode satelit nyala —
+                    # meniru jalur halaman tracking. 1 call per mode ke ident yang dipakai app.
+                    for use_sat in ((False, True) if _vesselapi_use_sat() else (False,)):
+                        try:
+                            prov += _summarize_probe(await probe_vesselapi(r["mmsi"], r["imo"], sat=use_sat, primary_only=True))
+                        except Exception as e:
+                            prov.append({"idtype": "vesselapi", "mode": "satelit" if use_sat else "darat", "error": str(e)[:160]})
+                if vesselfinder_enabled():
+                    try:
+                        vf = await probe_vesselfinder(r["mmsi"], r["imo"])
+                        prov.append({
+                            "idtype": "vesselfinder", "id": ident,
+                            "status": vf.get("status"), "has_position": vf.get("has_position"),
+                            "source": "vesselfinder", "ratelimit_remaining": vf.get("ratelimit_remaining"),
+                            "error": vf.get("error"),
+                        })
+                    except Exception as e:
+                        prov.append({"idtype": "vesselfinder", "error": str(e)[:160]})
+                probe_cache[ident] = prov
+                r["provider"] = prov
     # urut: yang belum ada posisi di atas, lalu by nama
     rows.sort(key=lambda x: (x["cache_has_position"], x.get("kapal") or ""))
     return {
@@ -1024,7 +1046,7 @@ async def trace(db, probe_missing=True, max_probe=8):
         "worker_running": worker_running(),
         "watched_count": len(watched),
         "ship_count": len(rows),
-        "probed": max_probe - probes_left if (probe_missing and vesselapi_enabled()) else 0,
+        "probed": max_probe - probes_left if (probe_missing and (vesselapi_enabled() or vesselfinder_enabled())) else 0,
         "ships": rows,
     }
 

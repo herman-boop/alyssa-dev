@@ -1577,11 +1577,11 @@ function PengaturanPage({ dark, onToggleTheme, onLogout, fixHeicPhotos, fixingHe
                       <div>MMSI: <b style={{ color: s.mmsi ? "#c9d1d9" : "#f85149" }}>{s.mmsi || "— kosong —"}</b> · IMO: <b style={{ color: "#c9d1d9" }}>{s.imo || "—"}</b></div>
                       <div>Dipantau worker: <b style={{ color: s.watched ? "#3fb950" : "#f85149" }}>{s.watched ? "YA" : "TIDAK"}</b> · Ada posisi (cache): <b style={{ color: posColor }}>{s.cache_has_position ? `YA (${s.freshness})` : "TIDAK"}</b></div>
                       {s.provider && s.provider.length ? (
-                        <div>Provider VesselAPI: {s.provider.map((p, j) => (
+                        <div>Provider: {s.provider.map((p, j) => (
                           <span key={j} style={{ marginRight: 8, color: p.has_position ? "#3fb950" : "#f0a742" }}>
-                            {p.error ? `error` : `${p.idtype} → HTTP ${p.status}${p.has_position ? " (ada posisi)" : " (kosong)"}`}
+                            {p.error ? `${p.mode ? p.mode + " · " : ""}error` : `${p.mode ? p.mode + " · " : ""}${p.idtype} → HTTP ${p.status}${p.has_position ? " (ada posisi)" : " (kosong)"}`}
                           </span>
-                        ))}</div>
+                        ))}{s.provider_shared ? <span style={{ color: "#6b7681" }}> · (kapal sama dgn baris di atas — dites sekali)</span> : null}</div>
                       ) : (s.cache_has_position ? null : <div style={{ color: "#6b7681" }}>Provider: (tidak di-tes)</div>)}
                       <div style={{ color: "#6b7681" }}>trip: {s.trip_id || "—"}</div>
                     </div>

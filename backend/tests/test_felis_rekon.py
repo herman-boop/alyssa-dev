@@ -745,6 +745,62 @@ async def test_vesselfinder_refresh():
         AIS._last_pos_fetch.clear()
 
 
+async def test_trace_probe_dedupe_sat():
+    """Trace per Kapal: 1 kapal dites SEKALI walau muncul di banyak trip, dan
+    ikut tes jalur satelit (sama dgn halaman tracking). Hemat kuota provider."""
+    print("test_trace_probe_dedupe_sat")
+
+    class _R:
+        def __init__(self, st): self.status_code = st; self.headers = {}; self.text = ""
+        def json(self): return {}
+
+    calls = []
+    def fake_get(path, params, timeout=15):
+        calls.append((path, dict(params)))
+        return _R(404)
+
+    db = FakeDB()
+    # Mutiara Ferindo: 3 trip (MMSI+IMO sama); Kapal B: hanya IMO; Kapal C: sudah ada posisi di cache.
+    for tid in ("T1", "T2", "T3"):
+        await db.trips.insert_one({"trip_id": tid, "legs": [{"route_leg_id": "l-" + tid, "tipe": "Kapal RoRo", "kapal": "MUTIARA FERINDO V", "mmsi": "525200343", "imo": "9425021", "status": "Berlangsung"}]})
+    await db.trips.insert_one({"trip_id": "T4", "legs": [{"route_leg_id": "l4", "tipe": "Kapal RoRo", "kapal": "KAPAL B", "imo": "1234567", "status": "Berlangsung"}]})
+    await db.trips.insert_one({"trip_id": "T5", "legs": [{"route_leg_id": "l5", "tipe": "Kapal RoRo", "kapal": "KAPAL C", "mmsi": "525000001", "status": "Berlangsung"}]})
+    await db.ais_positions.insert_one({"mmsi": "525000001", "latitude": 1.0, "longitude": 118.0, "position_timestamp": "2026-10-06T00:00:00+00:00"})
+
+    saved = (AIS.vesselapi_enabled, AIS._vesselapi_use_sat, AIS._vesselapi_get, AIS.vesselfinder_enabled)
+    AIS.vesselapi_enabled = lambda: True
+    AIS._vesselapi_use_sat = lambda: True
+    AIS.vesselfinder_enabled = lambda: False
+    AIS._vesselapi_get = fake_get
+    try:
+        res = await AIS.trace(db, probe_missing=True, max_probe=8)
+    finally:
+        AIS.vesselapi_enabled, AIS._vesselapi_use_sat, AIS._vesselapi_get, AIS.vesselfinder_enabled = saved
+    pos = [c for c in calls if c[0].endswith("/position")]
+    ok(len(pos) == 4, "2 kapal unik x (darat + satelit) = 4 call (bukan per trip)")
+    ok(res["probed"] == 2, "probed = jumlah kapal UNIK (2), bukan jumlah trip")
+    m_calls = [c for c in pos if "/525200343/" in c[0]]
+    ok(len(m_calls) == 2 and all(c[1].get("filter.idType") == "mmsi" for c in m_calls), "Mutiara: hanya ident MMSI yang dites (sama dgn app), 1x per mode")
+    ok(sum(1 for c in m_calls if c[1].get("filter.sat") == "true") == 1 and sum(1 for c in m_calls if "filter.sat" not in c[1]) == 1, "Mutiara: 1 call darat + 1 call satelit")
+    b_calls = [c for c in pos if "/1234567/" in c[0]]
+    ok(len(b_calls) == 2 and all(c[1].get("filter.idType") == "imo" for c in b_calls), "Kapal B (IMO saja): dites via IMO")
+    ships = {(x["kapal"], x["trip_id"]): x for x in res["ships"]}
+    ok(all(ships[("MUTIARA FERINDO V", t)]["provider"] for t in ("T1", "T2", "T3")), "ketiga trip Mutiara dapat hasil provider")
+    ok(sum(1 for t in ("T1", "T2", "T3") if ships[("MUTIARA FERINDO V", t)].get("provider_shared")) == 2, "2 dari 3 baris ditandai 'hasil dipakai bersama'")
+    modes = sorted(p["mode"] for p in ships[("MUTIARA FERINDO V", "T1")]["provider"] if p.get("mode"))
+    ok(modes == ["darat", "satelit"], "hasil memuat mode darat & satelit")
+    ok(ships[("KAPAL C", "T5")]["provider"] is None, "kapal yang sudah ada posisi tidak dites")
+    # Mode satelit mati → hanya darat
+    calls.clear()
+    AIS.vesselapi_enabled = lambda: True; AIS._vesselapi_use_sat = lambda: False
+    AIS.vesselfinder_enabled = lambda: False; AIS._vesselapi_get = fake_get
+    try:
+        await AIS.trace(db, probe_missing=True, max_probe=8)
+    finally:
+        AIS.vesselapi_enabled, AIS._vesselapi_use_sat, AIS._vesselapi_get, AIS.vesselfinder_enabled = saved
+    ok(len([c for c in calls if c[0].endswith("/position")]) == 2 and all("filter.sat" not in c[1] for c in calls), "satelit mati: 1 call darat per kapal unik")
+
+
 async def test_invoice_payments():
     """Pembayaran customer per faktur: validasi, total, sisa & status."""
     print("test_invoice_payments")
@@ -790,7 +846,7 @@ async def test_invoice_payments():
 
 
 async def main():
-    for t in (test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
+    for t in (test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,
