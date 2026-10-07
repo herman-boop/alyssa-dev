@@ -398,6 +398,9 @@ function HomeScreen({ go, onLogout, dark, toggleDark, showThemeToggle }) {
 function FormScreen({ boot, headers, onBack, setLoading, flash, onSuccess, prefill }) {
   const isPrefill = !!(prefill && prefill.job_id);
   const [trip, setTrip] = useState(prefill ? { trip_id: prefill.trip_id, nopol: prefill.nopol, rute: prefill.rute } : null);
+  const [asal, setAsal] = useState("");     // rute leg yang dibayar — bisa diubah (default dari trip)
+  const [tujuan, setTujuan] = useState("");
+  const pickTrip = (t) => { setTrip(t); setAsal(t?.asal || ""); setTujuan(t?.tujuan || ""); };
   const [tripQ, setTripQ] = useState("");
   const [tripResults, setTripResults] = useState([]);
   const [tripSearching, setTripSearching] = useState(false);
@@ -477,6 +480,8 @@ function FormScreen({ boot, headers, onBack, setLoading, flash, onSuccess, prefi
       if (isPrefill) { fd.append("supplier_id", prefill.supplier_id); fd.append("job_id", prefill.job_id); }
       else {
         fd.append("trip_id", trip.trip_id);
+        if (asal.trim()) fd.append("asal_kota", asal.trim());
+        if (tujuan.trim()) fd.append("tujuan_kota", tujuan.trim());
         if (vendor.id) fd.append("supplier_id", vendor.id);
         else fd.append("vendor_name", vendor.nama);
       }
@@ -504,13 +509,31 @@ function FormScreen({ boot, headers, onBack, setLoading, flash, onSuccess, prefi
         <div className="vp-field">
           <label className="vp-label">Trip / Nomor Polisi</label>
           {isPrefill || trip ? (
+            <>
             <div className="vp-picked">
               <div>
                 <div className="vp-picked-main">{trip?.nopol || "—"}</div>
-                <div className="vp-picked-sub">{trip?.rute || ""}{trip?.trip_id ? ` · ${trip.trip_id}` : ""}</div>
+                {isPrefill
+                  ? <div className="vp-picked-sub">{trip?.rute || ""}{trip?.trip_id ? ` · ${trip.trip_id}` : ""}</div>
+                  : <div className="vp-picked-sub">{trip?.trip_id || ""}</div>}
               </div>
-              {!isPrefill && <button className="vp-change" onClick={() => { setTrip(null); setTripQ(""); }}>Ganti</button>}
+              {!isPrefill && <button className="vp-change" onClick={() => { setTrip(null); setTripQ(""); setAsal(""); setTujuan(""); }}>Ganti</button>}
             </div>
+            {!isPrefill && (
+              <div className="vp-rute-edit">
+                <div className="vp-rute-col">
+                  <label className="vp-label vp-label-sm">Asal</label>
+                  <input className="vp-input" value={asal} onChange={(e) => setAsal(e.target.value)} placeholder="Kota asal" />
+                </div>
+                <span className="vp-rute-arrow">→</span>
+                <div className="vp-rute-col">
+                  <label className="vp-label vp-label-sm">Tujuan</label>
+                  <input className="vp-input" value={tujuan} onChange={(e) => setTujuan(e.target.value)} placeholder="Kota tujuan" />
+                </div>
+              </div>
+            )}
+            {!isPrefill && <div className="vp-hint">Rute leg yang dibayar — tap untuk ubah kalau beda dari rute trip.</div>}
+            </>
           ) : (
             <>
               <input className="vp-input" inputMode="search" placeholder="Ketik nopol / trip / customer…"
@@ -520,7 +543,7 @@ function FormScreen({ boot, headers, onBack, setLoading, flash, onSuccess, prefi
               {tripResults.length > 0 && (
                 <div className="vp-results">
                   {tripResults.map((t) => (
-                    <button key={t.trip_id} className="vp-result" onClick={() => { setTrip(t); setTripResults([]); setTripQ(""); }}>
+                    <button key={t.trip_id} className="vp-result" onClick={() => { pickTrip(t); setTripResults([]); setTripQ(""); }}>
                       <div className="vp-result-main">{t.nopol || "(tanpa nopol)"} <span className="vp-result-veh">{t.vehicle}</span></div>
                       <div className="vp-result-sub">{t.rute} · {t.customer || "-"}</div>
                     </button>
@@ -631,6 +654,7 @@ function FormScreen({ boot, headers, onBack, setLoading, flash, onSuccess, prefi
       <BottomSheet open={confirm} title="Konfirmasi Pembayaran" onClose={() => setConfirm(false)}>
         <div className="vp-confirm">
           <Row k="Nopol" v={trip?.nopol || prefill?.nopol || "-"} />
+          {!isPrefill && (asal.trim() || tujuan.trim()) && <Row k="Rute" v={`${asal.trim() || "-"} → ${tujuan.trim() || "-"}`} />}
           <Row k="Vendor" v={vendor?.nama || "-"} />
           <Row k="Jenis Biaya" v={kategori || "-"} />
           <Row k="Nominal" v={fmtRp(nominalNum)} big />
@@ -1170,6 +1194,9 @@ function VpStyle() {
     .vp-result-veh { font-size:12.5px; font-weight:600; color:var(--vp-mute); }
     .vp-result-sub { font-size:13px; color:var(--vp-mute); margin-top:2px; }
     .vp-picked { display:flex; align-items:center; justify-content:space-between; padding:14px; border:1.5px solid var(--vp-navy); border-radius:12px; background:#eef3fb; }
+    .vp-rute-edit { display:flex; align-items:flex-end; gap:8px; margin-top:10px; }
+    .vp-rute-col { flex:1; min-width:0; } .vp-rute-arrow { padding-bottom:16px; font-size:20px; color:var(--vp-mute); }
+    .vp-label-sm { font-size:12px; margin-bottom:4px; }
     .vp-picked-main { font-size:17px; font-weight:800; } .vp-picked-sub { font-size:13px; color:var(--vp-mute); margin-top:2px; }
     .vp-change { background:#fff; border:1px solid var(--vp-line); border-radius:10px; padding:9px 12px; font-weight:700; min-height:44px; }
 
