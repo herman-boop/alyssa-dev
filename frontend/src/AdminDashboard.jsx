@@ -3848,6 +3848,16 @@ function invTotalFromRec(rec) {
   const total = (taxIncl ? subtotal : subtotal + ppn) - pph;
   return { subtotal, ppn, pph, total };
 }
+// Ringkasan pembayaran customer per faktur: total − pembayaran tercatat (rec.payments).
+// Total faktur asli tidak diubah. Status sama dgn backend invoice_payments.summarize.
+function invPayFromRec(rec) {
+  const total = invTotalFromRec(rec).total;
+  const pays = Array.isArray(rec.payments) ? rec.payments : [];
+  const diterima = pays.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const sisa = total - diterima;
+  const status = diterima <= 0 ? "Belum Bayar" : sisa > 0 ? "Sebagian" : sisa === 0 ? "Lunas" : "Lebih Bayar";
+  return { total, diterima, sisa, status, pays };
+}
 const MEKARI_LS_KEY = "aal_mekari_input_v1";
 function loadMekariMarks() { try { return JSON.parse(localStorage.getItem(MEKARI_LS_KEY) || "{}"); } catch { return {}; } }
 function saveMekariMarks(m) { try { localStorage.setItem(MEKARI_LS_KEY, JSON.stringify(m)); } catch {} }
@@ -4229,7 +4239,14 @@ function TagihanHariIni({ headers, onBack }) {
   const custCount = new Set(rows.map((r) => normName(r.customer)).filter(Boolean)).size;
   const unitCount = rows.reduce((s, r) => s + ((r.lines || []).length), 0);
   const fmtDayLabel = fmtDMY(day);
-  const statusOf = (r) => (lunas[r.id] ? "Lunas" : "Belum Dibayar");
+  // Status: lunas kalau pembayaran tercatat sudah penuh, ATAU ditandai lunas manual (lama).
+  // "Sebagian" kalau sudah ada pembayaran tapi belum penuh. Tanpa pembayaran → perilaku lama.
+  const lunasOf = (r) => !!lunas[r.id] || invPayFromRec(r).status === "Lunas";
+  const statusOf = (r) => {
+    if (lunasOf(r)) return "Lunas";
+    const ip = invPayFromRec(r);
+    return ip.diterima > 0 ? `Sebagian (sisa Rp ${ip.sisa.toLocaleString("id-ID")})` : "Belum Dibayar";
+  };
 
   // Selection
   const toggleSel = (id) => setSel((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -4253,7 +4270,7 @@ function TagihanHariIni({ headers, onBack }) {
   const reprint = async (r) => {
     let rec = r;
     try { const resp = await axios.get(`${API}/admin/doc-history/${r.id}`, { headers }); if (resp.data) rec = resp.data; } catch {}
-    try { printInvoiceDoc(rec.lines, rec.meta?.withTax, rec.meta || {}); } catch {}
+    try { printInvoiceDoc(rec.lines, rec.meta?.withTax, { ...(rec.meta || {}), payments: rec.payments || [] }); } catch {}
   };
 
   const exportExcel = (list) => {
@@ -4339,7 +4356,7 @@ function TagihanHariIni({ headers, onBack }) {
             </thead>
             <tbody>
               {rows.map((r, i) => {
-                const t = invTotalFromRec(r); const info = rowInfoFromRec(r); const isLunas = !!lunas[r.id];
+                const t = invTotalFromRec(r); const info = rowInfoFromRec(r); const isLunas = lunasOf(r);
                 return (
                   <tr key={r.id} onClick={() => setDetail(r)} data-testid={`tagih-row-${r.id}`}>
                     <td className="tg-sticky tg-c0" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={sel.has(r.id)} onChange={() => toggleSel(r.id)} data-testid={`tagih-sel-${r.id}`} /></td>
@@ -4354,7 +4371,7 @@ function TagihanHariIni({ headers, onBack }) {
                     <td className="tg-center">{info.qty}</td>
                     <td className="tg-num tg-total">Rp {t.total.toLocaleString("id-ID")}</td>
                     <td className="tg-center">{fmtDMY(r.meta?.jatuhTempo)}</td>
-                    <td className="tg-center"><span className={`tg-status ${isLunas ? "lunas" : "belum"}`}>{isLunas ? "Lunas" : "Belum Dibayar"}</span></td>
+                    <td className="tg-center"><span className={`tg-status ${isLunas ? "lunas" : "belum"}`}>{statusOf(r)}</span></td>
                   </tr>
                 );
               })}
@@ -4377,7 +4394,7 @@ function TagihanHariIni({ headers, onBack }) {
 
       {/* Detail drawer/modal */}
       {detail && (() => {
-        const t = invTotalFromRec(detail); const info = rowInfoFromRec(detail); const isLunas = !!lunas[detail.id];
+        const t = invTotalFromRec(detail); const info = rowInfoFromRec(detail); const isLunas = lunasOf(detail);
         const Row = ({ k, v }) => (
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "6px 0", borderBottom: "1px solid var(--border)", fontSize: 13 }}>
             <span style={{ color: "var(--text-mute)" }}>{k}</span>
@@ -4414,7 +4431,8 @@ function TagihanHariIni({ headers, onBack }) {
                 <Row k="Metode Pembayaran" v={detail.meta?.metode || "—"} />
                 <Row k="Jatuh Tempo" v={fmtDMY(detail.meta?.jatuhTempo)} />
                 <Row k="Catatan" v={detail.meta?.pesan || "—"} />
-                <Row k="Status" v={<span className={`tg-status ${isLunas ? "lunas" : "belum"}`}>{isLunas ? "Lunas" : "Belum Dibayar"}</span>} />
+                <Row k="Pembayaran Diterima" v={`Rp ${invPayFromRec(detail).diterima.toLocaleString("id-ID")}`} />
+                <Row k="Status" v={<span className={`tg-status ${isLunas ? "lunas" : "belum"}`}>{statusOf(detail)}</span>} />
               </div>
               <div style={{ display: "flex", gap: 8, padding: "12px 16px", flexWrap: "wrap", justifyContent: "flex-end" }}>
                 <button className="adm-btn adm-btn-sm adm-btn-ghost" onClick={() => reprint(detail)}>👁️ Lihat / Cetak</button>
@@ -4446,6 +4464,139 @@ const DOC_HIST_BADGE = {
   jadwal_gabungan: { txt: "Jadwal Gabungan", bg: "rgba(201,151,58,0.20)", fg: "#e6c375" },
 };
 
+/* ── Terima Pembayaran per Faktur ──
+   Catat pembayaran customer (boleh bertahap/cicilan) untuk 1 faktur, termasuk faktur
+   gabungan beberapa PO. Total faktur asli TIDAK diubah; faktur cetak menampilkan
+   rincian pembayaran + sisa tagihan. */
+function InvoicePaymentModal({ rec, headers, onClose, onChanged, onPrint }) {
+  const todayLocal = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+  const [pays, setPays] = useState(Array.isArray(rec.payments) ? rec.payments : []);
+  const [amount, setAmount] = useState("");
+  const [tanggal, setTanggal] = useState(todayLocal);
+  const [metode, setMetode] = useState("Transfer BCA");
+  const [catatan, setCatatan] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const total = invTotalFromRec(rec).total;
+  const diterima = pays.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const sisa = total - diterima;
+  const status = diterima <= 0 ? "Belum Bayar" : sisa > 0 ? "Sebagian" : sisa === 0 ? "Lunas" : "Lebih Bayar";
+  const stColor = status === "Lunas" ? "#3fb950" : status === "Sebagian" ? "#e3a008" : status === "Lebih Bayar" ? "#f85149" : "#8b949e";
+  const rp = (n) => "Rp " + (Number(n) || 0).toLocaleString("id-ID");
+  const fmtTglP = (iso) => { if (!iso || !/^\d{4}-\d{2}-\d{2}/.test(iso)) return "—"; const [y, m, d] = iso.slice(0, 10).split("-"); return `${d}-${m}-${y}`; };
+  const nominal = parseInt(String(amount).replace(/[^0-9]/g, ""), 10) || 0;
+
+  const add = async () => {
+    if (nominal <= 0) { setErr("Isi jumlah pembayaran yang diterima."); return; }
+    if (nominal > sisa && sisa > 0 && !window.confirm(`Jumlah ${rp(nominal)} lebih besar dari sisa tagihan ${rp(sisa)}.\n\nTetap catat?`)) return;
+    if (sisa <= 0 && !window.confirm("Faktur ini sudah lunas. Tetap catat pembayaran tambahan?")) return;
+    setBusy(true); setErr("");
+    try {
+      const { data } = await axios.post(`${API}/admin/doc-history/${rec.id}/payments`, { amount: nominal, tanggal, metode, catatan }, { headers });
+      const next = data.payments || [];
+      setPays(next); setAmount(""); setCatatan("");
+      onChanged && onChanged(rec.id, next);
+    } catch (e) {
+      setErr(e?.response?.data?.detail || "Gagal mencatat pembayaran. Coba lagi.");
+    } finally { setBusy(false); }
+  };
+
+  const remove = async (p) => {
+    if (!window.confirm(`Hapus catatan pembayaran ${rp(p.amount)} (${fmtTglP(p.tanggal)})?\n\nIni cuma koreksi salah input — faktur tetap utuh.`)) return;
+    setBusy(true); setErr("");
+    try {
+      const { data } = await axios.delete(`${API}/admin/doc-history/${rec.id}/payments/${p.id}`, { headers });
+      const next = data.payments || [];
+      setPays(next);
+      onChanged && onChanged(rec.id, next);
+    } catch (e) {
+      setErr(e?.response?.data?.detail || "Gagal menghapus pembayaran.");
+    } finally { setBusy(false); }
+  };
+
+  const rowS = { display: "flex", justifyContent: "space-between", gap: 12, padding: "4px 0", fontSize: 13 };
+  const lblS = { display: "block", fontSize: 12, color: "var(--text-3)", marginBottom: 5, fontWeight: 700 };
+  return createPortal((
+    <div className="adm-vars"><div className="adm-modal-bg" onClick={onClose}>
+      <div className="adm-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }} data-testid="invpay-modal">
+        <div className="adm-modal-head">
+          <div>
+            <div className="adm-modal-title">💰 Terima Pembayaran</div>
+            <div className="adm-modal-sub">{rec.no_dokumen || "(tanpa nomor)"} · {rec.customer || "—"}</div>
+          </div>
+          <button className="adm-modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="adm-modal-body">
+          <div style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "10px 14px", marginBottom: 14 }} data-testid="invpay-summary">
+            <div style={rowS}><span style={{ color: "var(--text-3)" }}>Total Tagihan</span><b>{rp(total)}</b></div>
+            <div style={rowS}><span style={{ color: "var(--text-3)" }}>Pembayaran Diterima</span><b style={{ color: "#3fb950" }}>− {rp(diterima)}</b></div>
+            <div style={{ ...rowS, borderTop: "1px solid var(--border)", marginTop: 4, paddingTop: 8, fontSize: 15 }}>
+              <b>{sisa < 0 ? "Kelebihan Bayar" : "Sisa Tagihan"}</b>
+              <b style={{ color: stColor }} data-testid="invpay-sisa">{rp(Math.abs(sisa))} <span style={{ fontSize: 11, fontWeight: 800 }}>· {status}</span></b>
+            </div>
+          </div>
+
+          <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: ".4px", marginBottom: 6 }}>Rincian pembayaran ({pays.length})</div>
+          {pays.length === 0 ? (
+            <div style={{ fontSize: 13, color: "var(--text-mute)", padding: "6px 0 12px" }}>Belum ada pembayaran tercatat.</div>
+          ) : (
+            <div style={{ marginBottom: 12 }}>
+              {pays.map((p) => (
+                <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid var(--border)", fontSize: 13 }} data-testid="invpay-row">
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700 }}>{fmtTglP(p.tanggal)} · {p.metode || "—"}</div>
+                    {p.catatan ? <div style={{ fontSize: 12, color: "var(--text-mute)" }}>{p.catatan}</div> : null}
+                  </div>
+                  <b>{rp(p.amount)}</b>
+                  <button className="adm-btn adm-btn-sm adm-btn-ghost" onClick={() => remove(p)} disabled={busy} title="Hapus (koreksi salah input)" data-testid="invpay-del">🗑️</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div style={{ border: "1px dashed var(--border)", borderRadius: 10, padding: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 10 }}>+ Catat pembayaran baru</div>
+            <label style={{ display: "block", marginBottom: 10 }}>
+              <span style={lblS}>Jumlah diterima (Rp)</span>
+              <input className="adm-input" inputMode="numeric" placeholder="mis. 8.500.000" value={amount}
+                onChange={(e) => { const d = e.target.value.replace(/[^0-9]/g, ""); setAmount(d ? Number(d).toLocaleString("id-ID") : ""); }}
+                data-testid="invpay-amount" />
+            </label>
+            {sisa > 0 && (
+              <button type="button" className="adm-btn adm-btn-sm adm-btn-ghost" style={{ marginBottom: 10 }}
+                onClick={() => setAmount(Number(sisa).toLocaleString("id-ID"))} data-testid="invpay-fill-sisa">Isi sisa tagihan ({rp(sisa)})</button>
+            )}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+              <label>
+                <span style={lblS}>Tanggal terima</span>
+                <input type="date" className="adm-input" value={tanggal} onChange={(e) => setTanggal(e.target.value)} data-testid="invpay-tgl" />
+              </label>
+              <label>
+                <span style={lblS}>Metode</span>
+                <input className="adm-input" list="invpay-metode-list" value={metode} onChange={(e) => setMetode(e.target.value)} data-testid="invpay-metode" />
+                <datalist id="invpay-metode-list">
+                  <option value="Transfer BCA" /><option value="Transfer Bank Lain" /><option value="Tunai" /><option value="Cash on Delivery" />
+                </datalist>
+              </label>
+            </div>
+            <label style={{ display: "block", marginBottom: 10 }}>
+              <span style={lblS}>Keterangan (opsional)</span>
+              <input className="adm-input" placeholder="mis. DP awal / pelunasan tahap 2" value={catatan} onChange={(e) => setCatatan(e.target.value)} data-testid="invpay-catatan" />
+            </label>
+            {err ? <div style={{ color: "#f85149", fontSize: 12.5, marginBottom: 8 }} data-testid="invpay-err">{err}</div> : null}
+            <button className="adm-btn adm-btn-gold" onClick={add} disabled={busy} style={{ width: "100%" }} data-testid="invpay-add">{busy ? "Menyimpan…" : "Catat Pembayaran"}</button>
+          </div>
+        </div>
+        <div className="adm-modal-foot">
+          <button className="adm-btn adm-btn-ghost" onClick={onClose}>Tutup</button>
+          <button className="adm-btn adm-btn-ghost" onClick={onPrint} data-testid="invpay-print">🖨️ Cetak Faktur (dengan pembayaran)</button>
+        </div>
+      </div>
+    </div></div>
+  ), document.body);
+}
+
 const HIST_PAGE_SIZE = 50;
 function HistoriDokumen({ headers }) {
   const [items, setItems] = useState([]);
@@ -4461,6 +4612,7 @@ function HistoriDokumen({ headers }) {
   const [fSampai, setFSampai] = useState("");
   const [fQ, setFQ] = useState("");                  // no dokumen / customer / PO
   const [page, setPage] = useState(1);
+  const [payRec, setPayRec] = useState(null);        // faktur yang lagi dibuka modal pembayarannya
 
   const isPrice = filter === "__pricelist";
 
@@ -4528,7 +4680,7 @@ function HistoriDokumen({ headers }) {
     let rec = rec0;
     try { const resp = await axios.get(`${API}/admin/doc-history/${rec0.id}`, { headers }); if (resp.data) rec = resp.data; } catch {}
     if (rec.jenis === "invoice") {
-      printInvoiceDoc(rec.lines, rec.meta?.withTax, rec.meta || {});
+      printInvoiceDoc(rec.lines, rec.meta?.withTax, { ...(rec.meta || {}), payments: rec.payments || [] });
     } else if (rec.jenis === "supplier") {
       printSupplierA4({ nama: rec.meta?.supplier_nama || rec.customer || "-", jobs: rec.units || [] }, null, rec.meta?.no_dokumen || rec.no_dokumen, rec.meta?.tanggal);
     } else if (rec.jenis === "jadwal") {
@@ -4668,6 +4820,8 @@ function HistoriDokumen({ headers }) {
         <div className="adm-dochist-list">
           {pageItems.map((rec) => {
             const badge = DOC_HIST_BADGE[rec.jenis] || { txt: rec.jenis_label || rec.jenis, bg: "rgba(255,255,255,0.08)", fg: "#cbd5e1" };
+            const ip = rec.jenis === "invoice" ? invPayFromRec(rec) : null;
+            const ipColor = ip ? (ip.status === "Lunas" ? "#3fb950" : ip.status === "Sebagian" ? "#e3a008" : ip.status === "Lebih Bayar" ? "#f85149" : "#8b949e") : "";
             return (
               <div key={rec.id} className="adm-dochist-row" data-testid="dochist-row">
                 <span className="adm-dochist-badge" style={{ background: badge.bg, color: badge.fg }}>{badge.txt}</span>
@@ -4677,9 +4831,20 @@ function HistoriDokumen({ headers }) {
                     {rec.customer || "—"} · {countUnits(rec)}
                     {rec.order_ids?.length > 1 ? ` · ${rec.order_ids.length} PO` : ""}
                   </div>
+                  {ip && (
+                    <div style={{ fontSize: 11.5, fontWeight: 800, marginTop: 2, color: ipColor }} data-testid="dochist-paystatus">
+                      {ip.status === "Belum Bayar" ? "Belum ada pembayaran"
+                        : ip.status === "Sebagian" ? `Dibayar Rp ${ip.diterima.toLocaleString("id-ID")} · sisa Rp ${ip.sisa.toLocaleString("id-ID")}`
+                        : ip.status === "Lunas" ? "Lunas"
+                        : `Lebih bayar Rp ${Math.abs(ip.sisa).toLocaleString("id-ID")}`}
+                    </div>
+                  )}
                 </div>
                 <div className="adm-dochist-when">{fmtWhen(rec.created_at)}</div>
                 <div className="adm-dochist-actions">
+                  {rec.jenis === "invoice" && (
+                    <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={() => setPayRec(rec)} data-testid="dochist-pay">💰 Pembayaran</button>
+                  )}
                   <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={() => reprint(rec)} data-testid="dochist-print">🖨️ Cetak ulang</button>
                   <button className="adm-btn adm-dochist-btn adm-dochist-del" onClick={() => del(rec)} data-testid="dochist-del">🗑️ Hapus</button>
                 </div>
@@ -4695,6 +4860,15 @@ function HistoriDokumen({ headers }) {
           </div>
         )}
         </>
+      )}
+      {payRec && (
+        <InvoicePaymentModal
+          rec={payRec}
+          headers={headers}
+          onClose={() => setPayRec(null)}
+          onChanged={(id, pays) => setItems((xs) => xs.map((x) => (x.id === id ? { ...x, payments: pays } : x)))}
+          onPrint={() => reprint(payRec)}
+        />
       )}
     </div>
   );
@@ -4719,6 +4893,14 @@ async function printInvoiceDoc(lines, withTax, extra) {
   const pph23 = withPph23 ? Math.round(dpp * 0.02) : 0;
   const total = (taxInclusive ? subtotal : subtotal + ppn) - pph23;
   const fRp = (n) => n.toLocaleString("id-ID") + ",00";
+  // Pembayaran customer yang sudah diterima (rincian) → faktur nampilin sisa tagihan.
+  // Tanpa pembayaran, tampilan faktur sama persis seperti sebelumnya.
+  const pays = (Array.isArray(extra.payments) ? extra.payments : []).filter((p) => (Number(p.amount) || 0) > 0);
+  const hasPay = pays.length > 0;
+  const diterima = pays.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const sisa = total - diterima;
+  const sisaLabel = sisa < 0 ? "Kelebihan Bayar" : sisa === 0 ? "Sisa Tagihan — LUNAS" : "Sisa Tagihan";
+  const escH = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const fmtTgl = (iso) => { if (!iso) return "—"; const [y, m, d] = iso.split("-"); return `${d}-${m}-${y}`; };
   const todayIso = new Date().toISOString().slice(0, 10);
   const tgl = fmtTgl(extra.tanggalInvoice || todayIso); // pakai tanggal input (biar bisa samain dgn tgl pajak), fallback hari ini
@@ -4762,6 +4944,10 @@ async function printInvoiceDoc(lines, withTax, extra) {
     .inv-totals-box { width:230px; }
     .inv-totals-box .row { display:flex; justify-content:space-between; padding:5px 0; font-size:10.5px; color:${DOC_BRAND.muted}; }
     .inv-totals-box .row.grand { border-top:1.5px solid ${DOC_BRAND.navy}; margin-top:4px; padding-top:8px; font-size:13px; font-weight:900; color:#000; }
+    .inv-totals-box .row.grand.sisa { margin-top:2px; border-top:1px solid ${DOC_BRAND.line}; }
+    .inv-pays-title { font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.5px; color:${DOC_BRAND.muted}; margin:2px 0 6px; }
+    table.inv-pays { margin-bottom:18px; }
+    table.inv-pays tr.inv-pays-sum td { background:#fff; border-bottom:1.5px solid ${DOC_BRAND.navy}; font-size:10.5px; }
     .inv-pay-box { display:flex; align-items:center; gap:12px; padding:12px 16px; background:${DOC_BRAND.paperMist}; border-radius:8px; margin-bottom:20px; }
     .inv-pay-badge { width:40px; height:40px; border-radius:7px; background:${DOC_BRAND.navy}; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:900; font-size:10px; flex-shrink:0; }
     .inv-pay-num { font-size:14px; font-weight:900; letter-spacing:.5px; color:${DOC_BRAND.ink}; }
@@ -4791,7 +4977,7 @@ async function printInvoiceDoc(lines, withTax, extra) {
         <tr><td>No. Pesanan</td><td>${extra.order_id || "—"}</td></tr>
       </table>
     </div>
-    <div class="inv-total-bar"><span>Total Tagihan</span><span>Rp ${fRp(total)}</span></div>
+    <div class="inv-total-bar"><span>${hasPay ? sisaLabel : "Total Tagihan"}</span><span>Rp ${fRp(hasPay ? Math.abs(sisa) : total)}</span></div>
     ${(() => {
       // Kolom ke-2 otomatis dari ADA/TIDAK-nya No. PO per baris (tanpa mode Retail/Corporate):
       //  - semua baris punya PO  → header "No. PO",   isi = nomor PO
@@ -4820,15 +5006,32 @@ async function printInvoiceDoc(lines, withTax, extra) {
       <div class="inv-note">
         ${pesan ? `<b>Pesan:</b> ${pesan}<br>` : ""}
         <b>Jumlah Unit:</b> ${lines.length}<br>
-        <b>Terbilang:</b> <i class="inv-terbilang">${terbilangRupiah(total)}</i>
+        <b>Terbilang${hasPay ? " (Sisa)" : ""}:</b> <i class="inv-terbilang">${terbilangRupiah(hasPay ? Math.abs(sisa) : total)}</i>
       </div>
       <div class="inv-totals-box">
         <div class="row"><span>${withTax && taxInclusive ? "DPP (Dasar Pengenaan Pajak)" : "Subtotal"}</span><span>Rp ${fRp(withTax && taxInclusive ? dpp : subtotal)}</span></div>
         <div class="row"><span>PPN Logistik (1.1%)${withTax && taxInclusive ? " — termasuk" : ""}</span><span>${withTax ? "Rp " + fRp(ppn) : "—"}</span></div>
         ${withPph23 ? `<div class="row"><span>Potongan PPh 23 (2%)</span><span>- Rp ${fRp(pph23)}</span></div>` : ""}
         <div class="row grand"><span>TOTAL TAGIHAN</span><span>Rp ${fRp(total)}</span></div>
+        ${hasPay ? `<div class="row"><span>Pembayaran Diterima</span><span>- Rp ${fRp(diterima)}</span></div>
+        <div class="row grand sisa"><span>${sisa < 0 ? "KELEBIHAN BAYAR" : "SISA TAGIHAN"}</span><span>Rp ${fRp(Math.abs(sisa))}</span></div>` : ""}
       </div>
     </div>
+    ${hasPay ? `<div class="inv-pays-title">Rincian Pembayaran Diterima</div>
+    <table class="inv-items inv-pays">
+      <thead><tr><th style="width:26px">No</th><th>Tanggal</th><th>Metode</th><th>Keterangan</th><th>Jumlah (Rp)</th></tr></thead>
+      <tbody>
+        ${pays.map((p, i) => `
+        <tr>
+          <td class="num">${i + 1}</td>
+          <td>${fmtTgl(p.tanggal)}</td>
+          <td>${escH(p.metode) || "&nbsp;"}</td>
+          <td>${escH(p.catatan) || "&nbsp;"}</td>
+          <td class="num">${fRp(Number(p.amount) || 0)}</td>
+        </tr>`).join("")}
+        <tr class="inv-pays-sum"><td></td><td colspan="3"><b>Total Diterima</b></td><td class="num"><b>${fRp(diterima)}</b></td></tr>
+      </tbody>
+    </table>` : ""}
     <div class="inv-pay-box">
       <div class="inv-pay-badge">${DOC_BRAND.bank.name}</div>
       <div>
