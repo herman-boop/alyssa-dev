@@ -435,21 +435,61 @@ function createCpIcon(num, isLatest, dark) {
   });
 }
 
-/* Marker kapal (AIS) gaya standar: PANAH arah yang berputar mengikuti heading
-   (fallback COG) — persis seperti app pelacak kapal umum. Kalau arah tidak
-   diketahui, tampil bulatan (tanpa mengklaim arah). Nama kapal jadi pill kecil
-   di samping; kesegaran jadi dot kecil di pill (BUKAN mewarnai seluruh marker). */
-function createShipIcon(freshness, heading, shipName) {
-  const S = 26;                                  // kotak ikon panah (px)
+/* Kondisi kapal untuk simbol di peta (sama seperti app pelacak kapal umum):
+     jalan    → PANAH biru, berputar mengikuti arah gerak (COG; fallback heading)
+     sandar   → kotak oranye (nav_status 5 / sudah tercatat sandar, kapal diam)
+     berlabuh → bulatan + jangkar (nav_status 1 = lego jangkar, kapal diam)
+     diam     → bulatan abu-biru (diam tanpa status jelas / arah tidak diketahui)
+   Kapal yang nyaris diam (< 1 knot) TIDAK diberi panah: COG/heading saat diam cuma
+   noise, jadi panahnya akan terlihat "ngawur". Kecepatan mengalahkan status nav
+   (kru sering lupa update status), konsisten dengan teks status di panel. */
+function shipMarkerState(info) {
+  const num = (v) => (v == null || v === "" || isNaN(Number(v)) ? null : Number(v));
+  const sp = num(info && info.speed);
+  const ns = num(info && info.nav_status);
+  const cg = num(info && info.course);
+  const hd = num(info && info.heading);
+  const course = cg != null && cg >= 0 && cg < 360 ? cg : null;     // 360 = tidak tersedia
+  const head = hd != null && hd >= 0 && hd < 360 ? hd : null;        // 511 = tidak tersedia
+  if (sp != null && sp >= 1) return { kind: "jalan", rot: course != null ? course : head };
+  if (ns === 1) return { kind: "berlabuh", rot: null };
+  if (ns === 5 || (info && info.berthed_at)) return { kind: "sandar", rot: null };
+  if (sp == null) {                                                    // kecepatan tak diketahui → perilaku lama
+    const r = head != null ? head : course;
+    return r != null ? { kind: "jalan", rot: r } : { kind: "diam", rot: null };
+  }
+  return { kind: "diam", rot: null };
+}
+
+/* Marker kapal (AIS): simbol sesuai kondisi (lihat shipMarkerState). Nama kapal
+   jadi pill kecil di samping; kesegaran jadi dot kecil di pill (BUKAN mewarnai
+   seluruh marker). */
+function createShipIcon(freshness, info, shipName) {
+  const S = 26;                                  // kotak ikon (px)
   const dot = freshnessDot(freshness);
-  const rot = (heading != null && !isNaN(heading)) ? heading : null;
-  const glyph = rot != null
-    ? `<svg viewBox="0 0 24 24" width="${S}" height="${S}" style="display:block;transform:rotate(${rot}deg);filter:drop-shadow(0 1px 2px rgba(0,0,0,.4));">
+  const st = shipMarkerState(info);
+  const shadow = "filter:drop-shadow(0 1px 2px rgba(0,0,0,.4));";
+  let glyph;
+  if (st.kind === "jalan" && st.rot != null) {
+    glyph = `<svg viewBox="0 0 24 24" width="${S}" height="${S}" style="display:block;transform:rotate(${st.rot}deg);${shadow}">
          <path d="M12 2 L19 21 L12 17 L5 21 Z" fill="#1d4ed8" stroke="#ffffff" stroke-width="1.4" stroke-linejoin="round"/>
-       </svg>`
-    : `<svg viewBox="0 0 24 24" width="${S}" height="${S}" style="display:block;filter:drop-shadow(0 1px 2px rgba(0,0,0,.4));">
-         <circle cx="12" cy="12" r="6.5" fill="#1d4ed8" stroke="#ffffff" stroke-width="1.6"/>
        </svg>`;
+  } else if (st.kind === "sandar") {
+    glyph = `<svg viewBox="0 0 24 24" width="${S}" height="${S}" style="display:block;${shadow}">
+         <rect x="5.5" y="5.5" width="13" height="13" rx="2.5" fill="#d97706" stroke="#ffffff" stroke-width="1.6"/>
+       </svg>`;
+  } else if (st.kind === "berlabuh") {
+    glyph = `<svg viewBox="0 0 24 24" width="${S}" height="${S}" style="display:block;${shadow}">
+         <circle cx="12" cy="12" r="10" fill="#0e7490" stroke="#ffffff" stroke-width="1.6"/>
+         <g fill="none" stroke="#ffffff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+           <circle cx="12" cy="7.4" r="1.7"/><path d="M12 9.1V17.5M8.6 11.6h6.8M6.8 13.8c.5 2.7 2.6 3.9 5.2 3.9s4.7-1.2 5.2-3.9"/>
+         </g>
+       </svg>`;
+  } else {
+    glyph = `<svg viewBox="0 0 24 24" width="${S}" height="${S}" style="display:block;${shadow}">
+         <circle cx="12" cy="12" r="6.5" fill="#64748b" stroke="#ffffff" stroke-width="1.6"/>
+       </svg>`;
+  }
   // Label nama kapal gaya BENDERA di tiang: kecil, warna terang (gradient biru→cyan),
   // + branding "ALYSSA LOGISTIK". Menempel di kanan marker seperti bendera kapal.
   const name = shipName
@@ -847,7 +887,7 @@ export default function CustomerTracking() {
 
               {/* Marker kapal (AIS) — hanya kalau ada posisi */}
               {shipPos && shipInfo && (
-                <Marker position={shipPos} icon={createShipIcon(shipInfo.freshness, shipInfo.heading != null ? shipInfo.heading : shipInfo.course, shipInfo.ship_name || shipAis.ship_name || "")}>
+                <Marker position={shipPos} icon={createShipIcon(shipInfo.freshness, shipInfo, shipInfo.ship_name || shipAis.ship_name || "")}>
                   <Popup className="trk-popup" maxWidth={260}>
                     <div className="trk-popup-inner">
                       <div className="trk-popup-header"><b>🚢 {shipInfo.ship_name || shipAis.ship_name || "Kapal"}</b></div>
@@ -855,6 +895,7 @@ export default function CustomerTracking() {
                         <div>Posisi: {Number(shipInfo.latitude).toFixed(4)}, {Number(shipInfo.longitude).toFixed(4)}</div>
                         {shipInfo.speed != null ? <div>Kecepatan: {shipInfo.speed} knot{shipInfo.course != null ? ` · ${shipInfo.course}°` : ""}</div> : (shipInfo.course != null ? <div>Course: {shipInfo.course}°</div> : null)}
                         {shipInfo.nav_status_text ? <div>Status: {shipInfo.nav_status_text}</div> : null}
+                        {(() => { const m = shipMarkerState(shipInfo); return <div>Simbol: {m.kind === "jalan" ? (m.rot != null ? `➤ berlayar, arah ${Math.round(m.rot)}°` : "➤ berlayar") : m.kind === "sandar" ? "◼ sandar" : m.kind === "berlabuh" ? "⚓ berlabuh (lego jangkar)" : "● diam"}</div>; })()}
                         {shipInfo.destination ? <div>Tujuan: {shipInfo.destination}</div> : null}
                         {shipInfo.eta ? <div>ETA: {shipInfo.eta}</div> : null}
                         {shipInfo.draught != null ? <div>Draft: {shipInfo.draught} m</div> : null}
@@ -1136,6 +1177,11 @@ export default function CustomerTracking() {
                       </div>
                       {shipPos && (
                         <button onClick={focusShip} style={{ width: "100%", marginTop: 10, padding: "9px 12px", borderRadius: 8, border: "1px solid #1f6feb", background: "#0d2340", color: "#58a6ff", fontWeight: 700, fontSize: 13, cursor: "pointer" }} data-testid="trk-ais-focus">📍 Lihat posisi kapal di peta</button>
+                      )}
+                      {shipPos && (
+                        <div style={{ marginTop: 8, fontSize: 11, color: "#8b949e", lineHeight: 1.6 }} data-testid="trk-ais-legend">
+                          Simbol di peta: <b style={{ color: "#58a6ff" }}>➤</b> berlayar (panah = arah gerak) · <b style={{ color: "#d97706" }}>◼</b> sandar · <b style={{ color: "#0e7490" }}>⚓</b> berlabuh · <b style={{ color: "#64748b" }}>●</b> diam
+                        </div>
                       )}
                     </>
                   ) : (

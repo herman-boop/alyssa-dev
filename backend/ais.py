@@ -405,8 +405,9 @@ async def _vesselapi_refresh(db, mmsi, imo, timeout=15):
         upd["speed"] = _num(pos.get("sog"))
     if _num(pos.get("cog")) is not None:
         upd["course"] = _num(pos.get("cog"))
-    if _num(pos.get("heading")) is not None:
-        upd["heading"] = _num(pos.get("heading"))
+    _hd = _num(pos.get("heading"))
+    if _hd is not None and 0 <= _hd < 360:   # 511 = "tidak tersedia" di AIS — jangan disimpan sbg arah
+        upd["heading"] = _hd
     if pos.get("nav_status") is not None:
         try:
             upd["nav_status"] = int(pos.get("nav_status"))
