@@ -53,33 +53,37 @@ export function buildRekonReportData(sup, jobIds) {
   const linkedIds = new Set(linked.map((p) => p.id));
   const feeExtra = active.filter((p) => isBankFee(p) && !linkedIds.has(p.id) && batchKeys.has(keyOf(p)));
 
-  const tx = [...linked, ...feeExtra]
+  const allTx = [...linked, ...feeExtra]
     .sort((a, b) => dayOf(a.tanggal).localeCompare(dayOf(b.tanggal)) || String(a.bank_transaction_id || "").localeCompare(String(b.bank_transaction_id || "")))
-    .map((p, i) => {
+    .map((p) => {
       const fee = isBankFee(p);
       const amount = n0(p.amount);
       const mine = allocTo(p);
       const allocated = mine.reduce((a, x) => a + n0(x.amount), 0);
       let status;
-      if (fee) status = allocated > 0 ? "Dialokasikan (biaya admin)" : "Biaya admin bank — tidak mengurangi hutang";
+      if (fee) status = "Biaya admin bank";
       else if (allocated >= amount && amount > 0) status = `Dialokasikan · ${mine.length} unit`;
       else if (allocated > 0) status = `Sebagian · ${mine.length} unit (sisa ${amount - allocated})`;
       else status = "Belum dialokasikan";
       return {
-        no: i + 1, tanggal: dayOf(p.tanggal), ket: String(p.catatan || "").trim() || "-",
+        tanggal: dayOf(p.tanggal), ket: String(p.catatan || "").trim() || "-",
         btx: p.bank_transaction_id || "", amount, allocated, units: mine.length, fee, status,
         entity: (p.rekon || {}).source_entity_label || p.source_entity || (p.rekon || {}).source_entity || "",
       };
     });
+  // Biaya admin bank BUKAN pembayaran supplier: tidak masuk daftar transaksi (bagian C), tidak dihitung
+  // sebagai pembayaran/alokasi PO — hanya diringkas SATU baris di bagian D (data bank aslinya tetap utuh).
+  const tx = allTx.filter((t) => !t.fee).map((t, i) => ({ ...t, no: i + 1 }));
+  const fees = allTx.filter((t) => t.fee);
 
   const sum = (arr, f) => arr.reduce((a, x) => a + f(x), 0);
-  const principal = tx.filter((t) => !t.fee);
-  const fees = tx.filter((t) => t.fee);
+  const principal = tx;
   const tagihan = sum(rows, (r) => r.tagihan);
   const dibayar = sum(rows, (r) => r.dibayar);
   const sisa = sum(rows, (r) => r.sisa);
-  const rekonAlloc = sum(tx, (t) => t.allocated);        // alokasi rekon ke PO ini (apa adanya di data)
-  const manual = Math.max(0, dibayar - rekonAlloc);         // sisanya = pembayaran manual / sumber lain
+  const rekonAlloc = sum(tx, (t) => t.allocated);        // alokasi rekon (transfer pokok saja) ke PO ini
+  const feeAlloc = sum(fees, (t) => t.allocated);
+  const manual = Math.max(0, dibayar - rekonAlloc - feeAlloc);   // sisanya = pembayaran manual / sumber lain
   const entities = [...new Set(tx.map((t) => t.entity).filter(Boolean))];
   const pids = [...new Set(rows.map((r) => r.project_id).filter(Boolean))];
   const fakturNo = pids.length === 1 && (projects[pids[0]] || {}).no_faktur ? projects[pids[0]].no_faktur : "";
@@ -96,9 +100,11 @@ export function buildRekonReportData(sup, jobIds) {
       sisa,
     },
     total: {
-      trxSemua: sum(tx, (t) => t.amount),
-      biayaAdmin: sum(fees, (t) => t.amount),
-      biayaAdminTeralokasi: sum(fees, (t) => t.allocated),
+      trxPokok: sum(tx, (t) => t.amount),                  // total transfer pokok supplier
+      biayaAdmin: sum(fees, (t) => t.amount),              // biaya admin bank (ringkasan, bukan pembayaran supplier)
+      biayaAdminCount: fees.length,
+      biayaAdminTeralokasi: sum(fees, (t) => t.allocated), // kalau di data tersimpan masih teralokasi → diberi peringatan
+      trxSemua: sum(tx, (t) => t.amount) + sum(fees, (t) => t.amount),
       dialokasi: rekonAlloc,
       sisaSupplier: sup.grand_sisa != null ? n0(sup.grand_sisa) : sum(sup.jobs || [], (j) => n0(j.sisa)),
     },

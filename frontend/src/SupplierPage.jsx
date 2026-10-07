@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import axios from "axios";
 import { DOC_BRAND, DOC_BASE_CSS, docHeader, docFooter, DOC_ENTITIES } from "./docTheme";
+import { isBankFee } from "./rekonReportData";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "";
 const API = `${BACKEND_URL}/api`;
@@ -41,22 +42,28 @@ export function printSupplierA4(sup, jobsOverride, noDocOverride, tglOverride) {
   // Pembayaran Rekon Bank yang SUDAH dialokasikan ikut Riwayat (porsi TERALOKASI
   // saja). Unallocated TIDAK dihitung sebagai pembayaran tagihan. Rekon tersimpan
   // di sup.rekon_payments[] — TERPISAH dari j.payments → tidak ada double-count.
+  let _feeAlloc = 0, _feeN = 0, _feeTgl = "";
   (sup.rekon_payments || []).forEach((p) => {
     if (p.status === "reversed") return;
     const alloc = p.allocated != null ? p.allocated
       : (p.allocations || []).reduce((a, x) => a + (x.amount || 0), 0);
     if (alloc <= 0) return;   // unallocated: tetap terpisah, bukan pembayaran tagihan
+    // Biaya admin bank BUKAN pembayaran supplier: jangan tampil per transaksi (Rp2.500 satu-satu);
+    // kalau di data masih teralokasi, diringkas SATU baris supaya total tetap cocok.
+    if (isBankFee(p)) { _feeAlloc += alloc; _feeN += 1; _feeTgl = p.tanggal || _feeTgl; return; }
     payTx.push({
       tanggal: p.tanggal || p.created_at || "", amount: alloc,
       bank: (p.rekon && p.rekon.source_entity_label) || "", ref: p.bank_transaction_id || "",
       tipe: "rekon",
     });
   });
+  if (_feeN > 0) payTx.push({ tanggal: _feeTgl, amount: _feeAlloc, bank: "", ref: "", tipe: "biaya_admin", n: _feeN });
   payTx.sort((a, b) => String(a.tanggal).localeCompare(String(b.tanggal)));
   // REFERENSI = data apa adanya dari DB (bank / no. referensi / kompensasi / rekon).
   // Tidak mengarang: kalau kosong tampil "—".
   const refOf = (p) => {
     if (p.tipe === "kompensasi") return "Kompensasi";
+    if (p.tipe === "biaya_admin") return `Biaya admin bank (${p.n} transaksi)`;
     if (p.tipe === "rekon") return "Rekon Bank" + (p.bank ? ` · ${p.bank}` : "");
     const parts = [p.bank, p.ref].filter(Boolean);
     return parts.length ? parts.join(" · ") : "—";
@@ -299,13 +306,16 @@ export function printDriverRekapA4(sup, jobsOverride, noDocOverride, tglOverride
   // Pembayaran Rekon Bank yang SUDAH dialokasikan ikut Riwayat (porsi TERALOKASI
   // saja; unallocated tetap terpisah). Rekon tersimpan di sup.rekon_payments[] —
   // terpisah dari j.payments → tidak double-count.
+  let _fAlloc = 0, _fTgl = "";
   (sup.rekon_payments || []).forEach((p) => {
     if (p.status === "reversed") return;
     const alloc = p.allocated != null ? p.allocated
       : (p.allocations || []).reduce((a, x) => a + (x.amount || 0), 0);
     if (alloc <= 0) return;
+    if (isBankFee(p)) { _fAlloc += alloc; _fTgl = p.tanggal || _fTgl; return; }   // biaya admin: diringkas 1 baris
     payTx.push({ tanggal: p.tanggal || p.created_at || "", amount: alloc });
   });
+  if (_fAlloc > 0) payTx.push({ tanggal: _fTgl, amount: _fAlloc });
   payTx.sort((a, b) => String(a.tanggal).localeCompare(String(b.tanggal)));
   const payRows = payTx.map((t, i) => `<div class="pay-row">
       <span class="pay-chk">&#10003;</span>
@@ -1032,6 +1042,24 @@ export default function SupplierPage() {
     return Object.values(map).sort((a, b) => (b.tanggal || "").localeCompare(a.tanggal || ""));
   }, [jobs]);
   const [txnDetail, setTxnDetail] = useState(null);
+  /* ═══ CLEAR / ARSIP Riwayat Pembayaran (aditif — TIDAK menghapus data/alokasi/status) ═══ */
+  const [clrSel, setClrSel] = useState(() => new Set());      // kunci yang dicentang: "rk:<id>" | "tx:<batch/payment id>"
+  const [showArsip, setShowArsip] = useState(false);
+  const [clrBusy, setClrBusy] = useState(false);
+  const clearedSet = useMemo(() => new Set(((selected && selected.riwayat_clear) || []).filter((e) => e.status === "cleared").map((e) => e.key)), [selected]);
+  const toggleClr = (k) => setClrSel((s0) => { const n = new Set(s0); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const runClear = async (restore) => {
+    const keys = [...clrSel];
+    if (!keys.length || !selected) return;
+    setClrBusy(true);
+    try {
+      await axios.post(`${API}/admin/suppliers/${selected.id}/riwayat/${restore ? "unclear" : "clear"}`, { keys, by: "Admin" }, { headers });
+      setClrSel(new Set());
+      await reloadSelected(selected.id);
+      flash(restore ? `✓ ${keys.length} transaksi dikembalikan ke daftar utama` : `✓ ${keys.length} transaksi di-clear (data tetap tersimpan — lihat Riwayat Clear / Arsip)`);
+    } catch (e) { flash(e?.response?.data?.detail || "Gagal memproses clear"); }
+    finally { setClrBusy(false); }
+  };
   const [txnBuktiSaving, setTxnBuktiSaving] = useState(false);
   const [txnDeleting, setTxnDeleting] = useState(false);
   const txnBuktiRef = useRef();
@@ -1398,18 +1426,87 @@ export default function SupplierPage() {
           {/* ═══ TAB RIWAYAT (timeline) ═══ */}
           {tab === "riwayat" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {(selected.rekon_payments || []).length > 0 && (() => {
+              {(() => {
+                const visKeys = [
+                  ...(selected.rekon_payments || []).filter((p) => !clearedSet.has(`rk:${p.id}`)).map((p) => `rk:${p.id}`),
+                  ...txns.filter((t) => !clearedSet.has(`tx:${t.key}`)).map((t) => `tx:${t.key}`),
+                ];
+                const arsipN = clearedSet.size;
+                if (visKeys.length === 0 && arsipN === 0) return null;
+                const allOn = visKeys.length > 0 && visKeys.every((k) => clrSel.has(k));
+                return (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: "8px 12px" }} data-testid="sup-clear-bar">
+                    {visKeys.length > 0 && (
+                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>
+                        <input type="checkbox" checked={allOn} onChange={() => setClrSel(allOn ? new Set() : new Set(visKeys))} style={{ width: 17, height: 17 }} data-testid="sup-clear-all" /> Pilih Semua
+                      </label>
+                    )}
+                    <button style={{ ...BTN, padding: "6px 12px", fontSize: 12 }} disabled={clrBusy || [...clrSel].filter((k) => !clearedSet.has(k)).length === 0}
+                      onClick={() => runClear(false)} data-testid="sup-clear-do">✓ Clear yang dipilih{[...clrSel].filter((k) => !clearedSet.has(k)).length ? ` (${[...clrSel].filter((k) => !clearedSet.has(k)).length})` : ""}</button>
+                    <button style={{ ...BTN_GHOST, padding: "6px 10px", fontSize: 11.5, marginLeft: "auto" }} onClick={() => { setShowArsip((v) => !v); setClrSel(new Set()); }} data-testid="sup-clear-arsip-toggle">
+                      🗂️ Riwayat Clear / Arsip{arsipN ? ` (${arsipN})` : ""}
+                    </button>
+                  </div>
+                );
+              })()}
+              {showArsip && (() => {
+                const arsipRekon = (selected.rekon_payments || []).filter((p) => clearedSet.has(`rk:${p.id}`));
+                const arsipTx = txns.filter((t) => clearedSet.has(`tx:${t.key}`));
+                const metaOf = (k) => ((selected.riwayat_clear || []).find((e) => e.key === k) || {});
+                const stamp = (k) => { const m = metaOf(k); return m.cleared_at ? `${fDate(m.cleared_at)} · ${m.cleared_by || "Admin"}` : ""; };
+                const arsipKeys = [...arsipRekon.map((p) => `rk:${p.id}`), ...arsipTx.map((t) => `tx:${t.key}`)];
+                const allOn = arsipKeys.length > 0 && arsipKeys.every((k) => clrSel.has(k));
+                return (
+                  <div style={{ background: C.card, border: `1px dashed ${C.mute}`, borderRadius: 12, padding: 12 }} data-testid="sup-arsip">
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 6 }}>
+                      <div style={{ fontSize: 13, fontWeight: 800 }}>🗂️ Riwayat Clear / Arsip — {arsipKeys.length}</div>
+                      {arsipKeys.length > 0 && (
+                        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer", marginLeft: "auto" }}>
+                          <input type="checkbox" checked={allOn} onChange={() => setClrSel(allOn ? new Set() : new Set(arsipKeys))} style={{ width: 16, height: 16 }} /> Pilih Semua
+                        </label>
+                      )}
+                      <button style={{ ...BTN_GHOST, padding: "5px 10px", fontSize: 11.5 }} disabled={clrBusy || [...clrSel].filter((k) => clearedSet.has(k)).length === 0}
+                        onClick={() => runClear(true)} data-testid="sup-clear-restore">↩️ Kembalikan dari Clear</button>
+                    </div>
+                    {arsipKeys.length === 0 && <div style={{ fontSize: 12, color: C.mute }}>Belum ada transaksi yang di-clear.</div>}
+                    {arsipRekon.map((p) => (
+                      <label key={p.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "7px 0", borderTop: `1px solid ${C.line}`, cursor: "pointer" }}>
+                        <input type="checkbox" checked={clrSel.has(`rk:${p.id}`)} onChange={() => toggleClr(`rk:${p.id}`)} style={{ width: 17, height: 17, flexShrink: 0 }} />
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ fontSize: 13, fontWeight: 800 }}>{fRp(p.amount)} <span style={{ fontSize: 11, color: C.mute, fontWeight: 600 }}>· {fDate(p.tanggal)}{isBankFee(p) ? " · biaya admin bank" : ""}</span></div>
+                          <div style={{ fontSize: 11, color: C.mute }}>{p.catatan || "Rekon Bank"} · clear {stamp(`rk:${p.id}`)}</div>
+                        </div>
+                      </label>
+                    ))}
+                    {arsipTx.map((t) => (
+                      <label key={t.key} style={{ display: "flex", gap: 10, alignItems: "center", padding: "7px 0", borderTop: `1px solid ${C.line}`, cursor: "pointer" }}>
+                        <input type="checkbox" checked={clrSel.has(`tx:${t.key}`)} onChange={() => toggleClr(`tx:${t.key}`)} style={{ width: 17, height: 17, flexShrink: 0 }} />
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ fontSize: 13, fontWeight: 800 }}>{fRp(t.total)} <span style={{ fontSize: 11, color: C.mute, fontWeight: 600 }}>· {fDate(t.tanggal)} · {t.metode || "Transfer"}</span></div>
+                          <div style={{ fontSize: 11, color: C.mute }}>{t.allocs.length} unit · clear {stamp(`tx:${t.key}`)}</div>
+                        </div>
+                      </label>
+                    ))}
+                    <div style={{ fontSize: 10.5, color: C.mute, marginTop: 8 }}>Clear hanya menyembunyikan dari daftar utama. Data transaksi bank, alokasi PO, status pembayaran, dan PDF rekon tetap utuh.</div>
+                  </div>
+                );
+              })()}
+              {(selected.rekon_payments || []).filter((p) => !clearedSet.has(`rk:${p.id}`)).length > 0 && (() => {
                 const jobById = Object.fromEntries((selected.jobs || []).map((j) => [j.id, j]));
                 return (
                 <div style={{ background: "#1a1408", border: `1px solid ${C.gold}`, borderRadius: 12, padding: 12 }}>
                   <div style={{ fontSize: 13, fontWeight: 800, color: C.gold, marginBottom: 8 }}>🏦 Pembayaran dari Audit Rekon Bank</div>
-                  {selected.rekon_payments.map((p) => {
+                  {selected.rekon_payments.filter((p) => !clearedSet.has(`rk:${p.id}`)).map((p) => {
                     const st = p.alloc_status;
                     const badge = st === "allocated" ? { t: "Dialokasikan", c: C.green } : st === "partial" ? { t: `Sebagian · sisa ${fRp(p.unallocated)}`, c: C.gold } : { t: "Belum Dialokasikan", c: C.red };
                     return (
                       <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "9px 0", borderTop: `1px solid ${C.line}`, flexWrap: "wrap" }} data-testid={`sup-rekon-${p.id}`}>
                         <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: 13.5, fontWeight: 800 }}>{fRp(p.amount)} <span style={{ fontSize: 11, fontWeight: 700, color: badge.c }}>· {badge.t}</span></div>
+                          <div style={{ fontSize: 13.5, fontWeight: 800 }}>
+                            <input type="checkbox" checked={clrSel.has(`rk:${p.id}`)} onChange={() => toggleClr(`rk:${p.id}`)} style={{ width: 17, height: 17, verticalAlign: "middle", marginRight: 8 }} data-testid={`sup-clear-chk-rk-${p.id}`} />
+                            {fRp(p.amount)} <span style={{ fontSize: 11, fontWeight: 700, color: badge.c }}>· {badge.t}</span>
+                            {isBankFee(p) && <span style={{ fontSize: 10.5, fontWeight: 700, color: C.mute, marginLeft: 6 }}>· biaya admin bank</span>}
+                          </div>
                           <div style={{ fontSize: 11, color: C.mute, marginTop: 2 }}>{fDate(p.tanggal)}{p.catatan ? ` · ${p.catatan}` : ""} · btx {p.bank_transaction_id}</div>
                           {(p.allocations || []).length > 0 ? (
                             <div style={{ fontSize: 11.5, color: C.green, marginTop: 3 }}>
@@ -1446,8 +1543,15 @@ export default function SupplierPage() {
                 </div>
               )}
               {txns.length === 0 && (selected.rekon_payments || []).length === 0 && <div style={{ textAlign: "center", padding: 30, color: C.mute }}>Belum ada pembayaran.</div>}
-              {txns.map((tx) => (
-                <button key={tx.key} onClick={() => setTxnDetail(tx)} style={{ textAlign: "left", background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 14, cursor: "pointer", color: C.ink }} data-testid={`sup-txn-${tx.key}`}>
+              {txns.length + (selected.rekon_payments || []).length > 0 && txns.filter((t) => !clearedSet.has(`tx:${t.key}`)).length === 0 && (selected.rekon_payments || []).filter((p) => !clearedSet.has(`rk:${p.id}`)).length === 0 && (
+                <div style={{ textAlign: "center", padding: 24, color: C.mute, fontSize: 13 }}>Semua transaksi sudah di-clear. Buka "🗂️ Riwayat Clear / Arsip" untuk melihat/mengembalikan.</div>
+              )}
+              {txns.filter((t) => !clearedSet.has(`tx:${t.key}`)).map((tx) => (
+                <div key={tx.key} style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+                  <label style={{ display: "flex", alignItems: "center", padding: "0 4px", cursor: "pointer" }}>
+                    <input type="checkbox" checked={clrSel.has(`tx:${tx.key}`)} onChange={() => toggleClr(`tx:${tx.key}`)} style={{ width: 18, height: 18 }} data-testid={`sup-clear-chk-tx-${tx.key}`} />
+                  </label>
+                <button onClick={() => setTxnDetail(tx)} style={{ flex: 1, textAlign: "left", background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 14, cursor: "pointer", color: C.ink }} data-testid={`sup-txn-${tx.key}`}>
                   {/* Card utama = TRANSAKSI BANK: tanggal + nominal + status. Unit cuma helper kecil. */}
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
                     <div>
@@ -1461,6 +1565,7 @@ export default function SupplierPage() {
                     </div>
                   </div>
                 </button>
+                </div>
               ))}
             </div>
           )}
