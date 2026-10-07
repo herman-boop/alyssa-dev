@@ -61,9 +61,19 @@ export async function printPenawaran(rows, meta) {
   const pph = pphOn ? Math.round(dpp * 0.02) : 0;
   const shipTotal = (incl ? subtotal : subtotal + ppn) - pph;
   // ── Asuransi (DI LUAR pajak): premi = nilai pertanggungan × rate% ──
-  const insBase = Number(String(insVal ?? "").replace(/[^0-9]/g, "")) || 0;
+  // PER BARIS (tiap unit/rute punya nilai pertanggungan sendiri, mis. Terios 190jt, HRV 150jt):
+  // premi tiap baris dibulatkan SENDIRI-SENDIRI, lalu total premi = jumlah premi baris —
+  // jadi angka di kolom tabel & di ringkasan selalu persis sama. Fallback lama: 1 nilai global (insVal).
   const rate = (insRate === 0 || insRate) ? Number(insRate) : 0.15;
-  const premi = insBase > 0 ? Math.round(insBase * (rate / 100)) : 0;
+  const rowNilai = (e) => Number(e && e.insNilai) || 0;
+  const rowPremi = (e) => { const n = rowNilai(e); return n > 0 ? Math.round(n * (rate / 100)) : 0; };
+  const perRow = !isDraft && (rows || []).some((e) => rowNilai(e) > 0);
+  const insBase = perRow
+    ? (rows || []).reduce((s, e) => s + rowNilai(e), 0)
+    : (Number(String(insVal ?? "").replace(/[^0-9]/g, "")) || 0);
+  const premi = perRow
+    ? (rows || []).reduce((s, e) => s + rowPremi(e), 0)
+    : (insBase > 0 ? Math.round(insBase * (rate / 100)) : 0);
   const grandTotal = shipTotal + premi;
   const hasBreakdown = ppnOn || pph > 0 || premi > 0;
   // Tiap rute = 1 <tbody> supaya 1 rute tidak pecah antar-halaman & tetap 1 item.
@@ -94,6 +104,7 @@ export async function printPenawaran(rows, meta) {
       <td><b>${esc(e.rute || "-")}</b>${catatanHtml}</td>
       <td>${esc(metode)}</td>
       <td>${esc(e.tipe_kendaraan || "-")}</td>
+      ${perRow ? `<td class="r">${rowPremi(e) > 0 ? `${fRp(rowPremi(e))}<div class="ph-note">Nilai ${fRp(rowNilai(e))}</div>` : "-"}</td>` : ""}
       <td class="r">${fRp(harga)}</td>
     </tr>`;
     return `<tbody class="ph-route">${main}</tbody>`;
@@ -183,7 +194,7 @@ export async function printPenawaran(rows, meta) {
     <table class="ph">
       <thead><tr>
         <th class="c" style="width:24px">No</th><th>Rute</th>
-        <th style="width:100px">Metode</th><th style="width:96px">Tipe Kendaraan</th><th class="r" style="width:132px">Harga</th>
+        <th style="width:100px">Metode</th><th style="width:96px">Tipe Kendaraan</th>${perRow ? `<th class="r" style="width:112px">Premi Asuransi</th>` : ""}<th class="r" style="width:${perRow ? 112 : 132}px">Harga</th>
       </tr></thead>
       ${body}
     </table>
@@ -197,7 +208,7 @@ export async function printPenawaran(rows, meta) {
       <div class="row"><span class="k">${ppnOn && incl ? "DPP (Dasar Pengenaan Pajak)" : "Subtotal Pengiriman"}</span><span class="v">${fRp(ppnOn && incl ? dpp : subtotal)}</span></div>
       ${ppnOn ? `<div class="row"><span class="k">PPN 1,1%${incl ? " (sudah termasuk)" : ""}</span><span class="v">${fRp(ppn)}</span></div>` : ""}
       ${pph ? `<div class="row minus"><span class="k">Potongan PPh 23 (2%)</span><span class="v">- ${fRp(pph)}</span></div>` : ""}
-      ${premi ? `<div class="row"><span class="k">Premi Asuransi (${fRp(insBase)} &times; ${rate}%)</span><span class="v">${fRp(premi)}</span></div>` : ""}
+      ${premi ? `<div class="row"><span class="k">${perRow ? "Total Premi Asuransi" : "Premi Asuransi"} (${fRp(insBase)} &times; ${rate}%)</span><span class="v">${fRp(premi)}</span></div>` : ""}
       <div class="ph-grand"><span class="k">Grand Total</span><span class="v">${fRp(grandTotal)}</span></div>
     </div>` : ""}
     `}
@@ -243,8 +254,8 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
   const [selIdx, setSelIdx] = useState(() => new Set());
   const [cari, setCari] = useState("");
   // Rincian biaya & pajak (opsional) — mirip invoice
-  const [insVal, setInsVal] = useState("");        // nilai pertanggungan asuransi (angka)
-  const [insRate, setInsRate] = useState("0.15");  // rate asuransi (%)
+  const [insMap, setInsMap] = useState({});       // nilai pertanggungan asuransi PER RUTE/UNIT (key = index, value = digit)
+  const [insRate, setInsRate] = useState("0.15");  // rate asuransi (%) — sama untuk semua baris
   const [withPpn, setWithPpn] = useState(false);   // kenakan PPN 1,1%
   const [taxIncl, setTaxIncl] = useState(false);   // harga sudah termasuk PPN
   const [withPph, setWithPph] = useState(false);   // potong PPh 23 (2%)
@@ -268,7 +279,7 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
   const toggleExpand = (i) => setExpanded((s) => { const n = new Set(s); n.has(i) ? n.delete(i) : n.add(i); return n; });
 
   const list = rows || [];
-  const openModal = () => { setSelIdx(new Set(list.map((_, i) => i))); setCari(""); setOptMap({}); setSelMap({}); setExpanded(new Set()); setOpen(true); };
+  const openModal = () => { setSelIdx(new Set(list.map((_, i) => i))); setCari(""); setOptMap({}); setSelMap({}); setInsMap({}); setExpanded(new Set()); setOpen(true); };
   const match = (e) => {
     const q = cari.trim().toLowerCase();
     if (!q) return true;
@@ -283,9 +294,12 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
   const pvPpn = !withPpn ? 0 : (taxIncl ? pvSub - pvDpp : Math.round(pvSub * 0.011));
   const pvPph = withPph ? Math.round(pvDpp * 0.02) : 0;
   const pvShip = (taxIncl ? pvSub : pvSub + pvPpn) - pvPph;
-  const pvInsBase = Number(onlyDigits(insVal)) || 0;
   const pvRate = insRate === "" ? 0 : Number(insRate);
-  const pvPremi = pvInsBase > 0 ? Math.round(pvInsBase * (pvRate / 100)) : 0;
+  const rowIns = (i) => Number(onlyDigits(insMap[i])) || 0;                       // nilai pertanggungan baris i
+  const rowPremiPv = (i) => { const n = rowIns(i); return n > 0 ? Math.round(n * (pvRate / 100)) : 0; };
+  // Total premi = jumlah premi tiap baris YANG DICENTANG (dibulatkan per baris, sama dgn hasil cetak).
+  const pvInsBase = list.reduce((s, _e, i) => (selIdx.has(i) ? s + rowIns(i) : s), 0);
+  const pvPremi = list.reduce((s, _e, i) => (selIdx.has(i) ? s + rowPremiPv(i) : s), 0);
   const pvGrand = pvShip + pvPremi;
   const anyBreakdown = withPpn || pvPph > 0 || pvPremi > 0;
 
@@ -372,6 +386,16 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
                         {isOpen ? "▲ Opsi" : `▾ Opsi${opts.length ? ` (${opts.length})` : ""}`}
                       </button>
                     </div>
+                    {on && mode === "final" && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 10px 8px 36px", flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 10.5, color: gray, fontWeight: 700, whiteSpace: "nowrap" }}>🛡️ Asuransi — nilai pertanggungan</span>
+                        <input inputMode="numeric" value={insMap[i] ? Number(onlyDigits(insMap[i])).toLocaleString("id-ID") : ""}
+                          onChange={(ev) => { const d = onlyDigits(ev.target.value); setInsMap((m) => ({ ...m, [i]: d })); }}
+                          placeholder="mis. 190.000.000" data-testid={`pnw-ins-${i}`}
+                          style={{ flex: "1 1 120px", minWidth: 0, padding: "6px 8px", borderRadius: 7, border: `1px solid ${border}`, fontSize: 12, textAlign: "right" }} />
+                        <span style={{ fontSize: 11, fontWeight: 800, color: navy, whiteSpace: "nowrap" }} data-testid={`pnw-ins-premi-${i}`}>{rowPremiPv(i) > 0 ? `Premi ${fRp(rowPremiPv(i))}` : ""}</span>
+                      </div>
+                    )}
                     {isOpen && (
                       <div style={{ padding: "4px 10px 10px 36px", background: "#fafbfc" }}>
                         <div style={{ fontSize: 10, fontWeight: 800, color: gray, textTransform: "uppercase", letterSpacing: ".3px", marginBottom: 6 }}>Opsi Harga / Metode <span style={{ textTransform: "none", fontWeight: 400 }}>(alternatif — customer pilih 1, tidak dijumlah)</span></div>
@@ -428,17 +452,13 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
             <div style={{ border: `1px solid ${border}`, borderRadius: 10, padding: 12, marginBottom: 12, background: "#fafbfc" }}>
               <div style={{ fontSize: 11, fontWeight: 800, color: navy, marginBottom: 8, letterSpacing: 0.3 }}>RINCIAN BIAYA & PAJAK (opsional)</div>
 
-              <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: gray, marginBottom: 4 }}>Asuransi — Nilai Pertanggungan × Rate</label>
-              <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
-                <input inputMode="numeric" value={insVal ? Number(onlyDigits(insVal)).toLocaleString("id-ID") : ""} onChange={(e) => setInsVal(onlyDigits(e.target.value))} placeholder="mis. 300.000.000" data-testid="penawaran-ins-val"
-                  style={{ flex: 2, boxSizing: "border-box", padding: "9px 12px", borderRadius: 8, border: `1px solid ${border}`, fontSize: 13, minWidth: 0 }} />
-                <div style={{ display: "flex", alignItems: "center", gap: 4, flex: 1, minWidth: 90 }}>
-                  <input inputMode="decimal" value={insRate} onChange={(e) => setInsRate(e.target.value.replace(/[^0-9.]/g, ""))} data-testid="penawaran-ins-rate"
-                    style={{ width: "100%", boxSizing: "border-box", padding: "9px 8px", borderRadius: 8, border: `1px solid ${border}`, fontSize: 13, textAlign: "right" }} />
-                  <span style={{ fontSize: 12, color: gray, fontWeight: 700 }}>%</span>
-                </div>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: gray, marginBottom: 4 }}>Asuransi — Rate (sama untuk semua baris)</label>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, maxWidth: 150 }}>
+                <input inputMode="decimal" value={insRate} onChange={(e) => setInsRate(e.target.value.replace(/[^0-9.]/g, ""))} data-testid="penawaran-ins-rate"
+                  style={{ width: "100%", boxSizing: "border-box", padding: "9px 8px", borderRadius: 8, border: `1px solid ${border}`, fontSize: 13, textAlign: "right" }} />
+                <span style={{ fontSize: 12, color: gray, fontWeight: 700 }}>%</span>
               </div>
-              <div style={{ fontSize: 10.5, color: gray, marginBottom: 10 }}>Premi = Nilai × rate{pvPremi > 0 ? ` = ${fRp(pvPremi)}` : ""}. Kosongkan Nilai = tanpa asuransi. Asuransi TIDAK kena pajak.</div>
+              <div style={{ fontSize: 10.5, color: gray, marginBottom: 10 }}>Nilai pertanggungan diisi <b>per unit/rute</b> di daftar rute di atas (kolom 🛡️ Asuransi). Premi tiap baris = nilai × rate, total premi = jumlah semua baris yang dicentang{pvPremi > 0 ? ` = ${fRp(pvPremi)} (nilai total ${fRp(pvInsBase)})` : ""}. Baris tanpa nilai = tanpa asuransi. Asuransi TIDAK kena pajak.</div>
 
               <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "#111827", marginBottom: 6, cursor: "pointer" }}>
                 <input type="checkbox" checked={withPpn} onChange={(e) => setWithPpn(e.target.checked)} style={{ width: 16, height: 16 }} data-testid="penawaran-ppn" />
@@ -506,10 +526,10 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
                     .map((k) => ({ metode: (k.metode || "Lainnya"), harga: pNum(k.harga), catatan: (k.catatan || "").trim() }))
                     .filter((k) => k.harga > 0 || k.metode);
                   // options = ALTERNATIF (tidak dijumlah). `selected` = index opsi terpilih (mode final).
-                  return { ...e, options, selected: options.length ? selOf(i) : -1 };
+                  return { ...e, options, selected: options.length ? selOf(i) : -1, insNilai: mode === "final" ? rowIns(i) : 0 };
                 });
                 if (!sel.length) { alert("Centang minimal 1 rute dulu bro."); return; }
-                printPenawaran(sel, { nama_pt: namaPt, ttdNama, ttdJabatan, stempel, tanggal: tglPenawaran, insVal, insRate, withPpn, taxIncl, withPph, mode, catatan: catatanUmum });
+                printPenawaran(sel, { nama_pt: namaPt, ttdNama, ttdJabatan, stempel, tanggal: tglPenawaran, insRate, withPpn, taxIncl, withPph, mode, catatan: catatanUmum });
                 setOpen(false);
               }}
                 style={{ padding: "9px 18px", borderRadius: 8, border: "none", background: gold, color: "#fff", fontSize: 12.5, fontWeight: 800, cursor: "pointer" }}>🖨️ {mode === "draft" ? "Cetak Opsi Harga" : "Cetak Resmi"} ({selIdx.size})</button>
