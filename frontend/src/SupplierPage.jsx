@@ -866,6 +866,7 @@ export default function SupplierPage() {
   const [allocRows, setAllocRows] = useState([]);      // [{job_id, amount}]
   const [allocSaving, setAllocSaving] = useState(false);
   const openAlloc = (p) => {
+    setAllocNote("");
     setAllocPay(p);
     setAllocRows((p.allocations && p.allocations.length) ? p.allocations.map((a) => ({ job_id: a.job_id, amount: String(a.amount || "") })) : [{ job_id: "", amount: "" }]);
   };
@@ -885,6 +886,27 @@ export default function SupplierPage() {
       remaining -= give;
     }
     setAllocRows(rows.length ? rows : [{ job_id: "", amount: "" }]);
+  };
+  // 🎯 Cocokkan Otomatis: usulan dari server — nominal pas ke FAKTUR (projek) / unit; kalau
+  // tidak ada yang pas → berurutan. Hanya MENGISI baris di jendela ini; admin cek lalu Simpan.
+  const [allocNote, setAllocNote] = useState("");
+  const suggestAlloc = async () => {
+    if (!allocPay) return;
+    try {
+      const { data } = await axios.get(`${API}/admin/suppliers/${selected.id}/rekon-payments/${allocPay.id}/suggest-allocation`, { headers });
+      const rows = (data.allocations || []).map((a) => ({ job_id: a.job_id, amount: String(a.amount) }));
+      setAllocRows(rows.length ? rows : [{ job_id: "", amount: "" }]);
+      setAllocNote(`${data.method === "faktur_pas" || data.method === "unit_pas" ? "✅" : "ℹ️"} ${data.note || ""} (${rows.length} unit · ${fRp(data.total || 0)}) — cek, lalu Simpan Alokasi.`);
+    } catch (e) { flash(e?.response?.data?.detail || "Gagal mengambil usulan"); }
+  };
+  // Pulihkan pembayaran Rekon yang sudah di-Reverse → kembali Belum Dialokasikan.
+  const restoreRekon = async (p) => {
+    if (!window.confirm(`Pulihkan pembayaran Rekon ${fRp(p.amount)}?\n\nKembali jadi "Belum Dialokasikan" (alokasi lama TIDAK dipakai). Setelah itu alokasikan ulang.`)) return;
+    try {
+      await axios.post(`${API}/admin/rekon/imports/${encodeURIComponent(p.bank_transaction_id)}/restore`, {}, { headers });
+      await reloadSelected(selected.id); setListRefreshTick((t) => t + 1);
+      flash("✓ Dipulihkan — sekarang alokasikan ulang");
+    } catch (e) { flash(e?.response?.data?.detail || "Gagal memulihkan"); }
   };
   const saveAlloc = async () => {
     if (!allocPay) return;
@@ -1392,6 +1414,21 @@ export default function SupplierPage() {
                 </div>
                 );
               })()}
+              {(selected.rekon_reversed || []).length > 0 && (
+                <div style={{ background: C.card, border: `1px dashed ${C.red}`, borderRadius: 12, padding: 12 }} data-testid="sup-rekon-reversed">
+                  <div style={{ fontSize: 13, fontWeight: 800, color: C.red, marginBottom: 6 }}>↩️ Rekon dibatalkan (Reverse) — {(selected.rekon_reversed || []).length}</div>
+                  {selected.rekon_reversed.map((p) => (
+                    <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "8px 0", borderTop: `1px solid ${C.line}`, flexWrap: "wrap" }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 13.5, fontWeight: 800 }}>{fRp(p.amount)} <span style={{ fontSize: 11, color: C.mute }}>· {fDate(p.tanggal)}</span></div>
+                        <div style={{ fontSize: 11, color: C.mute, marginTop: 2 }}>btx {p.bank_transaction_id}{p.reversal_reason ? ` · alasan: ${p.reversal_reason}` : ""}</div>
+                      </div>
+                      <button style={{ ...BTN_GHOST, padding: "6px 10px" }} onClick={() => restoreRekon(p)} data-testid={`sup-rekon-restore-${p.id}`}>Pulihkan</button>
+                    </div>
+                  ))}
+                  <div style={{ fontSize: 10.5, color: C.mute, marginTop: 8 }}>Pembayaran yang dibatalkan nggak dihitung di tagihan & PDF. <b style={{ color: C.ink }}>Pulihkan</b> = kembali jadi Belum Dialokasikan, lalu dibagi ulang.</div>
+                </div>
+              )}
               {txns.length === 0 && (selected.rekon_payments || []).length === 0 && <div style={{ textAlign: "center", padding: 30, color: C.mute }}>Belum ada pembayaran.</div>}
               {txns.map((tx) => (
                 <button key={tx.key} onClick={() => setTxnDetail(tx)} style={{ textAlign: "left", background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 14, cursor: "pointer", color: C.ink }} data-testid={`sup-txn-${tx.key}`}>
@@ -1436,8 +1473,12 @@ export default function SupplierPage() {
             Belum dialokasi: <b style={{ color: allocTotal > allocPay.amount ? C.red : C.gold }}>{fRp(Math.max(0, allocPay.amount - allocTotal))}</b>
             {allocTotal > allocPay.amount && <span style={{ color: C.red }}> · melebihi nominal!</span>}
           </div>
+          <button style={{ ...BTN, background: C.gold, borderColor: C.gold, color: "#111", marginBottom: 8, width: "100%" }} onClick={suggestAlloc} data-testid="sup-alloc-suggest">
+            🎯 Cocokkan Otomatis (nominal pas ke faktur)
+          </button>
+          {allocNote && <div style={{ fontSize: 11.5, color: C.ink, background: "#1a1408", border: `1px solid ${C.gold}`, borderRadius: 8, padding: "8px 10px", marginBottom: 10, lineHeight: 1.5 }} data-testid="sup-alloc-note">{allocNote}</div>}
           <button style={{ ...BTN, background: C.green, borderColor: C.green, marginBottom: 12, width: "100%" }} onClick={autoFillAlloc} data-testid="sup-alloc-autofill">
-            ⚡ Isi Otomatis (bagi ke tagihan belum lunas)
+            ⚡ Isi Otomatis (berurutan dari tagihan paling atas)
           </button>
           {allocRows.map((r, i) => (
             <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8 }}>
