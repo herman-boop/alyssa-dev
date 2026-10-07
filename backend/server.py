@@ -14,6 +14,7 @@ from odoo_client import OdooClient
 from playwright.async_api import async_playwright
 import ais  # modul AIS (posisi kapal) — provider-agnostic, aman tanpa key
 import rekon_sync  # integrasi pembayaran supplier dari Audit Rekon (isolated)
+import supplier_faktur  # pisah unit ke faktur (projek) baru — logika murni
 import rekon_felis_client  # adapter PULL dari Felis (stub sampai kontrak final)
 import expenses as expenses_mod  # Biaya Umum & Administratif (Fase 3, isolated, terpisah dari HPP)
 import ledger_status  # status tagihan supplier (Belum/Sebagian/Lunas) dari ledger — pure
@@ -4926,13 +4927,17 @@ async def vendor_mobile_vendors_unpaid(limit: int = 300):
     async for s in db.supplier_profiles.find({}, {"_id": 0}):
         jobs_out = []
         tot = terb = 0
+        alloc_by_job = _supplier_rekon_overview(s)["alloc_by_job"]   # pembayaran Rekon ikut dihitung
+        closed_pids = {p.get("id") for p in (s.get("projects") or []) if p.get("status") == "closed"}
         for j in (s.get("jobs") or []):
-            jt = _supplier_job_totals(j)
+            jt = _supplier_job_totals(j, extra_paid=alloc_by_job.get(j.get("id"), 0))
             th = jt.get("total_harga") or 0
             if th <= 0:
                 continue
             tb = jt.get("total_terbayar") or 0
             si = jt.get("sisa") or 0
+            if si <= 0 and (j.get("project_id") or "") in closed_pids:
+                continue   # sudah dipisah ke faktur yang selesai (lunas) → keluar dari daftar
             status = "lunas" if si <= 0 else ("sebagian" if tb > 0 else "belum")
             jobs_out.append({
                 "job_id": j.get("id"), "trip_id": j.get("trip_id"),
@@ -6567,6 +6572,44 @@ async def add_supplier_project(supplier_id: str, body: SupplierProjectBody):
     projects = projects + [new_proj]
     await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"projects": projects}})
     return new_proj
+
+
+@api_router.post("/admin/suppliers/{supplier_id}/pisah-faktur", dependencies=[Depends(require_admin_pin)])
+async def pisah_faktur(supplier_id: str, body: Dict[str, Any] = Body(...)):
+    """Pisahkan unit terpilih jadi FAKTUR (projek) baru dengan No. Faktur OTOMATIS. Hanya
+    memindahkan `project_id` unit — nominal/pembayaran/rekon tidak berubah. Kalau semua unit sudah
+    lunas, faktur langsung ditutup (unit hilang dari daftar 'belum dibayar'). Idempoten."""
+    job_ids = {str(j) for j in ((body or {}).get("job_ids") or []) if j}
+    if not job_ids:
+        raise HTTPException(400, "Centang minimal 1 unit dulu")
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    doc = await _ensure_supplier_projects(doc)
+    jobs = list(doc.get("jobs") or [])
+    valid = {j.get("id") for j in jobs}
+    chosen = job_ids & valid
+    if not chosen:
+        raise HTTPException(404, "Unit tidak ditemukan")
+    projects = list(doc.get("projects") or [])
+    reuse = supplier_faktur.reusable_project(jobs, projects, chosen)
+    if reuse is not None:
+        if not reuse.get("no_faktur"):
+            reuse["no_faktur"] = await _gen_no_faktur(db)
+            await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"projects": projects}})
+        return {"ok": True, "reused": True, "project_id": reuse["id"], "no_faktur": reuse["no_faktur"],
+                "nama": reuse.get("nama"), "status": reuse.get("status"), "units": len(chosen)}
+    alloc_by_job = _supplier_rekon_overview(doc)["alloc_by_job"]
+    all_lunas = all(
+        (_supplier_job_totals(j, extra_paid=alloc_by_job.get(j.get("id"), 0)).get("sisa") or 0) <= 0
+        for j in jobs if j.get("id") in chosen)
+    no_faktur = await _gen_no_faktur(db)
+    nama = str((body or {}).get("nama") or "").strip() or None
+    new_jobs, new_projects, proj = supplier_faktur.move_to_new_project(
+        jobs, projects, chosen, _gen_supplier_id(), no_faktur, nama, all_lunas, datetime.utcnow().isoformat())
+    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": new_jobs, "projects": new_projects}})
+    return {"ok": True, "reused": False, "project_id": proj["id"], "no_faktur": no_faktur,
+            "nama": proj["nama"], "status": proj["status"], "units": len(chosen), "closed": all_lunas}
 
 
 @api_router.post("/admin/suppliers/{supplier_id}/projects/{project_id}/no-faktur", dependencies=[Depends(require_admin_pin)])

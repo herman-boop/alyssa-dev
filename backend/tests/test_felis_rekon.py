@@ -1214,8 +1214,30 @@ async def test_tembak_semua():
     ok(sm4["fee_released"] == 0, "release_fee=False → alokasi biaya admin dibiarkan")
 
 
+async def test_pisah_faktur():
+    """Pisah unit ke faktur (projek) baru: pindah project_id saja, closed kalau lunas, open di depan
+    kalau belum, idempoten. Modul murni asli supplier_faktur."""
+    print("test_pisah_faktur")
+    import supplier_faktur as SF
+    jobs = [{"id": f"J{i}", "project_id": "P0", "total_harga": 100} for i in range(5)] + [{"id": "K0", "project_id": "P9"}]
+    projects = [{"id": "P0", "nama": "Projek 1", "status": "open"}, {"id": "P9", "nama": "Projek 9", "status": "open"}]
+    chosen = {"J0", "J1", "J2"}
+    ok(SF.reusable_project(jobs, projects, chosen) is None, "unit belum sendiri di projeknya → belum bisa dipakai ulang")
+    nj, np_, pr = SF.move_to_new_project(jobs, projects, chosen, "PN", "FP-AAL-000777", None, True, "2026-10-07T00:00:00")
+    by = {j["id"]: j for j in nj}
+    ok(all(by[i]["project_id"] == "PN" for i in chosen) and all(by[i]["project_id"] == "P0" for i in ("J3", "J4")) and by["K0"]["project_id"] == "P9", "hanya unit terpilih pindah projek")
+    ok(pr["no_faktur"] == "FP-AAL-000777" and pr["nama"] == "FP-AAL-000777" and pr["status"] == "closed" and pr["closed_at"], "faktur otomatis, nama default = no faktur, lunas → closed")
+    ok(np_[-1]["id"] == "PN" and [p["id"] for p in np_[:2]] == ["P0", "P9"], "projek lunas ditaruh di belakang; projek aktif lama tak berubah")
+    ok(by["J0"]["total_harga"] == 100 and jobs[0]["project_id"] == "P0", "nominal tak berubah & data asli tak dimutasi")
+    nj2, np2, pr2 = SF.move_to_new_project(jobs, projects, chosen, "PN", "FP-AAL-000778", "Faktur Marthen", False, "t")
+    ok(pr2["status"] == "open" and np2[0]["id"] == "PN" and pr2["nama"] == "Faktur Marthen", "belum lunas → open, di DEPAN (bukan projek aktif penampung unit baru)")
+    again = SF.reusable_project(nj, np_, chosen)
+    ok(again is not None and again["id"] == "PN", "tekan lagi → pakai faktur yang sama (idempoten, tak bikin nomor baru)")
+    ok(SF.reusable_project(nj, np_, {"J0", "J1"}) is None, "sebagian unit faktur → tidak dipakai ulang")
+
+
 async def main():
-    for t in (test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
+    for t in (test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,
