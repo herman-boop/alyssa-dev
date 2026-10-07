@@ -38,6 +38,9 @@ export default function TaskPage() {
   const cpInput = useRef(null);
 
   const flash = (m) => { setToast(m); setTimeout(() => setToast(""), 2200); };
+  // Checkpoint DRIVER wajib ada foto unit (supir mengira ikon kamera di "Tambah Checkpoint"
+  // sudah memotret, padahal itu cuma membuka formulir → checkpoint tersimpan tanpa foto).
+  const fotoWajib = /^driver/i.test((task && task.tipe_tugas) || "");
 
   const load = useCallback(async () => {
     try {
@@ -153,6 +156,7 @@ export default function TaskPage() {
   };
   const saveCheckpoint = async () => {
     if (!cp?.jenis) { flash("Pilih jenis checkpoint dulu"); return; }
+    if (fotoWajib && !cp.file) { flash("📷 Foto unit WAJIB — tekan tombol “Ambil Foto Unit” dulu"); return; }
     // Petugas pelabuhan: GPS TIDAK wajib — cukup 1 foto jepret (di pelabuhan GPS
     // sering susah). Peran lain (driver): lokasi tetap wajib untuk tracking.
     const gpsOptional = /pelabuhan/i.test(task.tipe_tugas || "");
@@ -170,6 +174,7 @@ export default function TaskPage() {
         flash("⚠️ Aktifkan izin Lokasi (GPS) dulu — lokasi WAJIB di checkpoint"); return;
       }
     }
+    if (!cp.file && !window.confirm("Kirim checkpoint TANPA foto?\n\nOK = kirim tanpa foto\nBatal = kembali & ambil foto dulu")) return;
     setBusy(true);
     try {
       const fd = new FormData();
@@ -179,7 +184,12 @@ export default function TaskPage() {
       if (geo) { fd.append("lat", geo.lat); fd.append("lng", geo.lng); if (geo.acc != null) fd.append("acc", geo.acc); }
       if (cp.file) { let up = cp.file; try { up = await stampPhoto(cp.file, buildStampLines(cp.jenis, geo, alamat)); } catch {} fd.append("foto", up); }
       const r = await axios.post(`${API}/public/task/${token}/checkpoint`, fd, { headers: { "Content-Type": "multipart/form-data" } });
-      setTask(r.data); setCp(null); flash("✓ Checkpoint tersimpan");
+      setTask(r.data); setCp(null);
+      // Cek balasan server: kalau foto dikirim tapi checkpoint terbaru tak punya url → beri tahu jelas.
+      const cps = (r.data && r.data.checkpoints) || [];
+      const last = cps.length ? cps[cps.length - 1] : null;
+      if (cp.file && last && !last.url) window.alert("⚠️ Checkpoint tersimpan, tapi FOTO-nya tidak ikut terkirim.\n\nUlangi checkpoint dengan foto, atau hubungi admin.");
+      else flash(cp.file ? "✓ Checkpoint + foto tersimpan" : "✓ Checkpoint tersimpan (tanpa foto)");
     } catch (e) { flash(e?.response?.data?.detail || "Gagal simpan checkpoint"); }
     setBusy(false);
   };
@@ -374,16 +384,17 @@ export default function TaskPage() {
             <div style={{ fontSize: 12, color: C.mute, fontWeight: 700, marginBottom: 6 }}>Jenis checkpoint</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
               {(task.allowed_checkpoint_types || []).map((j) => (
-                <button key={j} onClick={() => setCp((c) => ({ ...c, jenis: j }))} style={{ padding: "9px 12px", borderRadius: 20, border: `1px solid ${cp.jenis === j ? C.blue : C.line}`, background: cp.jenis === j ? C.blue : "none", color: cp.jenis === j ? "#fff" : C.ink, fontSize: 13, fontWeight: 700, cursor: "pointer", minHeight: 40 }}>{j}</button>
+                <button key={j} onClick={() => { setCp((c) => ({ ...c, jenis: j })); if (fotoWajib && !cp.file) cpInput.current?.click(); }} style={{ padding: "9px 12px", borderRadius: 20, border: `1px solid ${cp.jenis === j ? C.blue : C.line}`, background: cp.jenis === j ? C.blue : "none", color: cp.jenis === j ? "#fff" : C.ink, fontSize: 13, fontWeight: 700, cursor: "pointer", minHeight: 40 }}>{j}</button>
               ))}
             </div>
             <input ref={cpInput} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => cpPickFoto(e.target.files?.[0])} />
-            <button onClick={() => cpInput.current?.click()} style={{ width: "100%", padding: 12, borderRadius: 10, border: `1px solid ${C.line}`, background: "none", color: C.ink, fontWeight: 700, fontSize: 14, cursor: "pointer", minHeight: 48, marginBottom: 8 }}>{cp.previewUrl ? "✓ Foto siap · ganti" : "📷 Tambah Foto (opsional)"}</button>
+            {fotoWajib && !cp.previewUrl && <div style={{ fontSize: 12, color: C.mute, marginBottom: 6 }}>Foto unit WAJIB di setiap checkpoint (lokasi & jam otomatis ikut tercap di foto).</div>}
+            <button onClick={() => cpInput.current?.click()} style={{ width: "100%", padding: 12, borderRadius: 10, border: `${fotoWajib && !cp.previewUrl ? 2 : 1}px solid ${fotoWajib && !cp.previewUrl ? C.blue : C.line}`, background: fotoWajib && !cp.previewUrl ? "rgba(88,166,255,.12)" : "none", color: C.ink, fontWeight: 700, fontSize: 14, cursor: "pointer", minHeight: 48, marginBottom: 8 }}>{cp.previewUrl ? "✓ Foto siap · ganti" : (fotoWajib ? "📷 Ambil Foto Unit (wajib)" : "📷 Tambah Foto (opsional)")}</button>
             {cp.previewUrl && <img src={cp.previewUrl} alt="" style={{ width: "100%", maxHeight: 160, objectFit: "cover", borderRadius: 8, marginBottom: 8 }} />}
             <textarea value={cp.catatan} onChange={(e) => setCp((c) => ({ ...c, catatan: e.target.value }))} placeholder="Catatan (opsional)" style={{ width: "100%", background: "#0d1117", border: `1px solid ${C.line}`, borderRadius: 8, padding: "11px 12px", color: C.ink, fontSize: 15, outline: "none", boxSizing: "border-box", minHeight: 56, resize: "vertical", marginBottom: 12, fontFamily: "inherit" }} />
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={() => setCp(null)} disabled={busy} style={{ flex: 1, padding: 14, borderRadius: 10, border: `1px solid ${C.line}`, background: "none", color: C.mute, fontWeight: 700, fontSize: 14, cursor: "pointer", minHeight: 52 }}>Batal</button>
-              <button onClick={saveCheckpoint} disabled={busy} style={{ flex: 2, padding: 14, borderRadius: 10, border: "none", background: C.greenSoft, color: "#fff", fontWeight: 900, fontSize: 15, cursor: "pointer", minHeight: 52 }}>{busy ? "Menyimpan…" : "Simpan Checkpoint"}</button>
+              <button onClick={saveCheckpoint} disabled={busy} style={{ flex: 2, padding: 14, borderRadius: 10, border: "none", background: C.greenSoft, color: "#fff", fontWeight: 900, fontSize: 15, cursor: "pointer", minHeight: 52, opacity: fotoWajib && !cp.file ? 0.5 : 1 }}>{busy ? "Menyimpan…" : "Simpan Checkpoint"}</button>
             </div>
           </div>
         </div>
