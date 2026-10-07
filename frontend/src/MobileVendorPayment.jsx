@@ -842,6 +842,7 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
   const [tbMsg, setTbMsg] = useState("");
   const [tbDone, setTbDone] = useState(false);
   const [tbOther, setTbOther] = useState([]);    // rekon aktif yang tercatat di vendor LAIN
+  const [tbOtherState, setTbOtherState] = useState("idle");   // idle | loading | done | error
   const loadTbSup = async () => {
     const r = await axios.get(`${API}/admin/suppliers/${vendor.supplier_id}`, { headers });
     setTbSup(r.data);
@@ -850,12 +851,12 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
   const openTembak = async () => {
     if (selJobs.length === 0) { flash("Centang minimal 1 PO dulu"); return; }
     setTbIds(selJobs.map((j) => j.job_id)); setTbMsg(""); setTbDone(false); setTbSup(null); setTbOpen(true);
-    setTbOther([]);
+    setTbOther([]); setTbOtherState("loading");
     try { await loadTbSup(); } catch { flash("Gagal memuat pembayaran Rekon"); setTbOpen(false); return; }
     try {
       const r = await axios.get(`${API}/admin/rekon/other-payments`, { headers, params: { exclude_supplier_id: vendor.supplier_id, limit: 60 } });
-      setTbOther(r.data.items || []);
-    } catch (_) { /* opsional */ }
+      setTbOther(r.data.items || []); setTbOtherState("done");
+    } catch (_) { setTbOtherState("error"); }
   };
   // Rekon tercatat di vendor lain → pindahkan ke vendor ini (jalur koreksi resmi), lalu tembak + PDF.
   const doPindahTembak = async (o) => {
@@ -1060,6 +1061,11 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
               </button>
             </div>
           ))}
+          {tbSup && tbOtherState === "loading" && <div className="vp-hint" style={{ textAlign: "center", marginTop: 8 }}>Mencari rekon di vendor lain…</div>}
+          {tbSup && tbOtherState === "done" && tbOther.length === 0 && (
+            <div className="vp-hint" style={{ textAlign: "center", marginTop: 8 }}>Tidak ada rekon aktif di vendor lain juga — rekonnya belum masuk ke sistem. Tarik dulu dari Audit Rekon.</div>
+          )}
+          {tbSup && tbOtherState === "error" && <div className="vp-hint" style={{ textAlign: "center", marginTop: 8 }}>Gagal memeriksa rekon di vendor lain. Tutup lalu buka lagi.</div>}
           {tbOther.length > 0 && (
             <>
               <div className="vp-hint" style={{ margin: "10px 0 6px", fontWeight: 700 }}>
