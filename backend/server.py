@@ -7002,6 +7002,11 @@ async def _auto_allocate_rekon(supplier_id: str, rekon_payment_id: str, amount) 
     sup = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
     if not sup:
         return {"allocated": 0}
+    pay = next((p for p in (sup.get("rekon_payments") or []) if p.get("id") == rekon_payment_id), None)
+    if pay and rekon_sync.is_bank_fee(pay):
+        # Biaya admin bank ditanggung kita: JANGAN dibagi ke tagihan supplier.
+        return {"allocated": 0, "unallocated": int(amount or 0), "allocations": [], "method": "biaya_admin",
+                "note": "Biaya admin bank — tidak dialokasikan ke tagihan supplier."}
     res = rekon_sync.smart_allocations(_rekon_job_rows(sup), amount)
     allocs = res["allocations"]
     if allocs:
@@ -7028,6 +7033,34 @@ async def rekon_suggest_allocation(supplier_id: str, rekon_payment_id: str):
     amount = int(pay.get("amount") or 0)
     res = rekon_sync.smart_allocations(_rekon_job_rows(sup, own), amount)
     return {"amount": amount, **res, "total": sum(a["amount"] for a in res["allocations"])}
+
+
+@api_router.post("/admin/suppliers/{supplier_id}/rekon-payments/tembak-semua", dependencies=[Depends(require_admin_pin)])
+async def rekon_tembak_semua(supplier_id: str, body: Dict[str, Any] = Body(...)):
+    """TEMBAK SEMUA: arahkan semua pembayaran Rekon aktif supplier (KECUALI biaya admin bank)
+    ke unit yang dicentang di Rekap, sekali jalan & atomik (1 tulis). Alokasi lama pembayaran
+    itu diganti total; biaya admin bank dilepas dari tagihan. Reversible (Alokasikan/Reverse)."""
+    job_ids = [str(j) for j in ((body or {}).get("job_ids") or []) if j]
+    if not job_ids:
+        raise HTTPException(400, "Centang minimal 1 unit dulu")
+    sup = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not sup:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    rps = list(sup.get("rekon_payments") or [])
+    if not [p for p in rps if p.get("status") != "reversed"]:
+        raise HTTPException(400, "Belum ada pembayaran Rekon aktif untuk supplier ini")
+    release_fee = bool((body or {}).get("release_fee", True))
+    combined = {}   # alokasi yang akan DIGANTI/DILEPAS → jangan dihitung sebagai sudah membayar
+    for p in rps:
+        if p.get("status") == "reversed" or (rekon_sync.is_bank_fee(p) and not release_fee):
+            continue
+        for a in (p.get("allocations") or []):
+            if a.get("job_id"):
+                combined[a["job_id"]] = combined.get(a["job_id"], 0) + int(a.get("amount") or 0)
+    rows = _rekon_job_rows(sup, combined)
+    new, summary = rekon_sync.plan_tembak_semua(rows, rps, job_ids, release_fee=release_fee)
+    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"rekon_payments": new}})
+    return {"ok": True, **summary}
 
 
 @api_router.post("/admin/suppliers/{supplier_id}/rekon-payments/{rekon_payment_id}/tembak", dependencies=[Depends(require_admin_pin)])

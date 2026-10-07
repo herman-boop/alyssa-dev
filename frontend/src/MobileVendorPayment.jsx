@@ -882,6 +882,30 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
     } catch (e) { setTbMsg(e?.response?.data?.detail || "Gagal memindahkan rekon"); }
     finally { setTbBusy(""); }
   };
+  // Biaya admin bank (mis. "BIF BIAYA TXN KE 002 …") ditanggung kita — bukan pembayaran ke supplier.
+  const isFee = (p) => /\bBIAYA\s*(TXN|TRX|TRANSAKSI|ADM|ADMIN)\b/i.test(`${p.catatan || ""} ${(p.rekon || {}).referensi_bank || ""}`);
+  // Tembak SEMUA rekon aktif (kecuali biaya admin) ke PO terpilih, sekali jalan → langsung PDF.
+  const doTembakSemua = async () => {
+    const real = (tbSup?.rekon_payments || []).filter((p) => !isFee(p));
+    const total = real.reduce((a, p) => a + (p.amount || 0), 0);
+    if (!window.confirm(
+      `Tembak SEMUA rekon (${real.length} transfer · ${fmtRp(total)}) ke ${tbIds.length} PO terpilih?\n\n` +
+      `• Biaya admin bank dikecualikan (alokasinya dilepas dari tagihan).\n` +
+      `• Alokasi lama rekon ini ke unit LAIN diganti — dipakai untuk ${tbIds.length} PO ini.\n` +
+      `• Bisa diubah lagi lewat Supplier → Riwayat → Alokasikan / Reverse.`)) return;
+    setTbBusy("ALL"); setTbMsg("");
+    try {
+      const { data } = await axios.post(`${API}/admin/suppliers/${vendor.supplier_id}/rekon-payments/tembak-semua`, { job_ids: tbIds, release_fee: true }, { headers });
+      const doc = await loadTbSup();
+      setTbDone(data.allocated > 0);
+      setTbMsg(`✓ ${fmtRp(data.allocated)} dari ${data.payments.length} transfer masuk ke PO terpilih`
+        + (data.fee_count ? ` · ${data.fee_count} biaya admin dikecualikan` : "")
+        + (data.sisa_unit > 0 ? ` · PO masih kurang ${fmtRp(data.sisa_unit)}` : " · semua PO lunas")
+        + (data.unallocated > 0 ? ` · uang lebih ${fmtRp(data.unallocated)} belum dialokasikan` : ""));
+      if (data.allocated > 0) cetakTembak(doc);
+    } catch (e) { setTbMsg(e?.response?.data?.detail || "Gagal tembak semua"); }
+    finally { setTbBusy(""); }
+  };
   // Tembak 1 pembayaran Rekon ke PO terpilih lalu LANGSUNG buka PDF A4 (kalau ada yang masuk).
   const doTembak = async (p) => {
     setTbBusy(p.id); setTbMsg("");
@@ -1068,7 +1092,12 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
               </button>
             </div>
           ))}
-          {tbSup && (tbSup.rekon_payments || []).map((p) => (
+          {tbSup && (tbSup.rekon_payments || []).some((p) => !isFee(p)) && (
+            <button className="vp-btn vp-btn-primary" style={{ marginBottom: 10 }} disabled={!!tbBusy} onClick={doTembakSemua} data-testid="vp-tembak-semua">
+              {tbBusy === "ALL" ? "Menembak semua…" : `🎯 Tembak SEMUA (${(tbSup.rekon_payments || []).filter((p) => !isFee(p)).length} transfer) + PDF`}
+            </button>
+          )}
+          {tbSup && (tbSup.rekon_payments || []).filter((p) => !isFee(p)).map((p) => (
             <div key={p.id} className="vp-card" style={{ marginBottom: 8 }}>
               <div className="vp-card-top" style={{ marginBottom: 2 }}>
                 <span className="vp-card-nopol">{fmtRp(p.amount)}</span>
@@ -1080,6 +1109,12 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
               </button>
             </div>
           ))}
+          {tbSup && (tbSup.rekon_payments || []).filter(isFee).length > 0 && (
+            <div className="vp-card" style={{ marginBottom: 8, opacity: 0.75 }}>
+              <div className="vp-card-nopol" style={{ fontSize: 14 }}>🏦 Biaya admin bank — dikecualikan ({(tbSup.rekon_payments || []).filter(isFee).length})</div>
+              <div className="vp-card-rute">Ditanggung Alyssa, tidak dihitung sebagai pembayaran ke vendor. Total {fmtRp((tbSup.rekon_payments || []).filter(isFee).reduce((a, p) => a + (p.amount || 0), 0))}.</div>
+            </div>
+          )}
           {tbSup && tbOtherState === "loading" && <div className="vp-hint" style={{ textAlign: "center", marginTop: 8 }}>Mencari rekon di vendor lain…</div>}
           {tbSup && tbOtherState === "done" && tbOther.length === 0 && (
             <div className="vp-hint" style={{ textAlign: "center", marginTop: 8 }}>Tidak ada rekon aktif di vendor lain juga — rekonnya belum masuk ke sistem. Tarik dulu dari Audit Rekon.</div>
