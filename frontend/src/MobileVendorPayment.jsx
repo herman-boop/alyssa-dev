@@ -841,6 +841,7 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
   const [tbBusy, setTbBusy] = useState("");
   const [tbMsg, setTbMsg] = useState("");
   const [tbDone, setTbDone] = useState(false);
+  const [tbOther, setTbOther] = useState([]);    // rekon aktif yang tercatat di vendor LAIN
   const loadTbSup = async () => {
     const r = await axios.get(`${API}/admin/suppliers/${vendor.supplier_id}`, { headers });
     setTbSup(r.data);
@@ -849,7 +850,31 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
   const openTembak = async () => {
     if (selJobs.length === 0) { flash("Centang minimal 1 PO dulu"); return; }
     setTbIds(selJobs.map((j) => j.job_id)); setTbMsg(""); setTbDone(false); setTbSup(null); setTbOpen(true);
-    try { await loadTbSup(); } catch { flash("Gagal memuat pembayaran Rekon"); setTbOpen(false); }
+    setTbOther([]);
+    try { await loadTbSup(); } catch { flash("Gagal memuat pembayaran Rekon"); setTbOpen(false); return; }
+    try {
+      const r = await axios.get(`${API}/admin/rekon/other-payments`, { headers, params: { exclude_supplier_id: vendor.supplier_id, limit: 60 } });
+      setTbOther(r.data.items || []);
+    } catch (_) { /* opsional */ }
+  };
+  // Rekon tercatat di vendor lain → pindahkan ke vendor ini (jalur koreksi resmi), lalu tembak + PDF.
+  const doPindahTembak = async (o) => {
+    const ok = window.confirm(
+      `Pindahkan rekon ${fmtRp(o.amount)} (${o.tanggal || "-"}) dari "${o.supplier_nama}" ke "${vendor.supplier_nama}"?\n\n` +
+      `• Jejak pemindahan tersimpan (audit).\n` +
+      `• Alokasi rekon ini di "${o.supplier_nama}" direset${o.allocated > 0 ? ` — unit di sana yang sudah terbayar ${fmtRp(o.allocated)} dari rekon ini kembali belum terbayar` : ""}.\n` +
+      `• Setelah itu langsung dibagi ke ${tbIds.length} PO yang dicentang & PDF dibuka.`);
+    if (!ok) return;
+    setTbBusy(o.id); setTbMsg("");
+    try {
+      await axios.post(`${API}/admin/rekon/imports/${encodeURIComponent(o.bank_transaction_id)}/pindah`, { supplier_id_baru: vendor.supplier_id }, { headers });
+      const doc = await loadTbSup();
+      setTbOther((l) => l.filter((x) => x.id !== o.id));
+      const pay = (doc.rekon_payments || []).find((x) => x.bank_transaction_id === o.bank_transaction_id);
+      if (!pay) { setTbMsg("Dipindahkan, tapi pembayarannya tidak ditemukan — coba lagi."); return; }
+      await doTembak(pay);
+    } catch (e) { setTbMsg(e?.response?.data?.detail || "Gagal memindahkan rekon"); }
+    finally { setTbBusy(""); }
   };
   // Tembak 1 pembayaran Rekon ke PO terpilih lalu LANGSUNG buka PDF A4 (kalau ada yang masuk).
   const doTembak = async (p) => {
@@ -1006,7 +1031,7 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
         <BottomSheet open={tbOpen} title={`Tembak Rekon · ${tbIds.length} PO`} onClose={closeTembak}>
           {!tbSup && <div className="vp-hint" style={{ textAlign: "center" }}>Memuat pembayaran Rekon…</div>}
           {tbSup && (tbSup.rekon_payments || []).length === 0 && (tbSup.rekon_reversed || []).length === 0 && (
-            <div className="vp-hint" style={{ textAlign: "center" }}>Belum ada pembayaran Rekon untuk vendor ini. Tarik dulu dari Audit Rekon.</div>
+            <div className="vp-hint" style={{ textAlign: "center" }}>Belum ada pembayaran Rekon untuk vendor ini.{tbOther.length > 0 ? " Tapi ada rekon yang tercatat di vendor lain — cek daftar di bawah." : " Tarik dulu dari Audit Rekon."}</div>
           )}
           {tbSup && (tbSup.rekon_payments || []).length === 0 && (tbSup.rekon_reversed || []).length > 0 && (
             <div className="vp-hint" style={{ textAlign: "center" }}>Rekon vendor ini sebelumnya dibatalkan (Reverse). Pulihkan langsung dari sini:</div>
@@ -1035,6 +1060,29 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
               </button>
             </div>
           ))}
+          {tbOther.length > 0 && (
+            <>
+              <div className="vp-hint" style={{ margin: "10px 0 6px", fontWeight: 700 }}>
+                Rekon yang tercatat di vendor LAIN ({tbOther.length}) — kalau uangnya untuk {vendor.supplier_nama}, pindahkan:
+              </div>
+              {tbOther.map((o) => {
+                const match = o.amount === totalSel;
+                return (
+                  <div key={o.id} className="vp-card" style={{ marginBottom: 8, borderColor: match ? "var(--vp-navy)" : undefined }}>
+                    <div className="vp-card-top" style={{ marginBottom: 2 }}>
+                      <span className="vp-card-nopol">{fmtRp(o.amount)}{match ? " ✅" : ""}</span>
+                      <span className="vp-card-rute" style={{ margin: 0 }}>{o.alloc_status === "allocated" ? "Dialokasikan" : o.alloc_status === "partial" ? "Sebagian" : "Belum dialokasikan"}</span>
+                    </div>
+                    <div className="vp-card-rute">📍 di <b>{o.supplier_nama}</b> · {o.tanggal || ""}{o.catatan ? ` · ${o.catatan}` : ""}</div>
+                    {match && <div className="vp-hint">Nominal sama dengan total {tbIds.length} PO terpilih.</div>}
+                    <button className="vp-btn vp-btn-ghost" style={{ marginTop: 8 }} disabled={!!tbBusy} onClick={() => doPindahTembak(o)} data-testid={`vp-pindah-${o.id}`}>
+                      {tbBusy === o.id ? "Memproses…" : `➡️ Pindah ke ${vendor.supplier_nama} + Tembak + PDF`}
+                    </button>
+                  </div>
+                );
+              })}
+            </>
+          )}
           {tbMsg && <div className="vp-hint" style={{ margin: "8px 0", fontWeight: 700 }}>{tbMsg}</div>}
           {tbSup && <button className="vp-btn vp-btn-ghost" onClick={() => cetakTembak()} data-testid="vp-tembak-cetak">🖨️ Cetak A4 ({tbIds.length} PO)</button>}
           <div className="vp-hint" style={{ marginTop: 8 }}>Nominal dicocokkan ke faktur/PO yang pas (kalau tidak ada → berurutan), hanya ke PO yang dicentang.</div>

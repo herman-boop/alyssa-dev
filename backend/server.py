@@ -7071,6 +7071,45 @@ async def rekon_tembak_to_units(supplier_id: str, rekon_payment_id: str, body: D
             "method": res.get("method"), "note": res.get("note")}
 
 
+@api_router.get("/admin/rekon/other-payments", dependencies=[Depends(require_admin_pin)])
+async def rekon_other_payments(exclude_supplier_id: Optional[str] = None, limit: int = 200):
+    """READ-ONLY: pembayaran Rekon AKTIF di semua supplier (kecuali `exclude_supplier_id`).
+    Dipakai sheet Tembak Rekon untuk menemukan rekon yang ternyata tercatat di vendor lain
+    (supplier_id dari Felis berbeda). Terbaru dulu."""
+    limit = max(1, min(int(limit or 200), 500))
+    out = []
+    async for sup in db.supplier_profiles.find({"rekon_payments.0": {"$exists": True}},
+                                               {"_id": 0, "id": 1, "nama": 1, "rekon_payments": 1}):
+        if exclude_supplier_id and sup.get("id") == exclude_supplier_id:
+            continue
+        for p in (sup.get("rekon_payments") or []):
+            if p.get("status") == "reversed":
+                continue
+            amt = int(p.get("amount") or 0)
+            a_sum = sum(int(a.get("amount") or 0) for a in (p.get("allocations") or []))
+            out.append({
+                "supplier_id": sup.get("id"), "supplier_nama": sup.get("nama") or "-",
+                "id": p.get("id"), "bank_transaction_id": p.get("bank_transaction_id"),
+                "amount": amt, "tanggal": p.get("tanggal"), "catatan": p.get("catatan") or "",
+                "allocated": a_sum,
+                "alloc_status": "allocated" if (amt > 0 and a_sum >= amt) else ("partial" if a_sum > 0 else "unallocated"),
+            })
+    out.sort(key=lambda x: str(x.get("tanggal") or ""), reverse=True)
+    return {"items": out[:limit]}
+
+
+@api_router.post("/admin/rekon/imports/{bank_transaction_id}/pindah", dependencies=[Depends(require_admin_pin)])
+async def rekon_pindah_supplier(bank_transaction_id: str, body: Dict[str, Any] = Body(...)):
+    """Pindahkan 1 pembayaran Rekon ke supplier lain (jalur resmi `apply_correction`:
+    divalidasi, jejak `corrected_from` tersimpan, alokasi lama direset). Dipakai saat rekon
+    tercatat di vendor yang salah."""
+    sid_baru = str((body or {}).get("supplier_id_baru") or "").strip()
+    res = await rekon_sync.apply_correction(db, bank_transaction_id, sid_baru, reason=str((body or {}).get("reason") or "Dipindah manual dari Tembak Rekon"))
+    if res.get("status") != "moved":
+        raise HTTPException(409, f"Tidak bisa dipindahkan: {res.get('status')}")
+    return res
+
+
 @api_router.post("/admin/rekon/imports/{bank_transaction_id}/restore", dependencies=[Depends(require_admin_pin)])
 async def rekon_restore_import(bank_transaction_id: str):
     """Pulihkan pembayaran Rekon yang sudah di-Reverse → kembali Belum Dialokasikan."""
