@@ -4445,22 +4445,28 @@ async def _find_or_create_supplier(nama: str) -> dict:
     return doc
 
 
+def _trip_ctx_from(trip: dict, order: Optional[dict]) -> dict:
+    """Murni (tanpa DB): susun konteks trip dari trip + order-nya."""
+    order = order or {}
+    asal, tujuan = _route_split(trip)
+    return {
+        "trip_id": trip.get("trip_id"),
+        "order_id": order.get("order_id") or trip.get("order_id"),
+        "vehicle_type": order.get("vehicle_type") or trip.get("tipe_kendaraan") or trip.get("vehicle_type") or "",
+        "nopol": (order.get("nopol") or trip.get("nopol") or "").upper(),
+        "no_rangka": (order.get("no_rangka") or trip.get("no_rangka") or "").upper(),
+        "asal_kota": order.get("asal_kota") or asal,
+        "tujuan_kota": order.get("tujuan_kota") or tujuan,
+        "customer_id": order.get("customer_id"),
+        "customer_nama": order.get("customer_nama") or (trip.get("customer_data") or {}).get("nama") or "",
+    }
+
+
 async def _trip_auto_context(trip: dict) -> dict:
     """Data yang diisi OTOMATIS ke job supplier dari Trip/Order — tidak diketik
     ulang admin. Order (kalau ada) lebih lengkap soal kota & customer."""
     order = await db.orders.find_one({"trip_id": trip.get("trip_id")}, {"_id": 0})
-    asal, tujuan = _route_split(trip)
-    return {
-        "trip_id": trip.get("trip_id"),
-        "order_id": (order or {}).get("order_id") or trip.get("order_id"),
-        "vehicle_type": (order or {}).get("vehicle_type") or trip.get("tipe_kendaraan") or trip.get("vehicle_type") or "",
-        "nopol": ((order or {}).get("nopol") or trip.get("nopol") or "").upper(),
-        "no_rangka": ((order or {}).get("no_rangka") or trip.get("no_rangka") or "").upper(),
-        "asal_kota": (order or {}).get("asal_kota") or asal,
-        "tujuan_kota": (order or {}).get("tujuan_kota") or tujuan,
-        "customer_id": (order or {}).get("customer_id"),
-        "customer_nama": (order or {}).get("customer_nama") or (trip.get("customer_data") or {}).get("nama") or "",
-    }
+    return _trip_ctx_from(trip, order)
 
 
 async def _add_trip_supplier_job(trip: dict, *, vendor_name=None, supplier_id=None,
@@ -4747,20 +4753,34 @@ async def vendor_mobile_bootstrap():
     return {"kategori": MOBILE_VENDOR_KATEGORI, "metode": MOBILE_VENDOR_METODE, "vendors": vendors}
 
 
+def _norm_cari(x: str) -> str:
+    """Normalisasi buat pencarian: huruf kecil, tanpa spasi/tanda baca (B 1737 = b1737)."""
+    return re.sub(r"[^a-z0-9]", "", (x or "").lower())
+
+
 @api_router.get("/vendor-mobile/trips", dependencies=[Depends(require_vendor_pin)])
 async def vendor_mobile_trips(q: Optional[str] = None, limit: int = 25):
-    """Cari trip by nopol / trip_id / customer / kota. Ringkas buat picker."""
-    ql = (q or "").strip().lower()
+    """Cari trip by nopol / trip_id / customer / kota. Ringkas buat picker.
+    Cepat: 1 query trip + 1 query order (bukan 1 query per trip). Kosong = trip terbaru."""
+    ql = _norm_cari(q)
+    limit = max(1, min(int(limit or 25), 50))
+    trips = await db.trips.find({}, {
+        "_id": 0, "trip_id": 1, "order_id": 1, "nopol": 1, "no_rangka": 1, "tipe_kendaraan": 1,
+        "vehicle_type": 1, "route": 1, "customer_data": 1, "created_at": 1,
+    }).sort("created_at", -1).to_list(5000)
+    orders = {}
+    async for o in db.orders.find({"trip_id": {"$ne": None}}, {
+        "_id": 0, "trip_id": 1, "order_id": 1, "nopol": 1, "no_rangka": 1, "vehicle_type": 1,
+        "asal_kota": 1, "tujuan_kota": 1, "customer_id": 1, "customer_nama": 1,
+    }):
+        orders.setdefault(o["trip_id"], o)
     out = []
-    async for t in db.trips.find({}, {"_id": 0}).sort("created_at", -1):
-        try:
-            ctx = await _trip_auto_context(t)
-        except Exception:
-            ctx = {}
+    for t in trips:
+        ctx = _trip_ctx_from(t, orders.get(t.get("trip_id")))
         nopol = ctx.get("nopol") or ""
         cust = ctx.get("customer_nama") or ""
         asal = ctx.get("asal_kota") or ""; tuj = ctx.get("tujuan_kota") or ""
-        hay = f"{t.get('trip_id','')} {nopol} {cust} {asal} {tuj}".lower()
+        hay = _norm_cari(f"{t.get('trip_id','')} {nopol} {ctx.get('no_rangka','')} {cust} {asal} {tuj}")
         if ql and ql not in hay:
             continue
         out.append({
