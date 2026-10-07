@@ -9,6 +9,7 @@
    ════════════════════════════════════════════════════════════════════ */
 import { useState, useEffect, useCallback, useRef } from "react";
 import axios from "axios";
+import { printSupplierA4, supplierAutoDocNo } from "./SupplierPage";
 
 const API = (process.env.REACT_APP_BACKEND_URL || "") + "/api";
 const PIN_KEY = "vp_pin";
@@ -338,7 +339,7 @@ export default function MobileVendorPayment({ embedded = false }) {
 
       {screen === "home" && <HomeScreen go={setScreen} onLogout={logout} dark={dark} toggleDark={toggleDark} showThemeToggle={!embedded} />}
       {screen === "vendors" && (
-        <VendorsScreen headers={headers} onBack={() => setScreen("home")} setLoading={setLoading} flash={flash} />
+        <VendorsScreen embedded={embedded} headers={headers} onBack={() => setScreen("home")} setLoading={setLoading} flash={flash} />
       )}
       {screen === "form" && (
         <FormScreen boot={boot} headers={headers} onBack={() => { setPrefill(null); setScreen("home"); }}
@@ -776,7 +777,7 @@ const STATUS_CHIP = {
   lunas:    { txt: "Lunas",         cls: "vp-st-lunas" },
 };
 
-function VendorsScreen({ headers, onBack, setLoading, flash }) {
+function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
   const [mode, setMode] = useState("list");      // list | detail | pay | success
   const [vendors, setVendors] = useState([]);
   const [vendor, setVendor] = useState(null);    // vendor terpilih (dengan jobs)
@@ -812,6 +813,45 @@ function VendorsScreen({ headers, onBack, setLoading, flash }) {
     if (!all) payableJobs.forEach((j) => { next[j.job_id] = true; });
     setSel(next);
   };
+
+  // 🎯 Tembak Rekon (hanya dari dashboard admin): bagi pembayaran Rekon bank ke PO yang dicentang,
+  // lalu cetak A4 Ringkasan Supplier untuk PO itu. Mengganti alokasi rekon itu saja — tidak
+  // menyentuh pembayaran manual / rekon lain.
+  const [tbOpen, setTbOpen] = useState(false);
+  const [tbSup, setTbSup] = useState(null);      // dokumen supplier lengkap (rekon_payments, jobs)
+  const [tbIds, setTbIds] = useState([]);        // PO yang ditembak (snapshot saat dibuka)
+  const [tbBusy, setTbBusy] = useState("");
+  const [tbMsg, setTbMsg] = useState("");
+  const [tbDone, setTbDone] = useState(false);
+  const loadTbSup = async () => {
+    const r = await axios.get(`${API}/admin/suppliers/${vendor.supplier_id}`, { headers });
+    setTbSup(r.data);
+  };
+  const openTembak = async () => {
+    if (selJobs.length === 0) { flash("Centang minimal 1 PO dulu"); return; }
+    setTbIds(selJobs.map((j) => j.job_id)); setTbMsg(""); setTbDone(false); setTbSup(null); setTbOpen(true);
+    try { await loadTbSup(); } catch { flash("Gagal memuat pembayaran Rekon"); setTbOpen(false); }
+  };
+  const doTembak = async (p) => {
+    setTbBusy(p.id); setTbMsg("");
+    try {
+      const { data } = await axios.post(`${API}/admin/suppliers/${vendor.supplier_id}/rekon-payments/${p.id}/tembak`, { job_ids: tbIds }, { headers });
+      await loadTbSup();
+      setTbDone(data.allocated > 0);
+      setTbMsg(data.allocated > 0
+        ? `✓ ${fmtRp(data.allocated)} masuk ke ${data.units} PO${data.unallocated ? ` · sisa ${fmtRp(data.unallocated)} belum dialokasikan` : ""}${data.note ? ` — ${data.note}` : ""}`
+        : (data.note || "Tidak ada PO yang bisa dibayar"));
+    } catch (e) { setTbMsg(e?.response?.data?.detail || "Gagal tembak rekon"); }
+    finally { setTbBusy(""); }
+  };
+  const cetakTembak = () => {
+    if (!tbSup) return;
+    const ids = new Set(tbIds);
+    const jobs = (tbSup.jobs || []).filter((j) => ids.has(j.id));
+    if (!jobs.length) { flash("PO tidak ditemukan"); return; }
+    printSupplierA4(tbSup, jobs, supplierAutoDocNo(), "");
+  };
+  const closeTembak = () => { setTbOpen(false); if (tbDone) { setMode("list"); } };
 
   const goPay = () => {
     if (selJobs.length === 0) { flash("Centang minimal 1 PO dulu"); return; }
@@ -927,7 +967,29 @@ function VendorsScreen({ headers, onBack, setLoading, flash }) {
             <div><div className="vp-selbar-lbl">{selJobs.length} PO dipilih</div><div className="vp-selbar-amt">{fmtRp(totalSel)}</div></div>
           </div>
           <button className="vp-btn vp-btn-primary" disabled={selJobs.length === 0} onClick={goPay}>💰 Bayar yang Dipilih</button>
+          {embedded && <button className="vp-btn vp-btn-ghost" style={{ marginTop: 8 }} disabled={selJobs.length === 0} onClick={openTembak} data-testid="vp-tembak-open">🎯 Tembak Rekon ke yang Dipilih</button>}
         </div>
+        <BottomSheet open={tbOpen} title={`Tembak Rekon · ${tbIds.length} PO`} onClose={closeTembak}>
+          {!tbSup && <div className="vp-hint" style={{ textAlign: "center" }}>Memuat pembayaran Rekon…</div>}
+          {tbSup && (tbSup.rekon_payments || []).length === 0 && (
+            <div className="vp-hint" style={{ textAlign: "center" }}>Belum ada pembayaran Rekon untuk vendor ini. Tarik dulu dari Audit Rekon (atau Pulihkan yang di-Reverse di Supplier → Riwayat).</div>
+          )}
+          {tbSup && (tbSup.rekon_payments || []).map((p) => (
+            <div key={p.id} className="vp-card" style={{ marginBottom: 8 }}>
+              <div className="vp-card-top" style={{ marginBottom: 2 }}>
+                <span className="vp-card-nopol">{fmtRp(p.amount)}</span>
+                <span className="vp-card-rute" style={{ margin: 0 }}>{p.alloc_status === "allocated" ? "Dialokasikan" : p.alloc_status === "partial" ? `Sebagian · sisa ${fmtRp(p.unallocated)}` : "Belum dialokasikan"}</span>
+              </div>
+              <div className="vp-card-rute">{p.tanggal || ""}{p.catatan ? ` · ${p.catatan}` : ""}</div>
+              <button className="vp-btn vp-btn-primary" style={{ marginTop: 8 }} disabled={!!tbBusy} onClick={() => doTembak(p)} data-testid={`vp-tembak-${p.id}`}>
+                {tbBusy === p.id ? "Menembak…" : "🎯 Tembak ke PO terpilih"}
+              </button>
+            </div>
+          ))}
+          {tbMsg && <div className="vp-hint" style={{ margin: "8px 0", fontWeight: 700 }}>{tbMsg}</div>}
+          {tbSup && <button className="vp-btn vp-btn-ghost" onClick={cetakTembak} data-testid="vp-tembak-cetak">🖨️ Cetak A4 ({tbIds.length} PO)</button>}
+          <div className="vp-hint" style={{ marginTop: 8 }}>Nominal dicocokkan ke faktur/PO yang pas (kalau tidak ada → berurutan), hanya ke PO yang dicentang.</div>
+        </BottomSheet>
       </div>
     );
   }
