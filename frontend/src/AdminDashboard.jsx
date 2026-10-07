@@ -4486,6 +4486,8 @@ function InvoicePaymentModal({ rec, headers, onClose, onChanged, onPrint }) {
   const [tanggal, setTanggal] = useState(todayLocal);
   const [metode, setMetode] = useState("Transfer BCA");
   const [catatan, setCatatan] = useState("");
+  const [bukti, setBukti] = useState(null);          // file bukti transfer (opsional) untuk pembayaran baru
+  const buktiRef = useRef(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
@@ -4505,12 +4507,42 @@ function InvoicePaymentModal({ rec, headers, onClose, onChanged, onPrint }) {
     setBusy(true); setErr("");
     try {
       const { data } = await axios.post(`${API}/admin/doc-history/${rec.id}/payments`, { amount: nominal, tanggal, metode, catatan }, { headers });
-      const next = data.payments || [];
-      setPays(next); setAmount(""); setCatatan("");
+      let next = data.payments || [];
+      const file = bukti;
+      setPays(next); setAmount(""); setCatatan(""); setBukti(null);
+      if (buktiRef.current) buktiRef.current.value = "";
       onChanged && onChanged(rec.id, next);
+      // Bukti transfer (kalau ada) diupload setelah pembayaran tercatat. Kalau gagal,
+      // pembayaran TETAP tersimpan — bukti bisa diupload lagi dari baris pembayaran.
+      if (file && data.payment?.id) {
+        const r = await sendBukti(data.payment.id, file);
+        if (!r.ok) setErr(`Pembayaran tercatat, tapi bukti gagal diupload: ${r.msg} — upload lagi dari baris pembayaran.`);
+      }
     } catch (e) {
       setErr(e?.response?.data?.detail || "Gagal mencatat pembayaran. Coba lagi.");
     } finally { setBusy(false); }
+  };
+
+  // Upload / ganti bukti transfer 1 pembayaran. Return {ok, msg}.
+  const sendBukti = async (payId, file) => {
+    try {
+      const fd = new FormData();
+      fd.append("bukti", file);
+      const { data } = await axios.post(`${API}/admin/doc-history/${rec.id}/payments/${payId}/bukti`, fd, { headers: { ...headers, "Content-Type": "multipart/form-data" } });
+      const next = data.payments || [];
+      setPays(next);
+      onChanged && onChanged(rec.id, next);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, msg: e?.response?.data?.detail || "koneksi bermasalah" };
+    }
+  };
+  const uploadRowBukti = async (payId, file) => {
+    if (!file) return;
+    setBusy(true); setErr("");
+    const r = await sendBukti(payId, file);
+    if (!r.ok) setErr(`Bukti gagal diupload: ${r.msg}`);
+    setBusy(false);
   };
 
   const remove = async (p) => {
@@ -4561,6 +4593,14 @@ function InvoicePaymentModal({ rec, headers, onClose, onChanged, onPrint }) {
                     {p.no_kwitansi ? <div style={{ fontSize: 11, color: "var(--text-mute)" }}>Kwitansi {p.no_kwitansi}</div> : null}
                   </div>
                   <b>{rp(p.amount)}</b>
+                  {p.bukti_url ? (
+                    <button className="adm-btn adm-btn-sm adm-btn-ghost" onClick={() => window.open(resolveTripUrl(p.bukti_url), "_blank")} title="Lihat bukti transfer" data-testid="invpay-lihat-bukti">📎 Lihat bukti</button>
+                  ) : null}
+                  <label className="adm-btn adm-btn-sm adm-btn-ghost" style={{ cursor: busy ? "default" : "pointer", opacity: busy ? .6 : 1 }} title={p.bukti_url ? "Ganti bukti transfer" : "Upload bukti transfer"}>
+                    {p.bukti_url ? "Ganti" : "📎 Upload bukti"}
+                    <input type="file" accept="image/*,application/pdf" style={{ display: "none" }} disabled={busy}
+                      onChange={(e) => { const fl = e.target.files?.[0]; e.target.value = ""; uploadRowBukti(p.id, fl); }} data-testid="invpay-row-bukti" />
+                  </label>
                   <button className="adm-btn adm-btn-sm adm-btn-ghost" onClick={() => printKwitansi(rec.id, p.id, headers)} title="Cetak kwitansi pembayaran ini" data-testid="invpay-kwitansi">🧾 Kwitansi</button>
                   <button className="adm-btn adm-btn-sm adm-btn-ghost" onClick={() => remove(p)} disabled={busy} title="Hapus (koreksi salah input)" data-testid="invpay-del">🗑️</button>
                 </div>
@@ -4596,6 +4636,11 @@ function InvoicePaymentModal({ rec, headers, onClose, onChanged, onPrint }) {
             <label style={{ display: "block", marginBottom: 10 }}>
               <span style={lblS}>Keterangan (opsional)</span>
               <input className="adm-input" placeholder="mis. DP awal / pelunasan tahap 2" value={catatan} onChange={(e) => setCatatan(e.target.value)} data-testid="invpay-catatan" />
+            </label>
+            <label style={{ display: "block", marginBottom: 10 }}>
+              <span style={lblS}>Bukti transfer (opsional — foto atau PDF)</span>
+              <input ref={buktiRef} type="file" accept="image/*,application/pdf" onChange={(e) => setBukti(e.target.files?.[0] || null)} style={{ fontSize: 12.5, color: "var(--text-2)", width: "100%" }} data-testid="invpay-bukti" />
+              {bukti ? <span style={{ display: "block", fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>📎 {bukti.name}</span> : null}
             </label>
             {err ? <div style={{ color: "#f85149", fontSize: 12.5, marginBottom: 8 }} data-testid="invpay-err">{err}</div> : null}
             <button className="adm-btn adm-btn-gold" onClick={add} disabled={busy} style={{ width: "100%" }} data-testid="invpay-add">{busy ? "Menyimpan…" : "Catat Pembayaran"}</button>
