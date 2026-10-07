@@ -83,7 +83,18 @@ export function printSupplierA4(sup, jobsOverride, noDocOverride, tglOverride) {
   jobs.forEach((j) => { const pid = j.project_id || "_none"; if (!byPid.has(pid)) byPid.set(pid, []); byPid.get(pid).push(j); });
   const pids = [...projOrder.filter((id) => byPid.has(id)), ...[...byPid.keys()].filter((id) => !projOrder.includes(id))];
   const nameOf = (pid) => pid === "_none" ? "Tanpa Grup" : ((projList.find((x) => x.id === pid) || {}).nama || "Grup");
-  const multi = pids.length > 1;
+  // JUDUL GRUP DIIKUTI KE BAWAH: projek yang namanya masih DEFAULT ("Projek 20", "Grup", "Tanpa Grup")
+  // tidak bikin judul sendiri — unitnya ikut judul grup di atasnya. Judul diketik sekali; baris di bawah mengikuti.
+  const isAutoName = (pid) => pid === "_none" || /^\s*(projek|proyek|project|grup)\s*\d*\s*$/i.test(nameOf(pid));
+  const groups = [];
+  pids.forEach((pid) => {
+    const gj = byPid.get(pid);
+    if (groups.length && isAutoName(pid)) groups[groups.length - 1].jobs.push(...gj);
+    else groups.push({ name: nameOf(pid), jobs: [...gj] });
+  });
+  const multi = groups.length > 1;
+  // Satu-satunya grup tapi judulnya diketik (bukan default) → judul tetap tampil di atas barisnya (tanpa subtotal ganda).
+  const showHead = multi || (groups.length === 1 && !isAutoName(pids[0]));
   let idx = 0;
   const rowHtml = (j) => {
     idx++;
@@ -100,13 +111,13 @@ export function printSupplierA4(sup, jobsOverride, noDocOverride, tglOverride) {
       <td class="c"><span class="rp-st ${jl ? "y" : "n"}">${jl ? "Lunas" : "Sisa"}</span></td>
     </tr>`;
   };
-  const body = pids.map((pid) => {
-    const gj = byPid.get(pid);
+  const body = groups.map((g) => {
+    const gj = g.jobs;
     const sH = gj.reduce((s, j) => s + (j.total_harga || 0), 0);
     const sB = gj.reduce((s, j) => s + (j.total_terbayar || 0), 0);
-    const head = multi ? `<tr class="grp"><td colspan="7"><div class="grp-in"><span class="gname">${esc(nameOf(pid))}</span><span class="gunit">${gj.length} UNIT</span></div></td></tr>` : "";
+    const head = showHead ? `<tr class="grp"><td colspan="7"><div class="grp-in"><span class="gname">${esc(g.name)}</span><span class="gunit">${gj.length} UNIT</span></div></td></tr>` : "";
     const rows = gj.map(rowHtml).join("");
-    const sub = multi ? `<tr class="grpsub"><td class="lbl" colspan="3">Subtotal · ${esc(nameOf(pid))}</td><td class="r">${rp(sH)}</td><td class="r">${rp(sB)}</td><td class="r"><b>${rp(sH - sB)}</b></td><td></td></tr>` : "";
+    const sub = multi ? `<tr class="grpsub"><td class="lbl" colspan="3">Subtotal · ${esc(g.name)}</td><td class="r">${rp(sH)}</td><td class="r">${rp(sB)}</td><td class="r"><b>${rp(sH - sB)}</b></td><td></td></tr>` : "";
     return head + rows + sub;
   }).join("");
 
@@ -1312,7 +1323,7 @@ export default function SupplierPage() {
                   <div style={{ padding: "8px 12px", background: "#1a1f2e", border: `1px solid ${C.line}`, borderRadius: 10, marginBottom: 8 }}>
                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                     <div style={{ fontWeight: 800, fontSize: 13, color: C.gold, display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>📁 {g.nama}</span>
+                      <span title="Klik 2x untuk ganti judul" onDoubleClick={() => { if (g.id !== "_none") renameProject(g); }} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: g.id !== "_none" ? "text" : "default" }}>📁 {g.nama}</span>
                       {g.id !== "_none" && (
                         <button onClick={() => renameProject(g)} title="Ganti nama projek" data-testid={`sup-rename-proj-${g.id}`}
                           style={{ background: "none", border: "none", cursor: "pointer", fontSize: 13, padding: "0 2px", lineHeight: 1 }}>✏️</button>
