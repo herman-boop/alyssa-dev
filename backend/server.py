@@ -7939,12 +7939,14 @@ async def delete_selisih_payment(pic_id: str, tagihan_id: str, payment_id: str):
 
 
 @api_router.get("/admin/selisih/{pic_id}/ringkasan")
-async def selisih_ringkasan_data(pic_id: str, pin: str = Query(...)):
+async def selisih_ringkasan_data(pic_id: str, pin: str = Query("")):
     """Data buat kartu Ringkasan Selisih Harga (dirender Chromium headless jadi
-    gambar). PIN lewat query karena cuma dipanggil browser headless internal,
-    sama polanya kayak supplier_ringkasan_data."""
+    gambar/PDF). PIN lewat query karena cuma dipanggil browser headless internal,
+    sama polanya kayak supplier_ringkasan_data. Mode admin TERBUKA (tanpa ADMIN_PIN/ADMIN_LOCK):
+    sama seperti endpoint /admin/* lain, tidak minta PIN — sebelumnya selalu 401 sehingga
+    Download Ringkasan gagal di mode terbuka."""
     expected = (os.environ.get("ADMIN_PIN") or "").strip()
-    if not expected or pin.strip() != expected:
+    if not _admin_is_open() and (not expected or (pin or "").strip() != expected):
         raise HTTPException(401, "Invalid PIN")
     doc = await db.selisih_profiles.find_one({"id": pic_id}, {"_id": 0})
     if not doc:
@@ -7958,7 +7960,7 @@ async def selisih_ringkasan_data(pic_id: str, pin: str = Query(...)):
 
 
 @api_router.get("/admin/selisih/{pic_id}/ringkasan/image", dependencies=[Depends(require_admin_pin)])
-async def selisih_ringkasan_image(pic_id: str, x_admin_pin: str = Header(..., alias="X-Admin-Pin")):
+async def selisih_ringkasan_image(pic_id: str, x_admin_pin: str = Header("", alias="X-Admin-Pin")):
     """Render kartu Ringkasan Selisih Harga jadi PNG lewat Chromium headless --
     sama pola kayak supplier_ringkasan_image."""
     doc = await db.selisih_profiles.find_one({"id": pic_id}, {"_id": 0})
@@ -8000,7 +8002,7 @@ async def selisih_ringkasan_image(pic_id: str, x_admin_pin: str = Header(..., al
 
 
 @api_router.get("/admin/selisih/{pic_id}/ringkasan/pdf", dependencies=[Depends(require_admin_pin)])
-async def selisih_ringkasan_pdf(pic_id: str, x_admin_pin: str = Header(..., alias="X-Admin-Pin")):
+async def selisih_ringkasan_pdf(pic_id: str, x_admin_pin: str = Header("", alias="X-Admin-Pin")):
     """Render Ringkasan Selisih Harga jadi PDF A4 (paginasi rapi, teks vektor) --
     kaya laporan lain (Penawaran/Supplier), bukan PNG panjang."""
     doc = await db.selisih_profiles.find_one({"id": pic_id}, {"_id": 0})

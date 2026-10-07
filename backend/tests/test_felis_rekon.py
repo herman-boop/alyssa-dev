@@ -1325,8 +1325,46 @@ async def test_riwayat_clear():
     ok(got == 404, "supplier tak ada → 404")
 
 
+async def test_selisih_ringkasan_auth():
+    """Download Ringkasan Selisih: data endpoint tidak lagi selalu 401 di mode admin TERBUKA;
+    mode terkunci tetap wajib PIN yang cocok. Kode ASLI server.py (AST)."""
+    print("test_selisih_ringkasan_auth")
+    import ast, typing
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "server.py"), encoding="utf-8").read()
+    want = {"_admin_locked", "_admin_is_open", "selisih_ringkasan_data"}
+    code = "\n".join(ast.get_source_segment(src, n) for n in ast.parse(src).body
+                     if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in want)
+    class _HTTP(Exception):
+        def __init__(self, status_code, detail=""): self.status_code = status_code; self.detail = detail
+    class _DB: pass
+    d = _DB(); d.selisih_profiles = FakeColl()
+    await d.selisih_profiles.insert_one({"id": "P1", "nama": "RACHMAT", "tagihan": [{"id": "T1", "items": []}]})
+    ns = {"os": os, "db": d, "HTTPException": _HTTP, "Optional": typing.Optional, "Query": lambda *a, **k: None, "Header": lambda *a, **k: None,
+          "_selisih_tagihan_totals": lambda t: {**t, "total_selisih": 0, "total_terbayar": 0, "sisa": 0}}
+    exec(code, ns)
+    fn = ns["selisih_ringkasan_data"]
+    saved = {k: os.environ.get(k) for k in ("ADMIN_LOCK", "ADMIN_PIN")}
+    async def call(pin):
+        try:
+            return (await fn("P1", pin))["nama"]
+        except _HTTP as e:
+            return e.status_code
+    try:
+        os.environ.pop("ADMIN_LOCK", None); os.environ.pop("ADMIN_PIN", None)
+        ok(await call("") == "RACHMAT", "mode terbuka (tanpa PIN & tanpa lock): data ringkasan terbaca (sebelumnya 401)")
+        os.environ["ADMIN_PIN"] = "1234"
+        ok(await call("") == "RACHMAT", "ADMIN_PIN ada tapi ADMIN_LOCK mati (terbuka): tetap terbaca")
+        os.environ["ADMIN_LOCK"] = "1"
+        ok(await call("") == 401 and await call("0000") == 401, "terkunci: PIN kosong/salah → 401")
+        ok(await call("1234") == "RACHMAT", "terkunci: PIN benar → terbaca")
+    finally:
+        for k, v in saved.items():
+            if v is None: os.environ.pop(k, None)
+            else: os.environ[k] = v
+
+
 async def main():
-    for t in (test_riwayat_clear, test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
+    for t in (test_selisih_ringkasan_auth, test_riwayat_clear, test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,
