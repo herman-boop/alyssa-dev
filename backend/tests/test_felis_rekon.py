@@ -1126,8 +1126,36 @@ async def test_tembak_rekon_ke_unit_terpilih():
         ok(got == code_, f"error {code_} untuk input tidak valid")
 
 
+async def test_vendor_pay_rute_override():
+    """Catat Pembayaran: asal/tujuan leg bisa diubah dari rute trip. Kosong → pakai rute trip.
+    Kode ASLI _add_trip_supplier_job (AST) dengan helper di-stub."""
+    print("test_vendor_pay_rute_override")
+    import ast, re as _re, typing
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "server.py"), encoding="utf-8").read()
+    node = next(n for n in ast.parse(src).body if isinstance(n, ast.AsyncFunctionDef) and n.name == "_add_trip_supplier_job")
+    code = ast.get_source_segment(src, node)
+    class _DB: pass
+    d = _DB(); d.supplier_profiles = FakeColl()
+    await d.supplier_profiles.insert_one({"id": "S1", "nama": "FABLI", "jobs": []})
+    async def _ensure(sup): return sup
+    async def _ctx(trip): return {"vehicle_type": "Avanza", "nopol": "B1737DOI", "no_rangka": "", "asal_kota": "LUWUK", "tujuan_kota": "JAKARTA",
+                                  "trip_id": "T1", "order_id": "O1", "customer_id": "C1", "customer_nama": "PT X"}
+    ns = {"db": d, "re": _re, "Optional": typing.Optional, "HTTPException": Exception, "_ensure_supplier_projects": _ensure,
+          "_get_or_create_active_project": lambda sup: ("P1", []), "_gen_supplier_id": lambda: "J1", "today_wib": lambda: "2026-10-07",
+          "_trip_auto_context": _ctx, "_find_or_create_supplier": None}
+    exec(code, ns)
+    fn = ns["_add_trip_supplier_job"]
+    r = await fn({"trip_id": "T1"}, supplier_id="S1", kategori="Driver", jumlah=1000)
+    ok(r["job"]["asal_kota"] == "LUWUK" and r["job"]["tujuan_kota"] == "JAKARTA", "tanpa override → rute trip")
+    ns["_gen_supplier_id"] = lambda: "J2"
+    r = await fn({"trip_id": "T1"}, supplier_id="S1", kategori="Driver", jumlah=1000, asal_kota="  Makassar ", tujuan_kota="")
+    ok(r["job"]["asal_kota"] == "Makassar" and r["job"]["tujuan_kota"] == "JAKARTA", "asal diubah (di-trim), tujuan kosong → tetap rute trip")
+    r = await fn({"trip_id": "T1"}, supplier_id="S1", kategori="Driver", jumlah=1000, asal_kota="Luwuk", tujuan_kota="Palu")
+    ok(r["job"]["asal_kota"] == "Luwuk" and r["job"]["tujuan_kota"] == "Palu", "kedua kota bisa diubah (leg ≠ rute penuh)")
+
+
 async def main():
-    for t in (test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
+    for t in (test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,

@@ -4472,9 +4472,10 @@ async def _trip_auto_context(trip: dict) -> dict:
 async def _add_trip_supplier_job(trip: dict, *, vendor_name=None, supplier_id=None,
                                  kategori="Lainnya", jumlah=0, tanggal=None,
                                  jatuh_tempo=None, no_invoice_vendor=None, catatan="",
-                                 route_leg_id=None) -> dict:
+                                 route_leg_id=None, asal_kota=None, tujuan_kota=None) -> dict:
     """Tulis 1 biaya vendor sebagai supplier job, di-tag ke trip. Kendaraan/
-    rute/customer diisi otomatis dari trip — bukan input ulang."""
+    rute/customer diisi otomatis dari trip — bukan input ulang. `asal_kota`/`tujuan_kota`
+    (opsional) menimpa rute trip: leg yang dikerjakan/dibayar bisa beda dari rute penuh."""
     if supplier_id:
         sup = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
         if not sup:
@@ -4499,8 +4500,8 @@ async def _add_trip_supplier_job(trip: dict, *, vendor_name=None, supplier_id=No
         "vehicle_type": ctx["vehicle_type"],
         "nopol": ctx["nopol"],
         "no_rangka": ctx["no_rangka"],
-        "asal_kota": ctx["asal_kota"],
-        "tujuan_kota": ctx["tujuan_kota"],
+        "asal_kota": (asal_kota or "").strip()[:80] or ctx["asal_kota"],
+        "tujuan_kota": (tujuan_kota or "").strip()[:80] or ctx["tujuan_kota"],
         "total_harga": int(jumlah),
         "catatan": (catatan or "").strip(),
         "tanggal": tgl,
@@ -4786,7 +4787,7 @@ async def vendor_mobile_trips(q: Optional[str] = None, limit: int = 25):
         out.append({
             "trip_id": t.get("trip_id"), "nopol": nopol,
             "vehicle": ctx.get("vehicle_type") or "", "customer": cust,
-            "rute": _rute_str(asal, tuj),
+            "rute": _rute_str(asal, tuj), "asal": asal, "tujuan": tuj,
         })
         if len(out) >= limit:
             break
@@ -4852,6 +4853,8 @@ async def vendor_mobile_pay(
     job_id: Optional[str] = Form(None),
     trip_id: Optional[str] = Form(None),
     kategori: str = Form("Lainnya"),
+    asal_kota: Optional[str] = Form(None),
+    tujuan_kota: Optional[str] = Form(None),
     bukti: Optional[UploadFile] = File(None),
 ):
     """Catat 1 pembayaran vendor. Dua mode:
@@ -4875,6 +4878,7 @@ async def vendor_mobile_pay(
         res = await _add_trip_supplier_job(
             trip, vendor_name=vendor_name, supplier_id=supplier_id,
             kategori=kategori, jumlah=int(amount), tanggal=tanggal, catatan=catatan,
+            asal_kota=asal_kota, tujuan_kota=tujuan_kota,
         )
         target_sid, target_jid = res["supplier_id"], res["job"]["id"]
 
