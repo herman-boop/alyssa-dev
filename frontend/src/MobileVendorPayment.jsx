@@ -801,7 +801,25 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
   }, []); // eslint-disable-line
   useEffect(() => { if (mode === "list") load(); }, [mode, load]);
 
-  const openVendor = (v) => { setVendor(v); setSel({}); setMode("detail"); };
+  // Centangan PO diingat per vendor (tahan refresh/tutup tab) — tidak perlu klik 19 unit lagi.
+  const SEL_KEY = (sid) => `vp-sel-${sid}`;
+  const readSel = (v) => {
+    try {
+      const ids = JSON.parse(localStorage.getItem(SEL_KEY(v.supplier_id)) || "[]");
+      const ok = new Set((v.jobs || []).filter((j) => (j.sisa || 0) > 0).map((j) => j.job_id));
+      const out = {}; (Array.isArray(ids) ? ids : []).forEach((id) => { if (ok.has(id)) out[id] = true; });
+      return out;
+    } catch (_) { return {}; }
+  };
+  const openVendor = (v) => { setVendor(v); setSel(readSel(v)); setMode("detail"); };
+  useEffect(() => {
+    if (!vendor || mode !== "detail") return;
+    try {
+      const ids = Object.keys(sel).filter((k) => sel[k]);
+      if (ids.length) localStorage.setItem(SEL_KEY(vendor.supplier_id), JSON.stringify(ids));
+      else localStorage.removeItem(SEL_KEY(vendor.supplier_id));
+    } catch (_) { /* storage diblokir: abaikan */ }
+  }, [sel, vendor, mode]); // eslint-disable-line
   const payableJobs = (vendor?.jobs || []).filter((j) => (j.sisa || 0) > 0);
   const selJobs = payableJobs.filter((j) => sel[j.job_id]);
   const totalSel = selJobs.reduce((a, j) => a + (j.sisa || 0), 0);
