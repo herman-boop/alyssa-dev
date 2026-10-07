@@ -1079,8 +1079,55 @@ async def test_vendor_trip_search_fast():
     ok((await ns["vendor_mobile_trips"](q="tidakada"))["items"] == [], "tak cocok → kosong")
 
 
+async def test_tembak_rekon_ke_unit_terpilih():
+    """Tembak Rekon dari Rekap: pembayaran dibagi HANYA ke unit yang dicentang (pintar), unit
+    yang sudah lunas dilewati, alokasi ke unit lain tak tersentuh. Kode ASLI endpoint (AST)."""
+    print("test_tembak_rekon_ke_unit_terpilih")
+    import ast, typing
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "server.py"), encoding="utf-8").read()
+    node = next(n for n in ast.parse(src).body if isinstance(n, ast.AsyncFunctionDef) and n.name == "rekon_tembak_to_units")
+    code = ast.get_source_segment(src, node)
+    class _HTTP(Exception):
+        def __init__(self, status_code, detail=""): self.status_code = status_code; self.detail = detail
+    class _DB: pass
+    d = _DB(); d.supplier_profiles = FakeColl()
+    # 19 unit terpilih (faktur pas 57,5jt) + unit lain; unit "L0" sudah lunas (sisa 0)
+    A = [7500000, 2400000, 2500000, 3000000, 7500000, 2500000, 4500000, 2400000, 250000, 2700000, 1500000, 3000000, 1000000, 3200000, 3700000]
+    jobs = [{"id": f"A{i}"} for i in range(15)] + [{"id": "B0"}, {"id": "C0"}, {"id": "D0"}, {"id": "E0"}, {"id": "L0"}, {"id": "X0"}]
+    rows = [(f"A{i}", v, "PA") for i, v in enumerate(A)] + [("B0", 250000, "PB"), ("C0", 2500000, "PC"), ("D0", 3700000, "PD"), ("E0", 3400000, "PE"), ("L0", 0, "PL"), ("X0", 9000000, "PX")]
+    await d.supplier_profiles.insert_one({"id": "S1", "jobs": jobs, "rekon_payments": [
+        {"id": "RP1", "amount": 57500000, "allocations": [{"job_id": "X0", "amount": 100000}]},
+        {"id": "RPR", "amount": 1, "status": "reversed"}]})
+    ns = {"db": d, "rekon_sync": R, "HTTPException": _HTTP, "Body": lambda *a, **k: None, "Dict": typing.Dict, "Any": typing.Any,
+          "_rekon_job_rows": lambda sup, own=None: rows, "Optional": typing.Optional}
+    exec(code, ns)
+    fn = ns["rekon_tembak_to_units"]
+    chosen = [f"A{i}" for i in range(15)] + ["B0", "C0", "D0", "E0"]
+    # alokasi lama ke X0 (100rb) ikut mengurangi ruang → total harus muat
+    r = await fn("S1", "RP1", {"job_ids": chosen})
+    pay = (await d.supplier_profiles.find_one({"id": "S1"}))["rekon_payments"][0]
+    ids = {a["job_id"] for a in pay["allocations"]}
+    ok(r["ok"] and r["allocated"] + 100000 <= 57500000, "total (alokasi baru + yang dipertahankan) ≤ nominal")
+    ok("X0" in ids and any(a["job_id"] == "X0" and a["amount"] == 100000 for a in pay["allocations"]), "alokasi ke unit LAIN (X0) dipertahankan")
+    ok(all(i in chosen or i == "X0" for i in ids), "alokasi baru hanya ke unit yang dicentang")
+    ok("L0" not in ids, "unit sudah lunas dilewati")
+    # tanpa alokasi lama → faktur pas
+    await d.supplier_profiles.update_one({"id": "S1"}, {"$set": {"rekon_payments": [{"id": "RP1", "amount": 57500000}, {"id": "RPR", "amount": 1, "status": "reversed"}]}})
+    r = await fn("S1", "RP1", {"job_ids": chosen})
+    ok(r["method"] == "faktur_pas" and r["units"] == 19 and r["allocated"] == 57500000 and r["unallocated"] == 0, "57,5jt → 19 unit terpilih, pas, tanpa sisa")
+    # semua terpilih sudah lunas
+    r = await fn("S1", "RP1", {"job_ids": ["L0"]})
+    ok(r["allocated"] == 0 and r["method"] == "kosong", "unit terpilih sudah lunas → tidak ada yang dialokasikan, ada catatan")
+    for bad, code_ in ((("S1", "RP1", {"job_ids": []}), 400), (("S1", "RPR", {"job_ids": ["A0"]}), 400), (("S1", "ZZ", {"job_ids": ["A0"]}), 404), (("NOPE", "RP1", {"job_ids": ["A0"]}), 404)):
+        try:
+            await fn(*bad); got = None
+        except _HTTP as e:
+            got = e.status_code
+        ok(got == code_, f"error {code_} untuk input tidak valid")
+
+
 async def main():
-    for t in (test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
+    for t in (test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,

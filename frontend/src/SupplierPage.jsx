@@ -908,6 +908,22 @@ export default function SupplierPage() {
       flash("✓ Dipulihkan — sekarang alokasikan ulang");
     } catch (e) { flash(e?.response?.data?.detail || "Gagal memulihkan"); }
   };
+  // 🎯 Tembak Rekon: bagikan 1 pembayaran Rekon ke UNIT YANG DICENTANG di Rekap (pembagian pintar),
+  // lalu PDF Ringkasan langsung memuatnya. Tidak menghapus/ubah pembayaran manual.
+  const [tembakBusy, setTembakBusy] = useState("");
+  const tembakRekon = async (p) => {
+    const ids = chosenJobs().map((j) => j.id);
+    if (!ids.length) { flash("Centang minimal 1 unit dulu"); return; }
+    setTembakBusy(p.id);
+    try {
+      const { data } = await axios.post(`${API}/admin/suppliers/${selected.id}/rekon-payments/${p.id}/tembak`, { job_ids: ids }, { headers });
+      await reloadSelected(selected.id); setListRefreshTick((t) => t + 1);
+      flash(data.allocated > 0
+        ? `✓ ${fRp(data.allocated)} masuk ke ${data.units} unit${data.unallocated ? ` · sisa ${fRp(data.unallocated)} belum dialokasikan` : ""}`
+        : (data.note || "Tidak ada unit yang bisa dibayar"));
+    } catch (e) { flash(e?.response?.data?.detail || "Gagal tembak rekon"); }
+    finally { setTembakBusy(""); }
+  };
   const saveAlloc = async () => {
     if (!allocPay) return;
     const rows = allocRows.filter((r) => r.job_id && pNum(r.amount) > 0).map((r) => ({ job_id: r.job_id, amount: pNum(r.amount) }));
@@ -1568,6 +1584,22 @@ export default function SupplierPage() {
                     <option key={p.id} value={p.id}>📁 {p.nama}</option>
                   ))}
                 </select>
+              </div>
+            )}
+            {(selected.rekon_payments || []).length > 0 && (
+              <div style={{ background: "#1a1408", border: `1px solid ${C.gold}`, borderRadius: 12, padding: 10 }} data-testid="sup-rekap-tembak">
+                <div style={{ fontSize: 12.5, fontWeight: 800, color: C.gold, marginBottom: 6 }}>🎯 Tembak Rekon ke {chosenJobs().length} unit yang dicentang</div>
+                {selected.rekon_payments.map((p) => (
+                  <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "7px 0", borderTop: `1px solid ${C.line}`, flexWrap: "wrap" }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 800 }}>{fRp(p.amount)} <span style={{ fontSize: 10.5, fontWeight: 600, color: p.alloc_status === "allocated" ? C.green : C.gold }}>· {p.alloc_status === "allocated" ? "Dialokasikan" : p.alloc_status === "partial" ? `Sebagian · sisa ${fRp(p.unallocated)}` : "Belum dialokasikan"}</span></div>
+                      <div style={{ fontSize: 10.5, color: C.mute }}>{fDate(p.tanggal)}{p.catatan ? ` · ${p.catatan}` : ""}</div>
+                    </div>
+                    <button style={{ ...BTN, padding: "6px 12px", background: C.gold, borderColor: C.gold, color: "#111" }} disabled={!!tembakBusy}
+                      onClick={() => tembakRekon(p)} data-testid={`sup-rekap-tembak-${p.id}`}>{tembakBusy === p.id ? "…" : "🎯 Tembak"}</button>
+                  </div>
+                ))}
+                <div style={{ fontSize: 10.5, color: C.mute, marginTop: 6 }}>Nominal dicocokkan ke faktur/unit yang pas (kalau tidak ada → berurutan), hanya ke unit yang dicentang di bawah. Setelah itu langsung 🖨️ Cetak.</div>
               </div>
             )}
             {/* Pilih unit yang mau dicetak — centang berapa aja */}
