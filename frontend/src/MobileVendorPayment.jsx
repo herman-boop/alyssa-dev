@@ -10,6 +10,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import axios from "axios";
 import { printSupplierA4, supplierAutoDocNo } from "./SupplierPage";
+import { printRekonReport } from "./rekonReport";
 
 const API = (process.env.REACT_APP_BACKEND_URL || "") + "/api";
 const PIN_KEY = "vp_pin";
@@ -940,12 +941,12 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
     setTbBusy(p.id); setTbMsg("");
     try {
       const { data } = await axios.post(`${API}/admin/suppliers/${vendor.supplier_id}/rekon-payments/${p.id}/tembak`, { job_ids: tbIds }, { headers });
-      const doc = await loadTbSup();
+      await loadTbSup();
       setTbDone(data.allocated > 0);
       setTbMsg(data.allocated > 0
         ? `✓ ${fmtRp(data.allocated)} masuk ke ${data.units} PO${data.unallocated ? ` · sisa ${fmtRp(data.unallocated)} belum dialokasikan` : ""}${data.note ? ` — ${data.note}` : ""}`
         : (data.note || "Tidak ada PO yang bisa dibayar"));
-      if (data.allocated > 0) cetakTembak(doc);
+      if (data.allocated > 0) setTbMsg((m) => `${m} — tap 📄 PDF Rekonsiliasi untuk laporan gabungan`);
     } catch (e) { setTbMsg(e?.response?.data?.detail || "Gagal tembak rekon"); }
     finally { setTbBusy(""); }
   };
@@ -975,13 +976,20 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
     } catch (e) { setTbMsg(e?.response?.data?.detail || "Gagal memulihkan rekon"); }
     finally { setTbBusy(""); }
   };
+  // 📄 PDF Rekonsiliasi: SATU laporan gabungan untuk seluruh PO terpilih + semua transaksi bank terkait.
+  // Hanya membaca data tersimpan (tidak membuat/mengubah pembayaran maupun alokasi).
   const cetakTembak = (docArg) => {
     const doc = (docArg && docArg.jobs) ? docArg : tbSup;
     if (!doc) return;
+    if (!(doc.jobs || []).some((j) => tbIds.includes(j.id))) { flash("PO tidak ditemukan"); return; }
+    printRekonReport(doc, tbIds);
+  };
+  const cetakRingkasanLama = () => {
+    if (!tbSup) return;
     const ids = new Set(tbIds);
-    const jobs = (doc.jobs || []).filter((j) => ids.has(j.id));
+    const jobs = (tbSup.jobs || []).filter((j) => ids.has(j.id));
     if (!jobs.length) { flash("PO tidak ditemukan"); return; }
-    printSupplierA4(doc, jobs, supplierAutoDocNo(), "");
+    printSupplierA4(tbSup, jobs, supplierAutoDocNo(), "");
   };
   const closeTembak = () => { setTbOpen(false); if (tbDone) { setMode("list"); } };
 
@@ -1134,7 +1142,7 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
               </div>
               <div className="vp-card-rute">{p.tanggal || ""}{p.catatan ? ` · ${p.catatan}` : ""}</div>
               <button className="vp-btn vp-btn-primary" style={{ marginTop: 8 }} disabled={!!tbBusy} onClick={() => doTembak(p)} data-testid={`vp-tembak-${p.id}`}>
-                {tbBusy === p.id ? "Menembak…" : "🎯 Tembak + Buka PDF"}
+                {tbBusy === p.id ? "Menembak…" : "🎯 Tembak transaksi ini"}
               </button>
             </div>
           ))}
@@ -1201,7 +1209,8 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
           )}
           {tbMsg && <div className="vp-hint" style={{ margin: "8px 0", fontWeight: 700 }}>{tbMsg}</div>}
           {tbSup && <button className="vp-btn vp-btn-ghost" style={{ marginBottom: 8 }} disabled={!!tbBusy} onClick={pisahManual} data-testid="vp-pisah-faktur">{tbBusy === "PISAH" ? "Memisahkan…" : `📑 Pisahkan ${tbIds.length} PO jadi Faktur baru`}</button>}
-          {tbSup && <button className="vp-btn vp-btn-ghost" onClick={() => cetakTembak()} data-testid="vp-tembak-cetak">🖨️ Cetak A4 ({tbIds.length} PO)</button>}
+          {tbSup && <button className="vp-btn vp-btn-primary" style={{ marginBottom: 8 }} onClick={() => cetakTembak()} data-testid="vp-rekon-pdf">📄 PDF Rekonsiliasi ({tbIds.length} PO)</button>}
+          {tbSup && <button className="vp-btn vp-btn-ghost" onClick={cetakRingkasanLama} data-testid="vp-tembak-cetak">Ringkasan Supplier (format lama)</button>}
           <div className="vp-hint" style={{ marginTop: 8 }}>Nominal dicocokkan ke faktur/PO yang pas (kalau tidak ada → berurutan), hanya ke PO yang dicentang.</div>
         </BottomSheet>
       </div>
