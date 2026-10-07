@@ -1154,8 +1154,35 @@ async def test_vendor_pay_rute_override():
     ok(r["job"]["asal_kota"] == "Luwuk" and r["job"]["tujuan_kota"] == "Palu", "kedua kota bisa diubah (leg ≠ rute penuh)")
 
 
+async def test_rekon_other_payments():
+    """Daftar rekon aktif di vendor LAIN (read-only) buat sheet Tembak Rekon; pindah lewat
+    apply_correction (sudah diuji). Kode ASLI endpoint (AST)."""
+    print("test_rekon_other_payments")
+    import ast, typing
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "server.py"), encoding="utf-8").read()
+    node = next(n for n in ast.parse(src).body if isinstance(n, ast.AsyncFunctionDef) and n.name == "rekon_other_payments")
+    code = ast.get_source_segment(src, node)
+    class _DB: pass
+    d = _DB(); d.supplier_profiles = FakeColl()
+    await d.supplier_profiles.insert_one({"id": "M", "nama": "MARTHEN", "rekon_payments": []})
+    await d.supplier_profiles.insert_one({"id": "T", "nama": "Ahmad Taupiq", "rekon_payments": [
+        {"id": "p1", "amount": 57500000, "tanggal": "2026-10-05", "bank_transaction_id": "B1", "allocations": [{"job_id": "x", "amount": 1000000}]},
+        {"id": "p2", "amount": 1000, "tanggal": "2026-09-01", "bank_transaction_id": "B2", "status": "reversed"}]})
+    await d.supplier_profiles.insert_one({"id": "Z", "nama": "Z", "rekon_payments": [{"id": "p3", "amount": 5, "tanggal": "2026-10-06", "bank_transaction_id": "B3"}]})
+    orig = d.supplier_profiles.find
+    d.supplier_profiles.find = lambda f=None, proj=None: orig({})   # fake tak paham "rekon_payments.0"
+    ns = {"db": d, "Optional": typing.Optional}
+    exec(code, ns)
+    r = (await ns["rekon_other_payments"](exclude_supplier_id="M"))["items"]
+    ok([x["id"] for x in r] == ["p3", "p1"], "aktif di vendor lain saja, terbaru dulu, reversed tak ikut")
+    p1 = next(x for x in r if x["id"] == "p1")
+    ok(p1["supplier_nama"] == "Ahmad Taupiq" and p1["alloc_status"] == "partial" and p1["allocated"] == 1000000, "nama vendor & status alokasi benar")
+    r2 = (await ns["rekon_other_payments"](exclude_supplier_id="T"))["items"]
+    ok([x["id"] for x in r2] == ["p3"], "vendor yang dikecualikan tidak ikut")
+
+
 async def main():
-    for t in (test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
+    for t in (test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,
