@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import axios from "axios";
+import { printSelisihA4 } from "./selisihReport";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "";
 const API = `${BACKEND_URL}/api`;
@@ -319,12 +320,17 @@ export default function SelisihPage() {
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       flash("Ringkasan PDF A4 diunduh — siap dikirim / dicetak");
-    } catch (e) { flash("Gagal buat ringkasan, coba lagi"); }
+    } catch (e) {
+      // responseType blob → pesan error server ada di dalam blob JSON; tampilkan apa adanya supaya penyebabnya jelas
+      let detail = "";
+      try { const t = await e?.response?.data?.text?.(); detail = JSON.parse(t || "{}").detail || ""; } catch (_) { /* abaikan */ }
+      flash(`Gagal buat ringkasan: ${detail || e?.message || "coba lagi"} — pakai 🖨️ Cetak A4 sebagai alternatif`);
+    }
     finally { setRingkasanBusy(false); }
   };
 
   return (
-    <div style={{ maxWidth: 900, margin: "12px auto 0", padding: "0 16px 40px" }}>
+    <div style={{ maxWidth: 900, margin: "12px auto 0", padding: "0 16px 40px", color: "#e6edf3" }}>
       <div style={{ background: "#161b22", border: "1px solid #21262d", borderRadius: 12, padding: 18, marginBottom: 16 }}>
         <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 4 }}>📊 Selisih Harga</div>
         <div style={{ fontSize: 12, color: "#8b949e", marginBottom: 14 }}>
@@ -366,6 +372,9 @@ export default function SelisihPage() {
               <div style={{ fontWeight: 800, fontSize: 16 }}>{selected.nama}</div>
               <div style={{ fontSize: 11, color: "#8b949e" }}>PIC Purchasing {selected.no_hp && `· ${selected.no_hp}`}</div>
               <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                <button style={{ ...BTN, fontSize: 11, padding: "6px 12px" }} onClick={() => printSelisihA4(selected)} data-testid="sel-a4-print">
+                  🖨️ Cetak A4
+                </button>
                 <button style={{ ...BTN_GHOST, fontSize: 11, padding: "6px 12px" }} onClick={downloadRingkasan} disabled={ringkasanBusy} data-testid="sel-ringkasan-download">
                   {ringkasanBusy ? "⏳ Membuat..." : "📄 Download Ringkasan"}
                 </button>
