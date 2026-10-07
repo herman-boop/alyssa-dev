@@ -416,19 +416,36 @@ function FormScreen({ boot, headers, onBack, setLoading, flash, onSuccess, prefi
   const [confirm, setConfirm] = useState(false);
   const fileRef = useRef();
 
-  // Cari trip (debounce)
+  // Cari trip: daftar trip terbaru di-load sekali (langsung tampil & difilter instan
+  // saat ngetik), server dicari paralel (debounce pendek) buat trip yang lebih lama.
+  const normCari = (x) => String(x || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const [tripRecent, setTripRecent] = useState([]);
+  useEffect(() => {
+    if (isPrefill) return;
+    let alive = true;
+    axios.get(`${API}/vendor-mobile/trips`, { headers, params: { limit: 50 } })
+      .then((r) => { if (alive) setTripRecent(r.data.items || []); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []); // eslint-disable-line
+  const tripLocal = (q) => {
+    const n = normCari(q);
+    return tripRecent.filter((t) =>
+      normCari(`${t.trip_id} ${t.nopol} ${t.customer} ${t.rute}`).includes(n)).slice(0, 25);
+  };
   useEffect(() => {
     if (isPrefill) return;
     const q = tripQ.trim();
-    if (q.length < 1) { setTripResults([]); return; }
+    if (!q) { setTripResults([]); setTripSearching(false); return; }
+    setTripResults(tripLocal(q));   // instan dari daftar terbaru
     let alive = true; setTripSearching(true);
     const t = setTimeout(async () => {
       try {
         const r = await axios.get(`${API}/vendor-mobile/trips`, { headers, params: { q } });
         if (alive) setTripResults(r.data.items || []);
-      } catch { if (alive) setTripResults([]); }
+      } catch { /* biarin hasil lokal */ }
       finally { if (alive) setTripSearching(false); }
-    }, 350);
+    }, 120);
     return () => { alive = false; clearTimeout(t); };
   }, [tripQ]); // eslint-disable-line
 
@@ -497,8 +514,9 @@ function FormScreen({ boot, headers, onBack, setLoading, flash, onSuccess, prefi
           ) : (
             <>
               <input className="vp-input" inputMode="search" placeholder="Ketik nopol / trip / customer…"
-                value={tripQ} onChange={(e) => setTripQ(e.target.value)} />
-              {tripSearching && <div className="vp-hint">Mencari…</div>}
+                value={tripQ} onChange={(e) => setTripQ(e.target.value)}
+                onFocus={() => { if (!tripQ.trim() && tripRecent.length) setTripResults(tripRecent.slice(0, 10)); }} />
+              {tripSearching && tripResults.length === 0 && <div className="vp-hint">Mencari…</div>}
               {tripResults.length > 0 && (
                 <div className="vp-results">
                   {tripResults.map((t) => (

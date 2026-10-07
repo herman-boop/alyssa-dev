@@ -37,6 +37,9 @@ class FakeCursor:
         self._docs = self._docs[:n]
         return self
 
+    async def to_list(self, n=None):
+        return list(self._docs[:n] if n else self._docs)
+
     def __aiter__(self):
         async def gen():
             for d in self._docs:
@@ -1037,8 +1040,47 @@ async def test_invoice_payments():
     ok(IP.find_payment([p1, p2], p2["id"]) is p2 and IP.find_payment([p1], "x") is None and IP.find_payment(None, "x") is None, "find_payment")
 
 
+async def test_vendor_trip_search_fast():
+    """Pencarian trip di 'Catat Bayar Vendor': 1 query trip + 1 query order (tidak N+1),
+    nopol cocok walau beda spasi/huruf, kosong = trip terbaru. Kode ASLI server.py (AST)."""
+    print("test_vendor_trip_search_fast")
+    import ast, re as _re, typing
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "server.py"), encoding="utf-8").read()
+    want = {"_route_split", "_rute_str", "_trip_ctx_from", "_norm_cari", "vendor_mobile_trips"}
+    code = "\n".join(ast.get_source_segment(src, n) for n in ast.parse(src).body
+                     if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in want)
+    code = code.replace('@api_router.get("/vendor-mobile/trips", dependencies=[Depends(require_vendor_pin)])\n', "")
+
+    class _DB:
+        pass
+    d = _DB(); d.trips = FakeColl(); d.orders = FakeColl()
+    ns = {"re": _re, "Optional": typing.Optional, "db": d}
+    exec(code, ns)
+    calls = {"find_one": 0}
+    orig = d.orders.find_one
+    async def counting(*a, **k):
+        calls["find_one"] += 1
+        return await orig(*a, **k)
+    d.orders.find_one = counting
+    await d.trips.insert_one({"trip_id": "T1", "nopol": "", "route": "Jakarta-Makassar", "created_at": "2026-10-01"})
+    await d.trips.insert_one({"trip_id": "T2", "nopol": "D 55 XY", "route": "Surabaya-Ternate", "created_at": "2026-10-02",
+                              "customer_data": {"nama": "CV Trans Mandiri"}})
+    await d.orders.insert_one({"trip_id": "T1", "order_id": "O1", "nopol": "b1737kyz", "vehicle_type": "Terios",
+                               "customer_nama": "PT Maju", "asal_kota": "Jakarta", "tujuan_kota": "Makassar"})
+    r = (await ns["vendor_mobile_trips"](q="B 1737"))["items"]
+    ok(len(r) == 1 and r[0]["trip_id"] == "T1" and r[0]["nopol"] == "B1737KYZ", "nopol dari PO ketemu walau beda spasi/huruf")
+    ok(r[0]["vehicle"] == "Terios" and r[0]["customer"] == "PT Maju", "tipe unit & customer dari PO ikut")
+    r = (await ns["vendor_mobile_trips"](q="trans mandiri"))["items"]
+    ok(len(r) == 1 and r[0]["trip_id"] == "T2", "cari by customer dari trip tanpa PO")
+    r = (await ns["vendor_mobile_trips"](q=""))["items"]
+    ok([x["trip_id"] for x in r] == ["T1", "T2"] or [x["trip_id"] for x in r] == ["T2", "T1"], "kosong → daftar trip (terbaru) tampil")
+    ok(len((await ns["vendor_mobile_trips"](q="", limit=1))["items"]) == 1, "limit dihormati")
+    ok(calls["find_one"] == 0, "tidak ada query order per-trip (bukan N+1)")
+    ok((await ns["vendor_mobile_trips"](q="tidakada"))["items"] == [], "tak cocok → kosong")
+
+
 async def main():
-    for t in (test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
+    for t in (test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,
