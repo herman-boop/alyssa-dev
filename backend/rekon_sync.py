@@ -475,6 +475,12 @@ def plan_tembak_semua(rows, payments, chosen_ids, release_fee=True):
     new = [dict(p) for p in (payments or [])]
     targets = [p for p in new if p.get("status") != "reversed" and not is_bank_fee(p) and _to_int(p.get("amount")) > 0]
     targets.sort(key=lambda p: str(p.get("tanggal") or ""))
+    # Dampak: alokasi LAMA ke unit di LUAR centang akan dilepas (diganti total).
+    other_jobs, other_amount = set(), 0
+    for p in targets:
+        for a in (p.get("allocations") or []):
+            if a.get("job_id") and a.get("job_id") not in chosen:
+                other_jobs.add(a["job_id"]); other_amount += _to_int(a.get("amount"))
     per, total_alloc, total_amount = [], 0, 0
     for p in targets:
         amt = _to_int(p.get("amount"))
@@ -492,6 +498,9 @@ def plan_tembak_semua(rows, payments, chosen_ids, release_fee=True):
             if p.get("status") != "reversed" and is_bank_fee(p) and (p.get("allocations") or []):
                 p["allocations"] = []; released += 1
     return new, {"payments": per, "allocated": total_alloc, "amount": total_amount,
+                 "open_units": [{"job_id": j, "sisa": v} for j, v in remaining.items() if v > 0],
+                 "units_total": len(order),
+                 "released_other_units": len(other_jobs), "released_other_amount": other_amount,
                  "unallocated": total_amount - total_alloc,
                  "fee_count": sum(1 for p in new if p.get("status") != "reversed" and is_bank_fee(p)),
                  "fee_released": released,
