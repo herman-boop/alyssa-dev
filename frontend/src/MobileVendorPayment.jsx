@@ -843,6 +843,7 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
   const [tbDone, setTbDone] = useState(false);
   const [tbOther, setTbOther] = useState([]);    // rekon aktif yang tercatat di vendor LAIN
   const [tbOtherState, setTbOtherState] = useState("idle");   // idle | loading | done | error
+  const [tbTrail, setTbTrail] = useState([]);    // jejak impor rekon yang BUKAN pembayaran aktif (reversed / error / dicatat sebagai biaya / supplier tak ketemu)
   const loadTbSup = async () => {
     const r = await axios.get(`${API}/admin/suppliers/${vendor.supplier_id}`, { headers });
     setTbSup(r.data);
@@ -851,12 +852,16 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
   const openTembak = async () => {
     if (selJobs.length === 0) { flash("Centang minimal 1 PO dulu"); return; }
     setTbIds(selJobs.map((j) => j.job_id)); setTbMsg(""); setTbDone(false); setTbSup(null); setTbOpen(true);
-    setTbOther([]); setTbOtherState("loading");
+    setTbOther([]); setTbOtherState("loading"); setTbTrail([]);
     try { await loadTbSup(); } catch { flash("Gagal memuat pembayaran Rekon"); setTbOpen(false); return; }
     try {
       const r = await axios.get(`${API}/admin/rekon/other-payments`, { headers, params: { exclude_supplier_id: vendor.supplier_id, limit: 60 } });
       setTbOther(r.data.items || []); setTbOtherState("done");
     } catch (_) { setTbOtherState("error"); }
+    try {
+      const r2 = await axios.get(`${API}/admin/rekon/imports`, { headers, params: { limit: 150 } });
+      setTbTrail((r2.data.items || []).filter((x) => x.status && x.status !== "processed"));
+    } catch (_) { setTbTrail([]); }
   };
   // Rekon tercatat di vendor lain → pindahkan ke vendor ini (jalur koreksi resmi), lalu tembak + PDF.
   const doPindahTembak = async (o) => {
@@ -889,6 +894,20 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
         : (data.note || "Tidak ada PO yang bisa dibayar"));
       if (data.allocated > 0) cetakTembak(doc);
     } catch (e) { setTbMsg(e?.response?.data?.detail || "Gagal tembak rekon"); }
+    finally { setTbBusy(""); }
+  };
+  // Dari jejak: pulihkan rekon yang di-Reverse (di vendor mana pun) → muncul lagi sebagai rekon aktif.
+  const pulihkanJejak = async (t) => {
+    if (!window.confirm(`Pulihkan rekon ${fmtRp(t.amount || t.nominal)}?\n\nKembali jadi Belum Dialokasikan di vendornya. Setelah itu muncul di daftar untuk ditembak / dipindah.`)) return;
+    setTbBusy(t.bank_transaction_id); setTbMsg("");
+    try {
+      await axios.post(`${API}/admin/rekon/imports/${encodeURIComponent(t.bank_transaction_id)}/restore`, {}, { headers });
+      await loadTbSup();
+      const r = await axios.get(`${API}/admin/rekon/other-payments`, { headers, params: { exclude_supplier_id: vendor.supplier_id, limit: 60 } });
+      setTbOther(r.data.items || []); setTbOtherState("done");
+      setTbTrail((l) => l.filter((x) => x.bank_transaction_id !== t.bank_transaction_id));
+      setTbMsg("✓ Dipulihkan — cek daftar rekon di atas.");
+    } catch (e) { setTbMsg(e?.response?.data?.detail || "Gagal memulihkan"); }
     finally { setTbBusy(""); }
   };
   // Rekon yang pernah di-Reverse: Pulihkan + Tembak + PDF dalam 1 klik.
@@ -1084,6 +1103,33 @@ function VendorsScreen({ headers, onBack, setLoading, flash, embedded }) {
                     <button className="vp-btn vp-btn-ghost" style={{ marginTop: 8 }} disabled={!!tbBusy} onClick={() => doPindahTembak(o)} data-testid={`vp-pindah-${o.id}`}>
                       {tbBusy === o.id ? "Memproses…" : `➡️ Pindah ke ${vendor.supplier_nama} + Tembak + PDF`}
                     </button>
+                  </div>
+                );
+              })}
+            </>
+          )}
+          {tbTrail.length > 0 && (
+            <>
+              <div className="vp-hint" style={{ margin: "10px 0 6px", fontWeight: 700 }}>
+                Jejak rekon yang BUKAN pembayaran aktif ({tbTrail.length}) — cari Rp{(totalSel).toLocaleString("id-ID")} di sini:
+              </div>
+              {tbTrail.map((t) => {
+                const amt = Number(t.amount || t.nominal || (t.raw_payload || {}).nominal || 0);
+                const lbl = { reversed: "↩️ Dibatalkan (Reverse)", supplier_not_found: "⚠️ Supplier tidak ketemu", error: "⚠️ Error", processing: "⏳ Belum selesai", posted_expense: "🧾 Dicatat sebagai biaya (bukan pembayaran supplier)" }[t.status] || t.status;
+                const match = amt === totalSel;
+                return (
+                  <div key={t.bank_transaction_id} className="vp-card" style={{ marginBottom: 8, borderStyle: "dashed", borderColor: match ? "var(--vp-navy)" : undefined }}>
+                    <div className="vp-card-top" style={{ marginBottom: 2 }}>
+                      <span className="vp-card-nopol">{fmtRp(amt)}{match ? " ✅" : ""}</span>
+                      <span className="vp-card-rute" style={{ margin: 0 }}>{lbl}</span>
+                    </div>
+                    <div className="vp-card-rute">{t.tanggal || (t.raw_payload || {}).tanggal || ""}{(t.supplier_name || (t.raw_payload || {}).supplier_name) ? ` · ${t.supplier_name || t.raw_payload.supplier_name}` : ""}</div>
+                    {(t.deskripsi_bank || (t.raw_payload || {}).deskripsi_bank) && <div className="vp-hint">{String(t.deskripsi_bank || t.raw_payload.deskripsi_bank).slice(0, 90)}</div>}
+                    {t.status === "reversed" && (
+                      <button className="vp-btn vp-btn-ghost" style={{ marginTop: 8 }} disabled={!!tbBusy} onClick={() => pulihkanJejak(t)}>
+                        {tbBusy === t.bank_transaction_id ? "Memproses…" : "↩️ Pulihkan rekon ini"}
+                      </button>
+                    )}
                   </div>
                 );
               })}
