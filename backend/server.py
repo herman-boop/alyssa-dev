@@ -200,6 +200,10 @@ async def _ais_startup():
         ais.start_worker(db)
     except Exception as e:
         logger.warning(f"[startup] gagal start AIS worker: {e}")
+    try:
+        ais.start_auto_refresh(db)
+    except Exception as e:
+        logger.warning(f"[startup] gagal start AIS auto-refresh: {e}")
 
 
 

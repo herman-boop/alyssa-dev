@@ -745,6 +745,84 @@ async def test_vesselfinder_refresh():
         AIS._last_pos_fetch.clear()
 
 
+async def test_auto_refresh_cycle():
+    """Cek otomatis berkala: kapal 'Berlangsung' tanpa posisi segar dicek SEKALI per
+    kapal unik, jeda makin lama kalau kosong, kapal segar dilewati, data basi bukan sukses."""
+    print("test_auto_refresh_cycle")
+    ok([AIS._auto_backoff_seconds(n) for n in (1, 2, 3, 4, 9)] == [3600, 7200, 14400, 21600, 21600], "jeda: 1j → 2j → 4j → 6j (maks)")
+
+    from datetime import datetime, timezone, timedelta
+    class _R:
+        def __init__(self, st, body=None): self.status_code = st; self._b = body or {}; self.headers = {}; self.text = ""
+        def json(self): return self._b
+    calls = []
+    mode = {"v": "404"}
+    def fake_get(path, params, timeout=15):
+        calls.append((path, dict(params)))
+        if path.endswith("/eta"):
+            return _R(404)
+        if mode["v"] == "404":
+            return _R(404)
+        ts = datetime.now(timezone.utc).isoformat() if mode["v"] == "fresh" else (datetime.now(timezone.utc) - timedelta(hours=12)).isoformat()
+        return _R(200, {"vesselPosition": {"mmsi": "525200343", "latitude": 1.2, "longitude": 127.4, "timestamp": ts, "sog": 0.3}})
+
+    db = FakeDB()
+    # Mutiara: 3 trip 'Berlangsung' (kapal sama). KAPAL B: Berlangsung, hanya IMO. Menunggu: diabaikan.
+    for tid in ("T1", "T2", "T3"):
+        await db.trips.insert_one({"trip_id": tid, "legs": [{"route_leg_id": "l" + tid, "tipe": "Kapal RoRo", "kapal": "MUTIARA", "mmsi": "525200343", "imo": "9425021", "status": "Berlangsung"}]})
+    await db.trips.insert_one({"trip_id": "T4", "legs": [{"route_leg_id": "l4", "tipe": "Kapal RoRo", "kapal": "B", "imo": "1234567", "status": "Berlangsung"}]})
+    await db.trips.insert_one({"trip_id": "T5", "legs": [{"route_leg_id": "l5", "tipe": "Kapal RoRo", "kapal": "C", "mmsi": "525000009", "status": "Menunggu"}]})
+    # Kapal D: Berlangsung tapi posisinya SUDAH segar → dilewati
+    await db.trips.insert_one({"trip_id": "T6", "legs": [{"route_leg_id": "l6", "tipe": "Kapal RoRo", "kapal": "D", "mmsi": "525000007", "status": "Berlangsung"}]})
+    await db.ais_positions.insert_one({"mmsi": "525000007", "latitude": 1.0, "longitude": 118.0, "position_timestamp": datetime.now(timezone.utc).isoformat()})
+
+    saved = (AIS.vesselapi_enabled, AIS._vesselapi_use_sat, AIS._vesselapi_get, AIS.vesselfinder_enabled)
+    AIS.vesselapi_enabled = lambda: True
+    AIS._vesselapi_use_sat = lambda: False
+    AIS.vesselfinder_enabled = lambda: False
+    AIS._vesselapi_get = fake_get
+    state = {}
+    try:
+        AIS._last_pos_fetch.clear(); AIS._last_eta_fetch.clear()
+        r1 = await AIS.auto_refresh_cycle(db, state, 1000.0)
+        ok(r1["candidates"] == 3, "kandidat = 3 kapal unik 'Berlangsung' (Menunggu diabaikan)")
+        ok(r1["attempted"] == 2 and r1["skipped_fresh"] == 1, "2 dicek, 1 dilewati karena posisinya sudah segar")
+        ok(r1["fail"] == 2 and r1["ok"] == 0, "provider kosong → 2 gagal")
+        pos = [x for x in calls if x[0].endswith("/position")]
+        ok(len(pos) == 2, "Mutiara dites SEKALI walau 3 trip (+ 1 kapal IMO-saja) = 2 call posisi")
+        ok(state["525200343"]["fails"] == 1 and state["525200343"]["next"] == 1000.0 + 3600, "gagal pertama → cek ulang 1 jam lagi")
+
+        calls.clear(); AIS._last_pos_fetch.clear()
+        r2 = await AIS.auto_refresh_cycle(db, state, 1000.0 + 600)
+        ok(r2["attempted"] == 0 and r2["skipped_backoff"] == 2 and not calls, "10 menit kemudian: masih masa jeda → tidak ada call")
+
+        r3 = await AIS.auto_refresh_cycle(db, state, 1000.0 + 3601)
+        ok(r3["attempted"] == 2 and state["525200343"]["fails"] == 2 and state["525200343"]["next"] == 1000.0 + 3601 + 7200, "lewat 1 jam: dicek lagi, gagal kedua → jeda 2 jam")
+
+        # Provider balas posisi BASI (12 jam) → bukan sukses, tetap backoff
+        mode["v"] = "stale"; AIS._last_pos_fetch.clear()
+        r4 = await AIS.auto_refresh_cycle(db, state, 1000.0 + 3601 + 7300)
+        ok(r4["ok"] == 0 and r4["fail"] == 2 and state["525200343"]["fails"] == 3, "posisi basi 12 jam ≠ sukses → jeda makin lama (3 jam…)")
+
+        # Provider akhirnya balas posisi SEGAR → sukses, state dibersihkan, masuk cache
+        mode["v"] = "fresh"; AIS._last_pos_fetch.clear()
+        r5 = await AIS.auto_refresh_cycle(db, state, 1000.0 + 3601 + 7300 + 15000)
+        ok(r5["ok"] >= 1 and "525200343" not in state, "posisi segar → sukses, state bersih")
+        cached = await db.ais_positions.find_one({"mmsi": "525200343"})
+        ok(cached is not None and cached.get("latitude") == 1.2, "posisi masuk cache (semua unit Mutiara ikut dapat)")
+
+        # Batas per putaran
+        state2 = {}
+        for i in range(15):
+            await db.trips.insert_one({"trip_id": f"X{i}", "legs": [{"route_leg_id": f"x{i}", "tipe": "Kapal RoRo", "kapal": f"K{i}", "imo": f"90000{i:02d}", "status": "Berlangsung"}]})
+        mode["v"] = "404"; calls.clear(); AIS._last_pos_fetch.clear()
+        r6 = await AIS.auto_refresh_cycle(db, state2, 5.0, max_ships=4)
+        ok(r6["attempted"] == 4, "dibatasi max_ships per putaran")
+    finally:
+        AIS.vesselapi_enabled, AIS._vesselapi_use_sat, AIS._vesselapi_get, AIS.vesselfinder_enabled = saved
+        AIS._last_pos_fetch.clear(); AIS._last_eta_fetch.clear()
+
+
 async def test_trace_probe_dedupe_sat():
     """Trace per Kapal: 1 kapal dites SEKALI walau muncul di banyak trip, dan
     ikut tes jalur satelit (sama dgn halaman tracking). Hemat kuota provider."""
@@ -846,7 +924,7 @@ async def test_invoice_payments():
 
 
 async def main():
-    for t in (test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
+    for t in (test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,
