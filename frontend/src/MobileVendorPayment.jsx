@@ -414,6 +414,9 @@ function FakturBaruScreen({ boot, headers, onBack, onToVendors, setLoading, flas
   const [existing, setExisting] = useState(new Set());   // unit yang SUDAH ada di vendor ini (penanda anti-dobel)
   const [confirm, setConfirm] = useState(false);
   const [result, setResult] = useState(null);
+  const [projects, setProjects] = useState([]);          // faktur/projek yang sudah ada di vendor ini
+  const [mode, setMode] = useState("baru");              // "baru" = buat faktur baru | "lanjut" = tambah ke faktur yang sudah ada
+  const [targetPid, setTargetPid] = useState("");
 
   const unitsOf = (o) => {
     const arr = (Array.isArray(o.units) && o.units.length) ? o.units
@@ -440,10 +443,14 @@ function FakturBaruScreen({ boot, headers, onBack, onToVendors, setLoading, flas
   }, [q]); // eslint-disable-line
 
   useEffect(() => {        // unit yang sudah ada di vendor terpilih → ditandai
-    if (!vendor || !vendor.id) { setExisting(new Set()); return; }
+    if (!vendor || !vendor.id) { setExisting(new Set()); setProjects([]); return; }
     let alive = true;
     axios.get(`${API}/admin/suppliers/${vendor.id}`, { headers })
-      .then((r) => { if (alive) setExisting(new Set((r.data.jobs || []).map((j) => String(j.nopol || j.no_rangka || "").toUpperCase()).filter(Boolean))); })
+      .then((r) => {
+        if (!alive) return;
+        setExisting(new Set((r.data.jobs || []).map((j) => String(j.nopol || j.no_rangka || "").toUpperCase()).filter(Boolean)));
+        setProjects([...(r.data.projects || [])].reverse());   // terbaru dulu
+      })
       .catch(() => {});
     return () => { alive = false; };
   }, [vendor]); // eslint-disable-line
@@ -458,12 +465,28 @@ function FakturBaruScreen({ boot, headers, onBack, onToVendors, setLoading, flas
   const applySama = () => { const v = onlyDigits(hargaSama); if (!v) { flash("Isi HPP dulu"); return; } setSel((s0) => Object.fromEntries(Object.entries(s0).map(([k, x]) => [k, { ...x, harga: v }]))); };
   const vendorsFiltered = (boot.vendors || []).filter((v) => !vendorFilter.trim() || (v.nama || "").toLowerCase().includes(vendorFilter.trim().toLowerCase()));
 
+  const normJ = (x) => String(x || "").toLowerCase().replace(/\s+/g, " ").trim();
+  const projLabel = (pr) => `${pr.no_faktur ? pr.no_faktur + " · " : ""}${pr.nama || "(tanpa judul)"}${pr.status === "closed" ? " (selesai)" : ""}`;
+  // Judul yang diketik sama dengan faktur yang sudah ada → default "Lanjut" (tetap di judul & faktur yang sama).
+  const openKonfirmasi = () => {
+    const match = judul.trim() ? projects.find((pr) => normJ(pr.nama) === normJ(judul)) : null;
+    setMode(match ? "lanjut" : "baru");
+    setTargetPid(match ? match.id : ((projects.find((pr) => pr.no_faktur) || projects[0] || {}).id || ""));
+    setConfirm(true);
+  };
+  const targetProj = projects.find((pr) => pr.id === targetPid) || null;
+
   const doCreate = async () => {
     setConfirm(false); setLoading(true);
     let proj = null, made = 0;
     try {
-      const pr = await axios.post(`${API}/admin/suppliers/${vendor.id}/projects`, { nama: judul.trim() }, { headers });   // No. Faktur otomatis dari server
-      proj = pr.data;
+      if (mode === "lanjut" && targetProj) {
+        proj = targetProj;     // pakai faktur yang sudah ada: No. Faktur & judul TETAP, tidak bikin nomor baru
+        if (proj.status === "closed") await axios.patch(`${API}/admin/suppliers/${vendor.id}/projects/${proj.id}/reopen`, {}, { headers });   // faktur selesai dibuka lagi karena ada unit baru
+      } else {
+        const pr = await axios.post(`${API}/admin/suppliers/${vendor.id}/projects`, { nama: judul.trim() }, { headers });   // No. Faktur otomatis dari server
+        proj = pr.data;
+      }
       for (const x of valid) {
         await axios.post(`${API}/admin/suppliers/${vendor.id}/jobs`, {
           vehicle_type: x.row.vehicle_type, nopol: x.row.nopol, no_rangka: x.row.no_rangka,
@@ -472,7 +495,8 @@ function FakturBaruScreen({ boot, headers, onBack, onToVendors, setLoading, flas
         }, { headers });
         made += 1;
       }
-      setResult({ ok: true, no_faktur: proj.no_faktur, nama: proj.nama, vendor: vendor.nama, units: made, total });
+      setResult({ ok: true, lanjut: mode === "lanjut" && !!targetProj, no_faktur: proj.no_faktur, nama: proj.nama, vendor: vendor.nama, units: made, total });
+      setExisting((e0) => { const n = new Set(e0); valid.forEach((x) => n.add(String(x.row.nopol || x.row.no_rangka || "").toUpperCase())); return n; });
     } catch (e) {
       flash(e?.response?.data?.detail || "Gagal membuat faktur");
       if (proj) setResult({ ok: false, no_faktur: proj.no_faktur, nama: proj.nama, vendor: vendor.nama, units: made, total, partial: true });
@@ -484,16 +508,16 @@ function FakturBaruScreen({ boot, headers, onBack, onToVendors, setLoading, flas
       <div className="vp-screen vp-center">
         <div className="vp-success">
           <div className="vp-success-check">{result.ok ? "✓" : "!"}</div>
-          <div className="vp-success-title">{result.ok ? "Faktur Dibuat" : "Faktur Dibuat Sebagian"}</div>
+          <div className="vp-success-title">{result.ok ? (result.lanjut ? "Unit Ditambahkan ke Faktur" : "Faktur Dibuat") : "Faktur Dibuat Sebagian"}</div>
           <div className="vp-card" style={{ textAlign: "left" }}>
-            <div className="vp-card-lbl">No. Faktur (otomatis)</div>
+            <div className="vp-card-lbl">{result.lanjut ? "Faktur (tetap)" : "No. Faktur (otomatis)"}</div>
             <div className="vp-card-nopol" style={{ fontFamily: "monospace", fontSize: 20 }}>{result.no_faktur || "-"}</div>
             <div className="vp-card-rute" style={{ marginTop: 6 }}>{result.vendor}{result.nama && result.nama !== result.no_faktur ? ` · ${result.nama}` : ""}</div>
             <div className="vp-card-rute">{result.units} unit · Total HPP {fmtRp(result.total)}</div>
             {result.partial && <div className="vp-hint" style={{ color: "#b45309" }}>Hanya {result.units} dari {valid.length} unit yang masuk. Tambahkan sisanya lewat Supplier → Tarik Unit dari PO (pilih faktur ini).</div>}
           </div>
           <button className="vp-btn vp-btn-primary" onClick={onToVendors}>💰 Bayar Faktur Ini</button>
-          <button className="vp-btn vp-btn-ghost" style={{ marginTop: 8 }} onClick={() => { setResult(null); setSel({}); setJudul(""); }}>＋ Buat Faktur Lain</button>
+          <button className="vp-btn vp-btn-ghost" style={{ marginTop: 8 }} onClick={() => { setResult(null); setSel({}); setJudul(result.lanjut ? (result.nama || "") : ""); }}>{result.lanjut ? "＋ Lanjut Tambah Unit (judul sama)" : "＋ Buat Faktur Lain"}</button>
           <button className="vp-btn vp-btn-ghost" style={{ marginTop: 8 }} onClick={onBack}>Beranda</button>
         </div>
       </div>
@@ -578,7 +602,7 @@ function FakturBaruScreen({ boot, headers, onBack, onToVendors, setLoading, flas
         <div className="vp-selbar">
           <div><div className="vp-selbar-lbl">{valid.length} unit siap{selArr.length > valid.length ? ` (${selArr.length - valid.length} belum diisi HPP)` : ""}</div><div className="vp-selbar-amt">{fmtRp(total)}</div></div>
         </div>
-        <button className="vp-btn vp-btn-primary" disabled={!vendor || valid.length === 0} onClick={() => setConfirm(true)} data-testid="faktur-buat">📄 Buat Faktur</button>
+        <button className="vp-btn vp-btn-primary" disabled={!vendor || valid.length === 0} onClick={openKonfirmasi} data-testid="faktur-buat">📄 Buat Faktur</button>
       </div>
 
       <BottomSheet open={sheetVendor} title="Pilih Vendor" onClose={() => setSheetVendor(false)}>
@@ -590,15 +614,29 @@ function FakturBaruScreen({ boot, headers, onBack, onToVendors, setLoading, flas
           {vendorsFiltered.length === 0 && <div className="vp-hint" style={{ padding: 8 }}>Vendor tidak ada.</div>}
         </div>
       </BottomSheet>
-      <BottomSheet open={confirm} title="Konfirmasi Faktur Baru" onClose={() => setConfirm(false)}>
+      <BottomSheet open={confirm} title="Konfirmasi Faktur" onClose={() => setConfirm(false)}>
+        <div className="vp-chips" style={{ marginBottom: 10 }}>
+          <button className={`vp-chip ${mode === "lanjut" ? "vp-chip-on" : ""}`} disabled={projects.length === 0} onClick={() => setMode("lanjut")} data-testid="faktur-mode-lanjut">➕ Lanjut faktur yang ada</button>
+          <button className={`vp-chip ${mode === "baru" ? "vp-chip-on" : ""}`} onClick={() => setMode("baru")} data-testid="faktur-mode-baru">📄 Faktur baru</button>
+        </div>
+        {mode === "lanjut" && projects.length > 0 && (
+          <div className="vp-field">
+            <label className="vp-label">Tambahkan ke faktur</label>
+            <select className="vp-input" value={targetPid} onChange={(e) => setTargetPid(e.target.value)} data-testid="faktur-target">
+              {projects.map((pr) => <option key={pr.id} value={pr.id}>{projLabel(pr)}</option>)}
+            </select>
+            <div className="vp-hint">Judul & No. Faktur tetap sama — unit baru masuk ke bawahnya.{targetProj && targetProj.status === "closed" ? " Faktur ini sudah selesai; dibuka lagi otomatis." : ""}</div>
+          </div>
+        )}
         <div className="vp-confirm">
           <Row k="Vendor" v={vendor?.nama || "-"} />
-          <Row k="Judul" v={judul.trim() || "-"} />
+          {mode === "lanjut" && targetProj
+            ? <Row k="Faktur" v={projLabel(targetProj)} />
+            : <><Row k="Judul" v={judul.trim() || "-"} /><Row k="No. Faktur" v="Otomatis (FP-AAL-…)" /></>}
           <Row k="Jumlah Unit" v={String(valid.length)} />
           <Row k="Total HPP" v={fmtRp(total)} big />
-          <Row k="No. Faktur" v="Otomatis (FP-AAL-…)" />
         </div>
-        <button className="vp-btn vp-btn-primary" onClick={doCreate}>✅ Ya, Buat Faktur</button>
+        <button className="vp-btn vp-btn-primary" disabled={mode === "lanjut" && !targetProj} onClick={doCreate}>{mode === "lanjut" ? "✅ Ya, Tambahkan ke Faktur" : "✅ Ya, Buat Faktur Baru"}</button>
         <button className="vp-btn vp-btn-ghost" style={{ marginTop: 8 }} onClick={() => setConfirm(false)}>Batal</button>
       </BottomSheet>
     </div>
