@@ -1270,8 +1270,63 @@ async def test_imports_exclude_compact():
     ok([x["status"] for x in r["items"]] == ["reversed"], "status eksplisit menang atas exclude_status")
 
 
+async def test_riwayat_clear():
+    """Clear/Arsip Riwayat Pembayaran: hanya field aditif riwayat_clear; jobs/rekon_payments/alokasi/
+    status TIDAK berubah; idempoten; bisa dikembalikan; jejak audit tersimpan; kunci tak dikenal ditolak.
+    Modul murni + endpoint ASLI (AST)."""
+    print("test_riwayat_clear")
+    import ast, copy, typing
+    import riwayat_clear as RC
+    doc = {"id": "S1", "nama": "MARTHEN",
+           "jobs": [{"id": "J1", "total_harga": 100, "payments": [{"id": "p1", "batch_id": "B1", "amount": 60}, {"id": "p2", "batch_id": "B1", "amount": 40}, {"id": "p3", "amount": 5}]}],
+           "rekon_payments": [{"id": "r1", "amount": 100, "allocations": [{"job_id": "J1", "amount": 100}]}, {"id": "r2", "amount": 2500, "status": "reversed"}]}
+    vk = RC.valid_keys(doc)
+    ok(vk == {"rk:r1": "rekon", "rk:r2": "rekon", "tx:B1": "manual", "tx:p3": "manual"}, "kunci riwayat: rekon per id, manual per batch (1 batch = 1 transaksi)")
+    e1 = RC.apply_clear([], ["rk:r1", "tx:B1"], vk, "2026-10-08T00:00:00", "Admin")
+    ok(RC.cleared_keys(e1) == {"rk:r1", "tx:B1"} and e1[0]["cleared_by"] == "Admin" and e1[0]["history"][0]["action"] == "clear", "clear: status + cleared_at/by + history")
+    e1b = RC.apply_clear(e1, ["rk:r1"], vk, "2026-10-08T01:00:00", "X")
+    ok(e1b == e1 and len(e1b) == 2, "clear ulang = idempoten (tidak dobel, tidak menimpa)")
+    e2 = RC.apply_unclear(e1, ["tx:B1"], "2026-10-08T02:00:00", "Admin")
+    ok(RC.cleared_keys(e2) == {"rk:r1"} and [x for x in e2 if x["key"] == "tx:B1"][0]["status"] == "restored", "kembalikan dari clear → muncul lagi di daftar utama")
+    ok([h["action"] for h in [x for x in e2 if x["key"] == "tx:B1"][0]["history"]] == ["clear", "restore"], "jejak audit clear→restore tersimpan")
+    e3 = RC.apply_clear(e2, ["tx:B1"], vk, "2026-10-08T03:00:00", "Admin")
+    ok(RC.cleared_keys(e3) == {"rk:r1", "tx:B1"} and len([x for x in e3 if x["key"] == "tx:B1"][0]["history"]) == 3, "clear lagi setelah restore: 1 entri, riwayat 3 aksi")
+    ok(e1 != [] and RC.cleared_keys([]) == set() and RC.apply_unclear([], ["x"], "t", "a") == [], "kosong aman")
+
+    # endpoint asli
+    class _HTTP(Exception):
+        def __init__(self, status_code, detail=""): self.status_code = status_code; self.detail = detail
+    class _DB: pass
+    d = _DB(); d.supplier_profiles = FakeColl()
+    await d.supplier_profiles.insert_one(copy.deepcopy(doc))
+    node = next(n for n in ast.parse(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "server.py"), encoding="utf-8").read()).body
+                if isinstance(n, ast.AsyncFunctionDef) and n.name == "_riwayat_clear_op")
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "server.py"), encoding="utf-8").read()
+    ns = {"db": d, "HTTPException": _HTTP, "riwayat_clear": RC, "datetime": __import__("datetime").datetime}
+    exec(ast.get_source_segment(src, node), ns)
+    op = ns["_riwayat_clear_op"]
+    before = copy.deepcopy(await d.supplier_profiles.find_one({"id": "S1"}))
+    r = await op("S1", {"keys": ["rk:r1", "tx:B1"], "by": "Admin"}, False)
+    after = await d.supplier_profiles.find_one({"id": "S1"})
+    ok(r["cleared"] == ["rk:r1", "tx:B1"] and "riwayat_clear" in after, "endpoint clear: tersimpan di riwayat_clear")
+    ok(after["jobs"] == before["jobs"] and after["rekon_payments"] == before["rekon_payments"], "jobs (pembayaran/alokasi/status) & rekon_payments TIDAK berubah sama sekali")
+    r = await op("S1", {"keys": ["tx:B1"]}, True)
+    ok(r["cleared"] == ["rk:r1"], "endpoint unclear: tx:B1 kembali")
+    for body, code in (({"keys": []}, 400), ({"keys": ["rk:tidakada"]}, 400)):
+        try:
+            await op("S1", body, False); got = None
+        except _HTTP as e:
+            got = e.status_code
+        ok(got == code, f"input tidak valid → {code}")
+    try:
+        await op("ZZ", {"keys": ["rk:r1"]}, False); got = None
+    except _HTTP as e:
+        got = e.status_code
+    ok(got == 404, "supplier tak ada → 404")
+
+
 async def main():
-    for t in (test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
+    for t in (test_riwayat_clear, test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,

@@ -12,7 +12,7 @@ export function rekonReportHtml(sup, jobIds, opts = {}) {
   const d = buildRekonReportData(sup, jobIds);
   const now = new Date();
   const tglProses = `${String(now.getDate()).padStart(2, "0")}/${String(now.getMonth() + 1).padStart(2, "0")}/${now.getFullYear()}`;
-  const ref = [d.fakturNo, `${d.tx.filter((t) => !t.fee).length} transfer bank`].filter(Boolean).join(" · ");
+  const ref = [d.fakturNo, `${d.tx.length} transfer bank`].filter(Boolean).join(" · ");
   const noDoc = opts.noDoc || `RKN/${d.supplier.replace(/[^A-Za-z0-9]/g, "").slice(0, 8).toUpperCase()}/${tglProses.replace(/\//g, "")}`;
   const r = d.ringkasan, t = d.total;
 
@@ -20,7 +20,7 @@ export function rekonReportHtml(sup, jobIds, opts = {}) {
       <td class="c">${x.no}</td><td>${esc(x.ref || "-")}</td><td><b>${esc(x.nopol || "-")}</b></td><td>${esc(x.rute)}</td>
       <td class="r">${rp(x.tagihan)}</td><td class="r">${rp(x.dibayar)}</td><td class="r">${rp(x.sisa)}</td>
       <td class="c"><span class="st st-${x.status === "Lunas" ? "y" : x.status === "Sebagian" ? "p" : "n"}">${x.status}</span></td></tr>`).join("");
-  const rowsC = d.tx.map((x) => `<tr class="${x.fee ? "fee" : ""}">
+  const rowsC = d.tx.map((x) => `<tr>
       <td class="c">${x.no}</td><td class="nw">${fTgl(x.tanggal)}</td>
       <td>${esc(x.ket)}${x.btx ? `<div class="sub">btx ${esc(x.btx)}</div>` : ""}</td>
       <td class="r">${rp(x.amount)}</td><td>${esc(x.status)}</td></tr>`).join("");
@@ -42,7 +42,6 @@ export function rekonReportHtml(sup, jobIds, opts = {}) {
     table.rk th.r, table.rk td.r { text-align:right; white-space:nowrap; } table.rk th.c, table.rk td.c { text-align:center; } .nw { white-space:nowrap; }
     table.rk tfoot td { border-top:1.5px solid #000; border-bottom:none; font-weight:800; font-size:9.5px; padding:5px; }
     .sub { font-size:7.5px; color:#64748b; margin-top:1px; word-break:break-all; }
-    tr.fee td { color:#475569; background:#fafbfc; }
     .st { font-size:8px; font-weight:700; } .st-y { color:#0f7a4d; } .st-p { color:#b45309; } .st-n { color:#b91c1c; }
     .box { width:100%; border:1px solid #c9d2e0; border-radius:6px; padding:6px 10px; break-inside:avoid; page-break-inside:avoid; }
     .box .row { display:flex; justify-content:space-between; gap:12px; padding:3px 0; font-size:10px; }
@@ -68,7 +67,7 @@ export function rekonReportHtml(sup, jobIds, opts = {}) {
     <div class="box">
       <div class="row"><span class="k">Jumlah PO/unit yang dipilih</span><span class="v">${r.jumlahUnit}</span></div>
       <div class="row"><span class="k">Total tagihan sebelum pembayaran</span><span class="v">${rp(r.tagihan)}</span></div>
-      <div class="row"><span class="k">Total transaksi bank (transfer pokok) di batch ini</span><span class="v">${rp(r.trxPokok)}</span></div>
+      <div class="row"><span class="k">Total transfer pokok supplier di batch ini</span><span class="v">${rp(r.trxPokok)}</span></div>
       <div class="row"><span class="k">Total pembayaran rekon yang berhasil dialokasikan ke PO</span><span class="v">${rp(r.dialokasi)}</span></div>
       ${r.manual > 0 ? `<div class="row"><span class="k">Pembayaran lain (manual/di luar rekon)</span><span class="v">${rp(r.manual)}</span></div>` : ""}
       <div class="row big"><span class="k">Sisa tagihan setelah rekon</span><span class="v">${rp(r.sisa)}</span></div>
@@ -90,14 +89,14 @@ export function rekonReportHtml(sup, jobIds, opts = {}) {
 
     <div class="sec">D. Total</div>
     <div class="box">
+      <div class="row"><span class="k">Total transfer pokok supplier</span><span class="v">${rp(t.trxPokok)}</span></div>
+      <div class="row"><span class="k">Biaya admin bank${t.biayaAdminCount ? ` (${t.biayaAdminCount} transaksi, ditanggung Alyssa)` : ""}</span><span class="v">${rp(t.biayaAdmin)}</span></div>
       <div class="row"><span class="k">Total transaksi bank</span><span class="v">${rp(t.trxSemua)}</span></div>
-      <div class="row"><span class="k">&nbsp;&nbsp;– transfer pokok supplier</span><span class="v">${rp(t.trxSemua - t.biayaAdmin)}</span></div>
-      <div class="row"><span class="k">&nbsp;&nbsp;– biaya admin bank (ditanggung Alyssa, bukan pembayaran supplier)</span><span class="v">${rp(t.biayaAdmin)}</span></div>
       <div class="row"><span class="k">Total dialokasikan ke PO</span><span class="v">${rp(t.dialokasi)}</span></div>
       <div class="row big"><span class="k">Sisa keseluruhan supplier</span><span class="v">${rp(t.sisaSupplier)}</span></div>
-      ${t.biayaAdminTeralokasi > 0 ? `<div class="warn">⚠ Biaya admin bank ${rp(t.biayaAdminTeralokasi)} tercatat teralokasi ke PO pada data tersimpan (sesuai data apa adanya).</div>` : ""}
+      ${t.biayaAdminTeralokasi > 0 ? `<div class="warn">⚠ Biaya admin bank ${rp(t.biayaAdminTeralokasi)} masih tercatat teralokasi ke PO pada data tersimpan (tidak dihitung sebagai pembayaran supplier di laporan ini).</div>` : ""}
     </div>
-    <div class="note"><b>Catatan:</b> Laporan ini merupakan representasi hasil rekon yang sudah tersimpan — tidak membuat/mengubah pembayaran maupun alokasi. Biaya admin bank dibedakan dari pembayaran pokok supplier. Sisa keseluruhan supplier mencakup seluruh tagihan supplier, bukan hanya PO dalam laporan ini.</div>
+    <div class="note"><b>Catatan:</b> Laporan ini merupakan representasi hasil rekon yang sudah tersimpan — tidak membuat/mengubah pembayaran maupun alokasi. Biaya admin bank bukan pembayaran supplier: tidak ditampilkan sebagai transaksi, hanya diringkas di bagian D. Sisa keseluruhan supplier mencakup seluruh tagihan supplier, bukan hanya PO dalam laporan ini.</div>
     ${docFooter({ docNo: `Rekonsiliasi ${noDoc}` })}
   </div>
   <script>window.onload=()=>window.print()<\/script>

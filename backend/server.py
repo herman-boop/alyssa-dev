@@ -15,6 +15,7 @@ from playwright.async_api import async_playwright
 import ais  # modul AIS (posisi kapal) — provider-agnostic, aman tanpa key
 import rekon_sync  # integrasi pembayaran supplier dari Audit Rekon (isolated)
 import supplier_faktur  # pisah unit ke faktur (projek) baru — logika murni
+import riwayat_clear  # clear/arsip Riwayat Pembayaran Supplier — aditif, tanpa delete
 import rekon_felis_client  # adapter PULL dari Felis (stub sampai kontrak final)
 import expenses as expenses_mod  # Biaya Umum & Administratif (Fase 3, isolated, terpisah dari HPP)
 import ledger_status  # status tagihan supplier (Belum/Sebagian/Lunas) dari ledger — pure
@@ -6572,6 +6573,38 @@ async def add_supplier_project(supplier_id: str, body: SupplierProjectBody):
     projects = projects + [new_proj]
     await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"projects": projects}})
     return new_proj
+
+
+async def _riwayat_clear_op(supplier_id: str, body: dict, restore: bool):
+    keys = [str(k) for k in ((body or {}).get("keys") or []) if k]
+    if not keys:
+        raise HTTPException(400, "Pilih minimal 1 transaksi")
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0, "id": 1, "jobs": 1, "rekon_payments": 1, "riwayat_clear": 1})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    kinds = riwayat_clear.valid_keys(doc)
+    bad = [k for k in keys if k not in kinds]
+    if bad:
+        raise HTTPException(400, f"Transaksi tidak ditemukan: {', '.join(bad[:5])}")
+    by = str((body or {}).get("by") or "Admin").strip()[:60] or "Admin"
+    now = datetime.utcnow().isoformat()
+    cur = doc.get("riwayat_clear") or []
+    new = riwayat_clear.apply_unclear(cur, keys, now, by) if restore else riwayat_clear.apply_clear(cur, keys, kinds, now, by)
+    # HANYA field aditif riwayat_clear — jobs/rekon_payments/alokasi/status tidak disentuh.
+    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"riwayat_clear": new}})
+    return {"ok": True, "cleared": sorted(riwayat_clear.cleared_keys(new)), "riwayat_clear": new}
+
+
+@api_router.post("/admin/suppliers/{supplier_id}/riwayat/clear", dependencies=[Depends(require_admin_pin)])
+async def riwayat_clear_items(supplier_id: str, body: Dict[str, Any] = Body(...)):
+    """CLEAR (arsipkan) transaksi dari tampilan utama Riwayat Pembayaran Supplier. TIDAK delete data."""
+    return await _riwayat_clear_op(supplier_id, body, restore=False)
+
+
+@api_router.post("/admin/suppliers/{supplier_id}/riwayat/unclear", dependencies=[Depends(require_admin_pin)])
+async def riwayat_unclear_items(supplier_id: str, body: Dict[str, Any] = Body(...)):
+    """Kembalikan transaksi dari Clear/Arsip ke tampilan utama."""
+    return await _riwayat_clear_op(supplier_id, body, restore=True)
 
 
 @api_router.post("/admin/suppliers/{supplier_id}/pisah-faktur", dependencies=[Depends(require_admin_pin)])
