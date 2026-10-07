@@ -6089,7 +6089,12 @@ def _supplier_rekon_overview(sup: dict) -> dict:
         e["total_allocated"] += a_sum
         e["total_unallocated"] += max(0, amt - a_sum)
         e["count"] += 1
+    rev = [{"id": p.get("id"), "amount": p.get("amount") or 0, "tanggal": p.get("tanggal"),
+            "bank_transaction_id": p.get("bank_transaction_id"), "reversed_at": p.get("reversed_at"),
+            "reversal_reason": p.get("reversal_reason") or ""}
+           for p in (sup.get("rekon_payments") or []) if p.get("status") == "reversed"]
     return {
+        "rekon_reversed": rev,
         "alloc_by_job": alloc_by_job,
         "total_rekon": total_rekon,
         "total_rekon_allocated": total_alloc,
@@ -6253,6 +6258,7 @@ async def get_supplier(supplier_id: str):
     # ── Breakdown "Sudah Transfer" level supplier (bedakan 3 angka) ──
     manual_transfer = sum((p.get("amount") or 0) for j in (doc.get("jobs") or []) for p in (j.get("payments") or []))
     doc["rekon_payments"] = rk["rekon_payments"]
+    doc["rekon_reversed"] = rk.get("rekon_reversed") or []   # dibatalkan (bisa dipulihkan)
     doc["total_transferred"] = manual_transfer + rk["total_rekon"]      # total uang benar2 ditransfer
     doc["total_allocated"] = manual_transfer + rk["total_rekon_allocated"]  # yang sudah nempel ke tagihan
     doc["total_unallocated"] = rk["total_unallocated"]                  # masih belum dialokasikan
@@ -6945,27 +6951,68 @@ async def rekon_allocate_payment(supplier_id: str, rekon_payment_id: str, body: 
     return res
 
 
-async def _auto_allocate_rekon(supplier_id: str, rekon_payment_id: str, amount) -> dict:
-    """AUTO-ALOKASI saat Tarik: bagikan pembayaran Rekon ke tagihan supplier yang
-    BELUM lunas (berurutan), sampai uang habis. Tidak melebihi sisa tiap PO; sisa
-    uang tetap Belum Dialokasikan. Reversible & bisa di-edit manual (Alokasikan)."""
-    sup = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
-    if not sup:
-        return {"allocated": 0}
+def _rekon_job_rows(sup: dict, exclude_alloc: Optional[dict] = None) -> list:
+    """[(job_id, sisa, project_id)] BERURUTAN untuk pembagian pembayaran Rekon.
+    `exclude_alloc` = {job_id: nominal} alokasi pembayaran yang SEDANG dibagi ulang
+    (supaya tidak menghitung dirinya sendiri sebagai sudah membayar)."""
     rk = _supplier_rekon_overview(sup)
-    alloc_by_job = dict(rk.get("alloc_by_job") or {})   # alokasi lain (pembayaran ini msh 0)
-    job_sisa = []
+    alloc_by_job = dict(rk.get("alloc_by_job") or {})
+    for jid, av in (exclude_alloc or {}).items():
+        alloc_by_job[jid] = max(0, alloc_by_job.get(jid, 0) - int(av or 0))
+    rows = []
     for job in (sup.get("jobs") or []):
         jid = job.get("id")
         if not jid:
             continue
         tot = _supplier_job_totals(job, extra_paid=alloc_by_job.get(jid, 0))
-        job_sisa.append((jid, tot.get("sisa") or 0))
-    allocs = rekon_sync.waterfall_allocations(job_sisa, amount)
+        rows.append((jid, tot.get("sisa") or 0, job.get("project_id") or ""))
+    return rows
+
+
+async def _auto_allocate_rekon(supplier_id: str, rekon_payment_id: str, amount) -> dict:
+    """AUTO-ALOKASI saat Tarik: bagikan pembayaran Rekon ke tagihan supplier yang
+    BELUM lunas. PINTAR: nominal yang pas dengan sisa faktur (projek) / unit dicocokkan
+    dulu; kalau tidak ada yang pas → berurutan dari atas (perilaku lama). Tidak
+    melebihi sisa tiap unit; sisa uang tetap Belum Dialokasikan. Reversible & bisa
+    di-edit manual (Alokasikan)."""
+    sup = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not sup:
+        return {"allocated": 0}
+    res = rekon_sync.smart_allocations(_rekon_job_rows(sup), amount)
+    allocs = res["allocations"]
     if allocs:
         await rekon_sync.allocate_payment(db, supplier_id, rekon_payment_id, allocs)
     total = sum(a["amount"] for a in allocs)
-    return {"allocated": total, "unallocated": int(amount or 0) - total, "allocations": allocs}
+    return {"allocated": total, "unallocated": int(amount or 0) - total, "allocations": allocs,
+            "method": res.get("method"), "note": res.get("note")}
+
+
+@api_router.get("/admin/suppliers/{supplier_id}/rekon-payments/{rekon_payment_id}/suggest-allocation", dependencies=[Depends(require_admin_pin)])
+async def rekon_suggest_allocation(supplier_id: str, rekon_payment_id: str):
+    """USULAN pembagian (READ-ONLY, tidak menyimpan apa pun) untuk 1 pembayaran Rekon:
+    cocokkan nominal ke faktur/unit yang pas, kalau tidak ada → berurutan. Admin cek
+    dulu di jendela Alokasikan lalu Simpan sendiri."""
+    sup = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not sup:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    pay = next((p for p in (sup.get("rekon_payments") or []) if p.get("id") == rekon_payment_id), None)
+    if not pay:
+        raise HTTPException(404, "Pembayaran Rekon tidak ditemukan")
+    if pay.get("status") == "reversed":
+        raise HTTPException(400, "Pembayaran ini sudah dibatalkan (reversed) — pulihkan dulu.")
+    own = {a.get("job_id"): int(a.get("amount") or 0) for a in (pay.get("allocations") or []) if a.get("job_id")}
+    amount = int(pay.get("amount") or 0)
+    res = rekon_sync.smart_allocations(_rekon_job_rows(sup, own), amount)
+    return {"amount": amount, **res, "total": sum(a["amount"] for a in res["allocations"])}
+
+
+@api_router.post("/admin/rekon/imports/{bank_transaction_id}/restore", dependencies=[Depends(require_admin_pin)])
+async def rekon_restore_import(bank_transaction_id: str):
+    """Pulihkan pembayaran Rekon yang sudah di-Reverse → kembali Belum Dialokasikan."""
+    res = await rekon_sync.restore_import(db, bank_transaction_id)
+    if res.get("status") != "restored":
+        raise HTTPException(409, f"Tidak bisa dipulihkan: {res.get('status')}")
+    return res
 
 
 @api_router.post("/admin/rekon/pull", dependencies=[Depends(require_admin_pin)])

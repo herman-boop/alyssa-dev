@@ -119,6 +119,80 @@ def waterfall_allocations(job_sisa, amount):
     return out
 
 
+def smart_allocations(jobs, amount, max_groups=14):
+    """PEMBAGIAN PINTAR pembayaran Rekon ke tagihan supplier (PURE, tanpa I/O).
+    jobs = [(job_id, sisa, project_id)] BERURUTAN. project_id = FAKTUR supplier
+    (1 faktur = 1 projek, boleh banyak unit); unit tanpa projek dianggap faktur
+    sendiri. Urutan keputusan — dari sinyal paling kuat:
+      1) `faktur_pas`: ada kombinasi faktur UTUH yang total sisanya == nominal
+         (tepat 1 kombinasi) → lunaskan semua unit di faktur2 itu.
+      2) `unit_pas`: tepat 1 unit yang sisanya == nominal → unit itu.
+      3) `berurutan`: waterfall dari tagihan paling atas (perilaku lama).
+    Kalau ada >1 kombinasi pas (ambigu) → tidak menebak, jatuh ke `berurutan` +
+    catatan. Tidak pernah melebihi sisa unit; total ≤ nominal.
+    Return {"allocations": [{job_id, amount}], "method": str, "note": str}."""
+    amt = _to_int(amount)
+    rows = []
+    for j, sisa, pid in (jobs or []):
+        jid = str(j or "").strip()
+        sv = _to_int(sisa)
+        if jid and sv > 0:
+            rows.append((jid, sv, str(pid or "").strip()))
+    if amt <= 0 or not rows:
+        return {"allocations": [], "method": "kosong", "note": "Tidak ada tagihan belum lunas, atau nominal 0."}
+
+    groups, order = {}, []
+    for jid, sv, pid in rows:
+        key = pid or ("_u:" + jid)
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append((jid, sv))
+    totals = [sum(sv for _, sv in groups[k]) for k in order]
+    n = len(order)
+
+    ambiguous = False
+    if n <= max_groups:
+        sols = []
+        for mask in range(1, 1 << n):
+            t = 0
+            for i in range(n):
+                if (mask >> i) & 1:
+                    t += totals[i]
+                    if t > amt:
+                        break
+            if t == amt:
+                sols.append(mask)
+                if len(sols) > 1:
+                    break
+        if len(sols) == 1:
+            allocs = []
+            for i in range(n):
+                if (sols[0] >> i) & 1:
+                    allocs += [{"job_id": jid, "amount": sv} for jid, sv in groups[order[i]]]
+            nf = bin(sols[0]).count("1")
+            return {"allocations": allocs, "method": "faktur_pas",
+                    "note": f"Nominal pas dengan sisa {nf} faktur ({len(allocs)} unit) — dilunaskan."}
+        if len(sols) > 1:
+            ambiguous = True
+
+    cand = [jid for jid, sv, _ in rows if sv == amt]
+    if len(cand) == 1:
+        return {"allocations": [{"job_id": cand[0], "amount": amt}], "method": "unit_pas",
+                "note": "Nominal pas dengan sisa 1 unit — dilunaskan."}
+    if len(cand) > 1:
+        ambiguous = True
+
+    allocs = waterfall_allocations([(jid, sv) for jid, sv, _ in rows], amt)
+    note = "Tidak ada faktur/unit yang nominalnya pas — dibagi berurutan dari tagihan paling atas."
+    if ambiguous:
+        note = "Ada lebih dari 1 kombinasi faktur/unit yang nominalnya pas (ambigu) — dibagi berurutan; periksa manual."
+    left = amt - sum(a["amount"] for a in allocs)
+    if left > 0:
+        note += f" Sisa {left:,} belum teralokasi (melebihi total tagihan).".replace(",", ".")
+    return {"allocations": allocs, "method": "berurutan", "note": note}
+
+
 # Field aman yang ditampilkan di preview (TANPA token/credential).
 _PREVIEW_FIELDS = (
     "bank_transaction_id", "supplier_id", "supplier_name", "source_entity",
@@ -444,6 +518,40 @@ async def reverse_import(db, bank_transaction_id, reason=""):
                   "reversal_reason": str(reason or "")[:300], "reversed_payment_snapshot": snapshot}})
     return {"status": "reversed", "bank_transaction_id": btid, "supplier_id": sid,
             "rekon_payment_id": pid, "removed": snapshot is not None}
+
+
+async def restore_import(db, bank_transaction_id):
+    """Pulihkan pembayaran rekon yang sudah di-Reverse (salah reverse / mau diulang
+    alokasinya). Pembayaran kembali AKTIF sebagai Belum Dialokasikan — alokasi lama
+    sengaja DIKOSONGKAN (tidak dipakai ulang) supaya dibagi ulang dengan benar.
+    Audit trail dipertahankan (reversed_at/alasan tetap, ditambah restored_at)."""
+    btid = str(bank_transaction_id or "").strip()
+    rec = await db[IMPORTS_COLLECTION].find_one({"bank_transaction_id": btid}, {"_id": 0})
+    if not rec:
+        return {"status": "not_found", "bank_transaction_id": btid}
+    if rec.get("status") != "reversed":
+        return {"status": "not_reversed", "bank_transaction_id": btid, "current": rec.get("status")}
+    sid, pid = rec.get("supplier_id"), rec.get("rekon_payment_id")
+    sup = await db.supplier_profiles.find_one({"id": sid}, {"_id": 0}) if sid else None
+    if not sup:
+        return {"status": "supplier_not_found", "bank_transaction_id": btid}
+    rps = list(sup.get("rekon_payments") or [])
+    hit = None
+    for p in rps:
+        if p.get("id") == pid and p.get("status") == "reversed":
+            hit = p
+            break
+    if hit is None:
+        return {"status": "payment_not_found", "bank_transaction_id": btid}
+    hit["status"] = "active"
+    hit["allocations"] = []
+    hit["restored_at"] = _now_iso()
+    await db.supplier_profiles.update_one({"id": sid}, {"$set": {"rekon_payments": rps}})
+    await db[IMPORTS_COLLECTION].update_one(
+        {"bank_transaction_id": btid},
+        {"$set": {"status": "processed", "restored_at": _now_iso(), "updated_at": _now_iso()}})
+    return {"status": "restored", "bank_transaction_id": btid, "supplier_id": sid,
+            "rekon_payment_id": pid, "amount": hit.get("amount")}
 
 
 # ── Routing transaksi bank → Biaya/Beban (expenses) ─────────────────────────

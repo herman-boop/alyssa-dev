@@ -745,6 +745,72 @@ async def test_vesselfinder_refresh():
         AIS._last_pos_fetch.clear()
 
 
+async def test_smart_allocation_and_restore():
+    """Pembagian pintar Rekon: nominal pas ke FAKTUR (projek) / unit; ambigu & tak ada
+    yang pas → berurutan; + pulihkan rekon yang sudah di-Reverse."""
+    print("test_smart_allocation_and_restore")
+    # Skenario MARTHEN: 5 faktur (19 unit) yang di PDF + faktur lain yang juga belum lunas.
+    jobs = []
+    def add(pid, n, each):
+        for i in range(n):
+            jobs.append((f"{pid}-{i}", each, pid))
+    add("A", 15, 0); jobs.clear()
+    # A (BACHT SULAWESI): 15 unit total 47.650.000; B 250k; C 2.5jt; D 3.7jt; E 3.4jt
+    A = [7500000, 2400000, 2500000, 3000000, 7500000, 2500000, 4500000, 2400000, 250000, 2700000, 1500000, 3000000, 1000000, 3200000, 3700000]
+    ok(sum(A) == 47650000, "data uji: faktur A = 47.650.000")
+    for i, v in enumerate(A): jobs.append((f"A{i}", v, "PA"))
+    jobs += [("B0", 250000, "PB"), ("C0", 2500000, "PC"), ("D0", 3700000, "PD"), ("E0", 3400000, "PE")]
+    # faktur LAIN (di atas urutan?) — dipasang SEBELUM agar waterfall lama salah sasaran
+    other = [("X%d" % i, 2650000, "PX") for i in range(25)]   # 66.250.000 di faktur lain
+    allj = other + jobs
+    s = R.smart_allocations(allj, 57500000)
+    ids = {a["job_id"] for a in s["allocations"]}
+    ok(s["method"] == "faktur_pas" and len(s["allocations"]) == 19 and not any(i.startswith("X") for i in ids), "57,5jt = 5 faktur pas → tepat 19 unit (bukan faktur lain)")
+    ok(sum(a["amount"] for a in s["allocations"]) == 57500000, "total teralokasi = 57.500.000")
+    # waterfall lama akan salah sasaran (membayar faktur X dulu)
+    old = R.waterfall_allocations([(j, v) for j, v, _ in allj], 57500000)
+    ok(old[0]["job_id"].startswith("X"), "(pembanding) waterfall lama memang membayar faktur lain dulu")
+    s = R.smart_allocations(allj, 47650000)
+    ok(s["method"] == "faktur_pas" and len(s["allocations"]) == 15 and all(a["job_id"].startswith("A") for a in s["allocations"]), "47,65jt = faktur A saja (15 unit)")
+    # unit tunggal pas
+    s = R.smart_allocations([("u1", 1111111, "P1"), ("u2", 2222222, "P1"), ("u3", 5000000, "P2")], 2222222)
+    ok(s["method"] == "unit_pas" and s["allocations"] == [{"job_id": "u2", "amount": 2222222}], "nominal = sisa 1 unit → unit itu")
+    # tidak ada yang pas → berurutan (perilaku lama)
+    s = R.smart_allocations([("u1", 1000000, "P1"), ("u2", 2000000, "P2")], 1500000)
+    ok(s["method"] == "berurutan" and s["allocations"] == [{"job_id": "u1", "amount": 1000000}, {"job_id": "u2", "amount": 500000}], "tak ada yang pas → berurutan")
+    # ambigu (2 faktur sama-sama 1jt) → jangan menebak
+    s = R.smart_allocations([("a", 1000000, "P1"), ("b", 1000000, "P2")], 1000000)
+    ok(s["method"] == "berurutan" and "ambigu" in s["note"], "2 faktur sama nominal → ambigu, jatuh ke berurutan + catatan")
+    # nominal > total sisa → sisa tetap belum teralokasi
+    s = R.smart_allocations([("a", 1000000, "P1")], 1500000)
+    ok(s["method"] == "faktur_pas" or s["allocations"] == [{"job_id": "a", "amount": 1000000}], "tidak pernah melebihi sisa unit")
+    s = R.smart_allocations([("a", 1000000, "P1"), ("b", 500000, "P2")], 2000000)
+    ok(sum(x["amount"] for x in s["allocations"]) == 1500000 and "belum teralokasi" in s["note"], "nominal > total sisa → sisa dicatat belum teralokasi")
+    ok(R.smart_allocations([], 100)["method"] == "kosong" and R.smart_allocations([("a", 5, "P")], 0)["method"] == "kosong", "kosong / nominal 0 aman")
+    ok(R.smart_allocations([("a", 0, "P"), ("b", -5, "P")], 100)["allocations"] == [], "unit lunas / sisa negatif diabaikan")
+
+    # ── Pulihkan rekon yang sudah di-Reverse ──
+    jobs_db = [{"id": "job1"}, {"id": "job2"}]
+    db = FakeDB(); await R.ensure_indexes(db); await _seed_supplier(db, jobs=jobs_db)
+    r = await R.ingest_transaction(db, _payload())
+    await R.allocate_payment(db, "a3f9c1e2", r["rekon_payment_id"], [{"job_id": "job1", "amount": 2000000}])
+    btid = _payload()["bank_transaction_id"]
+    ok((await R.restore_import(db, btid))["status"] == "not_reversed", "belum di-reverse → tidak bisa dipulihkan")
+    await R.reverse_import(db, btid, reason="salah")
+    rs = await R.restore_import(db, btid)
+    ok(rs["status"] == "restored" and rs["amount"] == 5000000, "reverse → pulihkan: status restored")
+    sup = await db.supplier_profiles.find_one({"id": "a3f9c1e2"})
+    p = sup["rekon_payments"][0]
+    ok(p["status"] == "active" and p["allocations"] == [] and p.get("restored_at"), "pembayaran aktif lagi, alokasi lama DIKOSONGKAN")
+    imp = await db[R.IMPORTS_COLLECTION].find_one({"bank_transaction_id": btid})
+    ok(imp["status"] == "processed" and imp.get("restored_at") and imp.get("reversed_at"), "import processed lagi, jejak reverse tetap ada")
+    ok((await R.restore_import(db, btid))["status"] == "not_reversed", "pulihkan 2x → ditolak (tidak dobel)")
+    ok((await R.restore_import(db, "tidak-ada"))["status"] == "not_found", "btid tak dikenal → not_found")
+    # sesudah dipulihkan bisa dialokasikan ulang
+    again = await R.allocate_payment(db, "a3f9c1e2", p["id"], [{"job_id": "job2", "amount": 5000000}])
+    ok(again.get("ok") and again["allocated"] == 5000000, "setelah dipulihkan bisa dialokasikan ulang")
+
+
 async def test_vendor_pin_embedded():
     """Penjaga PIN 'Catat Bayar Vendor': dari dalam dashboard admin (header X-Admin-Embedded)
     TIDAK minta PIN saat admin mode terbuka; halaman vendor mandiri tetap wajib PIN;
@@ -972,7 +1038,7 @@ async def test_invoice_payments():
 
 
 async def main():
-    for t in (test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
+    for t in (test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,
