@@ -169,7 +169,7 @@ export default function SelisihPage() {
       no_unit: (u.nopol || u.no_rangka || "").toUpperCase(),
       nopol: (u.nopol || "").toUpperCase(), no_rangka: (u.no_rangka || "").toUpperCase(),
       asal_kota: o.asal_kota || "", tujuan_kota: o.tujuan_kota || "", customer: o.customer_nama || "",
-      suggestDeal: suggest,
+      suggestDeal: suggest, order_id: o.order_id || "",
     }));
   };
 
@@ -177,7 +177,7 @@ export default function SelisihPage() {
     setTarikOpen(tagihanId); setTarikSel({}); setTarikQ(""); setTarikLoading(true);
     try {
       const [ro, rp] = await Promise.all([
-        axios.get(`${API}/admin/orders`, { headers }),
+        axios.get(`${API}/admin/orders`, { headers, params: { limit: 500 } }),
         axios.get(`${API}/admin/deal-prices`, { headers }).catch(() => ({ data: { prices: {} } })),
       ]);
       setTarikOrders(ro.data?.items || []);
@@ -212,11 +212,48 @@ export default function SelisihPage() {
     finally { setTarikSaving(false); }
   };
 
+  // Cari INSTAN: tiap ketikan langsung disaring dari order yang sudah dimuat (spasi/strip/titik diabaikan,
+  // beberapa kata = semua harus cocok → "b 2791" ketemu "B-2791-KHE"); paralel, server mencari di SELURUH
+  // order (bukan cuma 500 terbaru) mulai 2 karakter, hasilnya digabung tanpa dobel.
+  const normS = (x) => String(x || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const [tarikSearching, setTarikSearching] = useState(false);
+  useEffect(() => {
+    if (!tarikOpen) return;
+    const q = tarikQ.trim();
+    if (q.length < 2) { setTarikSearching(false); return; }
+    let alive = true; setTarikSearching(true);
+    const t = setTimeout(async () => {
+      try {
+        const r = await axios.get(`${API}/admin/orders`, { headers, params: { q, limit: 300 } });
+        if (!alive) return;
+        const extra = r.data?.items || [];
+        setTarikOrders((cur) => {
+          const have = new Set(cur.map((o) => o.order_id));
+          const add = extra.filter((o) => !have.has(o.order_id));
+          return add.length ? [...add, ...cur] : cur;
+        });
+      } catch (_) { /* hasil lokal tetap tampil */ }
+      finally { if (alive) setTarikSearching(false); }
+    }, 180);
+    return () => { alive = false; clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tarikQ, tarikOpen]);
+  const tarikTokens = tarikQ.trim().toLowerCase().split(/\s+/).map(normS).filter(Boolean);
   const tarikRows = tarikOrders.flatMap(orderUnitsOf).filter((row) => {
-    const q = tarikQ.trim().toLowerCase();
-    if (!q) return true;
-    return `${row.no_unit} ${row.nopol} ${row.no_rangka} ${row.vehicle_type} ${row.asal_kota} ${row.tujuan_kota} ${row.customer}`.toLowerCase().includes(q);
+    if (tarikTokens.length === 0) return true;
+    const hay = normS(`${row.no_unit} ${row.nopol} ${row.no_rangka} ${row.vehicle_type} ${row.asal_kota} ${row.tujuan_kota} ${row.customer} ${row.order_id || ""}`);
+    return tarikTokens.every((t) => hay.includes(t));
   });
+  // Tandai bagian yang cocok (kuning, tebal) supaya hasil cepat terbaca.
+  const hl = (text) => {
+    const str = String(text || "");
+    const toks = tarikQ.trim().split(/\s+/).filter((t) => t.length >= 1);
+    if (!toks.length) return str;
+    const re = new RegExp(`(${toks.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "ig");
+    return str.split(re).map((part, i) => (i % 2 === 1
+      ? <mark key={i} style={{ background: "#EF9F27", color: "#1a1208", borderRadius: 3, padding: "0 2px", fontWeight: 900 }}>{part}</mark>
+      : <span key={i}>{part}</span>));
+  };
 
   // ── Payment form (per tagihan) ──
   const [payOpen, setPayOpen] = useState(null); // tagihan_id lagi buka form bayar
@@ -579,7 +616,11 @@ export default function SelisihPage() {
               <button onClick={() => setTarikOpen(null)} style={{ background: "none", border: "none", color: "#8b949e", fontSize: 18, cursor: "pointer" }}>✕</button>
             </div>
             <div style={{ fontSize: 12, color: "#8b949e", marginBottom: 10 }}>Centang unit, isi Harga Deal &amp; Harga Invoice. Unit &amp; rute otomatis dari order.</div>
-            <input style={I} placeholder="🔎 cari nopol / no rangka / customer / asal / tujuan…" value={tarikQ} onChange={(e) => setTarikQ(e.target.value)} />
+            <input style={{ ...I, fontSize: 16, fontWeight: 700, color: "#ffffff", padding: "12px 14px", border: "1.5px solid #EF9F27" }} autoFocus inputMode="search"
+              placeholder="🔎 ketik nopol / no rangka / no PO / customer / kota…" value={tarikQ} onChange={(e) => setTarikQ(e.target.value)} data-testid="sel-tarik-cari" />
+            <div style={{ fontSize: 11.5, color: "#c9d1d9", margin: "6px 2px 0", minHeight: 16 }}>
+              {tarikSearching ? "⏳ mencari di semua order…" : `${tarikRows.length} unit${tarikQ.trim() ? " cocok" : ""}`}
+            </div>
             {tarikLoading ? <div style={{ padding: 20, textAlign: "center", color: "#8b949e" }}>Memuat…</div> : (
               <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6, maxHeight: "46vh", overflowY: "auto" }}>
                 {tarikRows.map((row) => {
@@ -589,8 +630,9 @@ export default function SelisihPage() {
                       <label style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer" }}>
                         <input type="checkbox" checked={on} onChange={() => toggleTarik(row)} style={{ width: 16, height: 16, marginTop: 2, flexShrink: 0 }} />
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 700 }}>{row.no_unit || "(tanpa nopol)"} · {row.vehicle_type}</div>
-                          <div style={{ fontSize: 11, color: "#8b949e" }}>{row.asal_kota} → {row.tujuan_kota}{row.customer ? ` · ${row.customer}` : ""}</div>
+                          <div style={{ fontSize: 14.5, fontWeight: 800, color: "#ffffff", letterSpacing: 0.2 }}>{row.no_unit ? hl(row.no_unit) : "(tanpa nopol)"} · <span style={{ fontWeight: 600, color: "#e6edf3" }}>{hl(row.vehicle_type)}</span></div>
+                          <div style={{ fontSize: 12.5, color: "#c9d1d9", marginTop: 2 }}>{hl(row.asal_kota)} → {hl(row.tujuan_kota)}{row.customer ? <> · <b style={{ color: "#e6edf3" }}>{hl(row.customer)}</b></> : null}</div>
+                          {row.no_rangka && row.no_rangka !== row.no_unit && <div style={{ fontSize: 11, color: "#8b949e", fontFamily: "monospace" }}>{hl(row.no_rangka)}</div>}
                         </div>
                       </label>
                       {on && (
