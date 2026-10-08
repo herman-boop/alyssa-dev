@@ -8,6 +8,8 @@ import DriverData from "@/DriverData";
 import SupplierPage, { printSupplierA4 } from "@/SupplierPage";
 import SelisihPage from "@/SelisihPage";
 import ShipMasterPage from "@/ShipMasterPage";
+import OrderSummaryShare from "@/OrderSummaryShare";
+import { summaryPropsFromOrder } from "@/orderSummary";
 import ExpensesPage from "@/ExpensesPage";
 import LabaRugiPage from "@/LabaRugiPage";
 import KompensasiPage from "@/KompensasiPage";
@@ -2018,6 +2020,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
   const [showInvoice, setShowInvoice] = useState(false);
   const [showJadwal, setShowJadwal] = useState(false);
   const [showTrip360, setShowTrip360] = useState(false);
+  const [showSummary, setShowSummary] = useState(false); // kartu ringkasan siap bagikan
   const [showDupVendor, setShowDupVendor] = useState(false);
   const [showSJ, setShowSJ] = useState(false); // modal input harga surat jalan
   const [sjHargaDraft, setSjHargaDraft] = useState("");
@@ -2778,8 +2781,27 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
         )}
       </div>
 
+      {/* Kartu ringkasan siap bagikan (screenshot / unduh gambar) */}
+      {showSummary && (
+        <div style={{ padding: "4px 18px 16px" }} data-testid={`adm-summary-panel-${order.order_id}`}>
+          <OrderSummaryShare
+            card={summaryPropsFromOrder(order, computeProgress(order))}
+            fileName={`ringkasan-${order.order_id}`}
+          />
+        </div>
+      )}
+
       {/* Footer actions */}
       <footer className="adm-card-foot">
+        <button
+          type="button"
+          className="adm-btn adm-btn-ghost adm-btn-sm"
+          onClick={() => setShowSummary((v) => !v)}
+          aria-expanded={showSummary}
+          data-testid={`adm-summary-toggle-${order.order_id}`}
+        >
+          {showSummary ? "Tutup Ringkasan" : "Ringkasan"}
+        </button>
         {/* Entitas PT/CV (pembukuan Penjualan) — additive, buat Laba Rugi per entitas */}
         <label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: "#8b949e" }} title="Pembukuan PT / CV untuk laporan Laba Rugi">
           <span>PT/CV:</span>
