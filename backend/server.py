@@ -2199,6 +2199,25 @@ async def _ensure_order_units(order: dict) -> dict:
     return order
 
 
+def _sync_single_unit_vehicle(order: dict) -> dict:
+    """PO 1 unit: edit manual nopol/no. rangka lewat kartu PO tersimpan di field LEVEL ORDER
+    (order.nopol / order.no_rangka), sedangkan Invoice/Jadwal/Tarik Unit membaca units[0] —
+    sehingga invoice bisa memuat nopol/rangka lama. Untuk PO dengan tepat 1 unit, nilai level-order
+    (yang diisi admin) dipakai juga di units[0] pada respons. Murni; tidak menulis DB."""
+    if not isinstance(order, dict):
+        return order
+    units = order.get("units")
+    if not (isinstance(units, list) and len(units) == 1 and isinstance(units[0], dict)):
+        return order
+    u = dict(units[0])
+    for f, up in (("nopol", True), ("no_rangka", True)):
+        v = str(order.get(f) or "").strip()
+        if v and v.upper() != str(u.get(f) or "").strip().upper():
+            u[f] = v.upper() if up else v
+    order["units"] = [u]
+    return order
+
+
 def _order_unit_summary(order: dict) -> dict:
     """Ringkasan status unit untuk kartu PO admin."""
     units = order.get("units") or []
@@ -2434,6 +2453,7 @@ async def list_orders(limit: int = 50, status: Optional[str] = None):
     async for d in cur:
         d.pop("_id", None)
         d = await _ensure_order_units(d)
+        d = _sync_single_unit_vehicle(d)
         d["unit_summary"] = _order_unit_summary(d)
         items.append(d)
     return {"count": len(items), "items": items}
@@ -3457,6 +3477,13 @@ async def admin_patch_order(order_id: str, payload: OrderPatchBody):
         upd["entity_id"] = ent
     if len(upd) == 1:
         raise HTTPException(400, "No fields to update")
+    # PO 1 unit: nopol/no. rangka yang diedit ikut ke units[0] supaya Invoice/Jadwal memakai nilai yang sama.
+    ou = order.get("units")
+    if isinstance(ou, list) and len(ou) == 1:
+        if "nopol" in upd and upd["nopol"]:
+            upd["units.0.nopol"] = upd["nopol"].upper()
+        if "no_rangka" in upd and upd["no_rangka"]:
+            upd["units.0.no_rangka"] = upd["no_rangka"].upper()
     await db.orders.update_one({"order_id": order_id}, {"$set": upd})
 
     # Mirror driver_id to linked trip
