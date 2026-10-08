@@ -7,6 +7,7 @@ import CostCalculator from "@/CostCalculator";
 import DriverData from "@/DriverData";
 import SupplierPage, { printSupplierA4 } from "@/SupplierPage";
 import SelisihPage from "@/SelisihPage";
+import ShipMasterPage from "@/ShipMasterPage";
 import ExpensesPage from "@/ExpensesPage";
 import LabaRugiPage from "@/LabaRugiPage";
 import KompensasiPage from "@/KompensasiPage";
@@ -419,6 +420,7 @@ function Dashboard({ pin, onLogout }) {
     drivers:      { title: "Driver", sub: "Kelola data driver & dokumen" },
     koordinator:  { title: "Koordinator", sub: "Kelola akun koordinator lapangan" },
     supplier:     { title: "Supplier", sub: "Kelola unit titipan & selisih harga supplier" },
+    "master-kapal": { title: "Master Kapal", sub: "Panjang, lebar & tipe kapal (tampil di layar Lihat Posisi Kapal)" },
     selisih:      { title: "Selisih Harga", sub: "Bandingkan HPP vs harga deal pelanggan" },
     biaya:        { title: "Biaya / Beban", sub: "Biaya operasional (non-HPP) per PT/CV — terpisah dari tagihan supplier" },
     "laba-rugi":  { title: "Laba Rugi", sub: "Pendapatan − HPP − Biaya per PT/CV & periode (dari transaksi aktual)" },
@@ -514,6 +516,10 @@ function Dashboard({ pin, onLogout }) {
 
       {activeTab === "selisih" && (
         <SelisihPage />
+      )}
+
+      {activeTab === "master-kapal" && (
+        <ShipMasterPage />
       )}
 
       {activeTab === "biaya" && (
@@ -847,7 +853,7 @@ const STATUS_TONE = { NEW: "orange", DISPATCHED: "blue", ON_TRIP: "purple", DELI
 const SIDEBAR_ICON = {
   beranda: "🏠", "rekap-tagih": "💰", kontak: "📇",
   pesanan: "▦", "route-leg": "🧭", drivers: "👤", supplier: "🌿", koordinator: "🧑‍💼",
-  kendaraan: "🚙", dokumen: "📄", histori: "🗂️", laporan: "📑", kalkulator: "🧮", selisih: "📊",
+  kendaraan: "🚙", "master-kapal": "🚢", dokumen: "📄", histori: "🗂️", laporan: "📑", kalkulator: "🧮", selisih: "📊",
   kompensasi: "🔄", "minta-harga": "📩", pengaturan: "⚙️", "pembayaran-vendor": "🏢",
   biaya: "🧾", "laba-rugi": "📈",
 };
@@ -1099,6 +1105,7 @@ const SIDEBAR_GROUPS = [
     { key: "koordinator", label: "Koordinator" },
     { key: "drivers", label: "Driver" },
     { key: "kendaraan", label: "Kendaraan" },
+    { key: "master-kapal", label: "Master Kapal" },
     { key: "minta-harga", label: "Minta Harga" },
   ] },
   { title: "Pembelian", items: [

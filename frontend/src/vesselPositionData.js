@@ -74,7 +74,8 @@ export function buildVesselView(shipAis, leg, extra) {
   const lat = a ? num(a.latitude) : null;
   const lon = a ? num(a.longitude) : null;
   if (lat === null || lon === null) return null;
-  const ex = extra || {};
+  const mst = shipAis.master || {};           // master kapal (data statis dari admin)
+  const ex = { length: mst.length_m, width: mst.width_m, shipType: mst.ship_type, ...(extra || {}) };
   return {
     name: (shipAis.ship_name || a.ship_name || "KAPAL").toString(),
     mmsi: shipAis.mmsi || a.mmsi || "",

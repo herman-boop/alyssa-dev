@@ -17,6 +17,7 @@ from supplier_dedup import suggest_similar
 import ledger_status as LS
 import pnl as PNL
 import ais as AIS
+import ship_master as SM
 import invoice_payments as IP
 import expenses as EXP
 
@@ -1434,8 +1435,35 @@ async def test_sync_single_unit_vehicle():
     ok(f(None) is None and f({"units": None}) == {"units": None}, "input kosong aman")
 
 
+async def test_ship_master():
+    print("\n== master kapal (panjang/lebar/tipe) ==")
+    db = FakeDB()
+    ok(SM.make_key("525019123", "") == "mmsi:525019123", "key MMSI 9 digit")
+    ok(SM.make_key("12", "9512345") == "imo:9512345", "MMSI tak valid → fallback IMO 7 digit")
+    ok(SM.make_key("", "") == "", "tanpa identitas → key kosong")
+    for bad, msg in (({"mmsi": "123"}, "MMSI harus 9 digit"), ({"imo": "12"}, "IMO harus 7 digit"), ({}, "Isi MMSI"),
+                     ({"mmsi": "525019123", "length_m": "abc"}, "harus angka"),
+                     ({"mmsi": "525019123", "length_m": 9999}, "di luar batas"),
+                     ({"mmsi": "525019123", "width_m": -3}, "di luar batas")):
+        try:
+            SM.clean_payload(bad); ok(False, f"harus ditolak: {bad}")
+        except ValueError as e:
+            ok(msg in str(e), f"ditolak: {msg}")
+    d = await SM.upsert(db, {"mmsi": "525019123", "name": "KM <b>MUTIARA", "ship_type": "Passenger / Ro-Ro", "length_m": "78,5", "width_m": 14})
+    ok(d["length_m"] == 78.5 and d["width_m"] == 14.0 and "<" not in d["name"], "upsert: koma desimal diterima, tag HTML dibuang")
+    await SM.upsert(db, {"mmsi": "525019123", "length_m": 80})
+    ok(len(db.ship_master.docs) == 1 and db.ship_master.docs[0]["length_m"] == 80.0, "upsert kedua mengoreksi dokumen yang sama (tanpa duplikat)")
+    got = await SM.lookup(db, "525019123", "")
+    ok(got and got["length_m"] == 80.0, "lookup via MMSI")
+    ok(await SM.lookup(db, "000000000", "") is None, "lookup tak ada → None")
+    pub = SM.public_master(got)
+    ok(set(pub) == {"length_m", "width_m", "ship_type"}, "public_master hanya field aman")
+    ok(SM.public_master({"mmsi": "525019123"}) is None, "master tanpa data berguna → None")
+    ok(len(await SM.list_all(db)) == 1, "list_all")
+
+
 async def main():
-    for t in (test_sync_single_unit_vehicle, test_edit_invoice_lines, test_selisih_ringkasan_auth, test_riwayat_clear, test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
+    for t in (test_ship_master, test_sync_single_unit_vehicle, test_edit_invoice_lines, test_selisih_ringkasan_auth, test_riwayat_clear, test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,
