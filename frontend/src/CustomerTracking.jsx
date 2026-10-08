@@ -1008,7 +1008,7 @@ export default function CustomerTracking() {
               && !(shipInfo && shipInfo.berthed_at));
             return (
               <LiveTrackSummary
-                ship={onShip ? { name: shipAis.ship_name || shipInfo?.ship_name || activeShipLeg.kapal || "Kapal", onOpen: () => setVesselView(true) } : null}
+                ship={onShip ? { name: shipAis.ship_name || shipInfo?.ship_name || activeShipLeg.kapal || "Kapal", atPort: shipInfo && shipInfo.speed != null && Number(shipInfo.speed) < 1, onOpen: () => setVesselView(true) } : null}
                 nopol={data.nopol} driver={data.nama_driver} route={data.route} tipe={data.tipe_kendaraan}
                 status={overallStatus} tone={statusColor}
                 done={overallStatus === "Sudah Diterima" || overallStatus === "Tiba di Tujuan"}

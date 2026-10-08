@@ -47,7 +47,10 @@ export default function LiveTrackSummary({
       {ship ? (
         <button type="button" className="lts-ship" onClick={ship.onOpen} data-testid="lts-ship">
           <span className="lts-ship-ic" aria-hidden="true">🚢</span>
-          <span className="lts-ship-t"><small>Unit sedang di atas kapal</small><b>{ship.name}</b></span>
+          <span className="lts-ship-t">
+            <small>{ship.atPort ? "Kapal masih di pelabuhan" : "Unit sedang di atas kapal"}</small>
+            <b>{ship.name}</b>
+          </span>
           <span className="lts-ship-go">Lihat Posisi ›</span>
         </button>
       ) : null}
