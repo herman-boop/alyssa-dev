@@ -6,6 +6,7 @@ import "leaflet/dist/leaflet.css";
 import "./Tracking.css";
 import VesselPositionView from "./VesselPositionView";
 import LiveTrackSummary from "./LiveTrackSummary";
+import { MapFitter, SHIP_ZOOM, REGIONAL_ZOOM } from "./MapAutoCenter";
 import { buildVesselView } from "./vesselPositionData";
 import { MAP_TILE_URL, MAP_LABEL_URL, MAP_ATTR, MAP_MAX_ZOOM, MAP_MAX_NATIVE_ZOOM, ROUTE_COLOR, ROUTE_WEIGHT, ROUTE_OPACITY, ROUTE_DASH, freshnessDot } from "./mapTheme";
 
@@ -535,39 +536,8 @@ function aisAgeText(sec) {
   return `${Math.floor(sec / 86400)} hari lalu`;
 }
 
-/* ── Map auto-fit ──
-   Zoom regional biar langsung dapat konteks (kapal + pulau besar sekitarnya),
-   BUKAN zoom mepet ke 1 marker. Auto-fit hanya SEKALI saat data pertama siap;
-   sesudah itu user bebas zoom/pan — tidak dipaksa balik tiap AIS refresh. */
-const REGIONAL_ZOOM = 7;   // 1 posisi: tampilkan konteks regional
-const SHIP_ZOOM = 8;       // fokus ke kapal: kapal + kota/pelabuhan terdekat terbaca (mis. Nabire)
-const FIT_MAX_ZOOM = 9;    // banyak titik berdekatan: jangan lebih dekat dari ini
-function MapFitter({ positions, shipPos }) {
-  const map = useMap();
-  const done = useRef(false);
-  useEffect(() => {
-    if (done.current) return;              // hanya auto-fit sekali (initial)
-    try {
-      // Prioritas: langsung fokus ke KAPAL (yang dicari pelanggan) di zoom yang
-      // menampilkan kapal + kota/pelabuhan terdekat. Ini mencegah peta ke-zoom
-      // out kejauhan gara-gara checkpoint (mis. Jakarta) jauh dari kapal (mis. Papua).
-      if (shipPos && shipPos.length === 2) {
-        map.setView(shipPos, SHIP_ZOOM);
-        done.current = true;
-        return;
-      }
-      if (!positions || positions.length === 0) return;
-      if (positions.length === 1) {
-        map.setView(positions[0], REGIONAL_ZOOM);
-      } else {
-        map.fitBounds(L.latLngBounds(positions), { padding: [50, 50], maxZoom: FIT_MAX_ZOOM });
-      }
-      done.current = true;                 // kunci: refresh AIS berikutnya tidak re-center
-    } catch (e) {}
-  }, [map, positions, shipPos]);
-  return null;
-}
-
+/* ── Map auto-fit: lihat MapAutoCenter.jsx (kapal dipusatkan otomatis, invalidateSize,
+   berhenti begitu pengguna menyentuh peta). */
 /* Terbang/fokus ke satu titik saat `nonce` berubah (mis. pelanggan klik leg kapal). */
 function MapFlyTo({ target, nonce }) {
   const map = useMap();

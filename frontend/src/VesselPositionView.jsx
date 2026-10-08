@@ -58,15 +58,28 @@ function Recenter({ pos, nonce }) {
   return null;
 }
 
-/* Leaflet butuh invalidateSize setelah layout flex selesai. */
-function FixSize() {
+/* Leaflet butuh invalidateSize setelah layout flex selesai; lalu pusatkan ke kapal
+   selama pengguna belum menyentuh peta (supaya kapal tidak "bergeser" belakangan). */
+function FixSize({ pos }) {
   const map = useMap();
   useEffect(() => {
-    const t = setTimeout(() => map.invalidateSize(), 120);
-    const onR = () => map.invalidateSize();
-    window.addEventListener("resize", onR);
-    return () => { clearTimeout(t); window.removeEventListener("resize", onR); };
-  }, [map]);
+    let touched = false;
+    const el = map.getContainer();
+    const mark = () => { touched = true; };
+    const evs = ["pointerdown", "wheel", "touchstart"];
+    evs.forEach((e) => el.addEventListener(e, mark, { passive: true }));
+    const settle = () => {
+      map.invalidateSize({ animate: false });
+      if (!touched) map.setView(pos, map.getZoom(), { animate: false });
+    };
+    const timers = [0, 120, 350, 900].map((ms) => setTimeout(settle, ms));
+    window.addEventListener("resize", settle);
+    return () => {
+      timers.forEach(clearTimeout);
+      window.removeEventListener("resize", settle);
+      evs.forEach((e) => el.removeEventListener(e, mark));
+    };
+  }, [map]); // eslint-disable-line react-hooks/exhaustive-deps
   return null;
 }
 
@@ -122,7 +135,7 @@ export default function VesselPositionView({ vessel, onClose, landmarks = [] }) 
           <Marker position={pos} icon={icon}>
             <Tooltip permanent direction="right" offset={[18, 0]} className="vpos-name">{v.name}</Tooltip>
           </Marker>
-          <FixSize />
+          <FixSize pos={pos} />
           <Recenter pos={pos} nonce={nonce} />
         </MapContainer>
 
