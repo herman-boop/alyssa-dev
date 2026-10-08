@@ -33,14 +33,14 @@
   color-scheme: light;
 }
 
-/* Rute: tebal, biru laut menyala */
+/* Rute: tebal, biru super kontras (#0369A1) */
 .adm-order-bright .adm-route-bright {
   font-weight: 800;
   font-size: 14px;
   line-height: 1.3;
   letter-spacing: 0.2px;
   text-transform: uppercase;
-  color: #0284C7;
+  color: #0369A1;   /* biru super kontras: tajam dan terbaca jelas saat di-screenshot */
 }
 .adm-order-bright .adm-route-bright .adm-route-arrow {
   display: inline-block;
