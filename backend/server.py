@@ -1298,6 +1298,45 @@ async def ensure_kwitansi_no(doc_id: str, payment_id: str):
     return {"no_kwitansi": pay2.get("no_kwitansi") or no, "new": True}
 
 
+@api_router.patch("/admin/doc-history/{doc_id}/lines", dependencies=[Depends(require_admin_pin)])
+async def edit_invoice_lines(doc_id: str, body: Dict[str, Any] = Body(...)):
+    """EDIT / TAMBAH UNIT pada invoice yang sudah jadi: mengganti daftar baris (unit & harga) dan
+    order_ids. No. Invoice, tanggal, customer, meta, pembayaran (payments) & bukti TIDAK diubah —
+    total faktur dihitung ulang dari baris; sisa = total baru − pembayaran tercatat. Tiap edit dicatat
+    di `edit_log` (jejak audit). Hanya jenis 'invoice'."""
+    doc = await db.doc_history.find_one({"id": doc_id, "jenis": "invoice"}, {"_id": 0, "id": 1, "lines": 1, "customer": 1, "order_ids": 1})
+    if not doc:
+        raise HTTPException(404, "Invoice tidak ditemukan")
+    raw = (body or {}).get("lines")
+    if not isinstance(raw, list) or not raw:
+        raise HTTPException(400, "Invoice minimal punya 1 unit")
+    lines = []
+    for i, l in enumerate(raw):
+        if not isinstance(l, dict):
+            raise HTTPException(400, f"Baris {i + 1} tidak valid")
+        try:
+            harga = int(l.get("harga") or 0)
+            qty = int(l.get("qty") or 1)
+        except (TypeError, ValueError):
+            raise HTTPException(400, f"Harga/qty baris {i + 1} tidak valid")
+        if harga < 0 or qty < 1:
+            raise HTTPException(400, f"Harga/qty baris {i + 1} tidak valid")
+        item = dict(l); item["harga"] = harga; item["qty"] = qty
+        item["nama"] = str(l.get("nama") or "Jasa Pengiriman")[:120]
+        item["ket"] = str(l.get("ket") or "")[:600]
+        lines.append(item)
+    order_ids = [str(o) for o in ((body or {}).get("order_ids") or doc.get("order_ids") or []) if o]
+    now = datetime.now(timezone.utc).isoformat()
+    cust = doc.get("customer") or ""
+    judul = f"{cust} · {len(lines)} unit · {len(set(order_ids))} PO"
+    entry = {"at": now, "unit_sebelum": len(doc.get("lines") or []), "unit_sesudah": len(lines), "by": str((body or {}).get("by") or "Admin")[:60]}
+    await db.doc_history.update_one(
+        {"id": doc_id},
+        {"$set": {"lines": lines, "order_ids": order_ids, "judul": judul}, "$push": {"edit_log": entry}})
+    out = await db.doc_history.find_one({"id": doc_id}, {"_id": 0, "stempel": 0})
+    return out
+
+
 @api_router.delete("/admin/doc-history/{doc_id}", dependencies=[Depends(require_admin_pin)])
 async def delete_doc_history(doc_id: str):
     """Hapus 1 record arsip dokumen."""

@@ -4671,6 +4671,7 @@ function HistoriDokumen({ headers }) {
   const [fQ, setFQ] = useState("");                  // no dokumen / customer / PO
   const [page, setPage] = useState(1);
   const [payRec, setPayRec] = useState(null);        // faktur yang lagi dibuka modal pembayarannya
+  const [editRec, setEditRec] = useState(null);      // faktur yang lagi dibuka modal Edit / Tambah Unit
 
   const isPrice = filter === "__pricelist";
 
@@ -4903,6 +4904,9 @@ function HistoriDokumen({ headers }) {
                   {rec.jenis === "invoice" && (
                     <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={() => setPayRec(rec)} data-testid="dochist-pay">💰 Pembayaran</button>
                   )}
+                  {rec.jenis === "invoice" && (
+                    <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={async () => { let full = rec; try { const r = await axios.get(`${API}/admin/doc-history/${rec.id}`, { headers }); if (r.data) full = r.data; } catch {} setEditRec(full); }} data-testid="dochist-edit">✏️ Edit / Tambah Unit</button>
+                  )}
                   <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={() => reprint(rec)} data-testid="dochist-print">🖨️ Cetak ulang</button>
                   <button className="adm-btn adm-dochist-btn adm-dochist-del" onClick={() => del(rec)} data-testid="dochist-del">🗑️ Hapus</button>
                 </div>
@@ -4919,6 +4923,15 @@ function HistoriDokumen({ headers }) {
         )}
         </>
       )}
+      {editRec && (
+        <InvoiceEditModal
+          rec={editRec}
+          headers={headers}
+          onClose={() => setEditRec(null)}
+          onSaved={(upd) => { setEditRec(upd); setItems((xs) => xs.map((x) => (x.id === upd.id ? { ...x, lines: upd.lines, order_ids: upd.order_ids, judul: upd.judul } : x))); }}
+          onPrint={() => reprint(editRec)}
+        />
+      )}
       {payRec && (
         <InvoicePaymentModal
           rec={payRec}
@@ -4930,6 +4943,140 @@ function HistoriDokumen({ headers }) {
       )}
     </div>
   );
+}
+
+/* ── Edit / Tambah Unit pada invoice yang sudah jadi (No. Invoice & pembayaran tetap) ── */
+function InvoiceEditModal({ rec, headers, onClose, onSaved, onPrint }) {
+  const rp = (n) => "Rp " + (Number(n) || 0).toLocaleString("id-ID");
+  const digits = (v) => String(v == null ? "" : v).replace(/[^0-9]/g, "");
+  const [lines, setLines] = useState(() => (Array.isArray(rec.lines) ? rec.lines : []).map((l) => ({ ...l })));
+  const [orderIds, setOrderIds] = useState(Array.isArray(rec.order_ids) ? rec.order_ids : []);
+  const [added, setAdded] = useState([]);                // unit baru (buat mark-invoiced): { order_id, unit_id }
+  const [q, setQ] = useState("");
+  const [orders, setOrders] = useState([]);
+  const [loadingO, setLoadingO] = useState(false);
+  const [pick, setPick] = useState({});                  // key -> { row, harga }
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [saved, setSaved] = useState(false);
+
+  const unitsOf = (o) => {
+    const arr = (Array.isArray(o.units) && o.units.length) ? o.units
+      : [{ unit_id: "legacy", vehicle_type: o.vehicle_type, tipe_model: o.tipe_model, nopol: o.nopol, no_rangka: o.no_rangka }];
+    return arr.map((u, i) => ({
+      key: `${o.order_id}:${u.unit_id || u.nopol || i}`, order_id: o.order_id, unit_id: u.unit_id || "",
+      vehicle_type: `${u.vehicle_type || ""}${u.tipe_model ? " " + u.tipe_model : ""}`.trim() || "Kendaraan",
+      nopol: (u.nopol || "").toUpperCase(), no_rangka: (u.no_rangka || "").toUpperCase(),
+      asal_kota: o.asal_kota || "", tujuan_kota: o.tujuan_kota || "", customer: o.customer_nama || "",
+    }));
+  };
+  const ketOf = (r) => `${r.vehicle_type}${r.nopol ? " " + r.nopol : ""} (${r.asal_kota || "—"}–${r.tujuan_kota || "—"})${r.no_rangka ? `<br>No. Rangka: ${r.no_rangka}` : ""}`;
+  const plain = (h) => String(h || "").replace(/<br\s*\/?>/gi, " · ").replace(/<[^>]+>/g, "");
+
+  useEffect(() => {
+    if (!q.trim()) { setOrders([]); return; }
+    let alive = true; setLoadingO(true);
+    const t = setTimeout(async () => {
+      try { const r = await axios.get(`${API}/admin/orders`, { headers, params: { q: q.trim(), limit: 100 } }); if (alive) setOrders(r.data?.items || []); }
+      catch { if (alive) setOrders([]); }
+      finally { if (alive) setLoadingO(false); }
+    }, 200);
+    return () => { alive = false; clearTimeout(t); };
+  }, [q]); // eslint-disable-line
+
+  const norm = (x) => String(x || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const inInvoice = (r) => lines.some((l) => { const k = norm(l.ket); return (r.no_rangka && k.includes(norm(r.no_rangka))) || (r.nopol && k.includes(norm(r.nopol)) && r.nopol.length > 3); });
+  const rows = orders.flatMap(unitsOf);
+
+  const total = invTotalFromRec({ lines, meta: rec.meta }).total;
+  const diterima = (Array.isArray(rec.payments) ? rec.payments : []).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+
+  const setHarga = (i, v) => setLines((ls) => ls.map((l, x) => (x === i ? { ...l, harga: Number(digits(v)) || 0 } : l)));
+  const removeLine = (i) => { if (lines.length <= 1) { setErr("Invoice minimal punya 1 unit."); return; } if (window.confirm(`Hapus baris ini dari invoice?\n${plain(lines[i].ket)}`)) setLines((ls) => ls.filter((_, x) => x !== i)); };
+  const togglePick = (r) => setPick((p) => { const n = { ...p }; if (n[r.key]) delete n[r.key]; else n[r.key] = { row: r, harga: "" }; return n; });
+  const addPicked = () => {
+    const ready = Object.values(pick).filter((x) => Number(digits(x.harga)) > 0);
+    if (!ready.length) { setErr("Isi harga unit yang dipilih dulu."); return; }
+    setErr("");
+    setLines((ls) => [...ls, ...ready.map((x) => ({ nama: "Jasa Pengiriman", ket: ketOf(x.row), qty: 1, harga: Number(digits(x.harga)), customer_po_number: null }))]);
+    setOrderIds((ids) => Array.from(new Set([...ids, ...ready.map((x) => x.row.order_id).filter(Boolean)])));
+    setAdded((a) => [...a, ...ready.filter((x) => x.row.unit_id && x.row.unit_id !== "legacy").map((x) => ({ order_id: x.row.order_id, unit_id: x.row.unit_id }))]);
+    setPick({}); setQ("");
+  };
+
+  const save = async () => {
+    setBusy(true); setErr("");
+    try {
+      const { data } = await axios.patch(`${API}/admin/doc-history/${rec.id}/lines`, { lines, order_ids: orderIds, by: "Admin" }, { headers });
+      const byOrder = {};
+      added.forEach((a) => { (byOrder[a.order_id] = byOrder[a.order_id] || []).push(a.unit_id); });
+      Object.entries(byOrder).forEach(([oid, ids]) => axios.post(`${API}/admin/orders/${oid}/units/mark-invoiced`, { unit_ids: ids }, { headers }).catch(() => {}));
+      setAdded([]); setSaved(true);
+      onSaved && onSaved({ ...rec, ...data, payments: rec.payments });
+    } catch (e) { setErr(e?.response?.data?.detail || "Gagal menyimpan perubahan."); }
+    finally { setBusy(false); }
+  };
+
+  const rowS = { display: "flex", justifyContent: "space-between", gap: 12, padding: "4px 0", fontSize: 13 };
+  return createPortal((
+    <div className="adm-vars"><div className="adm-modal-bg" onClick={onClose}>
+      <div className="adm-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 640 }} data-testid="invedit-modal">
+        <div className="adm-modal-head">
+          <div>
+            <div className="adm-modal-title">✏️ Edit / Tambah Unit Invoice</div>
+            <div className="adm-modal-sub">{rec.no_dokumen || "(tanpa nomor)"} · {rec.customer || "—"} · nomor invoice tetap</div>
+          </div>
+          <button className="adm-modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="adm-modal-body">
+          <div style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "10px 14px", marginBottom: 14 }}>
+            <div style={rowS}><span style={{ color: "var(--text-3)" }}>{lines.length} unit · Total Tagihan</span><b data-testid="invedit-total">{rp(total)}</b></div>
+            {diterima > 0 && <div style={rowS}><span style={{ color: "var(--text-3)" }}>Pembayaran tercatat (tetap)</span><b style={{ color: "#3fb950" }}>− {rp(diterima)}</b></div>}
+            {diterima > 0 && <div style={{ ...rowS, borderTop: "1px solid var(--border)", marginTop: 4, paddingTop: 8 }}><b>Sisa Tagihan</b><b>{rp(total - diterima)}</b></div>}
+          </div>
+
+          <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: ".4px", marginBottom: 6 }}>Unit di invoice</div>
+          {lines.map((l, i) => (
+            <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", padding: "7px 0", borderBottom: "1px solid var(--border)" }}>
+              <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: "var(--text)" }}>{i + 1}. {plain(l.ket)}</div>
+              <input className="adm-input" style={{ width: 130, textAlign: "right" }} inputMode="numeric" value={(Number(l.harga) || 0).toLocaleString("id-ID")} onChange={(e) => setHarga(i, e.target.value)} />
+              <button className="adm-btn adm-btn-sm adm-btn-ghost" onClick={() => removeLine(i)} title="Hapus baris">✕</button>
+            </div>
+          ))}
+
+          <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: ".4px", margin: "16px 0 6px" }}>＋ Tambah unit dari PO</div>
+          <input className="adm-input" style={{ width: "100%" }} placeholder="Cari nopol / no rangka / no PO / customer / kota…" value={q} onChange={(e) => setQ(e.target.value)} data-testid="invedit-cari" />
+          {loadingO && <div style={{ fontSize: 12, color: "var(--text-mute)", padding: 6 }}>Mencari…</div>}
+          <div style={{ maxHeight: 220, overflowY: "auto", marginTop: 6 }}>
+            {rows.map((r) => {
+              const on = !!pick[r.key]; const dup = inInvoice(r);
+              return (
+                <div key={r.key} style={{ border: `1px solid ${on ? "var(--gold, #EF9F27)" : "var(--border)"}`, borderRadius: 8, padding: 8, marginBottom: 6 }}>
+                  <label style={{ display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer" }}>
+                    <input type="checkbox" checked={on} onChange={() => togglePick(r)} style={{ width: 16, height: 16, marginTop: 2 }} />
+                    <div style={{ flex: 1, minWidth: 0, fontSize: 12.5 }}>
+                      <b>{r.nopol || r.no_rangka || "(tanpa nopol)"}</b> · {r.vehicle_type}
+                      <div style={{ color: "var(--text-mute)" }}>{r.asal_kota} → {r.tujuan_kota}{r.customer ? ` · ${r.customer}` : ""}{dup ? " · ⚠️ sudah ada di invoice ini" : ""}</div>
+                    </div>
+                  </label>
+                  {on && <input className="adm-input" style={{ width: "100%", marginTop: 6 }} inputMode="numeric" placeholder="Harga (Rp)" value={pick[r.key].harga ? Number(digits(pick[r.key].harga)).toLocaleString("id-ID") : ""} onChange={(e) => setPick((p) => ({ ...p, [r.key]: { ...p[r.key], harga: digits(e.target.value) } }))} />}
+                </div>
+              );
+            })}
+          </div>
+          {Object.keys(pick).length > 0 && <button className="adm-btn adm-btn-sm adm-btn-blue" style={{ marginTop: 6 }} onClick={addPicked} data-testid="invedit-add">＋ Masukkan {Object.keys(pick).length} unit ke invoice</button>}
+
+          {err && <div style={{ color: "#f85149", fontSize: 12.5, marginTop: 10 }}>{err}</div>}
+          {saved && <div style={{ color: "#3fb950", fontSize: 12.5, marginTop: 10 }}>✓ Tersimpan — nomor invoice & pembayaran tetap. Cetak ulang untuk melihat hasilnya.</div>}
+        </div>
+        <div className="adm-modal-foot">
+          <button className="adm-btn adm-btn-ghost" onClick={onClose}>Tutup</button>
+          {saved && <button className="adm-btn adm-btn-ghost" onClick={onPrint} data-testid="invedit-print">🖨️ Cetak ulang</button>}
+          <button className="adm-btn adm-btn-blue" disabled={busy} onClick={save} data-testid="invedit-save">{busy ? "Menyimpan…" : "💾 Simpan Perubahan"}</button>
+        </div>
+      </div>
+    </div></div>
+  ), document.body);
 }
 
 /* ── Cetak Faktur/Invoice (fungsi modul, bisa dicetak ulang dari Histori) ──

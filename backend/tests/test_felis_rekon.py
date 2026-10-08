@@ -1363,8 +1363,55 @@ async def test_selisih_ringkasan_auth():
             else: os.environ[k] = v
 
 
+async def test_edit_invoice_lines():
+    """Edit/Tambah Unit invoice: baris diganti, No. Invoice/payments/meta TIDAK berubah, edit_log tercatat,
+    validasi input. Kode ASLI endpoint (AST)."""
+    print("test_edit_invoice_lines")
+    import ast, copy, typing, datetime as _dt
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "server.py"), encoding="utf-8").read()
+    node = next(n for n in ast.parse(src).body if isinstance(n, ast.AsyncFunctionDef) and n.name == "edit_invoice_lines")
+    class _HTTP(Exception):
+        def __init__(self, status_code, detail=""): self.status_code = status_code; self.detail = detail
+    class _C(FakeColl):
+        async def update_one(self, filt, update, upsert=False):
+            for d in self.docs:
+                if self._match(d, filt):
+                    d.update((update or {}).get("$set") or {})
+                    for k, v in ((update or {}).get("$push") or {}).items():
+                        d.setdefault(k, []).append(v)
+                    return types.SimpleNamespace(modified_count=1)
+            return types.SimpleNamespace(modified_count=0)
+    class _DB: pass
+    d = _DB(); d.doc_history = _C()
+    base = {"id": "DOC-1", "jenis": "invoice", "no_dokumen": "INV0156_08102026_2026", "customer": "PT ASDP", "meta": {"withTax": True},
+            "payments": [{"id": "p1", "amount": 1000}], "order_ids": ["O1"],
+            "lines": [{"nama": "Jasa Pengiriman", "ket": "Rush B 1", "qty": 1, "harga": 10500000}]}
+    await d.doc_history.insert_one(copy.deepcopy(base))
+    ns = {"db": d, "HTTPException": _HTTP, "Dict": typing.Dict, "Any": typing.Any, "Body": lambda *a, **k: None,
+          "datetime": _dt.datetime, "timezone": _dt.timezone}
+    exec(ast.get_source_segment(src, node), ns)
+    fn = ns["edit_invoice_lines"]
+    new_lines = base["lines"] + [{"nama": "Jasa Pengiriman", "ket": "Rush B 2<br>No. Rangka: X", "qty": 1, "harga": "8500000"}]
+    r = await fn("DOC-1", {"lines": new_lines, "order_ids": ["O1", "O2"], "by": "Admin"})
+    ok(len(r["lines"]) == 2 and r["lines"][1]["harga"] == 8500000, "unit ditambah, harga dinormalisasi ke angka")
+    ok(r["no_dokumen"] == base["no_dokumen"] and r["payments"] == base["payments"] and r["meta"] == base["meta"] and r["customer"] == "PT ASDP", "No. Invoice, pembayaran, meta, customer TIDAK berubah")
+    ok(r["order_ids"] == ["O1", "O2"] and r["judul"] == "PT ASDP · 2 unit · 2 PO", "order_ids & judul ikut")
+    ok(len(r["edit_log"]) == 1 and r["edit_log"][0]["unit_sebelum"] == 1 and r["edit_log"][0]["unit_sesudah"] == 2, "jejak edit tercatat")
+    for body, code in (({"lines": []}, 400), ({"lines": [{"harga": -1}]}, 400), ({"lines": [{"harga": "abc"}]}, 400), ({"lines": ["x"]}, 400)):
+        try:
+            await fn("DOC-1", body); got = None
+        except _HTTP as e:
+            got = e.status_code
+        ok(got == code, f"input tidak valid → {code}")
+    try:
+        await fn("ZZ", {"lines": new_lines}); got = None
+    except _HTTP as e:
+        got = e.status_code
+    ok(got == 404, "invoice tak ada → 404")
+
+
 async def main():
-    for t in (test_selisih_ringkasan_auth, test_riwayat_clear, test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
+    for t in (test_edit_invoice_lines, test_selisih_ringkasan_auth, test_riwayat_clear, test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,
