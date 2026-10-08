@@ -1059,6 +1059,22 @@ export default function SupplierPage() {
   const [clrBusy, setClrBusy] = useState(false);
   const clearedSet = useMemo(() => new Set(((selected && selected.riwayat_clear) || []).filter((e) => e.status === "cleared").map((e) => e.key)), [selected]);
   const toggleClr = (k) => setClrSel((s0) => { const n = new Set(s0); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  // "Belum Dialokasikan" (header): rekon yang sudah di-CLEAR tidak ikut dihitung/ditampilkan; data tidak dihapus.
+  const unallocRows = ((selected && selected.rekon_payments) || []).filter((p) => p.status !== "reversed" && (p.unallocated || 0) > 0);
+  const unallocOpen = unallocRows.filter((p) => !clearedSet.has(`rk:${p.id}`));
+  const unallocOpenTotal = unallocOpen.reduce((a, p) => a + (p.unallocated || 0), 0);
+  const unallocClearedN = unallocRows.length - unallocOpen.length;
+  const clearUnalloc = async () => {
+    if (!selected || !unallocOpen.length) return;
+    if (!window.confirm(`Clear ${unallocOpen.length} transaksi rekon yang belum dialokasikan (${fRp(unallocOpenTotal)})?\n\nHanya disembunyikan dari angka ini & daftar Riwayat. Data bank, alokasi, dan pembayaran TIDAK dihapus; bisa dikembalikan di Riwayat Clear / Arsip.`)) return;
+    setClrBusy(true);
+    try {
+      await axios.post(`${API}/admin/suppliers/${selected.id}/riwayat/clear`, { keys: unallocOpen.map((p) => `rk:${p.id}`), by: "Admin" }, { headers });
+      await reloadSelected(selected.id);
+      flash(`✓ ${unallocOpen.length} transaksi di-clear (data tetap tersimpan)`);
+    } catch (e) { flash(e?.response?.data?.detail || "Gagal clear"); }
+    finally { setClrBusy(false); }
+  };
   const runClear = async (restore) => {
     const keys = [...clrSel];
     if (!keys.length || !selected) return;
@@ -1207,11 +1223,19 @@ export default function SupplierPage() {
                 { lbl: "Net Transfer", val: grandTax.net, c: C.ink },
                 { lbl: "Sudah Dialokasikan", val: grandTax.terbayar, c: C.green },
                 { lbl: "Sisa Transfer", val: grandTax.sisa_transfer, c: (grandTax.sisa_transfer > 0 ? C.red : C.green) },
-                ...(((selected.total_unallocated || 0) > 0) ? [{ lbl: "Belum Dialokasikan", val: selected.total_unallocated, c: C.gold }] : []),
+                ...((unallocOpenTotal > 0 || unallocClearedN > 0) ? [{ lbl: "Belum Dialokasikan", val: unallocOpenTotal, c: unallocOpenTotal > 0 ? C.gold : C.green, unalloc: true }] : []),
               ].map((s, i) => (
                 <div key={i} style={{ background: C.inpBg, border: `1px solid ${C.line}`, borderRadius: 12, padding: "10px 10px" }}>
                   <div style={{ fontSize: 9.5, color: C.mute, textTransform: "uppercase", letterSpacing: ".3px", fontWeight: 700 }}>{s.lbl}</div>
                   <div style={{ fontSize: 14, fontWeight: 900, color: s.c, marginTop: 3, textAlign: "right", wordBreak: "break-word" }}>{fRp(s.val)}</div>
+                  {s.unalloc && (
+                    <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+                      {unallocClearedN > 0 && <span style={{ fontSize: 10, color: C.mute }}>{unallocClearedN} di-clear</span>}
+                      {unallocOpen.length > 0 && (
+                        <button onClick={clearUnalloc} disabled={clrBusy} style={{ ...BTN_GHOST, padding: "4px 10px", fontSize: 11 }} data-testid="sup-clear-unalloc">🧹 Clear</button>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
