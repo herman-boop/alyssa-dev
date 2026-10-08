@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { labelOf } from "@/lib/uploadQueue";
 
 /*
   Banner status foto checkpoint yang belum sampai ke server.
@@ -23,11 +24,12 @@ export default function PendingUploadBanner({ items, busy, onRetry }) {
     : busy
       ? { bg: "#0D2340", bd: "#3B82F6", fg: "#BFDBFE" }
       : { bg: "#2B1D0E", bd: "#EF9F27", fg: "#FDE2B0" };
+  const label = labelOf(first);
   const title = blocked
-    ? "Foto belum bisa dikirim"
-    : busy ? "Mengirim foto checkpoint…" : "Foto aman tersimpan di HP";
+    ? `${label} belum bisa dikirim`
+    : busy ? `Mengirim ${label.toLowerCase()}…` : `${label} aman tersimpan di HP`;
   const sub = blocked
-    ? `${first.lastError || "Ditolak server"}. Hubungi admin; foto tetap tersimpan di HP.`
+    ? `${first.lastError || "Ditolak server"}. Hubungi admin; file tetap tersimpan di HP.`
     : busy ? "Jangan tutup halaman ini sampai selesai."
       : `Menunggu sinyal, dikirim otomatis${first.lastError ? ` (${first.lastError})` : ""}.`;
 
@@ -44,7 +46,7 @@ export default function PendingUploadBanner({ items, busy, onRetry }) {
       }}
     >
       {thumb ? (
-        <img src={thumb} alt="Foto checkpoint yang menunggu terkirim" style={{ width: 48, height: 48, borderRadius: 10, objectFit: "cover", flex: "none", border: "1px solid rgba(255,255,255,.25)" }} />
+        <img src={thumb} alt={`${label} yang menunggu terkirim`} onError={() => setThumb("")} style={{ width: 48, height: 48, borderRadius: 10, objectFit: "cover", flex: "none", border: "1px solid rgba(255,255,255,.25)" }} />
       ) : null}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 14, fontWeight: 800, lineHeight: 1.25 }}>

@@ -1535,8 +1535,58 @@ async def test_daily_upload_idempotent():
     ok(len(r["daily_checkpoints"]) == 1 and "client_id" not in r["daily_checkpoints"][0], "klien lama tanpa client_id tetap berfungsi")
 
 
+async def test_bastk_upload_idempotent():
+    """BASTK: kiriman ulang (client_id sama) tidak menambah lembar; batas 6 lembar tetap; klien lama jalan.
+    Kode ASLI endpoint (AST)."""
+    print("test_bastk_upload_idempotent")
+    import ast, typing, copy
+    from datetime import datetime, timezone
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "server.py"), encoding="utf-8").read()
+    node = next(n for n in ast.parse(src).body if isinstance(n, ast.AsyncFunctionDef) and n.name == "upload_bastk")
+    code = ast.get_source_segment(src, node)
+    class _HTTP(Exception):
+        def __init__(self, status_code, detail=""): self.status_code, self.detail = status_code, detail
+    class _Trips:
+        def __init__(self): self.docs = [{"trip_id": "T1", "handover": {"bastk": []}}]
+        async def find_one(self, f, proj=None):
+            for d in self.docs:
+                if all(d.get(k) == v for k, v in f.items()): return copy.deepcopy(d)
+        async def update_one(self, f, upd):
+            for d in self.docs:
+                if all(d.get(k) == v for k, v in f.items()):
+                    for k, v in (upd.get("$push") or {}).items():
+                        a, b = k.split("."); d.setdefault(a, {}).setdefault(b, []).append(v)
+                    d.update(upd.get("$set") or {})
+    class _DB: pass
+    d = _DB(); d.trips = _Trips()
+    saved = []
+    async def _notify(tid): pass
+    ns = {"db": d, "Optional": typing.Optional, "UploadFile": object, "File": lambda *a, **k: None, "Form": lambda *a, **k: None,
+          "HTTPException": _HTTP, "uuid": __import__("uuid"), "datetime": datetime, "timezone": timezone,
+          "_save_upload": lambda *a: (saved.append(1), "/media/b%d.jpg" % len(saved))[1], "ALLOWED_IMG": {".jpg"}, "ALLOWED_DOC": {".pdf"},
+          "_maybe_notify_handover_complete": _notify, "trip_doc_to_public": lambda x: (x.pop("_id", None), x)[1]}
+    exec(code, ns)
+    up = ns["upload_bastk"]
+    r = await up("T1", foto=object(), client_id="k1")
+    ok(len(r["handover"]["bastk"]) == 1 and r["handover"]["bastk"][0]["client_id"] == "k1", "lembar pertama tercatat + client_id")
+    n = len(saved)
+    r = await up("T1", foto=object(), client_id="k1")
+    ok(len(r["handover"]["bastk"]) == 1 and len(saved) == n, "kiriman ulang client_id sama: tidak dobel, file tidak disimpan lagi")
+    r = await up("T1", foto=object(), client_id="k2")
+    ok(len(r["handover"]["bastk"]) == 2, "lembar berbeda (client_id lain) tetap ditambahkan")
+    r = await up("T1", foto=object(), client_id=None)
+    ok(len(r["handover"]["bastk"]) == 3 and "client_id" not in r["handover"]["bastk"][2], "klien lama tanpa client_id tetap berfungsi")
+    for i in range(3): await up("T1", foto=object(), client_id="m%d" % i)
+    try:
+        await up("T1", foto=object(), client_id="k-baru"); ok(False, "lembar ke-7 harus ditolak")
+    except _HTTP as e:
+        ok(e.status_code == 400, "batas 6 lembar tetap berlaku")
+    r = await up("T1", foto=object(), client_id="k1")
+    ok(len(r["handover"]["bastk"]) == 6, "kiriman ulang saat sudah penuh tetap sukses (bukan error)")
+
+
 async def main():
-    for t in (test_daily_upload_idempotent, test_ship_master, test_sync_single_unit_vehicle, test_edit_invoice_lines, test_selisih_ringkasan_auth, test_riwayat_clear, test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
+    for t in (test_bastk_upload_idempotent, test_daily_upload_idempotent, test_ship_master, test_sync_single_unit_vehicle, test_edit_invoice_lines, test_selisih_ringkasan_auth, test_riwayat_clear, test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,

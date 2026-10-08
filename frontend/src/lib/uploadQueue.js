@@ -116,22 +116,68 @@ export function classify(err, response) {
   return { ok: false, reason };
 }
 
-/* Kirim 1 item antrean. `axios` dan `api` diberikan pemanggil. Timeout keras 45 dtk. */
-export async function sendDaily(item, { axios, api, timeout = 45000 }) {
+/* Timeout kirim menyesuaikan ukuran file (asumsi minimal ~20 KB/dtk), antara 45 dtk dan 5 menit.
+   File besar (PDF BASTK) tidak boleh gagal terus hanya karena batas waktu terlalu pendek. */
+export function timeoutFor(size) {
+  const n = Number(size) || 0;
+  return Math.min(300000, Math.max(45000, Math.round(n / 20)));
+}
+
+export const SLOT_NAMES = { depan: "Depan", belakang: "Belakang", kiri: "Kiri", kanan: "Kanan", spidometer: "Spidometer" };
+
+/* Nama ramah untuk banner: "Foto checkpoint", "Foto awal (Depan)", "BASTK", "Foto resi". */
+export function labelOf(item) {
+  const k = (item && item.kind) || "daily";
+  if (k === "initial") return "Foto awal" + (item.slot ? " (" + (SLOT_NAMES[item.slot] || item.slot) + ")" : "");
+  if (k === "bastk") return "BASTK";
+  if (k === "resi") return "Foto resi";
+  return "Foto checkpoint";
+}
+
+/* Endpoint + field form per jenis unggahan.
+     daily   -> /photos/daily          (1 foto/hari; client_id agar kirim ulang tidak dobel)
+     initial -> /photos/initial        (menimpa isian slot yang sama; aman diulang)
+     bastk   -> /photos/handover-bastk (menambah lembar; client_id agar tidak dobel)
+     resi    -> /photos/handover-resi  (menimpa; aman diulang) */
+export function buildRequest(item) {
+  const k = item.kind || "daily";
   const fd = new FormData();
-  const name = item.name || "checkpoint.jpg";
+  const name = item.name || "foto.jpg";
   fd.append("foto", item.blob instanceof File ? item.blob : new File([item.blob], name, { type: item.type || "image/jpeg" }));
-  fd.append("client_id", item.id);
-  if (item.takenAt) fd.append("taken_at", new Date(item.takenAt).toISOString());
   const m = item.meta || {};
-  if (m.gps) { fd.append("lat", String(m.gps.lat)); fd.append("lng", String(m.gps.lng)); }
-  if (m.alamat) fd.append("alamat", m.alamat);
-  if (m.status) fd.append("status", m.status);
-  if (m.keterangan) fd.append("keterangan", m.keterangan);
+  let path;
+  if (k === "initial") {
+    path = "photos/initial";
+    fd.append("slot", item.slot);
+  } else if (k === "bastk") {
+    path = "photos/handover-bastk";
+    fd.append("client_id", item.id);
+  } else if (k === "resi") {
+    path = "photos/handover-resi";
+    if (m.noResi) fd.append("no_resi", m.noResi);
+  } else {
+    path = "photos/daily";
+    fd.append("client_id", item.id);
+    if (item.takenAt) fd.append("taken_at", new Date(item.takenAt).toISOString());
+    if (m.gps) { fd.append("lat", String(m.gps.lat)); fd.append("lng", String(m.gps.lng)); }
+    if (m.alamat) fd.append("alamat", m.alamat);
+    if (m.status) fd.append("status", m.status);
+    if (m.keterangan) fd.append("keterangan", m.keterangan);
+  }
+  return { path, fd };
+}
+
+/* Kirim 1 item antrean. `axios` dan `api` diberikan pemanggil. */
+export async function sendItem(item, { axios, api, timeout }) {
+  const { path, fd } = buildRequest(item);
+  const size = item.blob && item.blob.size;
   try {
-    const r = await axios.post(`${api}/trips/${item.tripId}/photos/daily`, fd, { timeout });
+    const r = await axios.post(`${api}/trips/${item.tripId}/${path}`, fd, { timeout: timeout || timeoutFor(size) });
     return classify(null, r);
   } catch (e) {
     return classify(e, null);
   }
 }
+
+/* Nama lama (checkpoint harian) dipertahankan. */
+export const sendDaily = sendItem;
