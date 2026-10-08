@@ -995,8 +995,6 @@ export default function DriverCheckpoint() {
   const [namaInput, setNamaInput] = useState("");
   const [savingName, setSavingName] = useState(false);
 
-  const [uploadingSlot, setUploadingSlot] = useState(null);
-  const [uploadingDaily, setUploadingDaily] = useState(false);
   const [dailyStatus, setDailyStatus] = useState("Berangkat");
   const [dailyNote, setDailyNote] = useState("");
   const [gpsState, setGpsState] = useState("unknown"); // granted | denied | prompt | unknown
@@ -1049,8 +1047,6 @@ export default function DriverCheckpoint() {
       { enableHighAccuracy: true, timeout: 15000 }
     );
   };
-  const [uploadingBastk, setUploadingBastk] = useState(false);
-  const [uploadingResi, setUploadingResi] = useState(false);
   const [cairingTahap, setCairingTahap] = useState(0);
   const [cropData, setCropData] = useState(null); // { url, file, onDone }
 
@@ -1208,45 +1204,38 @@ export default function DriverCheckpoint() {
     return { file: stamped, gps, alamat };
   };
 
-  const uploadInitial = async (slot, file) => {
-    if (!file) return;
-    if (file.size > 8 * 1024 * 1024) { showToast("Foto terlalu besar (max 8MB)", "err"); return; }
-    setUploadingSlot(slot);
-    try {
-      file = await convertHeicIfNeeded(file);
-      const { file: stamped } = await geotagPhoto(file);
-      const fd = new FormData();
-      fd.append("slot", slot);
-      fd.append("foto", stamped);
-      const r = await axios.post(`${API}/trips/${trip.trip_id}/photos/initial`, fd, { timeout: 60000 });
-      setTrip(r.data);
-      showToast("Foto " + SLOT_LABELS[slot] + " tersimpan");
-    } catch (e) {
-      showToast("Upload gagal. Coba lagi.", "err");
-    } finally { setUploadingSlot(null); }
-  };
-
-  /* ── Checkpoint harian: SIMPAN DULU, kirim di latar ─────────────────────────
-     Foto asli disimpan di HP (IndexedDB) seketika, jadi tidak hilang walau halaman
-     di-refresh atau sinyal putus. Pengiriman memakai batas waktu di tiap tahap dan
-     diulang otomatis (online, buka lagi aplikasi, tiap 15 dtk). Server idempotent
-     lewat client_id, jadi kirim ulang tidak membuat foto dobel. */
+  /* ── Antrean unggah: SIMPAN DULU, kirim di latar ─────────────────────────────
+     Berlaku untuk checkpoint harian, foto awal, BASTK, dan resi. Foto/dokumen ASLI
+     disimpan di HP (IndexedDB) seketika, jadi tidak hilang walau halaman di-refresh
+     atau sinyal putus. Pengiriman memakai batas waktu di tiap tahap dan diulang
+     otomatis (online, buka lagi aplikasi, tiap 15 dtk). Server idempotent (client_id
+     untuk checkpoint & BASTK; foto awal dan resi memang menimpa), jadi kirim ulang
+     tidak membuat dobel. */
   const [pendingUploads, setPendingUploads] = useState([]);
+  const [sendingNow, setSendingNow] = useState(false);
   const flushing = useRef(false);
+  const again = useRef("");
   const flushRef = useRef(null);
   const tripRef = useRef(trip);
   tripRef.current = trip;
 
+  const kindOf = (x) => x.kind || "daily";
+  const uploadingDaily = sendingNow && pendingUploads.some((x) => kindOf(x) === "daily");
+  const uploadingBastk = sendingNow && pendingUploads.some((x) => kindOf(x) === "bastk");
+  const uploadingResi = sendingNow && pendingUploads.some((x) => kindOf(x) === "resi");
+  const uploadingSlots = new Set(pendingUploads.filter((x) => kindOf(x) === "initial").map((x) => x.slot));
+
+  const queueTid = () => tripRef.current?.trip_id || params.trip || "";
   const refreshPending = async () => {
-    const tid = tripRef.current?.trip_id;
+    const tid = queueTid();
     if (!tid) { setPendingUploads([]); return; }
     setPendingUploads(await UQ.list(tid));
   };
 
-  // Siapkan foto: HEIC -> JPEG, cap lokasi & waktu. Tiap tahap berbatas waktu;
-  // gagal/telat -> tetap lanjut dengan foto asli + koordinat (tidak pernah menahan kiriman).
-  const prepareDaily = async (item) => {
-    let file = item.blob instanceof File ? item.blob : new File([item.blob], item.name || "checkpoint.jpg", { type: item.type || "image/jpeg" });
+  // Siapkan foto (checkpoint & foto awal): HEIC -> JPEG, cap lokasi & waktu. Tiap tahap
+  // berbatas waktu; gagal/telat -> tetap lanjut dengan foto asli (tidak menahan kiriman).
+  const prepareImage = async (item) => {
+    let file = item.blob instanceof File ? item.blob : new File([item.blob], item.name || "foto.jpg", { type: item.type || "image/jpeg" });
     file = await UQ.withTimeout(convertHeicIfNeeded(file), 8000, file);
     let gps = (item.meta && item.meta.gps) || cachedGps.current || null;
     if (!gps && typeof navigator !== "undefined" && "geolocation" in navigator) {
@@ -1276,26 +1265,42 @@ export default function DriverCheckpoint() {
     return next;
   };
 
+  // Pesan sukses + perayaan BASTK/resi lengkap, sama seperti sebelum antrean.
+  const afterSent = (cur, res, prevTrip) => {
+    const k = kindOf(cur);
+    if (k === "daily") {
+      showToast(res.already
+        ? "Checkpoint hari ini sudah tercatat."
+        : (cur.meta && cur.meta.gps
+          ? "Checkpoint + lokasi terkirim! Bonus Rp 30.000 diproses."
+          : "Checkpoint terkirim (tanpa GPS). Bonus Rp 30.000 diproses."));
+    } else if (k === "initial") {
+      showToast("Foto " + (SLOT_LABELS[cur.slot] || cur.slot) + " tersimpan");
+    } else {
+      const prevComplete = !!(prevTrip?.handover?.bastk && prevTrip?.handover?.resi);
+      if (!prevComplete && res.trip?.handover?.bastk && res.trip?.handover?.resi) showCelebration();
+      else showToast(k === "bastk" ? "BASTK terupload" : "Foto Resi terupload");
+    }
+  };
+
   const flushQueue = async (manual) => {
-    const tid = tripRef.current?.trip_id;
-    if (flushing.current || !tid) return;
+    const tid = queueTid();
+    if (!tid) return;
+    if (flushing.current) { again.current = manual ? "m" : (again.current || "a"); return; }
     flushing.current = true;
     try {
       const items = await UQ.list(tid);
-      if (items.length) setUploadingDaily(true);
+      if (items.length) setSendingNow(true);
       for (const it of items) {
         if (!manual && (it.blocked || (it.next && Date.now() < it.next))) continue;
         let cur = it;
-        if (!cur.prepared) cur = await prepareDaily(cur);
-        const res = await UQ.sendDaily(cur, { axios, api: API });
+        if (!cur.prepared) cur = await prepareImage(cur);
+        const prevTrip = tripRef.current;
+        const res = await UQ.sendItem(cur, { axios, api: API });
         if (res.ok) {
           await UQ.remove(cur.id);
-          if (res.trip) setTrip(res.trip); else await reload();
-          showToast(res.already
-            ? "Checkpoint hari ini sudah tercatat."
-            : (cur.meta && cur.meta.gps
-              ? "Checkpoint + lokasi terkirim! Bonus Rp 30.000 diproses."
-              : "Checkpoint terkirim (tanpa GPS). Bonus Rp 30.000 diproses."));
+          if (res.trip) { tripRef.current = res.trip; setTrip(res.trip); } else await reload();
+          afterSent(cur, res, prevTrip);
         } else {
           const attempts = (cur.attempts || 0) + 1;
           await UQ.update(cur.id, { attempts, lastError: res.reason, blocked: !!res.fatal, next: Date.now() + UQ.backoffMs(attempts) });
@@ -1305,96 +1310,85 @@ export default function DriverCheckpoint() {
       /* satu item bermasalah tidak boleh mematikan antrean; dicoba lagi di putaran berikutnya */
     } finally {
       flushing.current = false;
-      setUploadingDaily(false);
+      setSendingNow(false);
       await refreshPending();
+      // Ada item baru masuk saat putaran ini berjalan -> proses sekarang, jangan tunggu 15 dtk.
+      if (again.current) { const m = again.current === "m"; again.current = ""; flushRef.current && flushRef.current(m); }
     }
   };
   flushRef.current = flushQueue;
 
   // Pemicu kirim otomatis: trip siap (termasuk setelah refresh), sinyal kembali,
-  // aplikasi dibuka lagi, dan berkala selama masih ada foto menunggu.
+  // aplikasi dibuka lagi, dan berkala selama masih ada yang menunggu.
   useEffect(() => {
-    if (!trip?.trip_id) return undefined;
+    if (!trip?.trip_id && !params.trip) return undefined;
     refreshPending().then(() => flushRef.current && flushRef.current(false));
     const go = () => flushRef.current && flushRef.current(false);
     const vis = () => { if (document.visibilityState === "visible") go(); };
     window.addEventListener("online", go);
     document.addEventListener("visibilitychange", vis);
     const iv = setInterval(async () => {
-      const tid = tripRef.current?.trip_id;
+      const tid = queueTid();
       if (tid && (await UQ.list(tid)).length > 0) go();
     }, 15000);
     return () => { window.removeEventListener("online", go); document.removeEventListener("visibilitychange", vis); clearInterval(iv); };
-  }, [trip?.trip_id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [trip?.trip_id, params.trip]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Masukkan ke antrean (durable). Yang digantikan (slot foto awal yang sama, resi lama)
+  // atau yang DITOLAK permanen server dibuang, supaya driver tidak pernah terkunci.
+  const enqueue = async (kind, file, extra) => {
+    const tid = tripRef.current.trip_id;
+    for (const x of await UQ.list(tid)) {
+      if (kindOf(x) !== kind) continue;
+      const replaces = (kind === "initial" && x.slot === extra.slot) || kind === "resi";
+      if (replaces || x.blocked) await UQ.remove(x.id);
+    }
+    await UQ.add({
+      id: UQ.newId(), tripId: tid, kind,
+      blob: file, name: file.name || "foto.jpg", type: file.type || "image/jpeg",
+      takenAt: Date.now(), createdAt: Date.now(), attempts: 0,
+      prepared: kind === "bastk" || kind === "resi",   // scan dokumen sudah final: jangan diproses ulang
+      meta: {}, ...extra,
+    });
+    await refreshPending();
+  };
+
+  const uploadInitial = async (slot, file) => {
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) { showToast("Foto terlalu besar (max 8MB)", "err"); return; }
+    await enqueue("initial", file, { slot, meta: { gps: cachedGps.current || null } });
+    showToast("Foto " + SLOT_LABELS[slot] + " tersimpan di HP. Mengirim...");
+    flushRef.current && flushRef.current(true);
+  };
 
   const uploadDaily = async (file) => {
     if (!file) return;
     if (file.size > 8 * 1024 * 1024) { showToast("Foto terlalu besar (max 8MB)", "err"); return; }
-    const waiting = await UQ.list(trip.trip_id);
+    const waiting = (await UQ.list(trip.trip_id)).filter((x) => kindOf(x) === "daily");
     if (waiting.some((x) => !x.blocked)) {
       showToast("Foto sebelumnya masih menunggu terkirim. Tunggu sebentar.", "err");
       flushRef.current && flushRef.current(true);
       return;
     }
-    // Foto yang DITOLAK permanen oleh server (format/trip salah) tidak boleh mengunci driver.
-    for (const x of waiting) await UQ.remove(x.id);
-    // 1) Simpan foto ASLI dulu (tahan refresh). Ini satu-satunya langkah yang ditunggu.
-    await UQ.add({
-      id: UQ.newId(), tripId: trip.trip_id, kind: "daily",
-      blob: file, name: file.name || "checkpoint.jpg", type: file.type || "image/jpeg",
-      takenAt: Date.now(), createdAt: Date.now(), attempts: 0,
-      meta: { status: dailyStatus || "", keterangan: dailyNote.trim(), gps: cachedGps.current || null },
-    });
+    await enqueue("daily", file, { meta: { status: dailyStatus || "", keterangan: dailyNote.trim(), gps: cachedGps.current || null } });
     showToast("Foto tersimpan di HP. Mengirim...");
-    await refreshPending();
-    // 2) Kirim di latar (tidak ditunggu): UI langsung bebas, tidak ada loading menggantung.
-    flushRef.current && flushRef.current(true);
+    flushRef.current && flushRef.current(true);   // di latar, tidak ditunggu: UI langsung bebas
   };
 
   const uploadBastk = async (file) => {
     if (!file) return;
     if (file.size > 15 * 1024 * 1024) { showToast("File terlalu besar (max 15MB)", "err"); return; }
-    setUploadingBastk(true);
-    showToast("Mengupload dokumen...");
-    try {
-      // file SUDAH hasil scanner final (crop+perspektif+enhance dari CropModal).
-      // JANGAN diproses ulang -> biar file di storage PERSIS sama dgn preview.
-      const fd = new FormData();
-      fd.append("foto", file);
-      const prevComplete = !!(trip?.handover?.bastk && trip?.handover?.resi);
-      const r = await axios.post(`${API}/trips/${trip.trip_id}/photos/handover-bastk`, fd);
-      setTrip(r.data);
-      if (!prevComplete && r.data?.handover?.bastk && r.data?.handover?.resi) {
-        showCelebration();
-      } else {
-        showToast("BASTK terupload");
-      }
-    } catch (e) {
-      const msg = e?.response?.data?.detail || "Upload gagal";
-      showToast(msg, "err");
-    } finally { setUploadingBastk(false); }
+    // file SUDAH hasil scanner final (crop+perspektif+enhance dari CropModal): JANGAN diproses ulang.
+    await enqueue("bastk", file, { meta: {} });
+    showToast("Dokumen tersimpan di HP. Mengirim...");
+    flushRef.current && flushRef.current(true);
   };
 
   const uploadResi = async (file, noResi) => {
     if (!file) return;
-    setUploadingResi(true);
-    showToast("Mengupload dokumen...");
-    try {
-      // file sudah final dari scanner -> upload apa adanya (preview === storage).
-      const fd = new FormData();
-      fd.append("foto", file);
-      if (noResi && noResi.trim()) fd.append("no_resi", noResi.trim());
-      const prevComplete = !!(trip?.handover?.bastk && trip?.handover?.resi);
-      const r = await axios.post(`${API}/trips/${trip.trip_id}/photos/handover-resi`, fd);
-      setTrip(r.data);
-      if (!prevComplete && r.data?.handover?.bastk && r.data?.handover?.resi) {
-        showCelebration();
-      } else {
-        showToast("Foto Resi terupload");
-      }
-    } catch (e) {
-      showToast("Upload gagal", "err");
-    } finally { setUploadingResi(false); }
+    await enqueue("resi", file, { meta: { noResi: (noResi || "").trim() } });
+    showToast("Dokumen tersimpan di HP. Mengirim...");
+    flushRef.current && flushRef.current(true);
   };
 
   const requestCair = async (tahap) => {
@@ -1533,11 +1527,19 @@ export default function DriverCheckpoint() {
   }
 
   if (loading) {
-    return <div className="drv-loading">Memuat…</div>;
+    return (
+      <>
+        <PendingUploadBanner items={pendingUploads} busy={sendingNow} onRetry={() => flushRef.current && flushRef.current(true)} />
+        <div className="drv-loading">Memuat…</div>
+      </>
+    );
   }
   if (error) {
+    const netFail = /^Gagal memuat/i.test(String(error));
     return (
       <div className="drv-root">
+        <PendingUploadBanner items={pendingUploads} busy={sendingNow} onRetry={() => flushRef.current && flushRef.current(true)} />
+
         <header className="drv-header">
           <div className="drv-brand">
             <Logo size={36} />
@@ -1551,9 +1553,13 @@ export default function DriverCheckpoint() {
           <div style={{ marginBottom:16 }}>
             <svg width="56" height="56" viewBox="0 0 56 56" fill="none"><circle cx="28" cy="28" r="26" stroke="#D4A847" strokeWidth="2"/><path d="M28 17v14M28 37h.01" stroke="#D4A847" strokeWidth="2.5" strokeLinecap="round"/></svg>
           </div>
-          <h2 style={{ color:"#D4A847", marginBottom:8 }}>Link Tidak Valid</h2>
+          <h2 style={{ color:"#D4A847", marginBottom:8 }}>{netFail ? "Tidak Bisa Memuat Data" : "Link Tidak Valid"}</h2>
           <p style={{ color:"#8aa3c4", marginBottom:4 }}>{error}</p>
-          <p style={{ color:"#8aa3c4", marginBottom:24 }}>Minta link yang benar dari admin PT Alyssa Auto Logistik.</p>
+          <p style={{ color:"#8aa3c4", marginBottom:24 }}>
+            {netFail
+              ? (pendingUploads.length ? "Foto Anda aman di HP dan akan dikirim otomatis begitu sinyal kembali." : "Periksa sinyal internet, lalu refresh halaman.")
+              : "Minta link yang benar dari admin PT Alyssa Auto Logistik."}
+          </p>
           <a href="/" style={{ color:"#D4A847", textDecoration:"none", marginRight:16 }}>← Beranda</a>
           <a href="https://wa.me/628186311350" target="_blank" rel="noreferrer"
              style={{ background:"#16a34a", color:"#fff", padding:"8px 16px", borderRadius:8, textDecoration:"none", fontSize:14 }}>
@@ -1711,7 +1717,7 @@ export default function DriverCheckpoint() {
 
   return (
     <>
-    <PendingUploadBanner items={pendingUploads} busy={uploadingDaily} onRetry={() => flushRef.current && flushRef.current(true)} />
+    <PendingUploadBanner items={pendingUploads} busy={sendingNow} onRetry={() => flushRef.current && flushRef.current(true)} />
     <BerandaScreen
       trip={trip}
       progressPct={progressPct}
@@ -1921,7 +1927,7 @@ export default function DriverCheckpoint() {
               const idx = SLOT_GUIDE_ORDER.findIndex((s) => !initial[s]);
               const slot = SLOT_GUIDE_ORDER[idx];
               const g = SLOT_GUIDE[slot];
-              const isUp = uploadingSlot === slot;
+              const isUp = uploadingSlots.has(slot);
               const doneSlots = SLOT_GUIDE_ORDER.filter((s) => initial[s]);
               return (
                 <div data-testid="init-wizard">

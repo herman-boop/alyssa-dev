@@ -914,16 +914,22 @@ async def _maybe_notify_handover_complete(trip_id: str):
 
 
 @api_router.post("/trips/{trip_id}/photos/handover-bastk")
-async def upload_bastk(trip_id: str, foto: UploadFile = File(...)):
-    """BASTK: PDF atau gambar, max 6 file"""
+async def upload_bastk(trip_id: str, foto: UploadFile = File(...), client_id: Optional[str] = Form(None)):
+    """BASTK: PDF atau gambar, max 6 file. `client_id` (dari antrean HP driver) membuat kiriman
+    ulang aman: lembar yang sama tidak tercatat dua kali kalau respons sebelumnya hilang."""
     trip = await db.trips.find_one({"trip_id": trip_id})
     if not trip:
         raise HTTPException(404, "Trip not found")
     bastk = (trip.get("handover") or {}).get("bastk") or []
+    cid = (client_id or "").strip()[:64]
+    if cid and any(b.get("client_id") == cid for b in bastk):
+        return trip_doc_to_public(trip)
     if len(bastk) >= 6:
         raise HTTPException(400, "Maks 6 lembar BASTK")
     url = _save_upload(trip_id, "handover/bastk", foto, ALLOWED_IMG | ALLOWED_DOC)
     entry = {"id": str(uuid.uuid4()), "url": url, "ts": datetime.now(timezone.utc).isoformat()}
+    if cid:
+        entry["client_id"] = cid
     await db.trips.update_one(
         {"trip_id": trip_id},
         {"$push": {"handover.bastk": entry}, "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}}
