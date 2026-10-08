@@ -10,6 +10,7 @@ import SelisihPage from "@/SelisihPage";
 import ShipMasterPage from "@/ShipMasterPage";
 import "@/OrderCardBright.css";
 import OrderSummaryShare from "@/OrderSummaryShare";
+import { categoryOfGroupTitle, categoryOfTab } from "@/categoryColors";
 import { summaryPropsFromOrder } from "@/orderSummary";
 import ExpensesPage from "@/ExpensesPage";
 import LabaRugiPage from "@/LabaRugiPage";
@@ -453,6 +454,7 @@ function Dashboard({ pin, onLogout }) {
         <TopHeader
           title={section.title}
           sub={section.sub}
+          category={categoryOfTab(activeTab, SIDEBAR_GROUPS)}
           search={activeTab === "pesanan" ? search : ""}
           onSearch={activeTab === "pesanan" ? setSearch : undefined}
           onExport={exportCsv}
@@ -1135,15 +1137,17 @@ const SIDEBAR_GROUPS = [
 ];
 
 function Sidebar({ activeTab, setActiveTab, open, onNavigate }) {
-  const NavItem = ({ item, i }) => (
+  const NavItem = ({ item, i, cat }) => (
     <button
       key={`${item.key}-${i}`}
       onClick={() => { setActiveTab(item.key); if (onNavigate) onNavigate(); }}
+      data-category={cat ? cat.key : undefined}
       style={{
         display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "9px 14px", marginBottom: 2,
         border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600, textAlign: "left",
-        background: activeTab === item.key ? "rgba(91,141,239,0.14)" : "transparent",
-        color: activeTab === item.key ? "#dbe6ff" : "#8b98ab",
+        background: activeTab === item.key ? (cat ? `${cat.main}26` : "rgba(91,141,239,0.14)") : "transparent",
+        color: activeTab === item.key ? (cat ? cat.soft : "#dbe6ff") : "#8b98ab",
+        boxShadow: activeTab === item.key && cat ? `inset 3px 0 0 ${cat.main}` : "none",
         transition: "background .12s, color .12s",
       }}
       onMouseEnter={(e) => { if (activeTab !== item.key) e.currentTarget.style.background = "rgba(255,255,255,0.04)"; }}
@@ -1165,12 +1169,23 @@ function Sidebar({ activeTab, setActiveTab, open, onNavigate }) {
       </div>
 
       <nav style={{ flex: 1 }}>
-        {SIDEBAR_GROUPS.map((grp, gi) => (
-          <div key={gi}>
-            {grp.title ? <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.6, color: "#495267", textTransform: "uppercase", margin: "18px 10px 8px" }}>{grp.title}</div> : null}
-            {grp.items.map((item, i) => <NavItem item={item} i={`${gi}-${i}`} key={`${gi}-${i}`} />)}
-          </div>
-        ))}
+        {SIDEBAR_GROUPS.map((grp, gi) => {
+          const cat = categoryOfGroupTitle(grp.title);
+          return (
+            <div key={gi}>
+              {grp.title ? (
+                <div
+                  data-testid={cat ? `adm-group-${cat.key}` : undefined}
+                  style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 10, fontWeight: 800, letterSpacing: 0.6, color: cat ? cat.main : "#495267", textTransform: "uppercase", margin: "18px 10px 8px" }}
+                >
+                  {cat ? <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: "50%", background: cat.main, boxShadow: `0 0 8px ${cat.main}99`, flexShrink: 0 }} /> : null}
+                  {grp.title}
+                </div>
+              ) : null}
+              {grp.items.map((item, i) => <NavItem item={item} i={`${gi}-${i}`} key={`${gi}-${i}`} cat={cat} />)}
+            </div>
+          );
+        })}
       </nav>
 
       <div>
@@ -1187,14 +1202,23 @@ function Sidebar({ activeTab, setActiveTab, open, onNavigate }) {
 /* ════════════════════════════════════════
    TOP HEADER
 ════════════════════════════════════════ */
-function TopHeader({ title, sub, search, onSearch, onExport, onRefresh, profileMenuOpen, setProfileMenuOpen, onLogout, onOpenSidebar, dark, onToggleTheme }) {
+function TopHeader({ title, sub, category, search, onSearch, onExport, onRefresh, profileMenuOpen, setProfileMenuOpen, onLogout, onOpenSidebar, dark, onToggleTheme }) {
   const iconBtn = { width: 34, height: 34, borderRadius: 8, border: "1px solid #1f2937", background: "#111826", color: "#9aa4b6", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: 14, flexShrink: 0 };
   return (
     <header className="adm-topheader-v2" style={{ padding: "18px 28px", borderBottom: "1px solid #171e2c", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap", background: "#0a0e14" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
         <button className="adm-hamburger" onClick={onOpenSidebar} style={{ ...iconBtn, display: "none" }} aria-label="Buka menu" data-testid="adm-hamburger">☰</button>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 19, fontWeight: 800, color: "#f2f5fa", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{title}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+            <div style={{ fontSize: 19, fontWeight: 800, color: "#f2f5fa", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{title}</div>
+            {category ? (
+              <span
+                data-testid="adm-category-chip"
+                data-category={category.key}
+                style={{ flexShrink: 0, padding: "3px 10px", borderRadius: 999, background: category.main, color: category.ink, fontSize: 10.5, fontWeight: 800, letterSpacing: 0.5, textTransform: "uppercase", boxShadow: `0 0 12px ${category.main}66` }}
+              >{category.label}</span>
+            ) : null}
+          </div>
           <div style={{ fontSize: 12, color: "#6b7688", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sub}</div>
         </div>
       </div>
