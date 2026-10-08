@@ -5,6 +5,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "./Tracking.css";
 import VesselPositionView from "./VesselPositionView";
+import LiveTrackSummary from "./LiveTrackSummary";
 import { buildVesselView } from "./vesselPositionData";
 import { MAP_TILE_URL, MAP_LABEL_URL, MAP_ATTR, MAP_MAX_ZOOM, MAP_MAX_NATIVE_ZOOM, ROUTE_COLOR, ROUTE_WEIGHT, ROUTE_OPACITY, ROUTE_DASH, freshnessDot } from "./mapTheme";
 
@@ -990,36 +991,30 @@ export default function CustomerTracking() {
         {/* PANEL */}
         <div className="trk-panel" ref={panelRef}>
 
-          {/* Vehicle info */}
-          <div className="trk-panel-vehicle" data-testid="trk-vehicle">
-            <div className="trk-panel-label">NOMOR POLISI</div>
-            <div className="trk-panel-nopol" data-testid="trk-nopol">{data.nopol || "—"}</div>
-            <div className="trk-panel-rows">
-              {data.nama_driver && (
-                <div className="trk-panel-row">
-                  <span className="trk-panel-k">Driver</span>
-                  <span className="trk-panel-v">{data.nama_driver}</span>
-                </div>
-              )}
-              {data.route && (
-                <div className="trk-panel-row">
-                  <span className="trk-panel-k">Rute</span>
-                  <span className="trk-panel-v">{data.route}</span>
-                </div>
-              )}
-              {data.tipe_kendaraan && (
-                <div className="trk-panel-row">
-                  <span className="trk-panel-k">Tipe Kendaraan</span>
-                  <span className="trk-panel-v">{data.tipe_kendaraan}</span>
-                </div>
-              )}
-            </div>
-            <div className={`trk-status-chip trk-status-${statusColor}`}>
-              {overallStatus === "Sudah Diterima" || overallStatus === "Tiba di Tujuan"
-                ? <IcoCheck /> : <span className="trk-pulse-dot" />}
-              {overallStatus}
-            </div>
-          </div>
+          {/* Ringkasan kompak: nopol + status, kendaraan & rute, checkpoint terakhir */}
+          {(() => {
+            const last = daily.length ? daily[daily.length - 1] : null;
+            const cpNum = daily.length;
+            const cp = last ? {
+              ...last,
+              num: cpNum,
+              loc: last.alamat || geoNames[`${last.lat},${last.lng}`] || "",
+              time: `${fmtTime(last.ts || last.timestamp || last.created_at)} · ${fmtDate(last.ts || last.timestamp || last.created_at)}`,
+              url: last.url ? resolveUrl(last.url) : "",
+            } : null;
+            return (
+              <LiveTrackSummary
+                nopol={data.nopol} driver={data.nama_driver} route={data.route} tipe={data.tipe_kendaraan}
+                status={overallStatus} tone={statusColor}
+                done={overallStatus === "Sudah Diterima" || overallStatus === "Tiba di Tujuan"}
+                speed={shipInfo ? shipInfo.speed : null} heading={shipInfo ? (shipInfo.course ?? shipInfo.heading) : null}
+                lat={lastGps ? lastGps.lat : null} lon={lastGps ? lastGps.lng : null}
+                cp={cp}
+                onOpenPhoto={(c) => openDocPreview(last.url, `Checkpoint ${c.num}`)}
+                onSelectCp={last ? () => setSelectedCp(last) : null}
+              />
+            );
+          })()}
 
           {/* Checkpoint list */}
           <div className="trk-cp-section">
