@@ -4,6 +4,8 @@ import "@/App.css";
 import "@/Driver.css";
 import PoDCard from "@/PoDCard";
 import { convertHeicIfNeeded } from "@/lib/heic";
+import * as UQ from "@/lib/uploadQueue";
+import PendingUploadBanner from "@/PendingUploadBanner";
 import { Home, Camera, Image as ImageIcon, FileText, ChevronRight, CheckCircle2, Circle, Truck, MapPin, ArrowLeft, Flag, X, RotateCcw, LocateFixed, Clock, Plus, Trash2, ScanLine, Package, Download, Sparkles } from "lucide-react";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -841,6 +843,10 @@ export function CropModal({ url, file, onCancel, onConfirm }) {
 /* "Cap" foto: bakar lokasi + waktu ke dalam gambar (mirip GPS Map Camera).
    `lines` ditulis di bar bawah. Gagal apa pun → kembalikan file asli. */
 export function stampPhoto(file, lines) {
+  // Batas waktu keras: kalau decode/toBlob menggantung (HP lemot, memori tipis), pakai foto asli.
+  return UQ.withTimeout(_stampPhotoRaw(file, lines), 12000, file);
+}
+function _stampPhotoRaw(file, lines) {
   return new Promise((resolve) => {
     try {
       const img = new Image();
@@ -1212,7 +1218,7 @@ export default function DriverCheckpoint() {
       const fd = new FormData();
       fd.append("slot", slot);
       fd.append("foto", stamped);
-      const r = await axios.post(`${API}/trips/${trip.trip_id}/photos/initial`, fd);
+      const r = await axios.post(`${API}/trips/${trip.trip_id}/photos/initial`, fd, { timeout: 60000 });
       setTrip(r.data);
       showToast("Foto " + SLOT_LABELS[slot] + " tersimpan");
     } catch (e) {
@@ -1220,31 +1226,129 @@ export default function DriverCheckpoint() {
     } finally { setUploadingSlot(null); }
   };
 
+  /* ── Checkpoint harian: SIMPAN DULU, kirim di latar ─────────────────────────
+     Foto asli disimpan di HP (IndexedDB) seketika, jadi tidak hilang walau halaman
+     di-refresh atau sinyal putus. Pengiriman memakai batas waktu di tiap tahap dan
+     diulang otomatis (online, buka lagi aplikasi, tiap 15 dtk). Server idempotent
+     lewat client_id, jadi kirim ulang tidak membuat foto dobel. */
+  const [pendingUploads, setPendingUploads] = useState([]);
+  const flushing = useRef(false);
+  const flushRef = useRef(null);
+  const tripRef = useRef(trip);
+  tripRef.current = trip;
+
+  const refreshPending = async () => {
+    const tid = tripRef.current?.trip_id;
+    if (!tid) { setPendingUploads([]); return; }
+    setPendingUploads(await UQ.list(tid));
+  };
+
+  // Siapkan foto: HEIC -> JPEG, cap lokasi & waktu. Tiap tahap berbatas waktu;
+  // gagal/telat -> tetap lanjut dengan foto asli + koordinat (tidak pernah menahan kiriman).
+  const prepareDaily = async (item) => {
+    let file = item.blob instanceof File ? item.blob : new File([item.blob], item.name || "checkpoint.jpg", { type: item.type || "image/jpeg" });
+    file = await UQ.withTimeout(convertHeicIfNeeded(file), 8000, file);
+    let gps = (item.meta && item.meta.gps) || cachedGps.current || null;
+    if (!gps && typeof navigator !== "undefined" && "geolocation" in navigator) {
+      gps = await UQ.withTimeout(new Promise((resolve) => {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+          () => resolve(null),
+          { enableHighAccuracy: true, timeout: 5000, maximumAge: 60000 }
+        );
+      }), 6000, null);
+    }
+    const when = new Date(item.takenAt || Date.now());
+    const tgl = when.toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "2-digit", month: "short", year: "numeric" });
+    const jam = when.toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", second: "2-digit" }).replace(/[:.]/g, ".");
+    const lines = [`${tgl} ${jam} WIB`];
+    let alamat = (item.meta && item.meta.alamat) || "";
+    if (gps) {
+      const addr = await UQ.withTimeout(reverseGeocode(gps.lat, gps.lng), 6000, []);
+      addr.forEach((l) => lines.push(l));
+      if (addr.length) alamat = addr.join(", ");
+      else lines.push(`${gps.lat.toFixed(5)}, ${gps.lng.toFixed(5)}`);
+    }
+    if (tripRef.current?.nopol) lines.push(tripRef.current.nopol);
+    const stamped = await stampPhoto(file, lines);
+    const next = { ...item, blob: stamped, name: stamped.name || item.name, type: stamped.type || item.type, prepared: true, meta: { ...(item.meta || {}), gps, alamat } };
+    await UQ.add(next);
+    return next;
+  };
+
+  const flushQueue = async (manual) => {
+    const tid = tripRef.current?.trip_id;
+    if (flushing.current || !tid) return;
+    flushing.current = true;
+    try {
+      const items = await UQ.list(tid);
+      if (items.length) setUploadingDaily(true);
+      for (const it of items) {
+        if (!manual && (it.blocked || (it.next && Date.now() < it.next))) continue;
+        let cur = it;
+        if (!cur.prepared) cur = await prepareDaily(cur);
+        const res = await UQ.sendDaily(cur, { axios, api: API });
+        if (res.ok) {
+          await UQ.remove(cur.id);
+          if (res.trip) setTrip(res.trip); else await reload();
+          showToast(res.already
+            ? "Checkpoint hari ini sudah tercatat."
+            : (cur.meta && cur.meta.gps
+              ? "Checkpoint + lokasi terkirim! Bonus Rp 30.000 diproses."
+              : "Checkpoint terkirim (tanpa GPS). Bonus Rp 30.000 diproses."));
+        } else {
+          const attempts = (cur.attempts || 0) + 1;
+          await UQ.update(cur.id, { attempts, lastError: res.reason, blocked: !!res.fatal, next: Date.now() + UQ.backoffMs(attempts) });
+        }
+      }
+    } catch (e) {
+      /* satu item bermasalah tidak boleh mematikan antrean; dicoba lagi di putaran berikutnya */
+    } finally {
+      flushing.current = false;
+      setUploadingDaily(false);
+      await refreshPending();
+    }
+  };
+  flushRef.current = flushQueue;
+
+  // Pemicu kirim otomatis: trip siap (termasuk setelah refresh), sinyal kembali,
+  // aplikasi dibuka lagi, dan berkala selama masih ada foto menunggu.
+  useEffect(() => {
+    if (!trip?.trip_id) return undefined;
+    refreshPending().then(() => flushRef.current && flushRef.current(false));
+    const go = () => flushRef.current && flushRef.current(false);
+    const vis = () => { if (document.visibilityState === "visible") go(); };
+    window.addEventListener("online", go);
+    document.addEventListener("visibilitychange", vis);
+    const iv = setInterval(async () => {
+      const tid = tripRef.current?.trip_id;
+      if (tid && (await UQ.list(tid)).length > 0) go();
+    }, 15000);
+    return () => { window.removeEventListener("online", go); document.removeEventListener("visibilitychange", vis); clearInterval(iv); };
+  }, [trip?.trip_id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const uploadDaily = async (file) => {
     if (!file) return;
     if (file.size > 8 * 1024 * 1024) { showToast("Foto terlalu besar (max 8MB)", "err"); return; }
-    setUploadingDaily(true);
-    try {
-      file = await convertHeicIfNeeded(file);
-      const { file: stamped, gps, alamat } = await geotagPhoto(file);
-      const fd = new FormData();
-      fd.append("foto", stamped);
-      if (gps) {
-        fd.append("lat", String(gps.lat));
-        fd.append("lng", String(gps.lng));
-      }
-      if (alamat) fd.append("alamat", alamat);
-      if (dailyStatus) fd.append("status", dailyStatus);
-      if (dailyNote.trim()) fd.append("keterangan", dailyNote.trim());
-      const r = await axios.post(`${API}/trips/${trip.trip_id}/photos/daily`, fd);
-      setTrip(r.data);
-      showToast(gps
-        ? "Checkpoint + lokasi terkirim! Bonus Rp 30.000 diproses."
-        : "Checkpoint terkirim (tanpa GPS). Bonus Rp 30.000 diproses.");
-    } catch (e) {
-      const msg = e?.response?.data?.detail || "Upload gagal";
-      showToast(msg, "err");
-    } finally { setUploadingDaily(false); }
+    const waiting = await UQ.list(trip.trip_id);
+    if (waiting.some((x) => !x.blocked)) {
+      showToast("Foto sebelumnya masih menunggu terkirim. Tunggu sebentar.", "err");
+      flushRef.current && flushRef.current(true);
+      return;
+    }
+    // Foto yang DITOLAK permanen oleh server (format/trip salah) tidak boleh mengunci driver.
+    for (const x of waiting) await UQ.remove(x.id);
+    // 1) Simpan foto ASLI dulu (tahan refresh). Ini satu-satunya langkah yang ditunggu.
+    await UQ.add({
+      id: UQ.newId(), tripId: trip.trip_id, kind: "daily",
+      blob: file, name: file.name || "checkpoint.jpg", type: file.type || "image/jpeg",
+      takenAt: Date.now(), createdAt: Date.now(), attempts: 0,
+      meta: { status: dailyStatus || "", keterangan: dailyNote.trim(), gps: cachedGps.current || null },
+    });
+    showToast("Foto tersimpan di HP. Mengirim...");
+    await refreshPending();
+    // 2) Kirim di latar (tidak ditunggu): UI langsung bebas, tidak ada loading menggantung.
+    flushRef.current && flushRef.current(true);
   };
 
   const uploadBastk = async (file) => {
@@ -1607,6 +1711,7 @@ export default function DriverCheckpoint() {
 
   return (
     <>
+    <PendingUploadBanner items={pendingUploads} busy={uploadingDaily} onRetry={() => flushRef.current && flushRef.current(true)} />
     <BerandaScreen
       trip={trip}
       progressPct={progressPct}
