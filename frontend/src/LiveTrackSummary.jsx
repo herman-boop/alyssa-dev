@@ -21,7 +21,7 @@ function Item({ k, v, mono }) {
 
 export default function LiveTrackSummary({
   nopol, driver, route, tipe, status, tone = "gray", done = false,
-  speed, heading, lat, lon, cp, onOpenPhoto, onSelectCp,
+  speed, heading, lat, lon, cp, onOpenPhoto, onSelectCp, ship,
 }) {
   const coord = lat != null && lon != null
     ? `${Number(lat).toFixed(4)}, ${Number(lon).toFixed(4)}` : "";
@@ -42,6 +42,15 @@ export default function LiveTrackSummary({
           {status}
         </span>
       </div>
+
+      {/* Unit sedang di leg kapal + ada posisi AIS: tonjolkan kapalnya, 1 ketukan ke layar posisi */}
+      {ship ? (
+        <button type="button" className="lts-ship" onClick={ship.onOpen} data-testid="lts-ship">
+          <span className="lts-ship-ic" aria-hidden="true">🚢</span>
+          <span className="lts-ship-t"><small>Unit sedang di atas kapal</small><b>{ship.name}</b></span>
+          <span className="lts-ship-go">Lihat Posisi ›</span>
+        </button>
+      ) : null}
 
       <div className="lts-grid">
         {/* Kiri: kendaraan & rute */}
