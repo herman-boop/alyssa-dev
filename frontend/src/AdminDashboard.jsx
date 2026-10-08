@@ -4972,6 +4972,19 @@ function InvoiceEditModal({ rec, headers, onClose, onSaved, onPrint }) {
   };
   const ketOf = (r) => `${r.vehicle_type}${r.nopol ? " " + r.nopol : ""} (${r.asal_kota || "—"}–${r.tujuan_kota || "—"})${r.no_rangka ? `<br>No. Rangka: ${r.no_rangka}` : ""}`;
   const plain = (h) => String(h || "").replace(/<br\s*\/?>/gi, " · ").replace(/<[^>]+>/g, "");
+  // Keterangan baris = "Unit Nopol (Asal–Tujuan)<br>No. Rangka: X" → dipecah jadi 3 kolom yang bisa diedit.
+  const parseKet = (ket) => {
+    const m = String(ket || "").match(/^(.*?)\s*\(([^()]*)\)\s*(?:<br\s*\/?>\s*No\.?\s*Rangka:\s*(.*))?$/i);
+    return m ? { unit: m[1].trim(), rute: m[2].trim(), rangka: (m[3] || "").trim(), ok: true } : { unit: plain(ket), rute: "", rangka: "", ok: false };
+  };
+  const clean = (v) => String(v || "").replace(/[<>]/g, "");
+  const buildKet = (f) => `${clean(f.unit).trim()}${f.rute.trim() ? ` (${clean(f.rute).trim()})` : ""}${f.rangka.trim() ? `<br>No. Rangka: ${clean(f.rangka).trim()}` : ""}`;
+  const [editIdx, setEditIdx] = useState(-1);
+  const setKetField = (i, field, val) => setLines((ls) => ls.map((l, x) => {
+    if (x !== i) return l;
+    const f = parseKet(l.ket); f[field] = val;
+    return { ...l, ket: buildKet(f) };
+  }));
 
   useEffect(() => {
     if (!q.trim()) { setOrders([]); return; }
@@ -5036,13 +5049,38 @@ function InvoiceEditModal({ rec, headers, onClose, onSaved, onPrint }) {
           </div>
 
           <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: ".4px", marginBottom: 6 }}>Unit di invoice</div>
-          {lines.map((l, i) => (
-            <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", padding: "7px 0", borderBottom: "1px solid var(--border)" }}>
-              <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: "var(--text)" }}>{i + 1}. {plain(l.ket)}</div>
-              <input className="adm-input" style={{ width: 130, textAlign: "right" }} inputMode="numeric" value={(Number(l.harga) || 0).toLocaleString("id-ID")} onChange={(e) => setHarga(i, e.target.value)} />
-              <button className="adm-btn adm-btn-sm adm-btn-ghost" onClick={() => removeLine(i)} title="Hapus baris">✕</button>
+          {lines.map((l, i) => {
+            const f = parseKet(l.ket);
+            return (
+            <div key={i} style={{ padding: "7px 0", borderBottom: "1px solid var(--border)" }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: "var(--text)" }}>{i + 1}. {plain(l.ket)}</div>
+                <button className="adm-btn adm-btn-sm adm-btn-ghost" onClick={() => setEditIdx(editIdx === i ? -1 : i)} title="Ubah nopol / rute / no. rangka" data-testid={`invedit-ubah-${i}`}>✏️</button>
+                <input className="adm-input" style={{ width: 120, textAlign: "right" }} inputMode="numeric" value={(Number(l.harga) || 0).toLocaleString("id-ID")} onChange={(e) => setHarga(i, e.target.value)} />
+                <button className="adm-btn adm-btn-sm adm-btn-ghost" onClick={() => removeLine(i)} title="Hapus baris">✕</button>
+              </div>
+              {editIdx === i && (
+                <div style={{ marginTop: 8, display: "grid", gap: 6, background: "var(--bg-3, #161b22)", border: "1px solid var(--border)", borderRadius: 8, padding: 10 }}>
+                  {f.ok ? (
+                    <>
+                      <label style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 700 }}>UNIT &amp; NOPOL</label>
+                      <input className="adm-input" style={{ width: "100%" }} value={f.unit} onChange={(e) => setKetField(i, "unit", e.target.value)} placeholder="Toyota Rush B 1620 DOF" data-testid={`invedit-unit-${i}`} />
+                      <label style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 700 }}>RUTE (ASAL–TUJUAN)</label>
+                      <input className="adm-input" style={{ width: "100%" }} value={f.rute} onChange={(e) => setKetField(i, "rute", e.target.value)} placeholder="ACEH–JAKARTA" />
+                      <label style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 700 }}>NO. RANGKA</label>
+                      <input className="adm-input" style={{ width: "100%", fontFamily: "monospace" }} value={f.rangka} onChange={(e) => setKetField(i, "rangka", e.target.value)} placeholder="MHKE8FB2JPK0…" />
+                    </>
+                  ) : (
+                    <>
+                      <label style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 700 }}>KETERANGAN</label>
+                      <input className="adm-input" style={{ width: "100%" }} value={plain(l.ket)} onChange={(e) => setLines((ls) => ls.map((x, xi) => (xi === i ? { ...x, ket: clean(e.target.value) } : x)))} />
+                    </>
+                  )}
+                </div>
+              )}
             </div>
-          ))}
+            );
+          })}
 
           <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: ".4px", margin: "16px 0 6px" }}>＋ Tambah unit dari PO</div>
           <input className="adm-input" style={{ width: "100%" }} placeholder="Cari nopol / no rangka / no PO / customer / kota…" value={q} onChange={(e) => setQ(e.target.value)} data-testid="invedit-cari" />
