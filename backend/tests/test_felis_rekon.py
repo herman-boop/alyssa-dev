@@ -1462,8 +1462,81 @@ async def test_ship_master():
     ok(len(await SM.list_all(db)) == 1, "list_all")
 
 
+async def test_daily_upload_idempotent():
+    """Upload checkpoint harian: kiriman ulang (client_id sama) tidak dobel, foto antre
+    yang terkirim terlambat dicatat pada waktu foto diambil, aturan 1 foto/hari tetap.
+    Kode ASLI endpoint (AST)."""
+    print("test_daily_upload_idempotent")
+    import ast, typing
+    from datetime import datetime, timezone, timedelta
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "server.py"), encoding="utf-8").read()
+    node = next(n for n in ast.parse(src).body if isinstance(n, ast.AsyncFunctionDef) and n.name == "upload_daily_photo")
+    code = ast.get_source_segment(src, node)
+    WIB_ = timezone(timedelta(hours=7))
+
+    class _HTTP(Exception):
+        def __init__(self, status_code, detail=""):
+            self.status_code, self.detail = status_code, detail
+
+    class _Trips:
+        def __init__(self): self.docs = [{"trip_id": "T1", "daily_checkpoints": []}]
+        async def find_one(self, f, proj=None):
+            for d in self.docs:
+                if all(d.get(k) == v for k, v in f.items()):
+                    return json_copy(d)
+            return None
+        async def update_one(self, f, upd):
+            for d in self.docs:
+                if all(d.get(k) == v for k, v in f.items()):
+                    for k, v in (upd.get("$push") or {}).items(): d.setdefault(k, []).append(v)
+                    d.update(upd.get("$set") or {})
+
+    import copy as _copy
+    json_copy = _copy.deepcopy
+    class _DB: pass
+    d = _DB(); d.trips = _Trips()
+    saved = []
+    def _save(trip_id, sub, f, allowed): saved.append(1); return "/media/%s.jpg" % len(saved)
+    def _pub(doc): doc.pop("_id", None); return doc
+    ns = {"db": d, "Optional": typing.Optional, "UploadFile": object, "File": lambda *a, **k: None, "Form": lambda *a, **k: None,
+          "HTTPException": _HTTP, "uuid": __import__("uuid"), "datetime": datetime, "timezone": timezone, "timedelta": timedelta,
+          "WIB": WIB_, "today_wib": lambda: datetime.now(WIB_).strftime("%Y-%m-%d"),
+          "_save_upload": _save, "ALLOWED_IMG": {".jpg"}, "trip_doc_to_public": _pub}
+    exec(code, ns)
+    up = ns["upload_daily_photo"]
+    today = datetime.now(WIB_).strftime("%Y-%m-%d")
+
+    r = await up("T1", foto=object(), lat=1.5, lng=124.8, status="Berangkat", keterangan=" ok ", alamat=None, client_id="c1", taken_at=None)
+    ok(len(r["daily_checkpoints"]) == 1 and r["daily_checkpoints"][0]["client_id"] == "c1" and r["daily_checkpoints"][0]["date"] == today, "upload pertama tercatat + client_id")
+    n = len(saved)
+    r = await up("T1", foto=object(), lat=None, lng=None, status=None, keterangan=None, alamat=None, client_id="c1", taken_at=None)
+    ok(len(r["daily_checkpoints"]) == 1 and len(saved) == n, "kiriman ulang client_id sama: tidak dobel & file tidak disimpan lagi")
+    try:
+        await up("T1", foto=object(), lat=None, lng=None, status=None, keterangan=None, alamat=None, client_id="c2", taken_at=None)
+        ok(False, "foto kedua hari ini harus ditolak")
+    except _HTTP as e:
+        ok(e.status_code == 409, "foto lain di hari yang sama tetap 409")
+    # foto antre kemarin, terkirim hari ini: dicatat pada tanggal & waktu foto diambil
+    y = datetime.now(timezone.utc) - timedelta(days=1)
+    r = await up("T1", foto=object(), lat=None, lng=None, status=None, keterangan=None, alamat=None, client_id="c3", taken_at=y.isoformat().replace("+00:00", "Z"))
+    cps = r["daily_checkpoints"]
+    ok(len(cps) == 2 and cps[1]["date"] == y.astimezone(WIB_).strftime("%Y-%m-%d") and cps[1]["ts"].startswith(y.isoformat()[:16]), "foto kemarin dicatat sesuai waktu pengambilan")
+    for label, ta in (("5 hari lalu", (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()),
+                      ("masa depan", (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()),
+                      ("tidak valid", "bukan-tanggal")):
+        try:
+            await up("T1", foto=object(), lat=None, lng=None, status=None, keterangan=None, alamat=None, client_id="cx-" + label, taken_at=ta)
+            ok(False, "taken_at tidak wajar harus diabaikan -> 409: " + label)
+        except _HTTP as e:
+            ok(e.status_code == 409, "taken_at %s diabaikan (pakai waktu server)" % label)
+    # klien lama (tanpa client_id/taken_at) tetap jalan
+    d.trips.docs.append({"trip_id": "T2", "daily_checkpoints": []})
+    r = await up("T2", foto=object(), lat=None, lng=None, status=None, keterangan=None, alamat=None, client_id=None, taken_at=None)
+    ok(len(r["daily_checkpoints"]) == 1 and "client_id" not in r["daily_checkpoints"][0], "klien lama tanpa client_id tetap berfungsi")
+
+
 async def main():
-    for t in (test_ship_master, test_sync_single_unit_vehicle, test_edit_invoice_lines, test_selisih_ringkasan_auth, test_riwayat_clear, test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
+    for t in (test_daily_upload_idempotent, test_ship_master, test_sync_single_unit_vehicle, test_edit_invoice_lines, test_selisih_ringkasan_auth, test_riwayat_clear, test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,

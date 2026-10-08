@@ -839,12 +839,31 @@ async def upload_daily_photo(
     status: Optional[str] = Form(None),  # Berangkat|Checkpoint 1|Checkpoint 2|Checkpoint 3|Tiba Tujuan
     keterangan: Optional[str] = Form(None),
     alamat: Optional[str] = Form(None),   # nama lokasi (reverse-geocode dari HP)
+    client_id: Optional[str] = Form(None),   # id unik dari HP driver: kirim ulang = aman (idempotent)
+    taken_at: Optional[str] = Form(None),    # ISO waktu foto diambil (foto antre bisa terkirim terlambat)
 ):
     trip = await db.trips.find_one({"trip_id": trip_id})
     if not trip:
         raise HTTPException(404, "Trip not found")
-    today = today_wib()
     daily = trip.get("daily_checkpoints") or []
+    cid = (client_id or "").strip()[:64]
+    # Kiriman ulang dari antrean HP (respons sebelumnya hilang di jalan): foto sudah
+    # tercatat -> jangan dobel, cukup balikin data terbaru.
+    if cid and any(cp.get("client_id") == cid for cp in daily):
+        return trip_doc_to_public(trip)
+    now_utc = datetime.now(timezone.utc)
+    ts_dt = now_utc
+    if taken_at:
+        try:
+            t = datetime.fromisoformat(str(taken_at).strip().replace("Z", "+00:00"))
+            if t.tzinfo is None:
+                t = t.replace(tzinfo=timezone.utc)
+            # Hanya percaya waktu foto yang masuk akal: maks 48 jam lalu, tidak dari masa depan.
+            if now_utc - timedelta(hours=48) <= t <= now_utc + timedelta(minutes=5):
+                ts_dt = t
+        except Exception:
+            pass
+    today = ts_dt.astimezone(WIB).strftime("%Y-%m-%d") if ts_dt is not now_utc else today_wib()
     if any(cp.get("date") == today for cp in daily):
         raise HTTPException(409, "Foto hari ini sudah terkirim")
     url = _save_upload(trip_id, "daily", foto, ALLOWED_IMG)
@@ -852,8 +871,10 @@ async def upload_daily_photo(
         "id": str(uuid.uuid4()),
         "date": today,
         "url": url,
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": ts_dt.isoformat(),
     }
+    if cid:
+        entry["client_id"] = cid
     if lat is not None and lng is not None:
         entry["lat"] = float(lat)
         entry["lng"] = float(lng)
