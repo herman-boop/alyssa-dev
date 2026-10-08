@@ -1001,13 +1001,19 @@ export default function CustomerTracking() {
               time: `${fmtTime(last.ts || last.timestamp || last.created_at)} · ${fmtDate(last.ts || last.timestamp || last.created_at)}`,
               url: last.url ? resolveUrl(last.url) : "",
             } : null;
+            /* Unit di leg kapal yang sedang berjalan + ada posisi AIS → tonjolkan kapal.
+               Deteksi dari leg (tipe kapal / mmsi / imo) — bukan dari field `mode` diagnostik. */
+            const legSt = String((activeShipLeg && activeShipLeg.status) || "");
+            const onShip = !!(shipPos && activeShipLeg && /berlangsung|berangkat|jalan|transit/i.test(legSt)
+              && !(shipInfo && shipInfo.berthed_at));
             return (
               <LiveTrackSummary
+                ship={onShip ? { name: shipAis.ship_name || shipInfo?.ship_name || activeShipLeg.kapal || "Kapal", onOpen: () => setVesselView(true) } : null}
                 nopol={data.nopol} driver={data.nama_driver} route={data.route} tipe={data.tipe_kendaraan}
                 status={overallStatus} tone={statusColor}
                 done={overallStatus === "Sudah Diterima" || overallStatus === "Tiba di Tujuan"}
                 speed={shipInfo ? shipInfo.speed : null} heading={shipInfo ? (shipInfo.course ?? shipInfo.heading) : null}
-                lat={lastGps ? lastGps.lat : null} lon={lastGps ? lastGps.lng : null}
+                lat={onShip ? shipPos[0] : (lastGps ? lastGps.lat : null)} lon={onShip ? shipPos[1] : (lastGps ? lastGps.lng : null)}
                 cp={cp}
                 onOpenPhoto={(c) => openDocPreview(last.url, `Checkpoint ${c.num}`)}
                 onSelectCp={last ? () => setSelectedCp(last) : null}
