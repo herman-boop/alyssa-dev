@@ -12,6 +12,7 @@ from typing import List, Optional, Any, Dict
 from datetime import datetime, timezone, timedelta
 from odoo_client import OdooClient
 from playwright.async_api import async_playwright
+import ship_master  # master kapal (panjang/lebar/tipe)
 import ais  # modul AIS (posisi kapal) — provider-agnostic, aman tanpa key
 import rekon_sync  # integrasi pembayaran supplier dari Audit Rekon (isolated)
 import supplier_faktur  # pisah unit ke faktur (projek) baru — logika murni
@@ -198,6 +199,10 @@ async def _ais_startup():
         await db.ais_positions.create_index("mmsi", unique=True)
     except Exception as e:
         logger.warning(f"[startup] gagal bikin index ais_positions.mmsi: {e}")
+    try:
+        await db.ship_master.create_index("key", unique=True)
+    except Exception as e:
+        logger.warning(f"[startup] gagal bikin index ship_master.key: {e}")
     try:
         ais.start_worker(db)
     except Exception as e:
@@ -1953,7 +1958,29 @@ async def public_trip(trip_id: str):
     except Exception as e:
         logger.warning(f"[ais] attach ship_ais gagal: {e}")
         view["ship_ais"] = None
+    # Data statis kapal (panjang/lebar/tipe) dari master kapal — additif, aman kalau kosong.
+    try:
+        sa = view.get("ship_ais")
+        if isinstance(sa, dict):
+            sa["master"] = ship_master.public_master(await ship_master.lookup(db, sa.get("mmsi"), sa.get("imo")))
+    except Exception as e:
+        logger.warning(f"[ship_master] attach gagal: {e}")
     return view
+
+
+@api_router.get("/admin/ship-master", dependencies=[Depends(require_admin_pin)])
+async def admin_ship_master_list():
+    """Daftar master kapal (panjang/lebar/tipe)."""
+    return {"items": await ship_master.list_all(db)}
+
+
+@api_router.put("/admin/ship-master", dependencies=[Depends(require_admin_pin)])
+async def admin_ship_master_upsert(payload: dict):
+    """Tambah/koreksi data kapal per MMSI (9 digit) atau IMO (7 digit). Tidak ada delete."""
+    try:
+        return {"ok": True, "item": await ship_master.upsert(db, payload)}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @api_router.get("/admin/ais/diag", dependencies=[Depends(require_admin_pin)])
