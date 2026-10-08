@@ -1410,8 +1410,32 @@ async def test_edit_invoice_lines():
     ok(got == 404, "invoice tak ada → 404")
 
 
+async def test_sync_single_unit_vehicle():
+    """PO 1 unit: nopol/no. rangka hasil edit manual (level order) dipakai di units[0] untuk Invoice;
+    PO multi-unit & nilai kosong tidak disentuh. Fungsi ASLI server.py (AST)."""
+    print("test_sync_single_unit_vehicle")
+    import ast, typing
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "server.py"), encoding="utf-8").read()
+    node = next(n for n in ast.parse(src).body if isinstance(n, ast.FunctionDef) and n.name == "_sync_single_unit_vehicle")
+    ns = {}
+    exec(ast.get_source_segment(src, node), ns)
+    f = ns["_sync_single_unit_vehicle"]
+    o = {"order_id": "O1", "nopol": "B 1618 DOF", "no_rangka": "MHKE8FB2JPK017102",
+         "units": [{"unit_id": "u1", "nopol": "B 1620 DOF", "no_rangka": "MHKE8FB2JPK017072", "vehicle_type": "Rush"}]}
+    r = f(o)
+    ok(r["units"][0]["nopol"] == "B 1618 DOF" and r["units"][0]["no_rangka"] == "MHKE8FB2JPK017102", "1 unit: nopol & no. rangka hasil edit dipakai di units[0] (invoice benar)")
+    ok(r["units"][0]["unit_id"] == "u1" and r["units"][0]["vehicle_type"] == "Rush", "field unit lain tidak berubah")
+    multi = {"order_id": "O2", "nopol": "B 1", "units": [{"nopol": "B 9"}, {"nopol": "B 8"}]}
+    ok(f(dict(multi))["units"] == multi["units"], "PO multi-unit tidak disentuh")
+    blank = {"order_id": "O3", "nopol": "", "no_rangka": " ", "units": [{"nopol": "B 5", "no_rangka": "R5"}]}
+    ok(f(blank)["units"][0]["nopol"] == "B 5" and blank["units"][0]["no_rangka"] == "R5", "level-order kosong → units[0] dipertahankan")
+    same = {"nopol": "b 5", "units": [{"nopol": "B 5"}]}
+    ok(f(same)["units"][0]["nopol"] == "B 5", "nilai sama (beda huruf besar/kecil) → tidak ditimpa")
+    ok(f(None) is None and f({"units": None}) == {"units": None}, "input kosong aman")
+
+
 async def main():
-    for t in (test_edit_invoice_lines, test_selisih_ringkasan_auth, test_riwayat_clear, test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
+    for t in (test_sync_single_unit_vehicle, test_edit_invoice_lines, test_selisih_ringkasan_auth, test_riwayat_clear, test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,
