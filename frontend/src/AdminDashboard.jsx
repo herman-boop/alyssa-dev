@@ -8,6 +8,7 @@ import DriverData from "@/DriverData";
 import SupplierPage, { printSupplierA4 } from "@/SupplierPage";
 import SelisihPage from "@/SelisihPage";
 import ShipMasterPage from "@/ShipMasterPage";
+import "@/OrderCardBright.css";
 import OrderSummaryShare from "@/OrderSummaryShare";
 import { summaryPropsFromOrder } from "@/orderSummary";
 import ExpensesPage from "@/ExpensesPage";
@@ -851,6 +852,8 @@ const TONE = {
   red:     { bg: "#2d1414", fg: "#f85149", ring: "#7a2020" },
   purple:  { bg: "#1f1530", fg: "#a78bfa", ring: "#4c2f7a" },
 };
+/* Aksen tepi kartu pesanan (tema cerah) */
+const ORDER_BRIGHT_ACCENT = { NEW: "#0EA5E9", DISPATCHED: "#8B5CF6", ON_TRIP: "#84CC16", DELIVERED: "#10B981", CANCELLED: "#F43F5E" };
 const STATUS_TONE = { NEW: "orange", DISPATCHED: "blue", ON_TRIP: "purple", DELIVERED: "green", CANCELLED: "red" };
 const SIDEBAR_ICON = {
   beranda: "🏠", "rekap-tagih": "💰", kontak: "📇",
@@ -1324,9 +1327,54 @@ function computeProgress(order) {
   return { done, currentIdx: idx };
 }
 
-function ProgressTimeline({ order }) {
+/* Varian CERAH untuk kartu pesanan: padat, font kecil, garis bergradasi biru laut -> ungu neon. */
+const BRIGHT_FROM = [34, 211, 238];   // cyan
+const BRIGHT_TO = [139, 92, 246];     // ungu neon
+const brightMix = (t, a = 1) => `rgba(${BRIGHT_FROM.map((v, i) => Math.round(v + (BRIGHT_TO[i] - v) * t)).join(",")},${a})`;
+function BrightTimeline({ done, currentIdx, cancelled }) {
+  const n = PROGRESS_STEPS.length;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 5, minWidth: 250 }} data-testid="adm-progress-bright">
+      <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 0.6, color: "#475569", textTransform: "uppercase" }}>Progress</div>
+      <div style={{ display: "flex", alignItems: "center" }}>
+        {PROGRESS_STEPS.map((s, i) => {
+          const isDone = !!done[s.key] && !cancelled;
+          const isCur = i === currentIdx && !cancelled;
+          const c = brightMix(i / (n - 1));
+          const nx = brightMix(Math.min(1, (i + 1) / (n - 1)));
+          const segOn = i < n - 1 && !cancelled && !!done[PROGRESS_STEPS[i + 1].key];
+          return (
+            <div key={s.key} style={{ display: "flex", alignItems: "center", flex: i < n - 1 ? 1 : "0 0 auto" }}>
+              <div title={s.label} style={{
+                width: isCur ? 13 : 10, height: isCur ? 13 : 10, borderRadius: "50%", flexShrink: 0,
+                background: isDone ? c : "#fff",
+                border: `2px solid ${isDone ? c : "#CBD5E1"}`,
+                boxShadow: isCur ? `0 0 0 3px ${brightMix(i / (n - 1), 0.25)}, 0 0 10px ${brightMix(i / (n - 1), 0.8)}` : "none",
+              }} />
+              {i < n - 1 && (
+                <div style={{ flex: 1, height: 3, borderRadius: 2, minWidth: 14, background: segOn ? `linear-gradient(90deg, ${c}, ${nx})` : "#E2E8F0" }} />
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between" }}>
+        {PROGRESS_STEPS.map((s, i) => {
+          const isDone = !!done[s.key] && !cancelled;
+          const isCur = i === currentIdx && !cancelled;
+          return (
+            <span key={s.key} style={{ fontSize: 9, flex: 1, textAlign: "center", fontWeight: isCur ? 800 : 700, color: isCur ? "#6D28D9" : isDone ? "#0369A1" : "#64748B" }}>{s.label}</span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ProgressTimeline({ order, bright }) {
   const { done, currentIdx } = computeProgress(order);
   const cancelled = order.status === "CANCELLED";
+  if (bright) return <BrightTimeline done={done} currentIdx={currentIdx} cancelled={cancelled} />;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 260 }}>
       <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.6, color: "#5b6577", textTransform: "uppercase" }}>Progress</div>
@@ -2382,9 +2430,10 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
 
   return (
     <article
+      className="adm-order-bright"
       data-status={order.status}
       data-testid={`adm-order-${order.order_id}`}
-      style={{ animationDelay: `${idx * 40}ms`, background: "#0e1420", border: "1px solid #1a2130", borderRadius: 14, marginBottom: 12, overflow: "hidden", borderLeft: `3px solid ${TONE[STATUS_TONE[order.status]]?.fg || "#2a3140"}` }}
+      style={{ animationDelay: `${idx * 40}ms`, background: "#F8FAFC", border: "1px solid #7DD3FC", borderRadius: 14, marginBottom: 12, overflow: "hidden", borderLeft: `4px solid ${ORDER_BRIGHT_ACCENT[order.status] || "#7DD3FC"}`, boxShadow: "0 6px 22px -14px rgba(14,165,233,.55)" }}
     >
       {/* Compact summary row — always visible */}
       <div
@@ -2395,47 +2444,48 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
       >
         <div style={{ minWidth: 150 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span className="adm-mono" style={{ fontSize: 12.5, fontWeight: 800, color: "#e6edf3" }}>{order.order_id}</span>
+            <span className="adm-mono" style={{ fontSize: 12.5, fontWeight: 800, color: "var(--text)" }}>{order.order_id}</span>
             <span className={`adm-chip ${lbl.cls}`} data-testid={`adm-status-${order.order_id}`}>{lbl.txt}</span>
           </div>
-          <div style={{ fontSize: 11, color: "#6b7688", marginTop: 4 }}>{order.customer_nama || "—"}</div>
-          <div style={{ fontSize: 10.5, color: "#495267", marginTop: 1 }}>{order.customer_hp || "—"}</div>
+          <div style={{ fontSize: 11, color: "var(--text-mute)", marginTop: 4 }}>{order.customer_nama || "—"}</div>
+          <div style={{ fontSize: 10.5, color: "var(--text-dim)", marginTop: 1 }}>{order.customer_hp || "—"}</div>
         </div>
 
         <div style={{ minWidth: 130 }}>
-          <div style={{ fontSize: 11.5, color: "#c9d1d9", fontWeight: 600 }}>{order.vehicle_type || "—"}</div>
-          <div style={{ fontSize: 10.5, color: "#6b7688", marginTop: 3 }}>{order.nopol || "belum di-assign"}</div>
-          {order.no_rangka && <div style={{ fontSize: 9.5, color: "#495267", marginTop: 1 }}>{order.no_rangka}</div>}
+          <div style={{ fontSize: 11.5, color: "var(--text-2)", fontWeight: 600 }}>{order.vehicle_type || "—"}</div>
+          <div style={{ fontSize: 10.5, color: "var(--text-mute)", marginTop: 3 }}>{order.nopol || "belum di-assign"}</div>
+          {order.no_rangka && <div style={{ fontSize: 9.5, color: "var(--text-dim)", marginTop: 1 }}>{order.no_rangka}</div>}
         </div>
 
-        <div style={{ minWidth: 130 }}>
-          <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.5, color: "#5b6577", textTransform: "uppercase" }}>Rute</div>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "#e6edf3", marginTop: 2 }}>{order.asal_kota || "—"}</div>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "#e6edf3" }}>↓ {order.tujuan_kota || "—"}</div>
+        <div style={{ minWidth: 170, flex: "1 1 170px" }}>
+          <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 0.5, color: "var(--text-mute)", textTransform: "uppercase" }}>Rute</div>
+          <div className="adm-route-bright" style={{ marginTop: 2 }} data-testid={`adm-route-${order.order_id}`}>
+            {order.asal_kota || "—"} <span className="adm-route-arrow" aria-hidden="true">➔</span> {order.tujuan_kota || "—"}
+          </div>
         </div>
 
         <div style={{ minWidth: 110 }}>
-          <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.5, color: "#5b6577", textTransform: "uppercase" }}>Driver</div>
-          <div style={{ fontSize: 11.5, color: order.nama_driver ? "#c9d1d9" : "#495267", marginTop: 3, fontStyle: order.nama_driver ? "normal" : "italic" }}>
+          <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.5, color: "var(--text-mute)", textTransform: "uppercase" }}>Driver</div>
+          <div style={{ fontSize: 11.5, color: order.nama_driver ? "var(--text-2)" : "var(--text-dim)", marginTop: 3, fontStyle: order.nama_driver ? "normal" : "italic" }}>
             {order.nama_driver || "Belum di-assign"}
           </div>
         </div>
 
-        <ProgressTimeline order={order} />
+        <ProgressTimeline order={order} bright />
 
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-          <div style={{ fontSize: 10.5, color: "#495267", textAlign: "right" }}>{fmtDate(order.created_at)}</div>
+          <div style={{ fontSize: 10.5, color: "var(--text-dim)", textAlign: "right" }}>{fmtDate(order.created_at)}</div>
           <button
             onClick={copyPoText}
             title="Salin buat PO Jurnal Mekari (Model · Nopol · Rangka · Rute)"
-            style={{ padding: "7px 14px", borderRadius: 8, border: `1px solid ${copiedPo ? "#238636" : "#1f2937"}`, background: copiedPo ? "#0d2a10" : "#111826", color: copiedPo ? "#3fb950" : "#9aa4b6", fontSize: 11.5, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}
+            style={{ padding: "7px 14px", borderRadius: 8, border: `1px solid ${copiedPo ? "#34D399" : "#BAE6FD"}`, background: copiedPo ? "#D1FAE5" : "#FFFFFF", color: copiedPo ? "#047857" : "#0369A1", fontSize: 11.5, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}
             data-testid={`adm-order-copy-po-${order.order_id}`}
           >
             {copiedPo ? "✓ Tersalin" : "📋 Copy PO"}
           </button>
           <button
             onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}
-            style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid #1f2937", background: "#111826", color: "#9aa4b6", fontSize: 11.5, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}
+            style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid #BAE6FD", background: "#FFFFFF", color: "#0369A1", fontSize: 11.5, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}
             data-testid={`adm-order-toggle-${order.order_id}`}
           >
             {expanded ? "Tutup ↑" : "Buka →"}
@@ -2444,7 +2494,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
       </div>
 
       {expanded && (
-      <div style={{ borderTop: "1px solid #1a2130" }}>
+      <div style={{ borderTop: "1px solid #BAE6FD" }}>
       {/* Body — 2-col grid */}
       <div className="adm-card-body">
         <div className="adm-field-row">
@@ -2481,7 +2531,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
         <div className="adm-field-row">
           <div className="adm-field-key">Rute</div>
           <div className="adm-field-val">
-            {order.asal_kota || "—"} &rarr; {order.tujuan_kota || "—"}
+            <span className="adm-route-bright">{order.asal_kota || "—"} <span className="adm-route-arrow" aria-hidden="true">➔</span> {order.tujuan_kota || "—"}</span>
           </div>
         </div>
         <div className="adm-field-row">
@@ -2633,7 +2683,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
               </button>
             </span>
             {waStatus === "gagal" && waErr && (
-              <div style={{ fontSize: 11, color: "#f0a742", marginTop: 4 }} data-testid={`adm-wa-error-${order.order_id}`}>
+              <div style={{ fontSize: 11, color: "#B45309", marginTop: 4 }} data-testid={`adm-wa-error-${order.order_id}`}>
                 Alasan: {waErr}
               </div>
             )}
@@ -2741,7 +2791,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
                     <option value="">— Pilih koordinator —</option>
                     {activeKords.map(k => <option key={k.id} value={k.id}>{k.nama}</option>)}
                   </select>
-                  {kordSaving && <span style={{ fontSize: 11, color: "#8b949e" }}>Menyimpan...</span>}
+                  {kordSaving && <span style={{ fontSize: 11, color: "var(--text-mute)" }}>Menyimpan...</span>}
                   {!kordSaving && kordDraft && (
                     <span className="adm-pill" style={{ marginLeft: 4 }}>
                       {(kordList.find(k => k.id === kordDraft) || {}).nama || kordDraft}
@@ -2803,10 +2853,10 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
           {showSummary ? "Tutup Ringkasan" : "Ringkasan"}
         </button>
         {/* Entitas PT/CV (pembukuan Penjualan) — additive, buat Laba Rugi per entitas */}
-        <label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: "#8b949e" }} title="Pembukuan PT / CV untuk laporan Laba Rugi">
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--text-mute)" }} title="Pembukuan PT / CV untuk laporan Laba Rugi">
           <span>PT/CV:</span>
           <select value={order.entity_id || ""} onChange={(e) => onPatch({ entity_id: e.target.value })}
-            style={{ padding: "4px 8px", borderRadius: 7, border: "1px solid #1f2937", background: "#0e1420", color: "#e6edf3", fontSize: 11 }} data-testid={`adm-order-entity-${order.order_id}`}>
+            style={{ padding: "4px 8px", borderRadius: 7, border: "1px solid #7DD3FC", background: "#FFFFFF", color: "#050B1A", fontSize: 11 }} data-testid={`adm-order-entity-${order.order_id}`}>
             <option value="">— belum diisi —</option>
             {Object.entries(DOC_ENTITIES).map(([id, ent]) => <option key={id} value={id}>{ent.footerName || id}</option>)}
           </select>
@@ -2850,26 +2900,26 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
               onChange={(e) => uploadFotoAlbum(key, e.target.files)}
             />
             <button className="adm-btn adm-btn-sm" onClick={() => albumFileRefs.current[key]?.click()} disabled={uploadingStage === key}
-              style={{ background: "#1a3a5c", border: "1px solid #1f6feb", color: "#60a5fa" }}
+              style={{ background: "#E0F2FE", border: "1px solid #38BDF8", color: "#0369A1" }}
               title={`Upload foto ke album ${label} (kalau driver belum sempat)`}>
               {uploadingStage === key ? "Uploading..." : `${icon} ${label}`}
             </button>
           </span>
         ))}
         <button className="adm-btn adm-btn-sm" onClick={(e) => { e.stopPropagation(); setShowSJ(true); }}
-          style={{ background: "#1a2e1a", border: "1px solid #3fb950", color: "#3fb950" }}>
+          style={{ background: "#DCFCE7", border: "1px solid #4ADE80", color: "#166534" }}>
           📄 Surat Jalan
         </button>
         <button className="adm-btn adm-btn-sm" onClick={(e) => { e.stopPropagation(); setShowInvoice(true); }} data-testid={`adm-invoice-${order.order_id}`}
-          style={{ background: "#1a2e3a", border: "1px solid #58a6ff", color: "#58a6ff" }}>
+          style={{ background: "#DBEAFE", border: "1px solid #60A5FA", color: "#1D4ED8" }}>
           🧾 Invoice
         </button>
         <button className="adm-btn adm-btn-sm" onClick={(e) => { e.stopPropagation(); setShowJadwal(true); }} data-testid={`adm-jadwal-${order.order_id}`}
-          style={{ background: "#2a2410", border: "1px solid #d4a847", color: "#e6b450" }}>
+          style={{ background: "#FEF3C7", border: "1px solid #FBBF24", color: "#92400E" }}>
           🚢 Jadwal Pengiriman
         </button>
         <button className="adm-btn adm-btn-sm" onClick={(e) => { e.stopPropagation(); setShowDupVendor(true); }} data-testid={`adm-dupvendor-${order.order_id}`}
-          style={{ background: "#241a2e", border: "1px solid #a371f7", color: "#c9a2ff" }}>
+          style={{ background: "#F3E8FF", border: "1px solid #C084FC", color: "#6B21A8" }}>
           🏢 Duplikat ke Vendor
         </button>
         {showDupVendor && (
@@ -3001,7 +3051,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
         )}
         <button
           className="adm-btn adm-btn-danger adm-btn-sm"
-          style={{ background: "#791F1F", borderColor: "#A32D2D" }}
+          style={{ background: "#FEE2E2", borderColor: "#F87171", color: "#991B1B" }}
           onClick={() => { if (window.confirm(`Hapus PERMANEN order ${order.order_id}${order.trip_id ? " + trip-nya" : ""}? Tidak bisa dikembalikan.`)) onDelete(); }}
           data-testid={`adm-delete-${order.order_id}`}
         >
