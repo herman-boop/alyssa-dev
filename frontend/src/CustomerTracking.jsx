@@ -4,6 +4,8 @@ import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "./Tracking.css";
+import VesselPositionView from "./VesselPositionView";
+import { buildVesselView } from "./vesselPositionData";
 import { MAP_TILE_URL, MAP_LABEL_URL, MAP_ATTR, MAP_MAX_ZOOM, MAP_MAX_NATIVE_ZOOM, ROUTE_COLOR, ROUTE_WEIGHT, ROUTE_OPACITY, ROUTE_DASH, freshnessDot } from "./mapTheme";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -609,6 +611,7 @@ export default function CustomerTracking() {
   const [selectedCp, setSelectedCp] = useState(null);
   const [docPreview, setDocPreview] = useState(null);
   const [shipDetail, setShipDetail] = useState(false);   // toggle "Detail kapal"
+  const [vesselView, setVesselView] = useState(false);     // layar "Lihat Posisi Kapal"
   const [flyNonce, setFlyNonce] = useState(0);           // fokus map ke kapal saat klik leg
   const mapAreaRef = useRef(null);
   const [geoNames, setGeoNames] = useState({}); // "lat,lng" -> nama lokasi (checkpoint lama tanpa alamat)
@@ -1176,6 +1179,9 @@ export default function CustomerTracking() {
                         {shipInfo.draught != null ? <div style={rowS}><span style={kS}>Draft</span><span>{shipInfo.draught} m</span></div> : null}
                       </div>
                       {shipPos && (
+                        <button onClick={() => setVesselView(true)} style={{ width: "100%", marginTop: 10, padding: "10px 12px", borderRadius: 8, border: "1px solid #1d4ed8", background: "#1d4ed8", color: "#fff", fontWeight: 800, fontSize: 13, cursor: "pointer" }} data-testid="trk-vessel-open">🚢 Lihat Posisi Kapal</button>
+                      )}
+                      {shipPos && (
                         <button onClick={focusShip} style={{ width: "100%", marginTop: 10, padding: "9px 12px", borderRadius: 8, border: "1px solid #1f6feb", background: "#0d2340", color: "#58a6ff", fontWeight: 700, fontSize: 13, cursor: "pointer" }} data-testid="trk-ais-focus">📍 Lihat posisi kapal di peta</button>
                       )}
                       {shipPos && (
@@ -1388,6 +1394,10 @@ export default function CustomerTracking() {
         </div>
       </div>
       {docPreview && <DocPreviewModal item={docPreview} onClose={() => setDocPreview(null)} />}
+      {vesselView && (() => {
+        const vv = buildVesselView(shipAis, activeShipLeg);
+        return vv ? <VesselPositionView vessel={vv} onClose={() => setVesselView(false)} /> : null;
+      })()}
     </div>
   );
 }

@@ -34,3 +34,11 @@ export function freshnessDot(freshness) {
   if (freshness === "recent") return "#d97706";  // amber
   return "#94a3b8";                               // stale/unknown: abu netral (tidak mencolok)
 }
+
+// Basemap laut (Esri Ocean) — GRATIS tanpa key. Laut biru lembut + daratan + label
+// kota/pulau; dipakai layar "Lihat Posisi Kapal". Native zoom maksimal ~10.
+export const OCEAN_TILE_URL =
+  "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}";
+export const OCEAN_LABEL_URL =
+  "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}";
+export const OCEAN_MAX_NATIVE_ZOOM = 10;
