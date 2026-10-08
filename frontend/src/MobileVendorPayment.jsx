@@ -465,13 +465,24 @@ function FakturBaruScreen({ boot, headers, onBack, onToVendors, setLoading, flas
   const applySama = () => { const v = onlyDigits(hargaSama); if (!v) { flash("Isi HPP dulu"); return; } setSel((s0) => Object.fromEntries(Object.entries(s0).map(([k, x]) => [k, { ...x, harga: v }]))); };
   const vendorsFiltered = (boot.vendors || []).filter((v) => !vendorFilter.trim() || (v.nama || "").toLowerCase().includes(vendorFilter.trim().toLowerCase()));
 
+  const LAST_KEY = (vid) => `vp-lastfaktur-${vid}`;
+  const refreshProjects = async () => {
+    try {
+      const r = await axios.get(`${API}/admin/suppliers/${vendor.id}`, { headers });
+      setProjects([...(r.data.projects || [])].reverse());
+    } catch (_) { /* abaikan */ }
+  };
   const normJ = (x) => String(x || "").toLowerCase().replace(/\s+/g, " ").trim();
   const projLabel = (pr) => `${pr.no_faktur ? pr.no_faktur + " · " : ""}${pr.nama || "(tanpa judul)"}${pr.status === "closed" ? " (selesai)" : ""}`;
   // Judul yang diketik sama dengan faktur yang sudah ada → default "Lanjut" (tetap di judul & faktur yang sama).
   const openKonfirmasi = () => {
     const match = judul.trim() ? projects.find((pr) => normJ(pr.nama) === normJ(judul)) : null;
-    setMode(match ? "lanjut" : "baru");
-    setTargetPid(match ? match.id : ((projects.find((pr) => pr.no_faktur) || projects[0] || {}).id || ""));
+    let last = null;
+    try { const id = localStorage.getItem(LAST_KEY(vendor.id)); last = id ? projects.find((pr) => pr.id === id) : null; } catch (_) { /* abaikan */ }
+    // Default: judul sama → faktur itu; kalau tidak, faktur TERAKHIR yang dipakai di layar ini (input per unit tetap satu faktur).
+    const dflt = match || last;
+    setMode(dflt ? "lanjut" : "baru");
+    setTargetPid(dflt ? dflt.id : ((projects.find((pr) => pr.no_faktur) || projects[0] || {}).id || ""));
     setConfirm(true);
   };
   const targetProj = projects.find((pr) => pr.id === targetPid) || null;
@@ -495,6 +506,8 @@ function FakturBaruScreen({ boot, headers, onBack, onToVendors, setLoading, flas
         }, { headers });
         made += 1;
       }
+      try { localStorage.setItem(LAST_KEY(vendor.id), proj.id); } catch (_) { /* abaikan */ }
+      refreshProjects();
       setResult({ ok: true, lanjut: mode === "lanjut" && !!targetProj, no_faktur: proj.no_faktur, nama: proj.nama, vendor: vendor.nama, units: made, total });
       setExisting((e0) => { const n = new Set(e0); valid.forEach((x) => n.add(String(x.row.nopol || x.row.no_rangka || "").toUpperCase())); return n; });
     } catch (e) {
@@ -517,7 +530,8 @@ function FakturBaruScreen({ boot, headers, onBack, onToVendors, setLoading, flas
             {result.partial && <div className="vp-hint" style={{ color: "#b45309" }}>Hanya {result.units} dari {valid.length} unit yang masuk. Tambahkan sisanya lewat Supplier → Tarik Unit dari PO (pilih faktur ini).</div>}
           </div>
           <button className="vp-btn vp-btn-primary" onClick={onToVendors}>💰 Bayar Faktur Ini</button>
-          <button className="vp-btn vp-btn-ghost" style={{ marginTop: 8 }} onClick={() => { setResult(null); setSel({}); setJudul(result.lanjut ? (result.nama || "") : ""); }}>{result.lanjut ? "＋ Lanjut Tambah Unit (judul sama)" : "＋ Buat Faktur Lain"}</button>
+          <button className="vp-btn vp-btn-ghost" style={{ marginTop: 8 }} onClick={() => { setResult(null); setSel({}); setJudul(result.nama || ""); }}>＋ Lanjut Tambah Unit ke Faktur Ini</button>
+          <button className="vp-btn vp-btn-ghost" style={{ marginTop: 8 }} onClick={() => { try { localStorage.removeItem(LAST_KEY(vendor.id)); } catch (_) { /* abaikan */ } setResult(null); setSel({}); setJudul(""); }}>📄 Buat Faktur Lain (nomor baru)</button>
           <button className="vp-btn vp-btn-ghost" style={{ marginTop: 8 }} onClick={onBack}>Beranda</button>
         </div>
       </div>
