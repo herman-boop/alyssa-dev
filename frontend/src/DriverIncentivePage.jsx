@@ -33,6 +33,8 @@ export default function DriverIncentivePage() {
   const [msg, setMsg] = useState({ t: "", err: false });
   const [payFor, setPayFor] = useState(null);
   const [payNote, setPayNote] = useState("");
+  const [payAkun, setPayAkun] = useState("");    // akun kas yang dikurangi saat bayar manual
+  const [akunList, setAkunList] = useState([]);
   const fileRef = useRef(null);
   // ── Transfer via Flip ──
   const [cfg, setCfg] = useState(null);
@@ -53,6 +55,7 @@ export default function DriverIncentivePage() {
   }, [headers]);
   useEffect(() => { if (tab === "riwayat") loadLogs(); }, [tab, loadLogs]);
 
+  useEffect(() => { axios.get(`${API}/admin/kas/accounts`, { headers }).then((r) => setAkunList(r.data.items || [])).catch(() => {}); }, [headers]);
   const errOf = (e, d) => e.response?.data?.detail || d;
   const openFlip = async (d) => {
     let bank = "bca", acc = "";
@@ -83,7 +86,7 @@ export default function DriverIncentivePage() {
     setBusy(id); setMsg({ t: "", err: false });
     try {
       const r = await axios.post(`${API}/admin/driver-incentives/${id}/${path}`, form, { headers, timeout: 120000 });
-      setMsg({ t: r.data.bukti_warning || "Tersimpan", err: !!r.data.bukti_warning });
+      setMsg({ t: r.data.kas_warning || r.data.bukti_warning || "Tersimpan", err: !!(r.data.bukti_warning || r.data.kas_warning) });
       setPayFor(null); setPayNote("");
       await load();
     } catch (e) { setMsg({ t: e.response?.data?.detail || "Gagal menyimpan", err: true }); }
@@ -93,6 +96,7 @@ export default function DriverIncentivePage() {
   const doPay = (id) => {
     const fd = new FormData();
     fd.append("catatan", payNote);
+    if (payAkun) fd.append("akun_id", payAkun);
     const f = fileRef.current && fileRef.current.files && fileRef.current.files[0];
     if (f) fd.append("bukti", f);
     act(id, "bayar", fd);
@@ -227,6 +231,10 @@ export default function DriverIncentivePage() {
                     payFor === it.id ? (
                       <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
                         <input value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="Catatan (mis. transfer BCA)" style={{ background: "#0d1117", border: "1px solid #30363d", borderRadius: 8, padding: "8px 12px", color: "#e6edf3", fontSize: 13 }} data-testid="insentif-pay-note" />
+                        <select value={payAkun} onChange={(e) => setPayAkun(e.target.value)} style={{ background: "#0d1117", border: "1px solid #30363d", borderRadius: 8, padding: "8px 12px", color: "#e6edf3", fontSize: 13 }} data-testid="insentif-pay-akun">
+                          <option value="">Dibayar dari akun… (opsional, mengurangi saldo Kas & Bank)</option>
+                          {akunList.map((a) => <option key={a.id} value={a.id}>{a.nama}</option>)}
+                        </select>
                         <input ref={fileRef} type="file" accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf" style={{ fontSize: 12.5, color: "#c9d1d9" }} data-testid="insentif-pay-file" />
                         <div style={{ display: "flex", gap: 8 }}>
                           <button type="button" disabled={busy === it.id} onClick={() => doPay(it.id)} style={btn("#1D4ED8", "#fff")} data-testid="insentif-pay-confirm">{busy === it.id ? "Menyimpan…" : "Tandai Dibayar"}</button>

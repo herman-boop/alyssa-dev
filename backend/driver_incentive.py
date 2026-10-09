@@ -107,3 +107,19 @@ async def set_status(db, item_id, status, catatan="", bukti_url=None):
     await db[COLL].update_one({"id": item_id}, {"$set": upd})
     d = await db[COLL].find_one({"id": item_id})
     return {k: v for k, v in d.items() if k != "_id"}
+
+
+async def paid_total_by_trip(db, trip_id):
+    """Total insentif yang sudah DIBAYAR untuk 1 trip (masuk Biaya Driver / HPP trip)."""
+    n = 0
+    async for d in db[COLL].find({"trip_id": trip_id, "status": "dibayar"}):
+        n += int(d.get("amount") or 0)
+    return n
+
+
+async def paid_rows(db):
+    """Semua insentif berstatus dibayar (untuk Laba Rugi): trip_id, amount, tanggal bayar."""
+    rows = []
+    async for d in db[COLL].find({"status": "dibayar"}):
+        rows.append({"trip_id": d.get("trip_id"), "amount": int(d.get("amount") or 0), "paid_at": d.get("paid_at") or d.get("created_at") or ""})
+    return rows

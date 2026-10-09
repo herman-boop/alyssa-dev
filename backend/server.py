@@ -17,6 +17,7 @@ import leg_supplier  # supplier per leg + pembayaran supplier
 import driver_incentive  # insentif per checkpoint driver borongan (antrean bayar)
 import flip_client  # adapter Flip (transfer ke rekening driver)
 import payouts  # transfer driver lewat Flip dengan pengaman (inquiry wajib, anti dobel, payout_logs)
+import cashbank  # Kas & Bank: akun + mutasi + saldo
 import ais  # modul AIS (posisi kapal) — provider-agnostic, aman tanpa key
 import rekon_sync  # integrasi pembayaran supplier dari Audit Rekon (isolated)
 import supplier_faktur  # pisah unit ke faktur (projek) baru — logika murni
@@ -4548,7 +4549,7 @@ async def list_driver_incentives(status: Optional[str] = None, q: Optional[str] 
 
 
 @api_router.post("/admin/driver-incentives/{item_id}/bayar", dependencies=[Depends(require_admin_pin)])
-async def pay_driver_incentive(item_id: str, catatan: str = Form(""), bukti: Optional[UploadFile] = File(None)):
+async def pay_driver_incentive(item_id: str, catatan: str = Form(""), akun_id: str = Form(""), bukti: Optional[UploadFile] = File(None)):
     url, warn = None, None
     if bukti is not None and bukti.filename:
         url, warn = _save_upload_soft("driver-incentive", item_id, bukti, ALLOWED_IMG | ALLOWED_DOC)
@@ -4559,6 +4560,12 @@ async def pay_driver_incentive(item_id: str, catatan: str = Form(""), bukti: Opt
     except ValueError as e:
         raise HTTPException(400, str(e))
     res["bukti_warning"] = warn
+    if (akun_id or "").strip():     # kas: pembayaran manual mengurangi akun yang dipilih (gagal tidak membatalkan pembayaran)
+        try:
+            await cashbank.post_incentive(db, res, akun_id.strip(), today_wib(), url)
+        except Exception as e:
+            logger.warning(f"[kas] gagal catat mutasi insentif: {e}")
+            res["kas_warning"] = "Tersimpan dibayar, tetapi mutasi kas gagal dicatat. Catat manual di Kas & Bank."
     return res
 
 
@@ -4575,9 +4582,66 @@ async def reject_driver_incentive(item_id: str, catatan: str = Form("")):
 @api_router.post("/admin/driver-incentives/{item_id}/reset", dependencies=[Depends(require_admin_pin)])
 async def reset_driver_incentive(item_id: str):
     try:
-        return await driver_incentive.set_status(db, item_id, "menunggu")
+        res = await driver_incentive.set_status(db, item_id, "menunggu")
     except KeyError as e:
         raise HTTPException(404, str(e.args[0]))
+    try:    # pembayaran dibuka lagi -> mutasi kas dibatalkan (soft void)
+        await cashbank.void_incentive(db, item_id)
+    except Exception as e:
+        logger.warning(f"[kas] gagal void mutasi insentif: {e}")
+    return res
+
+
+# ══════════════════════════════════════════════════════
+# KAS & BANK (cashbank.py): akun, mutasi, pindah saldo, saldo dihitung ulang.
+# ══════════════════════════════════════════════════════
+async def _cb_guard(coro):
+    try:
+        return await coro
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except KeyError as e:
+        raise HTTPException(404, str(e.args[0]))
+
+
+@api_router.get("/admin/kas/accounts", dependencies=[Depends(require_admin_pin)])
+async def kas_accounts():
+    return await cashbank.list_accounts(db)
+
+
+@api_router.post("/admin/kas/accounts", dependencies=[Depends(require_admin_pin)])
+async def kas_create_account(body: dict = Body(...)):
+    return await _cb_guard(cashbank.create_account(db, body.get("nama"), body.get("jenis") or "bank", body.get("saldo_awal") or 0, body.get("entity_id") or ""))
+
+
+@api_router.get("/admin/kas/accounts/{account_id}/txns", dependencies=[Depends(require_admin_pin)])
+async def kas_txns(account_id: str, date_from: Optional[str] = None, date_to: Optional[str] = None, include_void: bool = False):
+    return await _cb_guard(cashbank.list_txns(db, account_id, date_from, date_to, include_void))
+
+
+@api_router.post("/admin/kas/txns", dependencies=[Depends(require_admin_pin)])
+async def kas_add_txn(account_id: str = Form(...), arah: str = Form(...), amount: str = Form(...), tanggal: str = Form(""),
+                      keterangan: str = Form(""), bukti: Optional[UploadFile] = File(None)):
+    url, warn = None, None
+    if bukti is not None and bukti.filename:
+        url, warn = _save_upload_soft("kas", account_id, bukti, ALLOWED_IMG | ALLOWED_DOC)
+    doc, _ = await _cb_guard(cashbank.add_txn(db, account_id, arah, amount, tanggal, keterangan, today_wib(), url))
+    return dict(doc, bukti_warning=warn)
+
+
+@api_router.post("/admin/kas/transfer", dependencies=[Depends(require_admin_pin)])
+async def kas_transfer(from_id: str = Form(...), to_id: str = Form(...), amount: str = Form(...), tanggal: str = Form(""),
+                       keterangan: str = Form(""), biaya_admin: str = Form("0"), bukti: Optional[UploadFile] = File(None)):
+    url, warn = None, None
+    if bukti is not None and bukti.filename:
+        url, warn = _save_upload_soft("kas", from_id, bukti, ALLOWED_IMG | ALLOWED_DOC)
+    res = await _cb_guard(cashbank.transfer(db, from_id, to_id, amount, tanggal, keterangan, today_wib(), biaya_admin, url))
+    return dict(res, bukti_warning=warn)
+
+
+@api_router.post("/admin/kas/txns/{txn_id}/void", dependencies=[Depends(require_admin_pin)])
+async def kas_void(txn_id: str, body: dict = Body(...)):
+    return await _cb_guard(cashbank.void_txn(db, txn_id, body.get("alasan")))
 
 
 # ══════════════════════════════════════════════════════
@@ -4833,7 +4897,8 @@ async def _trip_finance_summary(trip: dict) -> dict:
 
     uj = int(trip.get("uj") or 0); t1 = int(trip.get("t1") or 0)
     t2 = int(trip.get("t2") or 0); t3 = int(trip.get("t3") or 0)
-    driver_total = uj + t1 + t2 + t3
+    insentif = await driver_incentive.paid_total_by_trip(db, trip_id)   # insentif checkpoint yang sudah dibayar = Biaya Driver
+    driver_total = uj + t1 + t2 + t3 + insentif
 
     vendor_costs = await _trip_vendor_costs(trip_id)
     vendor_total = sum(c["jumlah"] for c in vendor_costs)
@@ -4869,7 +4934,7 @@ async def _trip_finance_summary(trip: dict) -> dict:
         "invoice_total": invoice_total,
         "has_invoice": has_invoice,
         "driver_cost": {
-            "uj": uj, "t1": t1, "t2": t2, "t3": t3, "total": driver_total,
+            "uj": uj, "t1": t1, "t2": t2, "t3": t3, "insentif": insentif, "total": driver_total,
             "klasifikasi": "Driver Cost",
             "bonus_daily": int(trip.get("bonus_daily") or 0),
             "bonus_kerajinan": int(trip.get("bonus_kerajinan") or 0),
@@ -7751,7 +7816,7 @@ async def expenses_summary(entity_id: Optional[str] = None, date_from: Optional[
 async def _laba_rugi(date_from=None, date_to=None, entity_id=None):
     """Laba Rugi dari transaksi AKTUAL (tidak ada input ulang):
       Pendapatan = trip.finance.invoice_total (join order utk entitas & tanggal)
-      HPP        = supplier jobs (DPP = total_harga + biaya tambahan)
+      HPP        = supplier jobs (DPP = total_harga + biaya tambahan) + insentif checkpoint driver yang sudah dibayar
       Biaya      = expenses (status active)
     Dikelompokkan per entitas PT/CV (belum diisi = 'none'); filter periode & entitas.
     READ-ONLY — tidak mengubah data apa pun."""
@@ -7790,6 +7855,19 @@ async def _laba_rugi(date_from=None, date_to=None, entity_id=None):
             if dpp <= 0:
                 continue
             bucket(e)["hpp"] += dpp
+
+    # HPP — insentif checkpoint driver yang sudah DIBAYAR (entitas dari order trip, tanggal = tanggal bayar).
+    trip_order = {}
+    async for t in db.trips.find({}, {"_id": 0, "trip_id": 1, "order_id": 1}):
+        trip_order[t.get("trip_id")] = t.get("order_id")
+    for r in await driver_incentive.paid_rows(db):
+        e = (order_meta.get(trip_order.get(r["trip_id"])) or {}).get("entity_id") or ""
+        if not pnl.entity_match(e, want, valid):
+            continue
+        if not pnl.in_period(r["paid_at"], date_from, date_to):
+            continue
+        if r["amount"] > 0:
+            bucket(e)["hpp"] += r["amount"]
 
     # Biaya/Beban — expenses active.
     async for ex in db[expenses_mod.EXPENSES].find({"status": "active"}, {"_id": 0, "entity_id": 1, "tanggal": 1, "nominal": 1}):

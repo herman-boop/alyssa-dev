@@ -11,6 +11,7 @@ import SupplierPage, { printSupplierA4 } from "@/SupplierPage";
 import SelisihPage from "@/SelisihPage";
 import ShipMasterPage from "@/ShipMasterPage";
 import DriverIncentivePage from "@/DriverIncentivePage";
+import KasBankPage from "@/KasBankPage";
 import "@/OrderCardBright.css";
 import OrderSummaryShare from "@/OrderSummaryShare";
 import { categoryOfGroupTitle, categoryOfTab } from "@/categoryColors";
@@ -431,6 +432,7 @@ function Dashboard({ pin, onLogout }) {
     "master-kapal": { title: "Master Kapal", sub: "Panjang, lebar & tipe kapal (tampil di layar Lihat Posisi Kapal)" },
     selisih:      { title: "Selisih Harga", sub: "Bandingkan HPP vs harga deal pelanggan" },
     biaya:        { title: "Biaya / Beban", sub: "Biaya operasional (non-HPP) per PT/CV — terpisah dari tagihan supplier" },
+    "kas-bank":   { title: "Kas & Bank", sub: "Saldo bank, kas, dan Saldo Flip; mutasi dan pindah saldo" },
     "laba-rugi":  { title: "Laba Rugi", sub: "Pendapatan − HPP − Biaya per PT/CV & periode (dari transaksi aktual)" },
     "pembayaran-vendor": { title: "Pembayaran Vendor", sub: "Bayar beberapa PO per vendor sekaligus (Keuangan)" },
     kompensasi:   { title: "Kompensasi", sub: "Kompensasi hutang piutang antar pihak" },
@@ -525,6 +527,10 @@ function Dashboard({ pin, onLogout }) {
 
       {activeTab === "selisih" && (
         <SelisihPage />
+      )}
+
+      {activeTab === "kas-bank" && (
+        <KasBankPage />
       )}
 
       {activeTab === "insentif-driver" && (
@@ -869,7 +875,7 @@ const SIDEBAR_ICON = {
   beranda: "🏠", "rekap-tagih": "💰", kontak: "📇",
   pesanan: "▦", "route-leg": "🧭", drivers: "👤", supplier: "🌿", koordinator: "🧑‍💼",
   kendaraan: "🚙", "master-kapal": "🚢", dokumen: "📄", histori: "🗂️", laporan: "📑", kalkulator: "🧮", selisih: "📊",
-  kompensasi: "🔄", "minta-harga": "📩", pengaturan: "⚙️", "pembayaran-vendor": "🏢", "insentif-driver": "🎯",
+  kompensasi: "🔄", "minta-harga": "📩", pengaturan: "⚙️", "pembayaran-vendor": "🏢", "insentif-driver": "🎯", "kas-bank": "🏦",
   biaya: "🧾", "laba-rugi": "📈",
 };
 
@@ -1135,6 +1141,7 @@ const SIDEBAR_GROUPS = [
     { key: "biaya", label: "Biaya / Beban" },
   ] },
   { title: "Keuangan", items: [
+    { key: "kas-bank", label: "Kas & Bank" },
     { key: "laba-rugi", label: "Laba Rugi" },
   ] },
   { title: "Arsip & Laporan", items: [
@@ -7255,11 +7262,12 @@ function Trip360Keuangan({ order, legs, headers, finance, onFinance, onOpenInvoi
           <div><span>Termin 1</span><b>{fmtRp(dc.t1)}</b></div>
           <div><span>Termin 2</span><b>{fmtRp(dc.t2)}</b></div>
           <div><span>Termin 3</span><b>{fmtRp(dc.t3)}</b></div>
+          {dc.insentif > 0 && <div><span>Insentif Checkpoint</span><b>{fmtRp(dc.insentif)}</b></div>}
         </div>
         {(dc.bonus_daily > 0 || dc.bonus_kerajinan > 0) && (
           <div className="t360-note" style={{ marginTop: 12 }}>
             {T360_ICONS.warn}
-            <div><div className="t">Bonus tidak dihitung otomatis ke HPP</div><div className="s">Bonus harian ({fmtRp(dc.bonus_daily)}/hari) &amp; kerajinan ({fmtRp(dc.bonus_kerajinan)}) tergantung jumlah hari &amp; performa driver saat pencairan. Kalau nilainya sudah pasti, tambahkan sebagai satu baris di Biaya Vendor (kategori Lainnya) supaya ikut HPP.</div></div>
+            <div><div className="t">Bonus kerajinan belum otomatis masuk HPP</div><div className="s">Insentif checkpoint yang sudah <b>dibayar</b> (menu Insentif Driver) otomatis masuk Biaya Driver di atas. Bonus harian ({fmtRp(dc.bonus_daily)}/hari) yang tidak lewat antrean insentif &amp; bonus kerajinan ({fmtRp(dc.bonus_kerajinan)}) tergantung jumlah hari &amp; performa saat pencairan. Kalau nilainya sudah pasti, tambahkan sebagai satu baris di Biaya Vendor (kategori Lainnya) supaya ikut HPP.</div></div>
           </div>
         )}
       </div>

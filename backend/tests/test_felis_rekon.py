@@ -22,6 +22,7 @@ import leg_supplier as LSP
 import driver_incentive as DI
 import flip_client as FL
 import payouts as PO
+import cashbank as CB
 import invoice_payments as IP
 import expenses as EXP
 
@@ -1696,6 +1697,9 @@ async def test_payouts_flip():
     ok(lg["status"] == "berhasil" and lg["flip_id"] == "9001" and r["marked"] == 2, "berhasil: log tercatat, 2 item ditandai dibayar")
     st = {d["id"]: d["status"] for d in db.driver_incentives.docs}
     ok(st == {"INS-0": "dibayar", "INS-1": "dibayar", "INS-2": "menunggu", "INS-3": "dibayar"}, "item driver lain (Andi) tidak tersentuh")
+    flip_acc = [a for a in db.cash_accounts.docs if a.get("sistem") == "flip"]
+    ok(len(flip_acc) == 1 and (await CB.list_accounts(db))["items"][0]["saldo"] == -50000, "transfer Flip berhasil: akun Saldo Flip dibuat otomatis dan berkurang 50.000")
+    ok(len([x for x in db.cash_txns.docs if x.get("kategori") == "insentif"]) == 2, "2 mutasi insentif tercatat (satu per item)")
     await expect(PO.disburse(db, http, q["inquiry_id"], "BUDI SANTOSO", src), ValueError, "sudah dipakai", "klik ganda / inquiry dipakai ulang → ditolak")
     ok(len(http.calls) == n_calls + 1, "tidak ada panggilan Flip kedua")
 
@@ -1735,6 +1739,73 @@ async def test_payouts_flip():
     ok(SECRET not in json.dumps(db.payout_logs.docs, default=str), "secret tidak pernah tersimpan di database")
     ok(len(await PO.list_logs(db, kind="disbursement")) == 3 and {l["status"] for l in await PO.list_logs(db, kind="disbursement")} == {"berhasil", "gagal", "berhasil"}, "riwayat berisi transfer berhasil & gagal")
     for k in ("FLIP_PAYOUT_ENABLED", "FLIP_ENV", "FLIP_SECRET_KEY"): os.environ.pop(k, None)
+
+
+async def test_cashbank_dan_hpp():
+    """Kas & Bank: saldo dihitung ulang, pindah saldo, void, mutasi otomatis insentif (anti dobel), HPP insentif."""
+    print("\n== kas & bank + hpp insentif ==")
+    db = FakeDB(); TODAY = "2026-10-09"
+    async def expect(coro, exc, frag, label):
+        try:
+            await coro; ok(False, label)
+        except exc as e:
+            ok(frag in str(e), label)
+    await expect(CB.create_account(db, "", "bank"), ValueError, "wajib", "nama akun kosong ditolak")
+    await expect(CB.create_account(db, "X", "emas"), ValueError, "Jenis", "jenis akun tidak valid ditolak")
+    await expect(CB.create_account(db, "X", "bank", "abc"), ValueError, "angka", "saldo awal bukan angka ditolak")
+    m = await CB.create_account(db, "Mandiri Hermansyah", "bank", "1.000.000")
+    f = await CB.create_account(db, "Saldo Flip", "ewallet", 0)
+    await expect(CB.create_account(db, " mandiri  hermansyah ", "bank"), ValueError, "sudah ada", "nama akun dobel ditolak (tanpa peduli huruf/spasi)")
+    ok(m["saldo_awal"] == 1000000, "saldo awal 1.000.000")
+
+    t1, new = await CB.add_txn(db, m["id"], "masuk", 500000, "2026-10-01", "Terima dari PT", TODAY)
+    await CB.add_txn(db, m["id"], "keluar", 200000, "2026-10-02", "Beli bensin", TODAY)
+    accs = (await CB.list_accounts(db))
+    ok(accs["items"][0]["saldo"] == 1300000 and accs["total_saldo"] == 1300000, "saldo = awal + masuk - keluar")
+    await expect(CB.add_txn(db, m["id"], "keluar", 0, "", "x", TODAY), ValueError, "lebih dari 0", "nominal 0 ditolak")
+    await expect(CB.add_txn(db, m["id"], "lain", 5, "", "x", TODAY), ValueError, "Arah", "arah tidak valid ditolak")
+    await expect(CB.add_txn(db, "nope", "masuk", 5, "", "x", TODAY), KeyError, "Akun", "akun tidak ada ditolak")
+    d, _ = await CB.add_txn(db, m["id"], "masuk", 1, "tanggal-salah", "x", TODAY)
+    ok(d["tanggal"] == TODAY, "tanggal tidak valid -> hari ini")
+    await CB.void_txn(db, d["id"], "salah input")
+
+    # pindah saldo (top up Flip) + biaya admin
+    r = await CB.transfer(db, m["id"], f["id"], 300000, "2026-10-03", "Top up Flip", TODAY, biaya_admin=2500)
+    a = {x["id"]: x["saldo"] for x in (await CB.list_accounts(db))["items"]}
+    ok(a[m["id"]] == 1300000 - 300000 - 2500 and a[f["id"]] == 300000, "pindah saldo: asal berkurang (+biaya admin), tujuan bertambah")
+    await expect(CB.transfer(db, m["id"], m["id"], 1, "", "", TODAY), ValueError, "tidak boleh sama", "pindah ke akun yang sama ditolak")
+    await expect(CB.void_txn(db, r["keluar"]["id"], ""), ValueError, "Alasan", "void tanpa alasan ditolak")
+    await CB.void_txn(db, r["keluar"]["id"], "salah akun")
+    a = {x["id"]: x["saldo"] for x in (await CB.list_accounts(db))["items"]}
+    ok(a[f["id"]] == 0 and a[m["id"]] == 1300000, "void pindah saldo membatalkan semua sisi yang bertaut (asal, tujuan, biaya admin)")
+    await expect(CB.void_txn(db, r["keluar"]["id"], "lagi"), ValueError, "sudah dibatalkan", "void dua kali ditolak")
+    lst = await CB.list_txns(db, m["id"])
+    ok(lst["saldo"] == 1300000 and lst["items"][0]["saldo_setelah"] is not None, "daftar mutasi: saldo akhir + saldo setelah tiap mutasi")
+    ok(all(not x["void"] for x in lst["items"]), "mutasi void disembunyikan secara default")
+    ok(any(x["void"] for x in (await CB.list_txns(db, m["id"], include_void=True))["items"]), "mutasi void bisa ditampilkan")
+
+    # insentif: bayar -> mutasi keluar, anti dobel, buka lagi -> void, bayar lagi -> mutasi baru
+    db.driver_incentives.docs += [
+        {"id": "INS-1", "trip_id": "T9", "driver_nama": "Budi", "status": "menunggu", "amount": 25000, "date": "2026-10-09", "created_at": "x"},
+        {"id": "INS-2", "trip_id": "T9", "driver_nama": "Budi", "status": "menunggu", "amount": 25000, "date": "2026-10-10", "created_at": "x"},
+        {"id": "INS-3", "trip_id": "T8", "driver_nama": "Andi", "status": "menunggu", "amount": 25000, "date": "2026-10-10", "created_at": "x"}]
+    ok(await DI.paid_total_by_trip(db, "T9") == 0 and not await DI.paid_rows(db), "HPP: belum dibayar = belum masuk HPP")
+    it = await DI.set_status(db, "INS-1", "dibayar", "tes")
+    tx, new = await CB.post_incentive(db, it, m["id"], TODAY)
+    ok(new and tx["arah"] == "keluar" and tx["amount"] == 25000 and tx["kategori"] == "insentif", "insentif dibayar -> mutasi keluar dari akun")
+    tx2, new2 = await CB.post_incentive(db, it, m["id"], TODAY)
+    ok(not new2 and tx2["id"] == tx["id"], "kirim ulang -> tidak dobel")
+    await expect(CB.void_txn(db, tx["id"], "coba"), ValueError, "otomatis", "mutasi otomatis tidak bisa di-void manual")
+    ok(await DI.paid_total_by_trip(db, "T9") == 25000 and await DI.paid_total_by_trip(db, "T8") == 0, "HPP trip T9 = 25.000 (hanya yang dibayar, per trip)")
+    await DI.set_status(db, "INS-2", "dibayar", "tes")
+    ok(await DI.paid_total_by_trip(db, "T9") == 50000 and len(await DI.paid_rows(db)) == 2, "HPP bertambah per insentif dibayar; paid_rows untuk Laba Rugi")
+    await DI.set_status(db, "INS-1", "menunggu")
+    ok((await CB.void_incentive(db, "INS-1"))["voided"] == 1 and await DI.paid_total_by_trip(db, "T9") == 25000, "buka lagi: mutasi void + HPP turun")
+    ok((await CB.void_incentive(db, "INS-1"))["voided"] == 0, "void ulang tidak berbuat apa-apa")
+    it = await DI.set_status(db, "INS-1", "dibayar", "tes lagi")
+    tx3, new3 = await CB.post_incentive(db, it, m["id"], TODAY)
+    ok(new3 and tx3["id"] != tx["id"], "bayar ulang setelah dibuka lagi -> mutasi baru")
+    ok(len([x for x in db.cash_txns.docs if x.get("key") == "ins:INS-1" and not x["void"]]) == 1, "hanya satu mutasi aktif per insentif")
 
 
 async def test_daily_upload_idempotent():
@@ -1862,7 +1933,7 @@ async def test_bastk_upload_idempotent():
 
 
 async def main():
-    for t in (test_payouts_flip, test_driver_incentive, test_leg_supplier, test_bastk_upload_idempotent, test_daily_upload_idempotent, test_ship_master, test_sync_single_unit_vehicle, test_edit_invoice_lines, test_selisih_ringkasan_auth, test_riwayat_clear, test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
+    for t in (test_cashbank_dan_hpp, test_payouts_flip, test_driver_incentive, test_leg_supplier, test_bastk_upload_idempotent, test_daily_upload_idempotent, test_ship_master, test_sync_single_unit_vehicle, test_edit_invoice_lines, test_selisih_ringkasan_auth, test_riwayat_clear, test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,
