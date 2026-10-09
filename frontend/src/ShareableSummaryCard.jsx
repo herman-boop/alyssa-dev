@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { CATEGORY } from "./categoryColors";
 
 /*
   Shareable Summary Card: ringkasan satu pesanan yang enak di-screenshot / dibagikan.
@@ -60,7 +61,7 @@ function Cell({ label, value, wide }) {
 
 export default function ShareableSummaryCard({
   nomorPo, nopol, unit, customer, asal, tujuan, status = "NEW", stage, stageLabels,
-  driver, kapal, jadwal, diperbarui,
+  driver, kapal, jadwal, diperbarui, kategori,
   defaultOpen = true, open: openProp, onOpenChange,
 }) {
   const [openState, setOpenState] = useState(defaultOpen);
@@ -72,6 +73,7 @@ export default function ShareableSummaryCard({
     if (onOpenChange) onOpenChange(next);
   };
   const panelId = useId();
+  const cat = CATEGORY[kategori] || null;   // "penjualan" | "pembelian" | "biaya"
   const badge = BADGES[status] || BADGES.NEW;
   const labels = Array.isArray(stageLabels) && stageLabels.length === 4 ? stageLabels : DEFAULT_STAGE_LABELS;
   const cur = Math.max(0, Math.min(3, Number.isInteger(stage) ? stage : (STAGE_BY_STATUS[status] ?? 0)));
@@ -111,7 +113,12 @@ export default function ShareableSummaryCard({
         </div>
         <div className="mt-3 flex flex-wrap items-end justify-between gap-x-3 gap-y-2">
           <div className="min-w-0">
-            <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Nomor PO</p>
+            <div className="flex items-center gap-2">
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Nomor PO</p>
+              {cat ? (
+                <span className={`inline-block rounded-full px-2 py-1 text-[10px] font-extrabold uppercase leading-none tracking-wider ${cat.chip}`} data-testid="summary-category" data-category={cat.key}>{cat.label}</span>
+              ) : null}
+            </div>
             <h3 className="break-all text-xl font-extrabold leading-tight tracking-tight text-slate-950" data-testid="summary-po">{nomorPo || nopol || "-"}</h3>
           </div>
           <span className={`relative inline-block flex-none whitespace-nowrap rounded-full py-2 pl-7 pr-3 text-xs font-extrabold leading-none tracking-wide ${badge.cls}`} data-testid="summary-badge">
@@ -148,6 +155,8 @@ export default function ShareableSummaryCard({
             {cells.length ? (
               <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-sky-100 bg-sky-100" data-testid="summary-details">
                 {cells.map(([k, v, wide]) => <Cell key={k} label={k} value={v} wide={wide} />)}
+                {/* jumlah kolom ganjil -> isi petak kosong supaya tidak tampak kotak biru */}
+                {cells.reduce((n, [, , wide]) => n + (wide ? 2 : 1), 0) % 2 === 1 ? <div className="bg-white" aria-hidden="true" /> : null}
               </dl>
             ) : null}
 

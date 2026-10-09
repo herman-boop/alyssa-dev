@@ -40,6 +40,7 @@ export function summaryPropsFromOrder(order, progress) {
   const baseUnit = (o.vehicle_type || (units[0] && units[0].vehicle_type) || "").trim();
   const extra = units.length > 1 ? ` (+${units.length - 1} unit)` : "";
   return {
+    kategori: "penjualan",           // pesanan = pendapatan (warna emerald)
     nomorPo: o.order_id || "",
     customer: o.customer_nama || "",
     unit: baseUnit ? baseUnit + extra : "",
