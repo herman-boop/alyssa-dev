@@ -15,6 +15,8 @@ from playwright.async_api import async_playwright
 import ship_master  # master kapal (panjang/lebar/tipe)
 import leg_supplier  # supplier per leg + pembayaran supplier
 import driver_incentive  # insentif per checkpoint driver borongan (antrean bayar)
+import flip_client  # adapter Flip (transfer ke rekening driver)
+import payouts  # transfer driver lewat Flip dengan pengaman (inquiry wajib, anti dobel, payout_logs)
 import ais  # modul AIS (posisi kapal) — provider-agnostic, aman tanpa key
 import rekon_sync  # integrasi pembayaran supplier dari Audit Rekon (isolated)
 import supplier_faktur  # pisah unit ke faktur (projek) baru — logika murni
@@ -4576,6 +4578,60 @@ async def reset_driver_incentive(item_id: str):
         return await driver_incentive.set_status(db, item_id, "menunggu")
     except KeyError as e:
         raise HTTPException(404, str(e.args[0]))
+
+
+# ══════════════════════════════════════════════════════
+# TRANSFER DRIVER LEWAT FLIP (payouts.py + flip_client.py). Default MATI (FLIP_PAYOUT_ENABLED), mode sandbox.
+# ══════════════════════════════════════════════════════
+def _payout_http():
+    import requests as _rq
+    return _rq.Session()
+
+
+def _payout_guard(fn):
+    async def run():
+        try:
+            return await fn()
+        except PermissionError as e:
+            raise HTTPException(403, str(e))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        except KeyError as e:
+            raise HTTPException(404, str(e.args[0]))
+    return run()
+
+
+@api_router.get("/admin/payouts/config", dependencies=[Depends(require_admin_pin)])
+async def payout_config():
+    c = flip_client.config()
+    return {"enabled": c["enabled"], "env": c["env"], "has_key": c["has_key"], "max_amount": c["max_amount"]}
+
+
+@api_router.get("/admin/payouts/bank", dependencies=[Depends(require_admin_pin)])
+async def payout_saved_bank(driver: str = ""):
+    return {"bank": await payouts.get_bank(db, driver)}
+
+
+@api_router.post("/admin/payouts/inquiry", dependencies=[Depends(require_admin_pin)])
+async def payout_inquiry(body: dict = Body(...)):
+    return await _payout_guard(lambda: payouts.inquiry(db, _payout_http(), str(body.get("driver_nama") or ""), body.get("bank_code"), body.get("account_number")))
+
+
+@api_router.post("/admin/payouts/disburse", dependencies=[Depends(require_admin_pin)])
+async def payout_disburse(body: dict = Body(...)):
+    return await _payout_guard(lambda: payouts.disburse(
+        db, _payout_http(), str(body.get("inquiry_id") or ""), str(body.get("confirm_name") or ""),
+        lambda: driver_incentive.list_items(db), str(body.get("remark") or "")))
+
+
+@api_router.post("/admin/payouts/{log_id}/refresh", dependencies=[Depends(require_admin_pin)])
+async def payout_refresh(log_id: str):
+    return await _payout_guard(lambda: payouts.refresh(db, _payout_http(), log_id))
+
+
+@api_router.get("/admin/payout-logs", dependencies=[Depends(require_admin_pin)])
+async def payout_logs(kind: Optional[str] = None):
+    return {"items": await payouts.list_logs(db, kind if kind in ("inquiry", "disbursement") else None)}
 
 
 # ══════════════════════════════════════════════════════

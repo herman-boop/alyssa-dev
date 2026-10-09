@@ -20,6 +20,8 @@ import ais as AIS
 import ship_master as SM
 import leg_supplier as LSP
 import driver_incentive as DI
+import flip_client as FL
+import payouts as PO
 import invoice_payments as IP
 import expenses as EXP
 
@@ -1617,6 +1619,124 @@ async def test_driver_incentive():
     ok(b["status"] == "menunggu" and b["catatan"] == "" and (await DI.list_items(db))["total_menunggu"] == 25000, "buka lagi → kembali menunggu")
 
 
+async def test_payouts_flip():
+    """Transfer driver via Flip (FAKE http, tanpa jaringan): fitur mati default, inquiry wajib + nama konfirmasi,
+    nominal dari server, anti dobel (1 inquiry = 1 transfer), timeout = tidak pasti (item tak ditandai dibayar),
+    refresh, payout_logs tersamarkan, secret tak bocor. Detail Flip nyata WAJIB diuji di Sandbox."""
+    print("\n== transfer driver via Flip ==")
+    import json, datetime as _dt
+    class Resp:
+        def __init__(self, code, body): self.status_code, self._b, self.text = code, body, json.dumps(body)
+        def json(self): return self._b
+    class HTTP:
+        def __init__(self): self.calls, self.queue = [], []
+        def request(self, method, url, data=None, params=None, headers=None, auth=None, timeout=None):
+            self.calls.append({"m": method, "url": url, "data": data, "params": params, "headers": headers or {}, "auth": auth})
+            r = self.queue.pop(0)
+            if isinstance(r, Exception): raise r
+            return r
+    SECRET = "SECRET-KEY-XYZ"
+    for k in ("FLIP_PAYOUT_ENABLED", "FLIP_ENV", "FLIP_SECRET_KEY", "FLIP_MAX_AMOUNT"): os.environ.pop(k, None)
+    db = FakeDB(); http = HTTP()
+    async def seed():
+        db.driver_incentives.docs.clear()
+        for i, (drv, st) in enumerate((("Budi", "menunggu"), ("Budi", "menunggu"), ("Andi", "menunggu"), ("Budi", "dibayar"))):
+            db.driver_incentives.docs.append({"id": f"INS-{i}", "driver_nama": drv, "status": st, "amount": 25000, "date": f"2026-10-0{i+1}", "created_at": "x"})
+    await seed()
+    src = lambda: DI.list_items(db)
+    async def expect(coro, exc, frag, label):
+        try:
+            await coro; ok(False, label)
+        except exc as e:
+            ok(frag in str(e), label)
+
+    ok(FL.config()["enabled"] is False and FL.config()["env"] == "sandbox", "default: mati + sandbox")
+    await expect(PO.inquiry(db, http, "Budi", "bca", "1234567890"), PermissionError, "belum diaktifkan", "fitur mati → inquiry ditolak")
+    await expect(PO.disburse(db, http, "x", "x", src), PermissionError, "belum diaktifkan", "fitur mati → transfer ditolak")
+    ok(not http.calls and not db.payout_logs.docs, "fitur mati: tidak ada panggilan ke Flip, tidak ada log")
+
+    os.environ["FLIP_PAYOUT_ENABLED"] = "true"
+    await expect(PO.inquiry(db, http, "Budi", "bca", "1234567890"), ValueError, "SECRET_KEY", "tanpa secret key → ditolak jelas")
+    os.environ["FLIP_SECRET_KEY"] = SECRET
+    await expect(PO.inquiry(db, http, "", "bca", "123"), ValueError, "wajib diisi", "input tidak lengkap ditolak")
+
+    # inquiry gagal / belum terverifikasi
+    http.queue = [Resp(200, {"status": "PENDING", "account_holder": ""})]
+    await expect(PO.inquiry(db, http, "Budi", "bca", "1234567890"), ValueError, "tidak valid", "inquiry PENDING/kosong → ditolak")
+    http.queue = [Resp(422, {"errors": [{"message": "Rekening tidak ditemukan"}]})]
+    await expect(PO.inquiry(db, http, "Budi", "bca", "1234567890"), ValueError, "Rekening tidak ditemukan", "inquiry 4xx → pesan Flip tampil")
+    ok(all(d["status"] == "gagal" for d in db.payout_logs.docs if d["kind"] == "inquiry"), "inquiry gagal tercatat di payout_logs")
+
+    # inquiry sukses
+    http.queue = [Resp(200, {"status": "SUCCESS", "account_holder": "BUDI SANTOSO", "bank_code": "bca", "account_number": "1234567890"})]
+    q = await PO.inquiry(db, http, "Budi", "BCA", "1234-567-890")
+    c = http.calls[-1]
+    ok(q["account_holder"] == "BUDI SANTOSO" and q["account_masked"] == "******7890", "inquiry sukses: nama pemilik + nomor tersamarkan")
+    ok(c["url"] == "https://bigflip.id/big_sandbox_api/v2/general/bank-account-inquiry" and c["auth"] == (SECRET, "") and c["data"]["account_number"] == "1234567890", "inquiry ke URL sandbox, Basic Auth, nomor dibersihkan")
+    ok((await PO.get_bank(db, "budi"))["account_holder"] == "BUDI SANTOSO", "rekening terverifikasi diingat per driver")
+
+    # pengaman transfer
+    await expect(PO.disburse(db, http, "PLG-nope", "x", src), ValueError, "Cek rekening dulu", "tanpa inquiry → ditolak")
+    await expect(PO.disburse(db, http, q["inquiry_id"], "ANDI", src), ValueError, "tidak sama", "nama konfirmasi salah → ditolak")
+    old = db.payout_logs.docs[-1]["created_at"]
+    db.payout_logs.docs[-1]["created_at"] = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(minutes=16)).isoformat()
+    await expect(PO.disburse(db, http, q["inquiry_id"], "BUDI SANTOSO", src), ValueError, "kedaluwarsa", "inquiry >15 menit → ditolak")
+    db.payout_logs.docs[-1]["created_at"] = old
+    os.environ["FLIP_MAX_AMOUNT"] = "40000"
+    await expect(PO.disburse(db, http, q["inquiry_id"], "budi  santoso", src), ValueError, "melebihi batas", "nominal > batas → ditolak (nama dicocokkan tanpa peduli spasi/huruf besar)")
+    del os.environ["FLIP_MAX_AMOUNT"]
+    n_calls = len(http.calls)
+
+    # transfer sukses
+    http.queue = [Resp(200, {"id": "9001", "status": "DONE", "amount": 50000})]
+    r = await PO.disburse(db, http, q["inquiry_id"], "Budi Santoso", src, "Insentif")
+    c = http.calls[-1]; lg = r["log"]
+    ok(len(http.calls) == n_calls + 1 and c["url"].endswith("/v3/disbursement") and c["data"]["amount"] == 50000, "nominal dihitung server = 2 item menunggu Budi (50.000)")
+    ok(c["headers"]["idempotency-key"] == lg["id"] and c["headers"].get("X-TIMESTAMP", "").endswith("+07:00"), "idempotency key = id log, timestamp WIB dikirim")
+    ok(lg["status"] == "berhasil" and lg["flip_id"] == "9001" and r["marked"] == 2, "berhasil: log tercatat, 2 item ditandai dibayar")
+    st = {d["id"]: d["status"] for d in db.driver_incentives.docs}
+    ok(st == {"INS-0": "dibayar", "INS-1": "dibayar", "INS-2": "menunggu", "INS-3": "dibayar"}, "item driver lain (Andi) tidak tersentuh")
+    await expect(PO.disburse(db, http, q["inquiry_id"], "BUDI SANTOSO", src), ValueError, "sudah dipakai", "klik ganda / inquiry dipakai ulang → ditolak")
+    ok(len(http.calls) == n_calls + 1, "tidak ada panggilan Flip kedua")
+
+    # Flip menolak (4xx): log gagal, item tetap menunggu
+    await seed()
+    http.queue = [Resp(200, {"status": "SUCCESS", "account_holder": "BUDI SANTOSO"})]
+    q2 = await PO.inquiry(db, http, "Budi", "bca", "1234567890")
+    http.queue = [Resp(400, {"errors": [{"message": "Saldo tidak cukup"}]})]
+    r = await PO.disburse(db, http, q2["inquiry_id"], "BUDI SANTOSO", src)
+    ok(r["log"]["status"] == "gagal" and "Saldo tidak cukup" in r["log"]["error"] and r["marked"] == 0, "Flip 4xx → gagal + alasan, tidak ada item dibayar")
+    ok(sum(1 for d in db.driver_incentives.docs if d["status"] == "menunggu") == 3, "item tetap menunggu setelah gagal")
+
+    # timeout: tidak pasti, lalu refresh
+    await seed()
+    http.queue = [Resp(200, {"status": "SUCCESS", "account_holder": "BUDI SANTOSO"})]
+    q3 = await PO.inquiry(db, http, "Budi", "bca", "1234567890")
+    http.queue = [TimeoutError("timeout")]
+    r = await PO.disburse(db, http, q3["inquiry_id"], "BUDI SANTOSO", src)
+    ok(r["log"]["status"] == "tidak_pasti" and r["marked"] == 0, "timeout → tidak_pasti, item TIDAK ditandai dibayar")
+    nc = len(http.calls)
+    http.queue = [Resp(200, {"data": [{"id": "9002", "status": "DONE"}]})]
+    rr = await PO.refresh(db, http, r["log"]["id"])
+    ok(len(http.calls) == nc + 1 and http.calls[-1]["params"] == {"idempotency-key": r["log"]["id"]}, "refresh menanyakan Flip dengan idempotency key")
+    ok(rr["log"]["status"] == "berhasil" and rr["marked"] == 2 and rr["log"]["flip_id"] == "9002", "refresh: berhasil → item ditandai dibayar")
+    nc = len(http.calls)
+    rr = await PO.refresh(db, http, r["log"]["id"])
+    ok(len(http.calls) == nc and rr["marked"] == 0, "refresh pada transfer final tidak memanggil Flip lagi")
+
+    # live env + riwayat
+    os.environ["FLIP_ENV"] = "live"
+    http.queue = [Resp(200, {"status": "SUCCESS", "account_holder": "ANDI"})]
+    await PO.inquiry(db, http, "Andi", "bni", "9876543210")
+    ok(http.calls[-1]["url"].startswith("https://bigflip.id/api/v2/"), "FLIP_ENV=live memakai URL live")
+    logs = await PO.list_logs(db)
+    blob = json.dumps(logs)
+    ok(SECRET not in blob and "1234567890" not in blob and "9876543210" not in blob and "response" not in blob, "riwayat: nomor rekening tersamarkan, secret & response mentah tidak bocor")
+    ok(SECRET not in json.dumps(db.payout_logs.docs, default=str), "secret tidak pernah tersimpan di database")
+    ok(len(await PO.list_logs(db, kind="disbursement")) == 3 and {l["status"] for l in await PO.list_logs(db, kind="disbursement")} == {"berhasil", "gagal", "berhasil"}, "riwayat berisi transfer berhasil & gagal")
+    for k in ("FLIP_PAYOUT_ENABLED", "FLIP_ENV", "FLIP_SECRET_KEY"): os.environ.pop(k, None)
+
+
 async def test_daily_upload_idempotent():
     """Upload checkpoint harian: kiriman ulang (client_id sama) tidak dobel, foto antre
     yang terkirim terlambat dicatat pada waktu foto diambil, aturan 1 foto/hari tetap.
@@ -1742,7 +1862,7 @@ async def test_bastk_upload_idempotent():
 
 
 async def main():
-    for t in (test_driver_incentive, test_leg_supplier, test_bastk_upload_idempotent, test_daily_upload_idempotent, test_ship_master, test_sync_single_unit_vehicle, test_edit_invoice_lines, test_selisih_ringkasan_auth, test_riwayat_clear, test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
+    for t in (test_payouts_flip, test_driver_incentive, test_leg_supplier, test_bastk_upload_idempotent, test_daily_upload_idempotent, test_ship_master, test_sync_single_unit_vehicle, test_edit_invoice_lines, test_selisih_ringkasan_auth, test_riwayat_clear, test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,
