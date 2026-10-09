@@ -1662,18 +1662,40 @@ async def test_payouts_flip():
     await expect(PO.inquiry(db, http, "", "bca", "123"), ValueError, "wajib diisi", "input tidak lengkap ditolak")
 
     # inquiry gagal / belum terverifikasi
+    keep_tries = PO.POLL_TRIES; PO.POLL_TRIES = 0          # tanpa pengulangan: PENDING tetap tidak boleh dianggap berhasil
     http.queue = [Resp(200, {"status": "PENDING", "account_holder": ""})]
-    await expect(PO.inquiry(db, http, "Budi", "bca", "1234567890"), ValueError, "tidak valid", "inquiry PENDING/kosong → ditolak")
+    await expect(PO.inquiry(db, http, "Budi", "bca", "1234567890"), ValueError, "masih memproses", "inquiry PENDING tanpa nama → ditolak (bukan berhasil)")
+    PO.POLL_TRIES = keep_tries
     http.queue = [Resp(422, {"errors": [{"message": "Rekening tidak ditemukan"}]})]
     await expect(PO.inquiry(db, http, "Budi", "bca", "1234567890"), ValueError, "Rekening tidak ditemukan", "inquiry 4xx → pesan Flip tampil")
     ok(all(d["status"] == "gagal" for d in db.payout_logs.docs if d["kind"] == "inquiry"), "inquiry gagal tercatat di payout_logs")
+
+    # inquiry 2 tahap: PENDING dulu, lalu hasil akhir (permintaan diulang otomatis)
+    PO.POLL_SLEEP = 0
+    nc = len(http.calls)
+    http.queue = [Resp(200, {"status": "PENDING"}), Resp(200, {"status": "PENDING"}), Resp(200, {"status": "SUCCESS", "account_holder": "BUDI SANTOSO"})]
+    qp = await PO.inquiry(db, http, "Budi", "mandiri", "1630003581462")
+    ok(qp["account_holder"] == "BUDI SANTOSO" and len(http.calls) == nc + 3, "PENDING lalu SUCCESS: diulang otomatis (3 panggilan) dan berhasil")
+    ok(all(c["data"]["account_number"] == "1630003581462" for c in http.calls[nc:]), "pengulangan memakai nomor rekening yang sama (cache Flip)")
+    nc = len(http.calls)
+    http.queue = [Resp(200, {"status": "PENDING"})] * (PO.POLL_TRIES + 1)
+    await expect(PO.inquiry(db, http, "Budi", "mandiri", "1630003581462"), ValueError, "masih memproses", "PENDING terus-menerus: berhenti dengan pesan jelas")
+    ok(len(http.calls) == nc + PO.POLL_TRIES + 1, "jumlah pengulangan dibatasi")
+    http.queue = [Resp(200, {"status": "INVALID_ACCOUNT_NUMBER", "account_holder": ""})]
+    await expect(PO.inquiry(db, http, "Budi", "mandiri", "1630003581462"), ValueError, "virtual account", "INVALID_ACCOUNT_NUMBER: pesan jelas")
+    http.queue = [Resp(200, {"status": "SUSPECTED_ACCOUNT", "account_holder": "ORANG X"})]
+    await expect(PO.inquiry(db, http, "Budi", "mandiri", "1630003581462"), ValueError, "mencurigakan", "SUSPECTED_ACCOUNT: transfer diblokir walau nama terbaca")
+    http.queue = [Resp(200, {"status": "BLACK_LISTED", "account_holder": "ORANG Y"})]
+    await expect(PO.inquiry(db, http, "Budi", "mandiri", "1630003581462"), ValueError, "daftar hitam", "BLACK_LISTED: transfer diblokir")
+    ok(any("[BLACK_LISTED]" in (d.get("error") or "") for d in db.payout_logs.docs), "status Flip tercatat di riwayat (payout_logs)")
+    ok(all(c["data"].get("inquiry_key", "").startswith("PLG-") for c in http.calls[-3:]), "inquiry_key (id log) dikirim ke Flip")
 
     # inquiry sukses
     http.queue = [Resp(200, {"status": "SUCCESS", "account_holder": "BUDI SANTOSO", "bank_code": "bca", "account_number": "1234567890"})]
     q = await PO.inquiry(db, http, "Budi", "BCA", "1234-567-890")
     c = http.calls[-1]
     ok(q["account_holder"] == "BUDI SANTOSO" and q["account_masked"] == "******7890", "inquiry sukses: nama pemilik + nomor tersamarkan")
-    ok(c["url"] == "https://bigflip.id/big_sandbox_api/v2/general/bank-account-inquiry" and c["auth"] == (SECRET, "") and c["data"]["account_number"] == "1234567890", "inquiry ke URL sandbox, Basic Auth, nomor dibersihkan")
+    ok(c["url"] == "https://bigflip.id/big_sandbox_api/v2/disbursement/bank-account-inquiry" and c["auth"] == (SECRET, "") and c["data"]["account_number"] == "1234567890", "inquiry ke URL sandbox, Basic Auth, nomor dibersihkan")
     ok((await PO.get_bank(db, "budi"))["account_holder"] == "BUDI SANTOSO", "rekening terverifikasi diingat per driver")
 
     # pengaman transfer

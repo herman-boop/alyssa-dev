@@ -16,7 +16,7 @@ import os
 from datetime import datetime, timezone, timedelta
 
 BASE_URL = {"sandbox": "https://bigflip.id/big_sandbox_api", "live": "https://bigflip.id/api"}
-PATH_INQUIRY = "/v2/general/bank-account-inquiry"
+PATH_INQUIRY = "/v2/disbursement/bank-account-inquiry"   # di dokumentasi Flip, Bank Account Inquiry ada di bagian Disbursement (bukan General)
 PATH_DISBURSE = "/v3/disbursement"
 PATH_GET_DISBURSEMENT = "/v3/get-disbursement"
 HDR_IDEMPOTENCY = "idempotency-key"
@@ -96,9 +96,14 @@ def _msg(body):
     return ""
 
 
-def inquiry(http, bank_code, account_number):
-    """Cek rekening: kembalikan {status, account_holder, raw}. status 'SUCCESS' hanya kalau pemilik terbaca."""
-    body = _call(http, "POST", PATH_INQUIRY, data={"account_number": account_number, "bank_code": bank_code})
+def inquiry(http, bank_code, account_number, inquiry_key=None):
+    """Cek rekening: kembalikan {status, account_holder, raw}. status 'SUCCESS' hanya kalau pemilik terbaca.
+    Status Flip: PENDING, SUCCESS, INVALID_ACCOUNT_NUMBER, SUSPECTED_ACCOUNT, BLACK_LISTED.
+    inquiry_key (opsional di Flip) mengenali permintaan berulang untuk inquiry yang sama."""
+    data = {"account_number": account_number, "bank_code": bank_code}
+    if inquiry_key:
+        data["inquiry_key"] = inquiry_key
+    body = _call(http, "POST", PATH_INQUIRY, data=data)
     return {"status": str(body.get("status") or "").upper(), "account_holder": (body.get("account_holder") or "").strip(), "raw": body}
 
 
