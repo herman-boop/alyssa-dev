@@ -927,7 +927,7 @@ const SLOT_GUIDE = {
 const SOP_POINTS = [
   { title: "CEK FISIK", body: "Cek oli, air radiator, lampu, dan ban (termasuk ban serep) sebelum berangkat." },
   { title: "FOTO UNIT", body: "Wajib upload foto 4 sisi mobil + foto dashboard bensin sebelum gas." },
-  { title: "UPDATE FOTO JALUR", body: "Klik tombol hijau setiap hari antara jam 06.00 – 18.00 sore. Foto lokasi wajib terkirim dalam window waktu tersebut. Dapat Rp 30.000 per foto!" },
+  { title: "UPDATE FOTO JALUR", body: "Klik tombol hijau setiap hari antara jam 06.00 – 18.00 sore. Foto lokasi wajib terkirim dalam window waktu tersebut. Dapat bonus per foto!" },
   { title: "ATURAN KABIN", body: "Dilarang merokok di dalam mobil. Dilarang beri tumpangan orang asing. Kecepatan tol max 80–100 km/jam." },
   { title: "PENAMPILAN", body: "Wajib berpakaian rapi dan sopan saat bertemu pelanggan di tujuan." },
   { title: "ATURAN FINISH", body: "Mobil WAJIB DICUCI BERSIH dan bensin/solar minimal sisa 1 BAR sebelum serah terima ke konsumen." },
@@ -980,6 +980,16 @@ function readURLParams() {
 
 // A "real" plate is a non-empty nopol that isn't the TBD placeholder for new cars.
 const isRealPlate = (np) => !!np && !/^TBD-/i.test(np);
+
+/* Kamera tidak terbuka biasanya karena izin kamera ditolak. Driver sering diam saja, jadi kasih jalan keluar yang jelas. */
+function CameraHelp() {
+  return (
+    <div data-testid="camera-help" style={{ marginTop: 10, fontSize: 12.5, lineHeight: 1.45, color: "#9FB2CC", textAlign: "center" }}>
+      Kamera tidak terbuka? Izinkan <b>Kamera</b> untuk situs ini (ikon gembok di kolom alamat, lalu Izin), atau{" "}
+      <a href="https://wa.me/628186311350?text=Kamera%20di%20link%20driver%20tidak%20terbuka" target="_blank" rel="noreferrer" style={{ color: "#D4A847", fontWeight: 700 }}>hubungi admin via WhatsApp</a>.
+    </div>
+  );
+}
 
 export default function DriverCheckpoint() {
   const params = useMemo(readURLParams, []);
@@ -1272,8 +1282,8 @@ export default function DriverCheckpoint() {
       showToast(res.already
         ? "Checkpoint hari ini sudah tercatat."
         : (cur.meta && cur.meta.gps
-          ? "Checkpoint + lokasi terkirim! Bonus Rp 30.000 diproses."
-          : "Checkpoint terkirim (tanpa GPS). Bonus Rp 30.000 diproses."));
+          ? `Checkpoint + lokasi terkirim! Bonus ${fmtIDR(trip?.bonus_daily ?? 30000)} diproses.`
+          : `Checkpoint terkirim (tanpa GPS). Bonus ${fmtIDR(trip?.bonus_daily ?? 30000)} diproses.`));
     } else if (k === "initial") {
       showToast("Foto " + (SLOT_LABELS[cur.slot] || cur.slot) + " tersimpan");
     } else {
@@ -1917,7 +1927,7 @@ export default function DriverCheckpoint() {
               <input
                 key={slot}
                 ref={(el) => fileRefs.current[`init-${slot}`] = el}
-                type="file" accept="image/*"
+                type="file" accept="image/*" capture="environment"
                 onChange={(e) => uploadInitial(slot, e.target.files?.[0])}
                 style={{ display: "none" }}
               />
@@ -1954,6 +1964,7 @@ export default function DriverCheckpoint() {
                   >
                     📸 {isUp ? "Mengirim..." : "Ambil Foto Sekarang"}
                   </button>
+                  <CameraHelp />
                   {doneSlots.length > 0 && (
                     <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
                       {doneSlots.map((s) => (
@@ -2084,7 +2095,7 @@ export default function DriverCheckpoint() {
                   ? "Window 06:00–18:00 WIB sudah lewat. Tetap foto sekarang untuk catat lokasi, tapi bonus harian besok ya."
                   : (isWindow
                       ? `Window aktif sampai 18:00 WIB. Sisa ${17 - wibHour} jam lagi. Tap kamera di bawah!`
-                      : "Jangan lupa foto checkpoint besok jam 06:00–18:00 WIB untuk dapat bonus Rp 30.000.")}
+                      : `Jangan lupa foto checkpoint besok jam 06:00–18:00 WIB untuk dapat bonus ${fmtIDR(trip?.bonus_daily ?? 30000)}.`)}
               </div>
             </div>
           </section>
@@ -2104,6 +2115,7 @@ export default function DriverCheckpoint() {
             ref={(el) => fileRefs.current["daily"] = el}
             type="file"
             accept="image/*"
+            capture="environment"
             onChange={(e) => uploadDaily(e.target.files?.[0])}
             style={{ display: "none" }}
           />
@@ -2154,14 +2166,15 @@ export default function DriverCheckpoint() {
           {todayDone ? (
             <div className="drv-alert drv-alert-ok">
               <b>✓ Foto hari ini sudah terkirim!</b>
-              <div>Bonus Rp 30.000 sedang diproses. Foto lagi besok jam 06.00 – 18.00 sore.</div>
+              <div>Bonus {fmtIDR(trip.bonus_daily ?? 30000)} sedang diproses. Foto lagi besok jam 06.00 – 18.00 sore.</div>
             </div>
           ) : (
             <div className="drv-alert drv-alert-info">
               <b>Belum ada foto hari ini.</b>
-              <div>Foto depan kendaraan (NoPol kelihatan) untuk klaim bonus Rp 30.000.</div>
+              <div>Foto depan kendaraan (NoPol kelihatan) untuk klaim bonus {fmtIDR(trip.bonus_daily ?? 30000)}.</div>
             </div>
           )}
+          {!todayDone ? <CameraHelp /> : null}
 
           <button className="drv-btn drv-btn-wa" onClick={shareWA} data-testid="btn-wa">Kirim Lokasi ke Admin via WA</button>
           <button className="drv-btn drv-btn-tester" onClick={resetToday} data-testid="btn-reset-today">↺ Reset Foto Hari Ini (tester)</button>
@@ -2477,7 +2490,7 @@ export default function DriverCheckpoint() {
         boxShadow: "0 4px 24px rgba(0,0,0,0.5)",
         fontSize: 17, fontWeight: 800, letterSpacing: 0.3,
       }}>
-        🎉 SELESAI! Berkas lengkap. Bonus Rp 30.000 diproses admin!
+        🎉 SELESAI! Berkas lengkap. Bonus diproses admin!
       </div>
     )}
 
@@ -2720,7 +2733,7 @@ function CheckpointScreen({
             <CheckCircle2 size={28} color="#fff" style={{ flexShrink: 0 }} />
             <div>
               <div style={{ fontWeight: 800, fontSize: 15, color: "#fff" }}>Checkpoint Tersimpan!</div>
-              <div style={{ fontSize: 13, color: "rgba(255,255,255,0.85)" }}>Bonus Rp 30.000 sedang diproses admin.</div>
+              <div style={{ fontSize: 13, color: "rgba(255,255,255,0.85)" }}>Bonus {fmtIDR(trip?.bonus_daily ?? 30000)} sedang diproses admin.</div>
             </div>
           </div>
         )}
@@ -2753,7 +2766,7 @@ function CheckpointScreen({
             <div style={{ fontSize: 12, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10 }}>Tugas Hari Ini</div>
             <div style={{ fontSize: 17, fontWeight: 800, color: "#fff", marginBottom: 6 }}>Belum Checkpoint Hari Ini</div>
             <div style={{ fontSize: 14, color: "#94A3B8", marginBottom: 20, lineHeight: 1.5 }}>
-              Foto kendaraan (nopol kelihatan) untuk catat lokasi & klaim bonus Rp 30.000.
+              Foto kendaraan (nopol kelihatan) untuk catat lokasi & klaim bonus {fmtIDR(trip?.bonus_daily ?? 30000)}.
             </div>
             <input
               ref={fileRef} type="file" accept="image/*" capture="environment"
