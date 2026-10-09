@@ -7116,7 +7116,8 @@ async def add_leg_supplier_payment(
     if bukti is not None and bukti.filename:
         bukti_url, warn = _save_upload_soft(sup_key, f"leg-payment/{trip_id}", bukti, ALLOWED_IMG | ALLOWED_DOC)
     try:
-        res = await leg_supplier.add_payment(db, trip_id, leg_id, tipe, amount, tanggal, catatan, bukti_url, ctx, _leg_supplier_helpers())
+        res = await leg_supplier.add_payment(db, trip_id, leg_id, tipe, amount, tanggal, catatan, bukti_url, ctx, _leg_supplier_helpers(),
+                                           bukti_nama=(bukti.filename if bukti is not None else ""))
     except ValueError as e:
         raise HTTPException(400, str(e))
     res["bukti_warning"] = warn

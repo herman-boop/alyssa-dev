@@ -47,21 +47,20 @@ function SupplierPicker({ value, onType, onPick, headers }) {
   const [open, setOpen] = useState(false);
   const timer = useRef(null);
   useEffect(() => () => clearTimeout(timer.current), []);
-  const type = (v) => {
-    onType(v);
+  const search = (v, delay) => {
     clearTimeout(timer.current);
-    if (!v.trim()) { setRes([]); setOpen(false); return; }
     timer.current = setTimeout(async () => {
       try {
-        const r = await axios.get(`${API}/admin/contacts`, { params: { jenis: "supplier", q: v }, headers });
+        const r = await axios.get(`${API}/admin/contacts`, { params: { jenis: "supplier", q: (v || "").trim() || undefined }, headers });
         setRes((r.data.items || []).slice(0, 8)); setOpen(true);
       } catch { setRes([]); }
-    }, 250);
+    }, delay);
   };
+  const type = (v) => { onType(v); search(v, 250); };
   return (
     <div className="relative">
-      <input className={INPUT} value={value} onChange={(e) => type(e.target.value)} onFocus={() => res.length && setOpen(true)}
-        onBlur={() => setTimeout(() => setOpen(false), 150)} placeholder="Ketik nama, pilih dari Master Kontak Supplier" data-testid="ls-nama" autoComplete="off" />
+      <input className={INPUT} value={value} onChange={(e) => type(e.target.value)} onFocus={() => (res.length ? setOpen(true) : search(value, 0))}
+        onBlur={() => setTimeout(() => setOpen(false), 150)} placeholder="Pilih / cari dari Master Supplier" data-testid="ls-nama" autoComplete="off" />
       {open && res.length > 0 ? (
         <ul className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-[#93C5FD] bg-white shadow-lg" role="listbox">
           {res.map((c) => (
@@ -116,9 +115,10 @@ export default function LegSupplierModal({ order, headers, onClose }) {
   const leg = legs[sel];
   const legId = leg && leg.route_leg_id;
 
-  const hydrate = useCallback((r) => {
+  const hydrate = useCallback((r, legInfo) => {
     setRec(r);
-    setSup({ ...blankSup, ...(r.supplier || {}) });
+    const fromLeg = !(r.supplier && r.supplier.nama) && legInfo && legInfo.nama ? { nama: legInfo.nama, pic: legInfo.pic || "", no_hp: legInfo.no_hp || "", email: legInfo.email || "", bank: legInfo.bank || "", no_rekening: legInfo.no_rekening || "" } : {};
+    setSup({ ...blankSup, ...(r.supplier || {}), ...fromLeg });
     setDeal(r.harga_deal || 0);
     setExtras((r.extras || []).map((x) => ({ ...x })));
   }, []);
@@ -143,10 +143,10 @@ export default function LegSupplierModal({ order, headers, onClose }) {
     let alive = true;
     setRec(null); setMsg(null);
     axios.get(`${API}/admin/trips/${tripId}/legs/${legId}/supplier`, { headers })
-      .then((r) => alive && hydrate(r.data))
+      .then((r) => alive && hydrate(r.data, leg && leg.supplier_info))
       .catch(() => alive && setMsg({ t: "err", s: "Gagal memuat data supplier leg ini." }));
     return () => { alive = false; };
-  }, [tripId, legId, headers, hydrate]);
+  }, [tripId, legId, headers, hydrate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape" && !preview) onClose(); };
@@ -167,7 +167,7 @@ export default function LegSupplierModal({ order, headers, onClose }) {
     try {
       const r = await axios.put(`${API}/admin/trips/${tripId}/legs/${legId}/supplier`, { supplier: sup, harga_deal: deal, extras: extras.filter((x) => x.label.trim() || toInt(x.amount)) }, { headers });
       hydrate(r.data);
-      setMsg({ t: "ok", s: "Tersimpan dan tersinkron ke Departemen Supplier." });
+      setMsg({ t: "ok", s: "Terkirim dan tersinkron ke Departemen Supplier." });
     } catch (e) { setMsg({ t: "err", s: (e.response && e.response.data && e.response.data.detail) || "Gagal menyimpan. Coba lagi." }); }
     finally { setBusy(false); }
   };
@@ -273,7 +273,7 @@ export default function LegSupplierModal({ order, headers, onClose }) {
                     <button type="button" onClick={() => setExtras((a) => [...a, { label: "", amount: 0 }])} className={`${BTN_GHOST} mt-3`} data-testid="ls-add-extra">+ Tambah Biaya Tambahan</button>
                     <p className="mt-2 text-xs font-semibold text-[#475569]">Biaya tambahan otomatis menambah HPP leg: <b className={INK}>{rp(totals.hpp_leg)}</b></p>
                     <div className="mt-4 flex items-center gap-3">
-                      <button type="button" onClick={save} disabled={busy} className={BTN_PRIMARY} data-testid="ls-save">{busy ? "Menyimpan…" : "Simpan & Sinkron ke Dept. Supplier"}</button>
+                      <button type="button" onClick={save} disabled={busy} className={BTN_PRIMARY} data-testid="ls-save">{busy ? "Menyimpan…" : "Simpan & Kirim"}</button>
                     </div>
                   </section>
 
@@ -315,10 +315,11 @@ export default function LegSupplierModal({ order, headers, onClose }) {
                             <span className={`relative z-10 mt-1 h-4 w-4 flex-none rounded-full border-2 border-white ${p.tipe === "transfer" ? "bg-[#1D4ED8]" : "bg-[#7C3AED]"} shadow-[0_0_0_2px_#BFDBFE]`} />
                             <div className="min-w-0 flex-1 rounded-xl border border-[#BFDBFE] bg-white px-3 py-2">
                               <div className="flex flex-wrap items-center justify-between gap-2">
-                                <span className={`text-xs font-extrabold ${p.tipe === "transfer" ? "text-[#1D4ED8]" : "text-[#6D28D9]"}`}>{p.tipe === "transfer" ? "💰 Transfer" : "🚗 Kompensasi"} · {p.tanggal}</span>
+                                <span className={`text-xs font-extrabold uppercase ${p.tipe === "transfer" ? "text-[#1D4ED8]" : "text-[#6D28D9]"}`}>{p.tipe === "transfer" ? "💰 Transfer" : "🚗 Kompensasi"} · {p.tanggal}</span>
                                 <span className={`font-mono text-sm font-black ${INK}`}>{rp(p.amount)}</span>
                               </div>
                               {p.catatan ? <p className="mt-0.5 break-words text-xs font-medium text-[#475569]">{p.catatan}</p> : null}
+                              {p.bukti_url ? <p className="mt-0.5 break-all text-xs font-semibold text-[#1E3A8A]" data-testid={`ls-file-${p.id}`}>📎 {p.bukti_nama || p.bukti_url.split("?")[0].split("/").pop()}</p> : null}
                               <div className="mt-2 flex flex-wrap gap-2">
                                 {p.bukti_url ? (
                                   <>

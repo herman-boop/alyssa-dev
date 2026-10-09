@@ -217,7 +217,7 @@ async def save_profile(db, trip_id, leg_id, payload, ctx, h):
     return view(await _save(db, rec))
 
 
-async def add_payment(db, trip_id, leg_id, tipe, amount, tanggal, catatan, bukti_url, ctx, h):
+async def add_payment(db, trip_id, leg_id, tipe, amount, tanggal, catatan, bukti_url, ctx, h, bukti_nama=""):
     if tipe not in ("transfer", "kompensasi"):
         raise ValueError("Tipe pembayaran harus transfer atau kompensasi")
     amt = _money(amount, "Jumlah bayar")
@@ -229,7 +229,8 @@ async def add_payment(db, trip_id, leg_id, tipe, amount, tanggal, catatan, bukti
     rec = await get(db, trip_id, leg_id)
     if not rec["supplier"].get("nama"):
         raise ValueError("Isi dan simpan Supplier dulu sebelum mencatat pembayaran")
-    item = {"id": _gid(), "amount": amt, "tanggal": tgl, "catatan": _s(catatan, 300), "bukti_url": bukti_url or None}
+    item = {"id": _gid(), "amount": amt, "tanggal": tgl, "catatan": _s(catatan, 300), "bukti_url": bukti_url or None,
+            "bukti_nama": _s(bukti_nama, 120) if bukti_url else ""}
     rec["transfers" if tipe == "transfer" else "kompensasi"].append(item)
     rec["updated_at"] = datetime.utcnow().isoformat()
     rec = await sync_to_dept(db, rec, ctx, h)

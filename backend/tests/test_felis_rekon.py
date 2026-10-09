@@ -1506,7 +1506,8 @@ async def test_leg_supplier():
     ok(prof["nama"] == "CV Laut Biru" and prof["bank"] == "BCA" and prof["pic"] == "Budi", "profil supplier dibuat + data bank/PIC tersimpan")
     ok(len(prof["jobs"]) == 1 and prof["jobs"][0]["total_harga"] == 10000000 and prof["jobs"][0]["nopol"] == "B 1234 XYZ", "job Departemen Supplier dibuat")
 
-    r = await LSP.add_payment(db, "T1", "L1", "kompensasi", 1000000, "2026-10-05", "Unit Avanza", "http://x/k.jpg", ctx, h)
+    r = await LSP.add_payment(db, "T1", "L1", "kompensasi", 1000000, "2026-10-05", "Unit Avanza", "http://x/k.jpg", ctx, h, bukti_nama="kompensasi.jpg")
+    ok(r["kompensasi"][0]["bukti_nama"] == "kompensasi.jpg", "nama file bukti tersimpan")
     ok(r["totals"]["kompensasi"] == 1000000 and r["totals"]["total_tagihan"] == 11750000, "kompensasi MENAMBAH total tagihan")
     r = await LSP.add_payment(db, "T1", "L1", "transfer", 4000000, "", "DP", "http://x/t.pdf", ctx, h)
     ok(r["totals"]["total_transfer"] == 4000000 and r["totals"]["outstanding"] == 7750000, "outstanding = total tagihan - transfer")

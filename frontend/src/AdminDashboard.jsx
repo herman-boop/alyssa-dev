@@ -1,5 +1,6 @@
 /* eslint-disable */
 import LegSupplierModal from "./LegSupplierModal";
+import LegSupplierFields from "./LegSupplierFields";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import axios from "axios";
@@ -2509,6 +2510,15 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
           >
             {copiedPo ? "✓ Tersalin" : "📋 Copy PO"}
           </button>
+          {order.trip_id ? (
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowLegSupplier(true); }}
+              style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid #1E40AF", background: "#1D4ED8", color: "#FFFFFF", fontSize: 11.5, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" }}
+              data-testid={`adm-legsupplier-${order.order_id}`}
+            >
+              Supplier ➔
+            </button>
+          ) : null}
           <button
             onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}
             style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid #BAE6FD", background: "#FFFFFF", color: "#0369A1", fontSize: 11.5, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}
@@ -2948,12 +2958,6 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
           style={{ background: "#F3E8FF", border: "1px solid #C084FC", color: "#6B21A8" }}>
           🏢 Duplikat ke Vendor
         </button>
-        {order.trip_id ? (
-          <button className="adm-btn adm-btn-sm" onClick={(e) => { e.stopPropagation(); setShowLegSupplier(true); }} data-testid={`adm-legsupplier-${order.order_id}`}
-            style={{ background: "#1D4ED8", border: "1px solid #1E40AF", color: "#FFFFFF", fontWeight: 800 }}>
-            Supplier ➔
-          </button>
-        ) : null}
         {showLegSupplier && <LegSupplierModal order={order} headers={headers} onClose={() => setShowLegSupplier(false)} />}
         {showDupVendor && (
           <DuplicateVendorModal order={order} headers={headers} onClose={() => setShowDupVendor(false)} />
@@ -8197,6 +8201,7 @@ function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tri
                         <SmartText style={MINI_INPUT} value={leg.kepala_rombongan ? (leg.kepala_rombongan.hp || "") : (leg.kord_bayangan_hp || "")} onChange={(v) => setKepala(i, { hp: v })} placeholder="08xx-xxxx" testid={`leg-kepala-hp-${i}`} />
                       </label>
                     </div>
+                    <LegSupplierFields index={i} headers={headers} info={leg.supplier_info} onChange={(patch) => setLeg(i, { supplier_info: { ...(leg.supplier_info || {}), ...patch } })} />
                     {/* ── Command Center Kepala Rombongan: 1 link untuk seluruh perjalanan ── */}
                     <div style={{ marginTop: 10, borderTop: "1px solid #2f5a1f", paddingTop: 8 }}>
                       <div style={{ fontSize: 9.5, color: "#7ee06b", fontWeight: 700, marginBottom: 6 }}>🎯 COMMAND CENTER (1 link utk seluruh perjalanan)</div>
