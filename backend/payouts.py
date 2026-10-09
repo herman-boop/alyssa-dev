@@ -21,6 +21,7 @@ from datetime import datetime, timezone, timedelta
 
 import flip_client as F
 import driver_incentive as DI
+import cashbank as CB
 
 COLL = "payout_logs"
 BANKS = "driver_bank_accounts"
@@ -166,11 +167,17 @@ async def disburse(db, http, inquiry_id, confirm_name, items_source, remark=""):
 
 async def _mark_paid(db, item_ids, log_id, flip_id, holder):
     n = 0
+    acc = None
     for iid in item_ids:
         try:
-            await DI.set_status(db, iid, "dibayar", f"Flip {flip_id} a.n. {holder} ({log_id})")
+            item = await DI.set_status(db, iid, "dibayar", f"Flip {flip_id} a.n. {holder} ({log_id})")
             n += 1
         except (ValueError, KeyError):
+            continue
+        try:   # kas: transfer Flip yang berhasil mengurangi akun "Saldo Flip" (gagal mencatat tidak boleh membatalkan pembayaran)
+            acc = acc or await CB.ensure_system_account(db, "flip", "Saldo Flip", "ewallet")
+            await CB.post_incentive(db, item, acc["id"], _now().strftime("%Y-%m-%d"))
+        except Exception:
             pass
     return n
 
