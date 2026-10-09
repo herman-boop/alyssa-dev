@@ -1,4 +1,6 @@
 /* eslint-disable */
+import LegSupplierModal from "./LegSupplierModal";
+import LegSupplierFields from "./LegSupplierFields";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import axios from "axios";
@@ -2094,6 +2096,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
   const [showTrip360, setShowTrip360] = useState(false);
   const [showSummary, setShowSummary] = useState(false); // kartu ringkasan siap bagikan
   const [showDupVendor, setShowDupVendor] = useState(false);
+  const [showLegSupplier, setShowLegSupplier] = useState(false); // Supplier per Leg & Pembayaran
   const [showSJ, setShowSJ] = useState(false); // modal input harga surat jalan
   const [sjHargaDraft, setSjHargaDraft] = useState("");
   const [sjNoPo, setSjNoPo] = useState(""); // No PO pelanggan (opsional) → tampil di surat jalan
@@ -2507,6 +2510,15 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
           >
             {copiedPo ? "✓ Tersalin" : "📋 Copy PO"}
           </button>
+          {order.trip_id ? (
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowLegSupplier(true); }}
+              style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid #1E40AF", background: "#1D4ED8", color: "#FFFFFF", fontSize: 11.5, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" }}
+              data-testid={`adm-legsupplier-${order.order_id}`}
+            >
+              Supplier ➔
+            </button>
+          ) : null}
           <button
             onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}
             style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid #BAE6FD", background: "#FFFFFF", color: "#0369A1", fontSize: 11.5, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}
@@ -2946,6 +2958,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
           style={{ background: "#F3E8FF", border: "1px solid #C084FC", color: "#6B21A8" }}>
           🏢 Duplikat ke Vendor
         </button>
+        {showLegSupplier && <LegSupplierModal order={order} headers={headers} onClose={() => setShowLegSupplier(false)} />}
         {showDupVendor && (
           <DuplicateVendorModal order={order} headers={headers} onClose={() => setShowDupVendor(false)} />
         )}
@@ -3728,6 +3741,7 @@ function KontakBox({ headers }) {
       }
     }
     const payload = { nama, jenis: jns, perusahaan: edit.perusahaan || "", no_hp: edit.no_hp || "", email: edit.email || "", alamat: edit.alamat || "", catatan: edit.catatan || "" };
+    if (jns === "supplier") { payload.pic = edit.pic || ""; payload.bank = edit.bank || ""; payload.no_rekening = edit.no_rekening || ""; }
     if (serverMode) {
       try {
         if (edit.id) await axios.patch(`${API}/admin/contacts/${edit.id}`, payload, { headers });
@@ -3911,7 +3925,7 @@ function KontakBox({ headers }) {
                   </div>
                 );
               })()}
-              {[["nama", "Nama *", "PT Transkon Jaya, TBK"], ["perusahaan", "Nama Perusahaan", "opsional"], ["no_hp", "No. Handphone", "0812…"], ["email", "Email", "opsional"], ["alamat", "Alamat", "opsional"], ["catatan", "Catatan", "opsional"]].map(([k, lbl, ph]) => (
+              {[["nama", "Nama *", "PT Transkon Jaya, TBK"], ["perusahaan", "Nama Perusahaan", "opsional"], ["no_hp", "No. Handphone", "0812…"], ["email", "Email", "opsional"], ["alamat", "Alamat", "opsional"], ...((edit.jenis || jenis) === "supplier" ? [["pic", "PIC", "opsional"], ["bank", "Bank", "mis. BCA"], ["no_rekening", "No. Rekening", "opsional"]] : []), ["catatan", "Catatan", "opsional"]].map(([k, lbl, ph]) => (
                 <label key={k}>
                   <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", fontWeight: 700, marginBottom: 4 }}>{lbl}</span>
                   {k === "alamat" || k === "catatan"
@@ -8169,7 +8183,7 @@ function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tri
                   />
                   {/* ── KEPALA ROMBONGAN (assignment per Leg, bukan sekadar teks) ── */}
                   <div style={{ marginTop: 10, padding: "10px 12px", background: "#12200f", border: "1px solid #2f5a1f", borderRadius: 8 }}>
-                    <div style={{ fontSize: 10, color: "#7ee06b", fontWeight: 800, marginBottom: 8, letterSpacing: .5 }}>🧑‍✈️ KEPALA ROMBONGAN
+                    <div style={{ fontSize: 10, color: "#7ee06b", fontWeight: 800, marginBottom: 8, letterSpacing: .5 }}>🧑‍✈️ SUPPLIER
                       {savedChip && <span style={{ marginLeft: 8, color: savedChip.c, fontWeight: 700 }}>{savedChip.t}</span>}
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 8 }}>
@@ -8187,6 +8201,7 @@ function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tri
                         <SmartText style={MINI_INPUT} value={leg.kepala_rombongan ? (leg.kepala_rombongan.hp || "") : (leg.kord_bayangan_hp || "")} onChange={(v) => setKepala(i, { hp: v })} placeholder="08xx-xxxx" testid={`leg-kepala-hp-${i}`} />
                       </label>
                     </div>
+                    <LegSupplierFields index={i} headers={headers} info={leg.supplier_info} onChange={(patch) => setLeg(i, { supplier_info: { ...(leg.supplier_info || {}), ...patch } })} />
                     {/* ── Command Center Kepala Rombongan: 1 link untuk seluruh perjalanan ── */}
                     <div style={{ marginTop: 10, borderTop: "1px solid #2f5a1f", paddingTop: 8 }}>
                       <div style={{ fontSize: 9.5, color: "#7ee06b", fontWeight: 700, marginBottom: 6 }}>🎯 COMMAND CENTER (1 link utk seluruh perjalanan)</div>

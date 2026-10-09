@@ -18,6 +18,7 @@ import ledger_status as LS
 import pnl as PNL
 import ais as AIS
 import ship_master as SM
+import leg_supplier as LSP
 import invoice_payments as IP
 import expenses as EXP
 
@@ -1462,6 +1463,113 @@ async def test_ship_master():
     ok(len(await SM.list_all(db)) == 1, "list_all")
 
 
+async def test_leg_supplier():
+    """Supplier per Leg: rumus = netting 2 arah modul Kompensasi (Kompensasi MEMOTONG),
+    sinkron ke Departemen Supplier DAN Kompensasi Hutang Piutang memakai fungsi hitung ASLI
+    (_supplier_job_totals, _kompensasi_totals) -> angka sama di semua tempat."""
+    print("\n== supplier per leg & pembayaran supplier ==")
+    import ast
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "server.py"), encoding="utf-8").read()
+    ns = {"PPN_RATE_DEFAULT": 1.1, "PPH23_RATE_DEFAULT": 2.0, "ledger_status": LS}
+    for fn in ("_supplier_job_totals", "_kompensasi_totals"):
+        node = next(n for n in ast.parse(src).body if isinstance(n, ast.FunctionDef) and n.name == fn)
+        exec(ast.get_source_segment(src, node), ns)
+    job_totals, komp_totals = ns["_supplier_job_totals"], ns["_kompensasi_totals"]
+
+    db = FakeDB()
+    async def ensure(doc):
+        if not doc.get("projects"):
+            doc["projects"] = [{"id": "p1", "nama": "Projek 1", "status": "open"}]
+        return doc
+    def active(doc):
+        ps = list(doc.get("projects") or [])
+        return ps[-1]["id"], ps
+    n = [0]
+    def gid():
+        n[0] += 1; return f"g{n[0]:03d}"
+    h = {"gen_id": gid, "gen_komp_id": gid, "today": lambda: "2026-10-09", "ensure_projects": ensure, "active_project": active}
+    ctx = {"order_id": "ORD-1", "customer_nama": "PT X", "vehicle_type": "Truck", "nopol": "b 1234 xyz", "no_rangka": "", "asal": "Cilegon", "tujuan": "Port Jakarta"}
+
+    for bad, msg in (({"harga_deal": "abc"}, "harus angka"), ({"harga_deal": -5}, "di luar batas"),
+                     ({"harga_deal": 1, "extras": [{"label": "", "amount": 5}]}, "Keterangan"),
+                     ({"harga_deal": 1, "extras": [{"label": "Tol", "amount": 0}]}, "Nominal")):
+        try:
+            await LSP.save_profile(db, "T1", "L1", dict(bad, supplier={"nama": "CV Laut"}), ctx, h); ok(False, f"harus ditolak {bad}")
+        except ValueError as e:
+            ok(msg in str(e), f"ditolak: {msg}")
+    ok(not db.leg_supplier.docs and not db.supplier_profiles.docs and not db.kompensasi_profiles.docs, "input salah tidak menulis apa pun")
+
+    sup = {"nama": "CV Laut Biru", "pic": "Budi", "no_hp": "0812", "email": "b@x.id", "bank": "BCA", "no_rekening": "123-456"}
+    r = await LSP.save_profile(db, "T1", "L1", {"supplier": sup, "harga_deal": "10.000.000", "extras": [{"label": "BBM", "amount": 500000}, {"label": "Tol", "amount": 250000}]}, ctx, h)
+    T = r["totals"]
+    ok(T["kewajiban_alyssa"] == 10750000 and T["outstanding"] == 10750000 and T["arah"] == "alyssa_bayar", "kewajiban Alyssa = deal + tambahan")
+    ok(T["hpp_leg"] == 10750000, "biaya tambahan masuk HPP leg")
+    prof = db.supplier_profiles.docs[0]
+    ok(prof["bank"] == "BCA" and prof["pic"] == "Budi" and prof["jobs"][0]["total_harga"] == 10000000, "profil + job Departemen Supplier dibuat")
+
+    r = await LSP.add_payment(db, "T1", "L1", "kompensasi", 1000000, "2026-10-05", "Unit Avanza", "http://x/k.jpg", ctx, h, bukti_nama="kompensasi.jpg")
+    T = r["totals"]
+    ok(r["kompensasi"][0]["bukti_nama"] == "kompensasi.jpg", "nama file bukti tersimpan")
+    ok(T["kompensasi"] == 1000000 and T["outstanding"] == 9750000 and T["kewajiban_alyssa"] == 10750000, "kompensasi MEMOTONG outstanding (bukan menambah)")
+    r = await LSP.add_payment(db, "T1", "L1", "transfer", 4000000, "", "DP", "http://x/t.pdf", ctx, h)
+    T = r["totals"]
+    ok(T["total_transfer"] == 4000000 and T["sisa_alyssa"] == 6750000 and T["outstanding"] == 5750000, "outstanding = (kewajiban - transfer) - kompensasi")
+    ok(r["transfers"][0]["tanggal"] == "2026-10-09", "tanggal kosong → hari ini")
+
+    prof = db.supplier_profiles.docs[0]
+    jt = job_totals(prof["jobs"][0])
+    ok(jt["total_harga"] == 10750000 and jt["total_terbayar"] == 5000000 and jt["net_transfer"] - jt["total_terbayar"] == 5750000, "Departemen Supplier: sisa = outstanding modul leg")
+    ok(any(p["tipe"] == "kompensasi" and p["src"] == "leg" for p in prof["jobs"][0]["payments"]), "kompensasi = pembayaran tipe kompensasi (cara lama)")
+    ok(not any(t.get("kind") == "kompensasi" for t in prof["jobs"][0]["tambahan"]), "kompensasi tidak lagi masuk tambahan")
+
+    kp = db.kompensasi_profiles.docs[0]
+    kt = komp_totals(kp)
+    ok(kp["nama"] == "CV Laut Biru" and kt["total_kita"] == 10750000 and kt["total_mereka"] == 1000000, "Kompensasi Hutang Piutang: 2 arah terisi")
+    ok(kt["dibayar_kita"] == 4000000 and kt["sisa"] == -5750000, "sisa kompensasi lama = -outstanding (selisih 2 arah sama)")
+    ok(sum(1 for i in kp["items"] if i["arah"] == "mereka_ke_kita" and i["bukti_url"] == "http://x/k.jpg") == 1, "kompensasi jadi baris Supplier→Alyssa (bukti ikut)")
+
+    # item manual aman + simpan ulang idempoten
+    prof["jobs"][0]["payments"].append({"id": "manual1", "amount": 111, "tipe": "transfer"})
+    prof["jobs"][0]["tambahan"].append({"id": "man2", "label": "Manual", "amount": 222})
+    kp["items"].append({"id": "kman", "arah": "mereka_ke_kita", "nilai": 77, "tanggal": "2026-10-01"})
+    r = await LSP.save_profile(db, "T1", "L1", {"supplier": dict(sup, supplier_id=prof["id"]), "harga_deal": 10000000, "extras": [{"id": r["extras"][0]["id"], "label": "BBM", "amount": 500000}, {"label": "Tol", "amount": 250000}]}, ctx, h)
+    prof, kp = db.supplier_profiles.docs[0], db.kompensasi_profiles.docs[0]
+    ids = [p["id"] for p in prof["jobs"][0]["payments"]]
+    ok(len(prof["jobs"]) == 1 and "manual1" in ids and len([i for i in ids if i.startswith("leg-")]) == 2, "simpan ulang: tanpa dobel di Dept Supplier, item manual aman")
+    ok(any(t["id"] == "man2" for t in prof["jobs"][0]["tambahan"]) and len(db.supplier_profiles.docs) == 1, "tambahan manual aman, supplier tidak diduplikasi")
+    ok(len(db.kompensasi_profiles.docs) == 1 and any(i["id"] == "kman" for i in kp["items"]) and len([i for i in kp["items"] if i.get("src") == "leg"]) == 4, "Kompensasi: item manual aman, item leg tanpa dobel (deal + 2 tambahan + 1 kompensasi)")
+
+    tid = r["transfers"][0]["id"]
+    r = await LSP.delete_payment(db, "T1", "L1", tid, ctx, h)
+    ok(r["totals"]["total_transfer"] == 0 and r["totals"]["outstanding"] == 9750000, "hapus transfer → outstanding naik lagi")
+    ok(all(p["id"] != "leg-" + tid for p in db.supplier_profiles.docs[0]["jobs"][0]["payments"]) and not any(p.get("src") == "leg" for p in db.kompensasi_profiles.docs[0].get("payments", [])), "hapus tersinkron ke Dept Supplier & Kompensasi")
+    try:
+        await LSP.delete_payment(db, "T1", "L1", "nope", ctx, h); ok(False, "harus 404")
+    except KeyError:
+        ok(True, "hapus id tak ada → KeyError (404)")
+    try:
+        await LSP.add_payment(db, "T1", "L2", "transfer", 5, "", "", None, ctx, h); ok(False, "tanpa supplier harus ditolak")
+    except ValueError as e:
+        ok("Supplier dulu" in str(e), "bayar sebelum supplier diisi ditolak")
+    try:
+        await LSP.add_payment(db, "T1", "L1", "transfer", 0, "", "", None, ctx, h); ok(False, "0 ditolak")
+    except ValueError:
+        ok(True, "jumlah 0 ditolak")
+
+    # kompensasi melebihi kewajiban -> Supplier wajib bayar ke Alyssa (arah berbalik)
+    r = await LSP.add_payment(db, "T1", "L1", "kompensasi", 10000000, "", "", None, ctx, h)
+    ok(r["totals"]["outstanding"] == -250000 and r["totals"]["arah"] == "supplier_bayar", "kompensasi > kewajiban → outstanding negatif, supplier bayar ke Alyssa")
+    ok(komp_totals(db.kompensasi_profiles.docs[0])["sisa"] == 250000 + 77, "sisa Kompensasi lama positif (rekanan wajib bayar ke kita) = selisih leg + item manual 77")
+
+    # ganti supplier: semua item leg pindah, supplier/rekanan lama bersih
+    await LSP.save_profile(db, "T1", "L1", {"supplier": {"nama": "PT Samudra"}, "harga_deal": 9000000, "extras": []}, ctx, h)
+    old, new = db.supplier_profiles.docs[0], db.supplier_profiles.docs[1]
+    ok(new["nama"] == "PT Samudra" and len(new["jobs"]) == 1 and new["jobs"][0]["total_harga"] == 9000000, "supplier baru punya job leg")
+    ok(not any(j.get("leg_ref") for j in old["jobs"]) and any(p["id"] == "manual1" for j in old["jobs"] for p in j["payments"]), "supplier lama bersih dari item leg, data manual tetap")
+    ko, kn = db.kompensasi_profiles.docs[0], db.kompensasi_profiles.docs[1]
+    ok(kn["nama"] == "PT Samudra" and any(i.get("src") == "leg" for i in kn["items"]), "rekanan Kompensasi baru dibuat untuk supplier baru")
+    ok(not any(i.get("src") == "leg" for i in ko["items"]) and any(i["id"] == "kman" for i in ko["items"]), "rekanan Kompensasi lama bersih dari item leg, data manual tetap")
+
 async def test_daily_upload_idempotent():
     """Upload checkpoint harian: kiriman ulang (client_id sama) tidak dobel, foto antre
     yang terkirim terlambat dicatat pada waktu foto diambil, aturan 1 foto/hari tetap.
@@ -1586,7 +1694,7 @@ async def test_bastk_upload_idempotent():
 
 
 async def main():
-    for t in (test_bastk_upload_idempotent, test_daily_upload_idempotent, test_ship_master, test_sync_single_unit_vehicle, test_edit_invoice_lines, test_selisih_ringkasan_auth, test_riwayat_clear, test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
+    for t in (test_leg_supplier, test_bastk_upload_idempotent, test_daily_upload_idempotent, test_ship_master, test_sync_single_unit_vehicle, test_edit_invoice_lines, test_selisih_ringkasan_auth, test_riwayat_clear, test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,
