@@ -50,7 +50,7 @@ export default function DriverIncentivePage() {
   useEffect(() => { if (tab !== "riwayat") load(); }, [load, tab]);
   useEffect(() => { axios.get(`${API}/admin/payouts/config`, { headers }).then((r) => setCfg(r.data)).catch(() => setCfg(null)); }, [headers]);
   const loadLogs = useCallback(async () => {
-    try { const r = await axios.get(`${API}/admin/payout-logs`, { headers, params: { kind: "disbursement" } }); setLogs(r.data.items || []); }
+    try { const r = await axios.get(`${API}/admin/payout-logs`, { headers }); setLogs(r.data.items || []); }
     catch (e) { setMsg({ t: e.response?.data?.detail || "Gagal memuat riwayat", err: true }); }
   }, [headers]);
   useEffect(() => { if (tab === "riwayat") loadLogs(); }, [tab, loadLogs]);
@@ -185,7 +185,17 @@ export default function DriverIncentivePage() {
       {tab === "riwayat" ? (
         logs.length === 0 ? <div style={{ ...card, color: "#8b949e", textAlign: "center" }} data-testid="riwayat-empty">Belum ada transfer.</div> : (
           <div style={{ display: "grid", gap: 10 }} data-testid="riwayat-list">
-            {logs.map((l) => (
+            {logs.map((l) => l.kind === "inquiry" ? (
+              <div key={l.id} style={{ ...card, padding: 12 }} data-testid={`riwayat-${l.id}`} data-status={l.status} data-kind="inquiry">
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                  <b>Cek rekening · {l.driver_nama}</b>
+                  <span style={{ fontWeight: 800, textTransform: "uppercase", fontSize: 12, color: l.status === "berhasil" ? "#79c0ff" : l.status === "gagal" ? "#d2a8ff" : "#EF9F27" }}>{l.status.replace("_", " ")}</span>
+                </div>
+                <div style={{ fontSize: 12.5, color: "#8b949e", marginTop: 3 }}>{(l.created_at || "").slice(0, 16).replace("T", " ")} · {(l.bank_code || "").toUpperCase()} {l.account_masked} · {l.env}</div>
+                {l.account_holder ? <div style={{ fontSize: 12.5, color: "#c9d1d9", marginTop: 3 }}>Pemilik: {l.account_holder}</div> : null}
+                {l.error ? <div style={{ fontSize: 12.5, color: "#d2a8ff", marginTop: 3 }} data-testid="riwayat-error">{l.error}</div> : null}
+              </div>
+            ) : (
               <div key={l.id} style={card} data-testid={`riwayat-${l.id}`} data-status={l.status}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
                   <b>{l.driver_nama} · {rp(l.amount)}</b>
