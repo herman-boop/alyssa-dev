@@ -1149,7 +1149,7 @@ export default function DriverCheckpoint() {
   };
 
   const submitNama = async () => {
-    const n = namaInput.trim();
+    const n = namaInput.trim().toUpperCase();   // nama driver selalu HURUF BESAR
     if (!n) { showToast("Isi nama dulu ya", "err"); return; }
     setSavingName(true);
     try {
@@ -1589,9 +1589,11 @@ export default function DriverCheckpoint() {
               type="text"
               placeholder="Nama sesuai KTP"
               value={namaInput}
-              onChange={(e) => setNamaInput(e.target.value)}
+              onChange={(e) => setNamaInput(e.target.value.toUpperCase())}
               onKeyDown={(e) => { if (e.key === "Enter") submitNama(); }}
               className="drv-step-input"
+              style={{ textTransform: "uppercase" }}
+              autoCapitalize="characters"
               autoComplete="name"
               autoFocus
               data-testid="input-nama"

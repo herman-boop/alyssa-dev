@@ -646,7 +646,7 @@ async def get_trip(trip_id: str):
 
 @api_router.post("/trips/{trip_id}/driver-name")
 async def set_driver_name(trip_id: str, payload: DriverName):
-    nama = payload.nama.strip()
+    nama = payload.nama.strip().upper()   # nama driver selalu HURUF BESAR (konsisten di PO, BASTK, insentif)
     if not nama:
         raise HTTPException(400, "Nama tidak boleh kosong")
     res = await db.trips.update_one(
