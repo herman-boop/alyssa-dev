@@ -26,6 +26,11 @@ import cashbank as CB
 COLL = "payout_logs"
 BANKS = "driver_bank_accounts"
 INQUIRY_TTL = timedelta(minutes=15)
+BLOCK_MSG = {   # status akhir Flip selain SUCCESS: transfer diblokir (SUSPECTED sengaja diblokir walau Flip masih mengizinkan)
+    "INVALID_ACCOUNT_NUMBER": "Nomor rekening tidak valid (bisa juga nomor virtual account). Periksa nomor dan kode bank.",
+    "SUSPECTED_ACCOUNT": "Flip menandai rekening ini mencurigakan (indikasi penipuan). Transfer diblokir demi keamanan; pastikan rekeningnya benar.",
+    "BLACK_LISTED": "Rekening ini masuk daftar hitam penipuan Flip. Transfer tidak diizinkan.",
+}
 POLL_TRIES = 5          # cek rekening Flip bersifat 2 tahap: jawaban pertama biasanya PENDING; tanya ulang sampai selesai
 POLL_SLEEP = 2.5        # detik antar percobaan (total tunggu maks ±12 detik)
 
@@ -98,11 +103,11 @@ async def inquiry(db, http, driver_nama, bank_code, account_number):
            "created_at": _iso(), "used": False}
     await _log(db, doc)
     try:
-        r = await _run(F.inquiry, http, bank_code, acc)
+        r = await _run(F.inquiry, http, bank_code, acc, doc["id"])
         tries = 0
         while r["status"] in ("PENDING", "") and not r["account_holder"] and tries < POLL_TRIES:
             await asyncio.sleep(POLL_SLEEP)       # Flip: permintaan yang sama diulang -> hasil akhir dari cache
-            r = await _run(F.inquiry, http, bank_code, acc)
+            r = await _run(F.inquiry, http, bank_code, acc, doc["id"])
             tries += 1
     except F.FlipError as e:
         await _update(db, doc["id"], {"status": "gagal", "error": str(e)[:200]})
@@ -114,8 +119,9 @@ async def inquiry(db, http, driver_nama, bank_code, account_number):
         await _update(db, doc["id"], {"status": "gagal", "error": "Flip masih memproses (PENDING). Coba Cek Rekening lagi beberapa detik lagi."})
         raise ValueError("Flip masih memproses cek rekening. Tunggu sebentar, lalu tap Cek Rekening lagi.")
     if r["status"] != F.INQUIRY_OK or not r["account_holder"]:
-        await _update(db, doc["id"], {"status": "gagal", "error": f"Rekening tidak lolos verifikasi (status Flip: {r['status'] or '-'})"})
-        raise ValueError(f"Rekening tidak valid atau tidak lolos verifikasi (status Flip: {r['status'] or '-'}). Cek kode bank dan nomor rekening.")
+        msg = BLOCK_MSG.get(r["status"]) or f"Rekening tidak lolos verifikasi (status Flip: {r['status'] or '-'}). Cek kode bank dan nomor rekening."
+        await _update(db, doc["id"], {"status": "gagal", "error": f"{msg} [{r['status'] or '-'}]"})
+        raise ValueError(msg)
     await _update(db, doc["id"], {"status": "berhasil", "account_holder": r["account_holder"]})
     await db[BANKS].update_one({"key": _norm(driver_nama)}, {"$set": {"key": _norm(driver_nama), "driver_nama": driver_nama.strip(),
         "bank_code": bank_code, "account_number": acc, "account_holder": r["account_holder"], "verified_at": _iso()}}, upsert=True)

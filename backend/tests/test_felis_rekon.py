@@ -1682,14 +1682,20 @@ async def test_payouts_flip():
     await expect(PO.inquiry(db, http, "Budi", "mandiri", "1630003581462"), ValueError, "masih memproses", "PENDING terus-menerus: berhenti dengan pesan jelas")
     ok(len(http.calls) == nc + PO.POLL_TRIES + 1, "jumlah pengulangan dibatasi")
     http.queue = [Resp(200, {"status": "INVALID_ACCOUNT_NUMBER", "account_holder": ""})]
-    await expect(PO.inquiry(db, http, "Budi", "mandiri", "1630003581462"), ValueError, "INVALID_ACCOUNT_NUMBER", "status gagal dari Flip ditampilkan apa adanya")
+    await expect(PO.inquiry(db, http, "Budi", "mandiri", "1630003581462"), ValueError, "virtual account", "INVALID_ACCOUNT_NUMBER: pesan jelas")
+    http.queue = [Resp(200, {"status": "SUSPECTED_ACCOUNT", "account_holder": "ORANG X"})]
+    await expect(PO.inquiry(db, http, "Budi", "mandiri", "1630003581462"), ValueError, "mencurigakan", "SUSPECTED_ACCOUNT: transfer diblokir walau nama terbaca")
+    http.queue = [Resp(200, {"status": "BLACK_LISTED", "account_holder": "ORANG Y"})]
+    await expect(PO.inquiry(db, http, "Budi", "mandiri", "1630003581462"), ValueError, "daftar hitam", "BLACK_LISTED: transfer diblokir")
+    ok(any("[BLACK_LISTED]" in (d.get("error") or "") for d in db.payout_logs.docs), "status Flip tercatat di riwayat (payout_logs)")
+    ok(all(c["data"].get("inquiry_key", "").startswith("PLG-") for c in http.calls[-3:]), "inquiry_key (id log) dikirim ke Flip")
 
     # inquiry sukses
     http.queue = [Resp(200, {"status": "SUCCESS", "account_holder": "BUDI SANTOSO", "bank_code": "bca", "account_number": "1234567890"})]
     q = await PO.inquiry(db, http, "Budi", "BCA", "1234-567-890")
     c = http.calls[-1]
     ok(q["account_holder"] == "BUDI SANTOSO" and q["account_masked"] == "******7890", "inquiry sukses: nama pemilik + nomor tersamarkan")
-    ok(c["url"] == "https://bigflip.id/big_sandbox_api/v2/general/bank-account-inquiry" and c["auth"] == (SECRET, "") and c["data"]["account_number"] == "1234567890", "inquiry ke URL sandbox, Basic Auth, nomor dibersihkan")
+    ok(c["url"] == "https://bigflip.id/big_sandbox_api/v2/disbursement/bank-account-inquiry" and c["auth"] == (SECRET, "") and c["data"]["account_number"] == "1234567890", "inquiry ke URL sandbox, Basic Auth, nomor dibersihkan")
     ok((await PO.get_bank(db, "budi"))["account_holder"] == "BUDI SANTOSO", "rekening terverifikasi diingat per driver")
 
     # pengaman transfer
