@@ -13,6 +13,7 @@ from datetime import datetime, timezone, timedelta
 from odoo_client import OdooClient
 from playwright.async_api import async_playwright
 import ship_master  # master kapal (panjang/lebar/tipe)
+import leg_supplier  # supplier per leg + pembayaran supplier
 import ais  # modul AIS (posisi kapal) — provider-agnostic, aman tanpa key
 import rekon_sync  # integrasi pembayaran supplier dari Audit Rekon (isolated)
 import supplier_faktur  # pisah unit ke faktur (projek) baru — logika murni
@@ -203,6 +204,10 @@ async def _ais_startup():
         await db.ship_master.create_index("key", unique=True)
     except Exception as e:
         logger.warning(f"[startup] gagal bikin index ship_master.key: {e}")
+    try:
+        await db.leg_supplier.create_index("key", unique=True)
+    except Exception as e:
+        logger.warning(f"[startup] gagal bikin index leg_supplier.key: {e}")
     try:
         ais.start_worker(db)
     except Exception as e:
@@ -1527,6 +1532,9 @@ class ContactBody(BaseModel):
     email: Optional[str] = ""
     alamat: Optional[str] = ""
     catatan: Optional[str] = ""
+    pic: Optional[str] = ""           # kontak PIC supplier (opsional, additive)
+    bank: Optional[str] = ""
+    no_rekening: Optional[str] = ""
 
 
 def _contact_doc(body: ContactBody) -> dict:
@@ -1539,6 +1547,9 @@ def _contact_doc(body: ContactBody) -> dict:
         "email": (body.email or "").strip()[:120],
         "alamat": (body.alamat or "").strip()[:400],
         "catatan": (body.catatan or "").strip()[:500],
+        "pic": (body.pic or "").strip()[:120],
+        "bank": (body.bank or "").strip()[:80],
+        "no_rekening": (body.no_rekening or "").strip()[:40],
     }
 
 
@@ -1573,7 +1584,12 @@ async def create_contact(body: ContactBody):
 async def update_contact(contact_id: str, body: ContactBody):
     if not (body.nama or "").strip():
         raise HTTPException(400, "nama wajib diisi")
-    res = await db.contacts.update_one({"id": contact_id}, {"$set": _contact_doc(body)})
+    upd = _contact_doc(body)
+    sent = getattr(body, "model_fields_set", None) or getattr(body, "__fields_set__", set())
+    for f in ("pic", "bank", "no_rekening"):     # form lama tidak mengirim field ini → jangan dikosongkan
+        if f not in sent:
+            upd.pop(f, None)
+    res = await db.contacts.update_one({"id": contact_id}, {"$set": upd})
     if res.matched_count == 0:
         raise HTTPException(404, "Kontak tidak ditemukan")
     doc = await db.contacts.find_one({"id": contact_id}, {"_id": 0})
@@ -7044,6 +7060,76 @@ async def delete_supplier_job_tambahan(supplier_id: str, job_id: str, tambahan_i
         raise HTTPException(404, "Biaya tambahan tidak ditemukan")
     await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
     return _supplier_job_totals(jobs[idx])
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# SUPPLIER PER LEG & PEMBAYARAN SUPPLIER (leg_supplier.py)
+# Per leg: supplier + harga deal + biaya tambahan + transfer/kompensasi.
+# Tiap simpan disinkron ke job Departemen Supplier (supplier_profiles.jobs).
+# ══════════════════════════════════════════════════════════════════════════
+def _leg_supplier_helpers():
+    return {"gen_id": _gen_supplier_id, "today": today_wib,
+            "ensure_projects": _ensure_supplier_projects, "active_project": _get_or_create_active_project}
+
+
+async def _leg_supplier_ctx(trip_id: str, leg_id: str) -> dict:
+    trip = await db.trips.find_one({"trip_id": trip_id}, {"_id": 0, "legs": 1})
+    if not trip:
+        raise HTTPException(404, "Trip tidak ditemukan")
+    leg = next((l for l in (trip.get("legs") or []) if l.get("route_leg_id") == leg_id), None)
+    if not leg:
+        raise HTTPException(404, "Leg tidak ditemukan (simpan Route Leg dulu)")
+    order = await db.orders.find_one({"trip_id": trip_id}, {"_id": 0}) or {}
+    return {"order_id": order.get("order_id"), "customer_nama": order.get("customer_nama") or "",
+            "vehicle_type": order.get("vehicle_type") or "", "nopol": order.get("nopol") or "",
+            "no_rangka": order.get("no_rangka") or "", "asal": leg.get("asal") or "", "tujuan": leg.get("tujuan") or ""}
+
+
+@api_router.get("/admin/trips/{trip_id}/legs/{leg_id}/supplier", dependencies=[Depends(require_admin_pin)])
+async def get_leg_supplier(trip_id: str, leg_id: str):
+    ctx = await _leg_supplier_ctx(trip_id, leg_id)
+    return {"ctx": ctx, **leg_supplier.view(await leg_supplier.get(db, trip_id, leg_id))}
+
+
+@api_router.put("/admin/trips/{trip_id}/legs/{leg_id}/supplier", dependencies=[Depends(require_admin_pin)])
+async def put_leg_supplier(trip_id: str, leg_id: str, payload: dict = Body(...)):
+    ctx = await _leg_supplier_ctx(trip_id, leg_id)
+    try:
+        if not ((payload.get("supplier") or {}).get("nama") or "").strip():
+            raise ValueError("Nama supplier wajib diisi")
+        return await leg_supplier.save_profile(db, trip_id, leg_id, payload, ctx, _leg_supplier_helpers())
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@api_router.post("/admin/trips/{trip_id}/legs/{leg_id}/supplier/payments", dependencies=[Depends(require_admin_pin)])
+async def add_leg_supplier_payment(
+    trip_id: str, leg_id: str,
+    tipe: str = Form("transfer"), amount: str = Form(...), tanggal: str = Form(""), catatan: str = Form(""),
+    bukti: Optional[UploadFile] = File(None),
+):
+    ctx = await _leg_supplier_ctx(trip_id, leg_id)
+    tipe = (tipe or "").strip().lower()
+    cur = await leg_supplier.get(db, trip_id, leg_id)
+    sup_key = (cur.get("dept") or {}).get("supplier_id") or "leg-supplier"
+    bukti_url, warn = None, None
+    if bukti is not None and bukti.filename:
+        bukti_url, warn = _save_upload_soft(sup_key, f"leg-payment/{trip_id}", bukti, ALLOWED_IMG | ALLOWED_DOC)
+    try:
+        res = await leg_supplier.add_payment(db, trip_id, leg_id, tipe, amount, tanggal, catatan, bukti_url, ctx, _leg_supplier_helpers())
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    res["bukti_warning"] = warn
+    return res
+
+
+@api_router.delete("/admin/trips/{trip_id}/legs/{leg_id}/supplier/payments/{payment_id}", dependencies=[Depends(require_admin_pin)])
+async def delete_leg_supplier_payment(trip_id: str, leg_id: str, payment_id: str):
+    ctx = await _leg_supplier_ctx(trip_id, leg_id)
+    try:
+        return await leg_supplier.delete_payment(db, trip_id, leg_id, payment_id, ctx, _leg_supplier_helpers())
+    except KeyError as e:
+        raise HTTPException(404, str(e.args[0]))
 
 
 # ══════════════════════════════════════════════════════════════════════════
