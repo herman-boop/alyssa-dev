@@ -10,6 +10,7 @@ import DriverData from "@/DriverData";
 import SupplierPage, { printSupplierA4 } from "@/SupplierPage";
 import SelisihPage from "@/SelisihPage";
 import ShipMasterPage from "@/ShipMasterPage";
+import DriverIncentivePage from "@/DriverIncentivePage";
 import "@/OrderCardBright.css";
 import OrderSummaryShare from "@/OrderSummaryShare";
 import { categoryOfGroupTitle, categoryOfTab } from "@/categoryColors";
@@ -426,6 +427,7 @@ function Dashboard({ pin, onLogout }) {
     drivers:      { title: "Driver", sub: "Kelola data driver & dokumen" },
     koordinator:  { title: "Koordinator", sub: "Kelola akun koordinator lapangan" },
     supplier:     { title: "Supplier", sub: "Kelola unit titipan & selisih harga supplier" },
+    "insentif-driver": { title: "Insentif Driver", sub: "Bonus per foto checkpoint driver borongan: cek foto, lalu bayar atau tolak" },
     "master-kapal": { title: "Master Kapal", sub: "Panjang, lebar & tipe kapal (tampil di layar Lihat Posisi Kapal)" },
     selisih:      { title: "Selisih Harga", sub: "Bandingkan HPP vs harga deal pelanggan" },
     biaya:        { title: "Biaya / Beban", sub: "Biaya operasional (non-HPP) per PT/CV — terpisah dari tagihan supplier" },
@@ -523,6 +525,10 @@ function Dashboard({ pin, onLogout }) {
 
       {activeTab === "selisih" && (
         <SelisihPage />
+      )}
+
+      {activeTab === "insentif-driver" && (
+        <DriverIncentivePage />
       )}
 
       {activeTab === "master-kapal" && (
@@ -863,7 +869,7 @@ const SIDEBAR_ICON = {
   beranda: "🏠", "rekap-tagih": "💰", kontak: "📇",
   pesanan: "▦", "route-leg": "🧭", drivers: "👤", supplier: "🌿", koordinator: "🧑‍💼",
   kendaraan: "🚙", "master-kapal": "🚢", dokumen: "📄", histori: "🗂️", laporan: "📑", kalkulator: "🧮", selisih: "📊",
-  kompensasi: "🔄", "minta-harga": "📩", pengaturan: "⚙️", "pembayaran-vendor": "🏢",
+  kompensasi: "🔄", "minta-harga": "📩", pengaturan: "⚙️", "pembayaran-vendor": "🏢", "insentif-driver": "🎯",
   biaya: "🧾", "laba-rugi": "📈",
 };
 
@@ -1120,6 +1126,7 @@ const SIDEBAR_GROUPS = [
   { title: "Pembelian", items: [
     { key: "supplier", label: "Supplier" },
     { key: "pembayaran-vendor", label: "Pembayaran Supplier" },
+    { key: "insentif-driver", label: "Insentif Driver" },
     { key: "kalkulator", label: "Kalkulator HPP" },
     { key: "selisih", label: "Selisih Harga" },
     { key: "kompensasi", label: "Kompensasi" },
@@ -3185,6 +3192,7 @@ function BonusModal({ tripId, order, headers, onClose, onSave }) {
   const [loading, setLoading] = useState(true);
   const [bd, setBd] = useState("0");
   const [bk, setBk] = useState("0");
+  const [bayar, setBayar] = useState(false);   // driver borongan: catat bonus harian ke antrean pembayaran
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -3194,6 +3202,7 @@ function BonusModal({ tripId, order, headers, onClose, onSave }) {
         if (!alive) return;
         setBd(String(r.data?.bonus_daily ?? 0));
         setBk(String(r.data?.bonus_kerajinan ?? 0));
+        setBayar(!!r.data?.bonus_daily_bayar);
       })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
@@ -3201,7 +3210,7 @@ function BonusModal({ tripId, order, headers, onClose, onSave }) {
 
   const submit = async () => {
     setSubmitting(true);
-    await onSave({ bonus_daily: parseInt(bd || "0", 10), bonus_kerajinan: parseInt(bk || "0", 10) });
+    await onSave({ bonus_daily: parseInt(bd || "0", 10), bonus_kerajinan: parseInt(bk || "0", 10), bonus_daily_bayar: bayar });
     setSubmitting(false);
   };
 
@@ -3226,6 +3235,10 @@ function BonusModal({ tripId, order, headers, onClose, onSave }) {
               <Field label="Bonus Kerajinan" hint="Dicairkan di Tahap 3">
                 <input type="number" min="0" className="adm-input" value={bk} onChange={(e) => setBk(e.target.value)} data-testid="adm-bonus-kerajinan" />
               </Field>
+              <label style={{ gridColumn: "1 / -1", display: "flex", gap: 10, alignItems: "flex-start", fontSize: 12.5, color: "var(--text-2)", cursor: "pointer" }}>
+                <input type="checkbox" checked={bayar} onChange={(e) => setBayar(e.target.checked)} data-testid="adm-bonus-bayar" style={{ marginTop: 3 }} />
+                <span><b>Driver borongan: catat bonus harian ke antrean pembayaran.</b> Tiap foto checkpoint yang masuk otomatis jadi tagihan bonus di menu Insentif Driver (kamu cek foto, lalu bayar manual).</span>
+              </label>
             </div>
           )}
         </div>

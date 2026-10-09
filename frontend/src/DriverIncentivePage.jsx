@@ -1,0 +1,159 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import axios from "axios";
+
+/*
+  Insentif Driver (borongan): bonus per foto checkpoint yang masuk, dicatat otomatis ke antrean ini.
+  Admin cek foto + lokasi, lalu Bayar (transfer manual, bukti opsional) atau Tolak (mis. foto screenshot peta).
+  TIDAK ada uang keluar otomatis dari aplikasi.
+*/
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "";
+const API = `${BACKEND_URL}/api`;
+
+const rp = (n) => "Rp " + (Number(n) || 0).toLocaleString("id-ID");
+const media = (u) => {
+  if (!u) return "";
+  if (/^https?:\/\//.test(u)) return u.includes("/storage/v1/object/public/") ? `${API}/media?u=${encodeURIComponent(u)}` : u;
+  return `${BACKEND_URL}${u}`;
+};
+
+const TABS = [["menunggu", "Menunggu"], ["dibayar", "Dibayar"], ["ditolak", "Ditolak"]];
+const BADGE = {
+  menunggu: { bg: "#E0F2FE", fg: "#075985", bd: "#7DD3FC" },
+  dibayar: { bg: "#DCFCE7", fg: "#166534", bd: "#86EFAC" },
+  ditolak: { bg: "#EDE9FE", fg: "#5B21B6", bd: "#C4B5FD" },
+};
+
+export default function DriverIncentivePage() {
+  const headers = useMemo(() => ({ "x-admin-pin": typeof window !== "undefined" ? (localStorage.getItem("aal_admin_pin") || "") : "" }), []);
+  const [tab, setTab] = useState("menunggu");
+  const [q, setQ] = useState("");
+  const [data, setData] = useState({ items: [], per_driver: [], total_menunggu: 0 });
+  const [busy, setBusy] = useState("");
+  const [msg, setMsg] = useState({ t: "", err: false });
+  const [payFor, setPayFor] = useState(null);
+  const [payNote, setPayNote] = useState("");
+  const fileRef = useRef(null);
+
+  const load = useCallback(async () => {
+    try {
+      const r = await axios.get(`${API}/admin/driver-incentives`, { headers, params: { status: tab, q: q || undefined } });
+      setData(r.data);
+    } catch (e) { setMsg({ t: e.response?.data?.detail || "Gagal memuat insentif", err: true }); }
+  }, [headers, tab, q]);
+  useEffect(() => { load(); }, [load]);
+
+  const act = async (id, path, form) => {
+    setBusy(id); setMsg({ t: "", err: false });
+    try {
+      const r = await axios.post(`${API}/admin/driver-incentives/${id}/${path}`, form, { headers, timeout: 120000 });
+      setMsg({ t: r.data.bukti_warning || "Tersimpan", err: !!r.data.bukti_warning });
+      setPayFor(null); setPayNote("");
+      await load();
+    } catch (e) { setMsg({ t: e.response?.data?.detail || "Gagal menyimpan", err: true }); }
+    finally { setBusy(""); }
+  };
+
+  const doPay = (id) => {
+    const fd = new FormData();
+    fd.append("catatan", payNote);
+    const f = fileRef.current && fileRef.current.files && fileRef.current.files[0];
+    if (f) fd.append("bukti", f);
+    act(id, "bayar", fd);
+  };
+  const doReject = (id) => {
+    const alasan = window.prompt("Alasan menolak (mis. foto screenshot peta, bukan foto lokasi):");
+    if (alasan == null) return;
+    if (!alasan.trim()) { setMsg({ t: "Alasan penolakan wajib diisi", err: true }); return; }
+    const fd = new FormData(); fd.append("catatan", alasan);
+    act(id, "tolak", fd);
+  };
+
+  const card = { background: "#161b22", border: "1px solid #30363d", borderRadius: 12, padding: 14 };
+  const btn = (bg, fg) => ({ padding: "8px 14px", borderRadius: 8, border: "none", background: bg, color: fg, fontWeight: 800, fontSize: 12.5, cursor: "pointer" });
+
+  return (
+    <div style={{ maxWidth: 900, margin: "0 auto", color: "#e6edf3" }} data-testid="insentif-page">
+      <p style={{ fontSize: 12.5, color: "#8b949e", margin: "0 0 12px" }}>
+        Bonus per foto checkpoint driver borongan. Aktifkan per trip lewat <b>Atur Bonus Driver</b>. Cek foto dulu sebelum bayar; pembayaran dilakukan manual.
+      </p>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+        {TABS.map(([k, l]) => (
+          <button key={k} type="button" onClick={() => setTab(k)} data-testid={`insentif-tab-${k}`}
+            style={{ ...btn(tab === k ? "#EF9F27" : "#21262d", tab === k ? "#1a1208" : "#c9d1d9"), border: "1px solid #30363d" }}>{l}</button>
+        ))}
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cari driver / nopol / trip"
+          style={{ flex: 1, minWidth: 180, background: "#0d1117", border: "1px solid #30363d", borderRadius: 8, padding: "8px 12px", color: "#e6edf3", fontSize: 13 }} data-testid="insentif-search" />
+      </div>
+
+      {tab === "menunggu" && data.per_driver.length > 0 ? (
+        <div style={{ ...card, marginBottom: 12 }} data-testid="insentif-summary">
+          <div style={{ fontSize: 11, color: "#8b949e", fontWeight: 800, textTransform: "uppercase", letterSpacing: ".4px", marginBottom: 8 }}>Yang harus dibayar · total {rp(data.total_menunggu)}</div>
+          {data.per_driver.map((d) => (
+            <div key={d.driver_nama} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", fontSize: 13.5 }}>
+              <span style={{ fontWeight: 700 }}>{d.driver_nama} <span style={{ color: "#8b949e", fontWeight: 500 }}>· {d.count} checkpoint</span></span>
+              <span style={{ fontWeight: 800 }}>{rp(d.total)}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {msg.t ? <div role="status" style={{ ...card, marginBottom: 12, color: msg.err ? "#d2a8ff" : "#79c0ff" }} data-testid="insentif-msg">{msg.t}</div> : null}
+
+      {data.items.length === 0 ? <div style={{ ...card, color: "#8b949e", textAlign: "center" }} data-testid="insentif-empty">Tidak ada data.</div> : (
+        <div style={{ display: "grid", gap: 10 }} data-testid="insentif-list">
+          {data.items.map((it) => {
+            const b = BADGE[it.status] || BADGE.menunggu;
+            return (
+              <div key={it.id} style={{ ...card, display: "flex", gap: 12, flexWrap: "wrap" }} data-testid={`insentif-${it.id}`} data-status={it.status}>
+                {it.foto_url ? (
+                  <a href={media(it.foto_url)} target="_blank" rel="noopener noreferrer" aria-label="Buka foto checkpoint">
+                    <img src={media(it.foto_url)} alt="Foto checkpoint" style={{ width: 96, height: 96, objectFit: "cover", borderRadius: 10, border: "1px solid #30363d" }} />
+                  </a>
+                ) : null}
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <b style={{ fontSize: 14.5 }}>{it.driver_nama || "(tanpa nama)"} {it.nopol ? <span style={{ color: "#8b949e", fontWeight: 500 }}>· {it.nopol}</span> : null}</b>
+                    <span style={{ fontWeight: 900, fontSize: 15 }}>{rp(it.amount)}</span>
+                  </div>
+                  <div style={{ fontSize: 12.5, color: "#8b949e", marginTop: 3 }}>{it.date}{it.status_cp ? ` · ${it.status_cp}` : ""} · Trip {it.trip_id}</div>
+                  <div style={{ fontSize: 12.5, color: "#c9d1d9", marginTop: 3 }}>
+                    {it.alamat || "Lokasi tidak tercatat"}
+                    {it.lat != null && it.lng != null ? <> · <a href={`https://www.google.com/maps?q=${it.lat},${it.lng}`} target="_blank" rel="noopener noreferrer" style={{ color: "#58a6ff" }}>Lihat di peta</a></> : null}
+                  </div>
+                  <div style={{ marginTop: 6 }}>
+                    <span style={{ background: b.bg, color: b.fg, border: `1px solid ${b.bd}`, borderRadius: 999, padding: "2px 10px", fontSize: 11.5, fontWeight: 800, textTransform: "uppercase" }}>{it.status}</span>
+                    {it.catatan ? <span style={{ fontSize: 12, color: "#8b949e", marginLeft: 8 }}>{it.catatan}</span> : null}
+                    {it.bukti_url ? <a href={media(it.bukti_url)} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: "#58a6ff", marginLeft: 8 }}>Lihat bukti bayar</a> : null}
+                  </div>
+
+                  {it.status === "menunggu" ? (
+                    payFor === it.id ? (
+                      <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+                        <input value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="Catatan (mis. transfer BCA)" style={{ background: "#0d1117", border: "1px solid #30363d", borderRadius: 8, padding: "8px 12px", color: "#e6edf3", fontSize: 13 }} data-testid="insentif-pay-note" />
+                        <input ref={fileRef} type="file" accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf" style={{ fontSize: 12.5, color: "#c9d1d9" }} data-testid="insentif-pay-file" />
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button type="button" disabled={busy === it.id} onClick={() => doPay(it.id)} style={btn("#1D4ED8", "#fff")} data-testid="insentif-pay-confirm">{busy === it.id ? "Menyimpan…" : "Tandai Dibayar"}</button>
+                          <button type="button" onClick={() => setPayFor(null)} style={btn("#21262d", "#c9d1d9")}>Batal</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
+                        <button type="button" onClick={() => { setPayFor(it.id); setPayNote(""); }} style={btn("#1D4ED8", "#fff")} data-testid={`insentif-bayar-${it.id}`}>Bayar</button>
+                        <button type="button" disabled={busy === it.id} onClick={() => doReject(it.id)} style={btn("#21262d", "#d2a8ff")} data-testid={`insentif-tolak-${it.id}`}>Tolak</button>
+                      </div>
+                    )
+                  ) : (
+                    <div style={{ marginTop: 10 }}>
+                      <button type="button" disabled={busy === it.id} onClick={() => act(it.id, "reset", new FormData())} style={btn("#21262d", "#c9d1d9")} data-testid={`insentif-reset-${it.id}`}>Buka lagi</button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}

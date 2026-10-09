@@ -14,6 +14,7 @@ from odoo_client import OdooClient
 from playwright.async_api import async_playwright
 import ship_master  # master kapal (panjang/lebar/tipe)
 import leg_supplier  # supplier per leg + pembayaran supplier
+import driver_incentive  # insentif per checkpoint driver borongan (antrean bayar)
 import ais  # modul AIS (posisi kapal) — provider-agnostic, aman tanpa key
 import rekon_sync  # integrasi pembayaran supplier dari Audit Rekon (isolated)
 import supplier_faktur  # pisah unit ke faktur (projek) baru — logika murni
@@ -894,6 +895,10 @@ async def upload_daily_photo(
         {"trip_id": trip_id},
         {"$push": {"daily_checkpoints": entry}, "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}}
     )
+    try:   # insentif driver borongan (hanya kalau trip diberi tanda); gagal tidak boleh menggagalkan upload foto
+        await driver_incentive.maybe_create(db, trip, entry)
+    except Exception as e:
+        logger.warning(f"[insentif] gagal catat antrean: {e}")
     doc = await db.trips.find_one({"trip_id": trip_id})
     return trip_doc_to_public(doc)
 
@@ -4497,6 +4502,7 @@ async def admin_patch_trip_koordinator(trip_id: str, body: KoordinatorBody):
 class BonusBody(BaseModel):
     bonus_daily: Optional[int] = None
     bonus_kerajinan: Optional[int] = None
+    bonus_daily_bayar: Optional[bool] = None   # catat bonus harian per checkpoint ke antrean pembayaran (driver borongan)
 
 @api_router.patch("/admin/trips/{trip_id}/bonus", dependencies=[Depends(require_admin_pin)])
 async def admin_patch_trip_bonus(trip_id: str, body: BonusBody):
@@ -4517,11 +4523,59 @@ async def admin_patch_trip_bonus(trip_id: str, body: BonusBody):
         if body.bonus_kerajinan < 0:
             raise HTTPException(400, "bonus_kerajinan tidak boleh negatif")
         upd["bonus_kerajinan"] = body.bonus_kerajinan
+    if body.bonus_daily_bayar is not None:
+        upd["bonus_daily_bayar"] = bool(body.bonus_daily_bayar)
     if len(upd) == 1:
         raise HTTPException(400, "No fields to update")
     await db.trips.update_one({"trip_id": trip_id}, {"$set": upd})
     doc = await db.trips.find_one({"trip_id": trip_id})
+    if doc and doc.get("bonus_daily_bayar"):
+        try:   # kreditkan checkpoint yang sudah terkirim sebelum fitur dinyalakan (idempoten)
+            await driver_incentive.backfill(db, doc)
+        except Exception as e:
+            logger.warning(f"[insentif] backfill gagal: {e}")
     return trip_doc_to_public(doc)
+
+
+# ══════════════════════════════════════════════════════
+# INSENTIF CHECKPOINT DRIVER (driver_incentive.py): antrean pembayaran, TANPA uang keluar otomatis.
+# ══════════════════════════════════════════════════════
+@api_router.get("/admin/driver-incentives", dependencies=[Depends(require_admin_pin)])
+async def list_driver_incentives(status: Optional[str] = None, q: Optional[str] = None):
+    return await driver_incentive.list_items(db, status if status in driver_incentive.STATUSES else None, q)
+
+
+@api_router.post("/admin/driver-incentives/{item_id}/bayar", dependencies=[Depends(require_admin_pin)])
+async def pay_driver_incentive(item_id: str, catatan: str = Form(""), bukti: Optional[UploadFile] = File(None)):
+    url, warn = None, None
+    if bukti is not None and bukti.filename:
+        url, warn = _save_upload_soft("driver-incentive", item_id, bukti, ALLOWED_IMG | ALLOWED_DOC)
+    try:
+        res = await driver_incentive.set_status(db, item_id, "dibayar", catatan, url)
+    except KeyError as e:
+        raise HTTPException(404, str(e.args[0]))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    res["bukti_warning"] = warn
+    return res
+
+
+@api_router.post("/admin/driver-incentives/{item_id}/tolak", dependencies=[Depends(require_admin_pin)])
+async def reject_driver_incentive(item_id: str, catatan: str = Form("")):
+    try:
+        return await driver_incentive.set_status(db, item_id, "ditolak", catatan)
+    except KeyError as e:
+        raise HTTPException(404, str(e.args[0]))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@api_router.post("/admin/driver-incentives/{item_id}/reset", dependencies=[Depends(require_admin_pin)])
+async def reset_driver_incentive(item_id: str):
+    try:
+        return await driver_incentive.set_status(db, item_id, "menunggu")
+    except KeyError as e:
+        raise HTTPException(404, str(e.args[0]))
 
 
 # ══════════════════════════════════════════════════════

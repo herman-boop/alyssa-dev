@@ -19,6 +19,7 @@ import pnl as PNL
 import ais as AIS
 import ship_master as SM
 import leg_supplier as LSP
+import driver_incentive as DI
 import invoice_payments as IP
 import expenses as EXP
 
@@ -1570,6 +1571,52 @@ async def test_leg_supplier():
     ok(kn["nama"] == "PT Samudra" and any(i.get("src") == "leg" for i in kn["items"]), "rekanan Kompensasi baru dibuat untuk supplier baru")
     ok(not any(i.get("src") == "leg" for i in ko["items"]) and any(i["id"] == "kman" for i in ko["items"]), "rekanan Kompensasi lama bersih dari item leg, data manual tetap")
 
+async def test_driver_incentive():
+    """Insentif checkpoint driver borongan: hanya trip bertanda, nominal = bonus_daily, anti dobel,
+    backfill, alur bayar/tolak/buka lagi, ringkasan per driver. Tanpa uang keluar otomatis."""
+    print("\n== insentif checkpoint driver ==")
+    db = FakeDB()
+    trip = {"trip_id": "T1", "nama_driver": "Budi", "nopol": "B 1 XY", "bonus_daily": 25000, "bonus_daily_bayar": False}
+    cp1 = {"id": "c1", "date": "2026-10-09", "url": "u1", "status": "Checkpoint 1", "alamat": "Tuban", "lat": -6.9, "lng": 112.0}
+    ok(await DI.maybe_create(db, trip, cp1) is None and not db.driver_incentives.docs, "trip tanpa tanda → tidak dicatat")
+    trip["bonus_daily_bayar"] = True
+    d = await DI.maybe_create(db, trip, cp1)
+    ok(d and d["amount"] == 25000 and d["status"] == "menunggu" and d["driver_nama"] == "Budi" and d["foto_url"] == "u1", "checkpoint dicatat 25.000, status menunggu, foto & lokasi ikut")
+    ok(await DI.maybe_create(db, trip, cp1) is None and len(db.driver_incentives.docs) == 1, "kirim ulang checkpoint yang sama → tidak dobel")
+    ok(await DI.maybe_create(db, dict(trip, bonus_daily=0), {"id": "c9", "date": "x"}) is None, "nominal 0 → tidak dicatat")
+    ok(await DI.maybe_create(db, trip, {"date": "x"}) is None, "tanpa id checkpoint → tidak dicatat")
+    trip["daily_checkpoints"] = [cp1, {"id": "c2", "date": "2026-10-10", "url": "u2"}]
+    ok(await DI.backfill(db, trip) == 1 and len(db.driver_incentives.docs) == 2, "backfill: hanya checkpoint yang belum tercatat")
+
+    r = await DI.list_items(db)
+    ok(len(r["items"]) == 2 and r["total_menunggu"] == 50000 and r["per_driver"][0] == {"driver_nama": "Budi", "count": 2, "total": 50000}, "ringkasan per driver")
+    ok(r["items"][0]["date"] == "2026-10-10", "urut terbaru dulu")
+    iid = r["items"][0]["id"]
+    for bad_fn, msg in ((lambda: DI.set_status(db, iid, "ditolak", ""), "Alasan"), (lambda: DI.set_status(db, iid, "lain"), "tidak valid")):
+        try:
+            await bad_fn(); ok(False, msg)
+        except ValueError as e:
+            ok(msg in str(e), f"ditolak: {msg}")
+    try:
+        await DI.set_status(db, "nope", "dibayar"); ok(False, "404")
+    except KeyError:
+        ok(True, "id tak ada → KeyError")
+    p = await DI.set_status(db, iid, "dibayar", "transfer BCA", "http://bukti")
+    ok(p["status"] == "dibayar" and p["paid_at"] and p["bukti_url"] == "http://bukti", "tandai dibayar + bukti")
+    try:
+        await DI.set_status(db, iid, "dibayar"); ok(False, "tak boleh dibayar dua kali")
+    except ValueError:
+        ok(True, "dibayar dua kali ditolak")
+    r = await DI.list_items(db)
+    ok(r["total_menunggu"] == 25000, "yang sudah dibayar keluar dari total menunggu")
+    ok(len((await DI.list_items(db, status="dibayar"))["items"]) == 1 and len((await DI.list_items(db, q="budi"))["items"]) == 2 and not (await DI.list_items(db, q="zzz"))["items"], "filter status & cari")
+    iid2 = r["items"][0]["id"] if r["items"][0]["status"] == "menunggu" else r["items"][1]["id"]
+    t = await DI.set_status(db, iid2, "ditolak", "foto screenshot peta")
+    ok(t["status"] == "ditolak" and (await DI.list_items(db))["total_menunggu"] == 0, "tolak dengan alasan → keluar dari total")
+    b = await DI.set_status(db, iid2, "menunggu")
+    ok(b["status"] == "menunggu" and b["catatan"] == "" and (await DI.list_items(db))["total_menunggu"] == 25000, "buka lagi → kembali menunggu")
+
+
 async def test_daily_upload_idempotent():
     """Upload checkpoint harian: kiriman ulang (client_id sama) tidak dobel, foto antre
     yang terkirim terlambat dicatat pada waktu foto diambil, aturan 1 foto/hari tetap.
@@ -1609,7 +1656,8 @@ async def test_daily_upload_idempotent():
     ns = {"db": d, "Optional": typing.Optional, "UploadFile": object, "File": lambda *a, **k: None, "Form": lambda *a, **k: None,
           "HTTPException": _HTTP, "uuid": __import__("uuid"), "datetime": datetime, "timezone": timezone, "timedelta": timedelta,
           "WIB": WIB_, "today_wib": lambda: datetime.now(WIB_).strftime("%Y-%m-%d"),
-          "_save_upload": _save, "ALLOWED_IMG": {".jpg"}, "trip_doc_to_public": _pub}
+          "_save_upload": _save, "ALLOWED_IMG": {".jpg"}, "trip_doc_to_public": _pub,
+          "driver_incentive": DI, "logger": __import__("logging").getLogger("t")}   # DB palsu tanpa koleksi insentif → gagal dicatat, upload tetap sukses
     exec(code, ns)
     up = ns["upload_daily_photo"]
     today = datetime.now(WIB_).strftime("%Y-%m-%d")
@@ -1694,7 +1742,7 @@ async def test_bastk_upload_idempotent():
 
 
 async def main():
-    for t in (test_leg_supplier, test_bastk_upload_idempotent, test_daily_upload_idempotent, test_ship_master, test_sync_single_unit_vehicle, test_edit_invoice_lines, test_selisih_ringkasan_auth, test_riwayat_clear, test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
+    for t in (test_driver_incentive, test_leg_supplier, test_bastk_upload_idempotent, test_daily_upload_idempotent, test_ship_master, test_sync_single_unit_vehicle, test_edit_invoice_lines, test_selisih_ringkasan_auth, test_riwayat_clear, test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,
