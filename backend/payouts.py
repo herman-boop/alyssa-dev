@@ -26,6 +26,8 @@ import cashbank as CB
 COLL = "payout_logs"
 BANKS = "driver_bank_accounts"
 INQUIRY_TTL = timedelta(minutes=15)
+POLL_TRIES = 5          # cek rekening Flip bersifat 2 tahap: jawaban pertama biasanya PENDING; tanya ulang sampai selesai
+POLL_SLEEP = 2.5        # detik antar percobaan (total tunggu maks ±12 detik)
 
 
 def _now():
@@ -97,15 +99,23 @@ async def inquiry(db, http, driver_nama, bank_code, account_number):
     await _log(db, doc)
     try:
         r = await _run(F.inquiry, http, bank_code, acc)
+        tries = 0
+        while r["status"] in ("PENDING", "") and not r["account_holder"] and tries < POLL_TRIES:
+            await asyncio.sleep(POLL_SLEEP)       # Flip: permintaan yang sama diulang -> hasil akhir dari cache
+            r = await _run(F.inquiry, http, bank_code, acc)
+            tries += 1
     except F.FlipError as e:
         await _update(db, doc["id"], {"status": "gagal", "error": str(e)[:200]})
         raise ValueError(f"Cek rekening gagal: {e}")
     except F.FlipUnknown as e:
         await _update(db, doc["id"], {"status": "gagal", "error": "Flip tidak merespons: " + str(e)})
         raise ValueError("Cek rekening gagal: Flip tidak merespons, coba lagi")
+    if r["status"] == "PENDING" and not r["account_holder"]:
+        await _update(db, doc["id"], {"status": "gagal", "error": "Flip masih memproses (PENDING). Coba Cek Rekening lagi beberapa detik lagi."})
+        raise ValueError("Flip masih memproses cek rekening. Tunggu sebentar, lalu tap Cek Rekening lagi.")
     if r["status"] != F.INQUIRY_OK or not r["account_holder"]:
-        await _update(db, doc["id"], {"status": "gagal", "error": f"Rekening belum terverifikasi (status {r['status'] or '-'})"})
-        raise ValueError("Rekening tidak valid atau belum bisa diverifikasi. Cek kode bank dan nomor rekening.")
+        await _update(db, doc["id"], {"status": "gagal", "error": f"Rekening tidak lolos verifikasi (status Flip: {r['status'] or '-'})"})
+        raise ValueError(f"Rekening tidak valid atau tidak lolos verifikasi (status Flip: {r['status'] or '-'}). Cek kode bank dan nomor rekening.")
     await _update(db, doc["id"], {"status": "berhasil", "account_holder": r["account_holder"]})
     await db[BANKS].update_one({"key": _norm(driver_nama)}, {"$set": {"key": _norm(driver_nama), "driver_nama": driver_nama.strip(),
         "bank_code": bank_code, "account_number": acc, "account_holder": r["account_holder"], "verified_at": _iso()}}, upsert=True)
