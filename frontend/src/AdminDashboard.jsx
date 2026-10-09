@@ -1,4 +1,5 @@
 /* eslint-disable */
+import HistoryLegButton from "./HistoryLegSheet";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import axios from "axios";
@@ -2499,6 +2500,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
 
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
           <div style={{ fontSize: 10.5, color: "var(--text-dim)", textAlign: "right" }}>{fmtDate(order.created_at)}</div>
+          {order.trip_id ? <HistoryLegButton order={order} /> : null}
           <button
             onClick={copyPoText}
             title="Salin buat PO Jurnal Mekari (Model · Nopol · Rangka · Rute)"
