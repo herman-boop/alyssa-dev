@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import axios from "axios";
-import { calcTotals, historyOf, isPdf, rp, toInt } from "./legSupplierCalc";
+import { calcTotals, historyOf, isPdf, rp, sisaText, toInt } from "./legSupplierCalc";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "";
 const API = `${BACKEND_URL}/api`;
@@ -277,13 +277,16 @@ export default function LegSupplierModal({ order, headers, onClose }) {
                     </div>
                   </section>
 
-                  <section aria-label="Ringkasan tagihan" className="rounded-xl border-2 border-[#1D4ED8] bg-[#EFF6FF] px-4 py-3" data-testid="ls-summary">
+                  <section aria-label="Ringkasan kompensasi" className="rounded-xl border-2 border-[#1D4ED8] bg-[#EFF6FF] px-4 py-3" data-testid="ls-summary">
+                    <p className="pb-1 text-xs font-black uppercase tracking-wide text-[#1D4ED8]">Kewajiban Alyssa → {sup.nama || "Supplier"}</p>
                     <Stat k="Harga Deal" v={rp(totals.harga_deal)} />
                     <Stat k="Biaya Tambahan" v={rp(totals.biaya_tambahan)} />
-                    <Stat k="Kompensasi" v={rp(totals.kompensasi)} />
-                    <Stat k="Total Tagihan" v={rp(totals.total_tagihan)} strong />
-                    <Stat k="Total Transfer" v={rp(totals.total_transfer)} />
-                    <Stat k="Outstanding" v={rp(totals.outstanding)} strong accent />
+                    <Stat k="Total Kewajiban Alyssa" v={rp(totals.kewajiban_alyssa)} strong />
+                    <Stat k="Total Transfer (dibayar)" v={rp(totals.total_transfer)} />
+                    <p className="pb-1 pt-3 text-xs font-black uppercase tracking-wide text-[#1D4ED8]">Kewajiban {sup.nama || "Supplier"} → Alyssa</p>
+                    <Stat k="Kompensasi (memotong)" v={rp(totals.kompensasi)} strong />
+                    <div className="mt-3 rounded-lg border-2 border-[#1D4ED8] bg-white px-3 py-2.5 text-sm font-extrabold text-[#0B1B3A]" data-testid="ls-sisa">{sisaText(totals, sup.nama)}</div>
+                    <p className="mt-2 text-xs font-semibold text-[#475569]">Sisa = (Kewajiban Alyssa − Transfer) − Kompensasi. Sama dengan Ringkasan Kompensasi.</p>
                   </section>
 
                   <section aria-label="Pembayaran" className="rounded-xl border border-[#BFDBFE] p-4">

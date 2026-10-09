@@ -7068,7 +7068,7 @@ async def delete_supplier_job_tambahan(supplier_id: str, job_id: str, tambahan_i
 # Tiap simpan disinkron ke job Departemen Supplier (supplier_profiles.jobs).
 # ══════════════════════════════════════════════════════════════════════════
 def _leg_supplier_helpers():
-    return {"gen_id": _gen_supplier_id, "today": today_wib,
+    return {"gen_id": _gen_supplier_id, "gen_komp_id": _gen_kompensasi_id, "today": today_wib,
             "ensure_projects": _ensure_supplier_projects, "active_project": _get_or_create_active_project}
 
 

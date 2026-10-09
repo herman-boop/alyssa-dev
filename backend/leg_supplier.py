@@ -9,16 +9,19 @@ Koleksi `leg_supplier` (1 dokumen per leg trip, key "<trip_id>:<route_leg_id>"):
   transfers[]           {id,amount,tanggal,catatan,bukti_url}
   dept {supplier_id, job_id}   tautan ke job di Departemen Supplier (supplier_profiles)
 
-RUMUS (sesuai keputusan pemilik; Kompensasi MENAMBAH tagihan):
-  Total Tagihan = Harga Deal + Biaya Tambahan + Kompensasi
-  Outstanding   = Total Tagihan - Total Transfer
+RUMUS = sistem Kompensasi Hutang Piutang (netting 2 arah, sama dengan Ringkasan Kompensasi):
+  Kewajiban Alyssa -> Supplier  = Harga Deal + Biaya Tambahan
+  Kewajiban Supplier -> Alyssa  = Kompensasi
+  Sisa Alyssa    = Kewajiban Alyssa -> Supplier - Total Transfer
+  Outstanding    = Sisa Alyssa - Kompensasi   (positif: Alyssa masih bayar; negatif: Supplier wajib bayar ke Alyssa)
 
-SINKRON ke Departemen Supplier (additif, tidak mengubah logika lama): tiap simpan,
-satu job di supplier_profiles[supplier].jobs (ditandai `leg_ref`) diperbarui:
-  total_harga = Harga Deal; tambahan = biaya tambahan + kompensasi (src="leg");
-  payments = transfer (src="leg"). Dengan begitu rumus lama
-  (deal + tambahan - payments) menghasilkan angka yang SAMA dengan modul ini.
-Item job yang bukan dari leg (src != "leg") tidak pernah disentuh.
+SINKRON (additif, logika lama tidak diubah; hanya item bertanda src="leg" yang dikelola):
+  1. Departemen Supplier: satu job di supplier_profiles[supplier].jobs (ditandai `leg_ref`):
+     total_harga = Harga Deal; tambahan = biaya tambahan; payments = transfer + kompensasi
+     (kompensasi = payment tipe "kompensasi"). Rumus lama _supplier_job_totals -> sisa SAMA.
+  2. Kompensasi Hutang Piutang (kompensasi_profiles[pihak] by nama supplier):
+     items kita_ke_mereka = Harga Deal + biaya tambahan; items mereka_ke_kita = kompensasi;
+     payments kita_bayar_mereka = transfer. _kompensasi_totals -> sisa = -Outstanding.
 """
 import re
 import uuid
@@ -83,10 +86,14 @@ def compute(rec):
     extras = sum(int(x.get("amount") or 0) for x in rec.get("extras") or [])
     komp = sum(int(x.get("amount") or 0) for x in rec.get("kompensasi") or [])
     trf = sum(int(x.get("amount") or 0) for x in rec.get("transfers") or [])
-    total = deal + extras + komp
+    kita = deal + extras                 # kewajiban Alyssa -> Supplier
+    sisa_kita = kita - trf               # setelah dikurangi transfer
+    out = sisa_kita - komp               # setelah dipotong kompensasi (kewajiban Supplier -> Alyssa)
     return {"harga_deal": deal, "biaya_tambahan": extras, "kompensasi": komp,
-            "total_tagihan": total, "total_transfer": trf, "outstanding": total - trf,
-            "hpp_leg": deal + extras}
+            "kewajiban_alyssa": kita, "kewajiban_supplier": komp, "total_tagihan": kita,
+            "total_transfer": trf, "sisa_alyssa": sisa_kita, "outstanding": out,
+            "arah": "alyssa_bayar" if out > 0 else ("supplier_bayar" if out < 0 else "lunas"),
+            "hpp_leg": kita}
 
 
 def blank(trip_id, leg_id):
@@ -138,12 +145,14 @@ def _leg_items(rec):
     """Item sisi Departemen Supplier yang berasal dari leg ini."""
     tambahan = [{"id": "leg-" + x["id"], "label": x["label"], "amount": int(x["amount"]), "src": "leg",
                  "created_at": rec.get("updated_at") or datetime.utcnow().isoformat()} for x in rec.get("extras") or []]
-    tambahan += [{"id": "leg-" + x["id"], "label": ("Kompensasi: " + x["catatan"]) if x.get("catatan") else "Kompensasi",
-                  "amount": int(x["amount"]), "src": "leg", "kind": "kompensasi", "bukti_url": x.get("bukti_url"),
-                  "created_at": rec.get("updated_at") or datetime.utcnow().isoformat()} for x in rec.get("kompensasi") or []]
     payments = [{"id": "leg-" + x["id"], "amount": int(x["amount"]), "catatan": x.get("catatan", ""),
                  "bukti_url": x.get("bukti_url"), "tanggal": x.get("tanggal"), "tipe": "transfer", "src": "leg"}
                 for x in rec.get("transfers") or []]
+    # kompensasi = pembayaran non-tunai (memotong sisa) -> persis cara lama Departemen Supplier
+    payments += [{"id": "leg-" + x["id"], "amount": int(x["amount"]), "catatan": x.get("catatan", ""),
+                  "bukti_url": x.get("bukti_url"), "tanggal": x.get("tanggal"), "tipe": "kompensasi", "src": "leg",
+                  "kompensasi_unit": {"vehicle_type": "", "no_unit": "", "asal_kota": "", "tujuan_kota": ""}}
+                 for x in rec.get("kompensasi") or []]
     return tambahan, payments
 
 
@@ -206,6 +215,66 @@ async def sync_to_dept(db, rec, ctx, h):
     return rec
 
 
+async def _komp_pihak(db, nama, no_hp, gen_id):
+    want = _norm(nama)
+    async for s in db.kompensasi_profiles.find({}, {"id": 1, "nama": 1}):
+        if _norm(s.get("nama")) == want:
+            return await db.kompensasi_profiles.find_one({"id": s["id"]}, {"_id": 0})
+    doc = {"id": gen_id(), "nama": nama, "no_hp": no_hp or "", "catatan": "",
+           "created_at": datetime.utcnow().isoformat(), "items": []}
+    await db.kompensasi_profiles.insert_one(doc)
+    return dict(doc)
+
+
+def _strip_leg(doc, ref):
+    doc["items"] = [i for i in doc.get("items") or [] if not (i.get("src") == "leg" and i.get("leg_ref") == ref)]
+    doc["payments"] = [p for p in doc.get("payments") or [] if not (p.get("src") == "leg" and p.get("leg_ref") == ref)]
+    return doc
+
+
+async def sync_to_kompensasi(db, rec, ctx, h):
+    """Dorong data leg ke modul Kompensasi Hutang Piutang (netting 2 arah)."""
+    sup = rec["supplier"]
+    if not sup.get("nama"):
+        return rec
+    ref = rec["key"]
+    old = (rec.get("komp") or {}).get("pihak_id")
+    pihak = await _komp_pihak(db, sup["nama"], sup.get("no_hp"), h["gen_komp_id"])
+    if old and old != pihak["id"]:
+        op = await db.kompensasi_profiles.find_one({"id": old}, {"_id": 0})
+        if op:
+            _strip_leg(op, ref)
+            await db.kompensasi_profiles.update_one({"id": old}, {"$set": {"items": op["items"], "payments": op["payments"]}})
+    _strip_leg(pihak, ref)
+    rute = (ctx.get("asal") or "") + " → " + (ctx.get("tujuan") or "")
+    base = {"vehicle_type": ctx.get("vehicle_type") or "", "no_unit": (ctx.get("nopol") or "").upper(),
+            "asal_kota": ctx.get("asal") or "", "tujuan_kota": ctx.get("tujuan") or "", "src": "leg", "leg_ref": ref}
+    today = h["today"]()
+    items = []
+    if int(rec.get("harga_deal") or 0) > 0:
+        items.append(dict(base, id="leg-deal-" + rec["route_leg_id"][:8], arah="kita_ke_mereka", tanggal=today,
+                          keterangan="Harga deal leg " + rute, nilai=int(rec["harga_deal"]), catatan="", bukti_url=None))
+    for x in rec.get("extras") or []:
+        items.append(dict(base, id="leg-" + x["id"], arah="kita_ke_mereka", tanggal=today,
+                          keterangan=x["label"], nilai=int(x["amount"]), catatan="", bukti_url=None))
+    for x in rec.get("kompensasi") or []:
+        items.append(dict(base, id="leg-" + x["id"], arah="mereka_ke_kita", tanggal=x.get("tanggal") or today,
+                          keterangan="Kompensasi" + ((": " + x["catatan"]) if x.get("catatan") else ""),
+                          nilai=int(x["amount"]), catatan=x.get("catatan", ""), bukti_url=x.get("bukti_url")))
+    pays = [{"id": "leg-" + x["id"], "arah": "kita_bayar_mereka", "jumlah": int(x["amount"]), "tanggal": x.get("tanggal"),
+             "catatan": x.get("catatan", ""), "bukti_url": x.get("bukti_url"), "src": "leg", "leg_ref": ref,
+             "created_at": rec.get("updated_at") or datetime.utcnow().isoformat()} for x in rec.get("transfers") or []]
+    await db.kompensasi_profiles.update_one({"id": pihak["id"]}, {"$set": {
+        "items": (pihak.get("items") or []) + items, "payments": (pihak.get("payments") or []) + pays}})
+    rec["komp"] = {"pihak_id": pihak["id"]}
+    return rec
+
+
+async def _sync_all(db, rec, ctx, h):
+    rec = await sync_to_dept(db, rec, ctx, h)
+    return await sync_to_kompensasi(db, rec, ctx, h)
+
+
 # ── Operasi ─────────────────────────────────────────────────────────────────
 async def save_profile(db, trip_id, leg_id, payload, ctx, h):
     rec = await get(db, trip_id, leg_id)
@@ -213,7 +282,7 @@ async def save_profile(db, trip_id, leg_id, payload, ctx, h):
     rec["harga_deal"] = _money(payload.get("harga_deal"), "Harga deal")
     rec["extras"] = clean_extras(payload.get("extras"))
     rec["updated_at"] = datetime.utcnow().isoformat()
-    rec = await sync_to_dept(db, rec, ctx, h)
+    rec = await _sync_all(db, rec, ctx, h)
     return view(await _save(db, rec))
 
 
@@ -233,7 +302,7 @@ async def add_payment(db, trip_id, leg_id, tipe, amount, tanggal, catatan, bukti
             "bukti_nama": _s(bukti_nama, 120) if bukti_url else ""}
     rec["transfers" if tipe == "transfer" else "kompensasi"].append(item)
     rec["updated_at"] = datetime.utcnow().isoformat()
-    rec = await sync_to_dept(db, rec, ctx, h)
+    rec = await _sync_all(db, rec, ctx, h)
     return view(await _save(db, rec))
 
 
@@ -245,5 +314,5 @@ async def delete_payment(db, trip_id, leg_id, pid, ctx, h):
     if len(rec["transfers"]) + len(rec["kompensasi"]) == n0:
         raise KeyError("Pembayaran tidak ditemukan")
     rec["updated_at"] = datetime.utcnow().isoformat()
-    rec = await sync_to_dept(db, rec, ctx, h)
+    rec = await _sync_all(db, rec, ctx, h)
     return view(await _save(db, rec))
