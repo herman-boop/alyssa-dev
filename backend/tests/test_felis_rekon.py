@@ -23,6 +23,7 @@ import driver_incentive as DI
 import flip_client as FL
 import payouts as PO
 import cashbank as CB
+import task_rules as TR
 import invoice_payments as IP
 import expenses as EXP
 
@@ -1959,8 +1960,76 @@ async def test_bastk_upload_idempotent():
     ok(len(r["handover"]["bastk"]) == 6, "kiriman ulang saat sudah penuh tetap sukses (bukan error)")
 
 
+async def test_task_driver_tujuan():
+    """Driver Tujuan: terima mobil 1 jepret, 1 checkpoint/hari jam 08-16 (zona HP driver), GPS+foto wajib,
+    batas hari dihitung sejak mobil diterima."""
+    from datetime import datetime, timezone, timedelta
+    U = lambda *a: datetime(*a, tzinfo=timezone.utc).isoformat()
+    ok(TR.tz_offset(480) == 480 and TR.tz_offset(0) == 420 and TR.tz_offset("x") == 420 and TR.tz_offset(None) == 420, "offset zona: WIB/WITA/WIT saja, selain itu WIB")
+    # WITA = UTC+8: 01:00 UTC = 09:00 (buka) ; 23:30 UTC (9 Okt) = 07:30 (belum buka) ; 08:00 UTC = 16:00 (tutup)
+    now_ok, now_pagi, now_sore = U(2026, 10, 10, 1, 0), U(2026, 10, 9, 23, 30), U(2026, 10, 10, 8, 0)
+    c = lambda *a: TR.cek_checkpoint(*a)
+    ok(c(TR.JENIS_TERIMA, now_pagi, 480, [], True, True) is None, "terima mobil boleh kapan saja (di luar jam checkpoint)")
+    ok(c(TR.JENIS_TERIMA, now_ok, 480, [], False, True)[0] == 400, "tanpa GPS ditolak")
+    ok(c(TR.JENIS_TERIMA, now_ok, 480, [], True, False)[0] == 400, "tanpa foto ditolak")
+    terima = [{"jenis": TR.JENIS_TERIMA, "ts": U(2026, 10, 9, 5, 0)}]
+    ok(c(TR.JENIS_TERIMA, now_ok, 480, terima, True, True)[0] == 409, "terima mobil 2x ditolak")
+    ok(c(TR.JENIS_HARIAN, now_ok, 480, [], True, True)[0] == 409, "checkpoint harian sebelum terima mobil ditolak")
+    ok(c(TR.JENIS_HARIAN, now_pagi, 480, terima, True, True)[0] == 403, "07.30 WITA: di luar jam 08-16 ditolak")
+    ok(c(TR.JENIS_HARIAN, now_sore, 480, terima, True, True)[0] == 403, "16.00 WITA: di luar jam ditolak")
+    ok(c(TR.JENIS_HARIAN, now_ok, 480, terima, True, True) is None, "09.00 WITA: boleh")
+    ok(c(TR.JENIS_HARIAN, U(2026, 10, 10, 7, 59), 480, terima, True, True) is None, "15.59 WITA: masih boleh")
+    sudah = terima + [{"jenis": TR.JENIS_HARIAN, "ts": U(2026, 10, 10, 1, 5)}]
+    ok(c(TR.JENIS_HARIAN, U(2026, 10, 10, 6, 0), 480, sudah, True, True)[0] == 409, "checkpoint ke-2 di hari yang sama ditolak")
+    ok(c(TR.JENIS_HARIAN, U(2026, 10, 11, 1, 0), 480, sudah, True, True) is None, "besoknya boleh lagi")
+    ok(c("Lainnya", now_ok, 480, terima, True, True)[0] == 403, "jenis lain ditolak")
+    # hari dihitung di zona HP, bukan UTC: 17.30 UTC tgl 10 = 01.30 WITA tgl 11 (di luar jam), 23.30 UTC = 07.30 WITA
+    ok(c(TR.JENIS_HARIAN, U(2026, 10, 10, 17, 30), 480, terima, True, True)[0] == 403, "tengah malam WITA bukan jam buka")
+
+    # batas hari
+    t = {"checkpoints": terima, "batas_hari": 4, "status": "dikerjakan"}
+    b = TR.batas_info(t, datetime(2026, 10, 10, 3, 0, tzinfo=timezone.utc))
+    ok(b["batas_tanggal"] == "2026-10-13" and b["sisa_hari"] == 3 and not b["terlambat"], "diterima 9 Okt + 4 hari = 13 Okt, sisa 3 hari")
+    b = TR.batas_info(t, datetime(2026, 10, 14, 3, 0, tzinfo=timezone.utc))
+    ok(b["terlambat"] and b["sisa_hari"] == -1, "lewat batas → terlambat")
+    b = TR.batas_info({**t, "status": "selesai"}, datetime(2026, 10, 14, 3, 0, tzinfo=timezone.utc))
+    ok(not b["terlambat"], "tugas selesai tidak dianggap terlambat")
+    b = TR.batas_info({"checkpoints": [], "batas_hari": 4}, datetime(2026, 10, 10, tzinfo=timezone.utc))
+    ok(b["batas_tanggal"] is None and not b["terlambat"] and b["batas_hari"] == 4, "belum diterima: batas belum dihitung")
+    ok(TR.batas_info({"checkpoints": terima})["batas_hari"] is None, "tanpa batas hari: tidak ada batas")
+    ok(TR.batas_info({"checkpoints": terima, "batas_hari": "abc"})["batas_hari"] is None, "batas hari ngawur diabaikan")
+
+    # konfigurasi peran + tampilan publik, diambil dari server.py asli
+    import ast
+    src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "server.py")).read()
+    tree = ast.parse(src)
+    wanted = {"_role_cfg", "_leg_task_public_view", "_leg_task_admin_view"}
+    ns = {"TR": TR, "DEFAULT_TIPE_TUGAS": "driver_asal"}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(getattr(x, "id", "") in ("ROLE_CONFIG", "DEFAULT_TIPE_TUGAS") for x in node.targets):
+            exec(compile(ast.Module([node], []), "server", "exec"), ns)
+        if isinstance(node, ast.FunctionDef) and node.name in wanted:
+            exec(compile(ast.Module([node], []), "server", "exec"), ns)
+    cfg = ns["ROLE_CONFIG"]["driver_tujuan"]
+    ok(cfg["simple"] and cfg["tabs"] == ["checkpoint", "foto", "dokumen"], "Driver Tujuan: menu Checkpoint, Foto, Dokumen")
+    ok(len(cfg["foto_instruksi"]) == 2 and cfg["checkpoint_types"] == [TR.JENIS_TERIMA, TR.JENIS_HARIAN], "foto tujuan cuma 2 & checkpoint cuma 2 jenis")
+    ok(not ns["ROLE_CONFIG"]["driver_asal"].get("simple"), "Driver Asal tidak berubah")
+    lama = {"token": "t", "tipe_tugas": "driver_tujuan", "tabs": ["foto", "checkpoint", "scan"], "foto_instruksi": ["a"] * 7,
+            "allowed_checkpoint_types": ["Lainnya"], "checkpoints": terima, "batas_hari": 4, "status": "dikerjakan"}
+    v = ns["_leg_task_public_view"](lama)
+    ok(v["tabs"] == ["checkpoint", "foto", "dokumen"] and len(v["foto_instruksi"]) == 2 and v["simple"], "link Driver Tujuan LAMA ikut tampilan baru")
+    ok(v["allowed_checkpoint_types"] == [TR.JENIS_TERIMA, TR.JENIS_HARIAN] and v["cp_harian"]["jam_mulai"] == 8 and v["cp_harian"]["jam_akhir"] == 16, "jenis checkpoint & jam dari server")
+    ok(v["batas_tanggal"] == "2026-10-13" and v["diterima_ts"], "tampilan publik membawa batas tanggal")
+    va = ns["_leg_task_public_view"]({"token": "t", "tipe_tugas": "driver_asal", "tabs": ["foto"], "status": "dikerjakan"})
+    ok(va["simple"] is False and va["cp_harian"] is None and "batas_tanggal" not in va, "peran lain: tanpa aturan simple")
+    import json as _j
+    ok("harga" not in _j.dumps(v).lower() and "hpp" not in _j.dumps(v).lower(), "tampilan publik tetap tanpa harga/HPP")
+    ad = ns["_leg_task_admin_view"]({"token": "t", "tipe_tugas": "driver_tujuan", "checkpoints": [{"jenis": TR.JENIS_TERIMA, "ts": U(2020, 1, 1, 5, 0)}], "batas_hari": 1, "status": "dikerjakan", "_id": 1})
+    ok("_id" not in ad and ad["terlambat"] is True, "admin view: terlambat kalau lewat batas")
+
+
 async def main():
-    for t in (test_cashbank_dan_hpp, test_payouts_flip, test_driver_incentive, test_leg_supplier, test_bastk_upload_idempotent, test_daily_upload_idempotent, test_ship_master, test_sync_single_unit_vehicle, test_edit_invoice_lines, test_selisih_ringkasan_auth, test_riwayat_clear, test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
+    for t in (test_task_driver_tujuan, test_cashbank_dan_hpp, test_payouts_flip, test_driver_incentive, test_leg_supplier, test_bastk_upload_idempotent, test_daily_upload_idempotent, test_ship_master, test_sync_single_unit_vehicle, test_edit_invoice_lines, test_selisih_ringkasan_auth, test_riwayat_clear, test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,

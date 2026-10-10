@@ -18,6 +18,7 @@ import driver_incentive  # insentif per checkpoint driver borongan (antrean baya
 import flip_client  # adapter Flip (transfer ke rekening driver)
 import payouts  # transfer driver lewat Flip dengan pengaman (inquiry wajib, anti dobel, payout_logs)
 import cashbank  # Kas & Bank: akun + mutasi + saldo
+import task_rules as TR  # aturan tugas Driver Tujuan (1 jepret, 1 checkpoint/hari, batas hari)
 import ais  # modul AIS (posisi kapal) — provider-agnostic, aman tanpa key
 import rekon_sync  # integrasi pembayaran supplier dari Audit Rekon (isolated)
 import supplier_faktur  # pisah unit ke faktur (projek) baru — logika murni
@@ -3789,11 +3790,12 @@ ROLE_CONFIG = {
     },
     "driver_tujuan": {
         "label": "Driver Tujuan", "petugas_tipe": "Driver", "album_key": "tujuan",
-        "tabs": ["foto", "checkpoint", "scan"], "needs_penerima": True,
-        "foto_title": "Tambah Foto Tujuan",
-        "foto_instruksi": ["Depan kendaraan", "Belakang kendaraan", "Sisi kanan", "Sisi kiri",
-                           "Speedometer / odometer", "Kendaraan sampai tujuan", "Serah terima kepada penerima"],
-        "checkpoint_types": ["Unit diterima", "Berangkat dari pelabuhan/transit", "Dalam perjalanan", "Sampai tujuan", "Serah terima selesai", "Lainnya"],
+        # Mode simple: terima mobil = 1 jepret, lalu 1 checkpoint/hari jam 08-16 (lihat task_rules.py).
+        "simple": True,
+        "tabs": ["checkpoint", "foto", "dokumen"], "needs_penerima": True,
+        "foto_title": "Foto Tujuan",
+        "foto_instruksi": ["Kendaraan sampai tujuan", "Serah terima kepada penerima"],
+        "checkpoint_types": ["Unit diterima", "Dalam perjalanan"],
         "document_types": ["BASTK akhir", "PoD", "Surat Jalan", "Dokumen akhir"],
     },
     "driver_full": {
@@ -3915,7 +3917,25 @@ async def upsert_petugas(body: PetugasBody):
 def _leg_task_admin_view(t: dict) -> dict:
     """View lengkap buat admin (semua field task)."""
     t = dict(t); t.pop("_id", None)
+    if _role_cfg(t.get("tipe_tugas")).get("simple"):
+        t.update(TR.batas_info(t))
     return t
+
+
+async def _task_view(t: dict) -> dict:
+    """View publik + batas hari yang diisi admin di leg (dibaca dari trip, jadi bisa diubah tanpa buat link baru)."""
+    if _role_cfg(t.get("tipe_tugas")).get("simple"):
+        try:
+            trip = await db.trips.find_one({"trip_id": t.get("trip_id")}, {"legs": 1})
+            legs = (trip or {}).get("legs") or []
+            leg = next((l for l in legs if t.get("route_leg_id") and l.get("route_leg_id") == t.get("route_leg_id")), None)
+            if leg is None and isinstance(t.get("leg_index"), int) and 0 <= t["leg_index"] < len(legs):
+                leg = legs[t["leg_index"]]
+            if leg and leg.get("batas_hari") not in (None, ""):
+                t = {**t, "batas_hari": leg.get("batas_hari")}
+        except Exception as e:
+            logger.warning(f"[task] gagal baca batas_hari leg: {e}")
+    return _leg_task_public_view(t)
 
 
 def _leg_task_public_view(t: dict) -> dict:
@@ -3933,11 +3953,16 @@ def _leg_task_public_view(t: dict) -> dict:
         "kapal": t.get("kapal", ""), "voyage": t.get("voyage", ""),
         "instruksi": t.get("instruksi", ""),
         # config peran (buat render tab/instruksi/kamera)
-        "tabs": t.get("tabs", cfg["tabs"]),
-        "foto_title": t.get("foto_title", cfg["foto_title"]),
-        "foto_instruksi": t.get("foto_instruksi", cfg["foto_instruksi"]),
-        "allowed_checkpoint_types": t.get("allowed_checkpoint_types", cfg["checkpoint_types"]),
+        # peran "simple" (Driver Tujuan) selalu pakai config terbaru, link lama ikut berubah
+        "tabs": cfg["tabs"] if cfg.get("simple") else t.get("tabs", cfg["tabs"]),
+        "foto_title": cfg["foto_title"] if cfg.get("simple") else t.get("foto_title", cfg["foto_title"]),
+        "foto_instruksi": cfg["foto_instruksi"] if cfg.get("simple") else t.get("foto_instruksi", cfg["foto_instruksi"]),
+        "allowed_checkpoint_types": cfg["checkpoint_types"] if cfg.get("simple") else t.get("allowed_checkpoint_types", cfg["checkpoint_types"]),
         "allowed_document_types": t.get("allowed_document_types", cfg["document_types"]),
+        "simple": bool(cfg.get("simple")),
+        "cp_harian": ({"jam_mulai": TR.CP_JAM_MULAI, "jam_akhir": TR.CP_JAM_AKHIR, "jenis": TR.JENIS_HARIAN, "jenis_terima": TR.JENIS_TERIMA}
+                      if cfg.get("simple") else None),
+        **(TR.batas_info(t) if cfg.get("simple") else {}),
         "needs_penerima": bool(t.get("needs_penerima")),
         "needs_info_kapal": bool(t.get("needs_info_kapal")),
         "units": t.get("units", []),            # snapshot aman: nopol/tipe/rangka aja
@@ -3967,6 +3992,7 @@ class LegTaskBody(BaseModel):
     checklist: Optional[List[str]] = None       # label list; kalau None → default per jenis
     units: Optional[List[Dict[str, Any]]] = None  # [{nopol, vehicle_type, no_rangka}]
     unit_ids: Optional[List[str]] = None
+    batas_hari: Optional[int] = None            # Driver Tujuan: estimasi maksimal hari sejak mobil diterima
 
 
 @api_router.post("/admin/trips/{trip_id}/legs/{leg_index}/task-link", dependencies=[Depends(require_admin_pin)])
@@ -4009,6 +4035,7 @@ async def create_leg_task_link(trip_id: str, leg_index: int, body: LegTaskBody):
         "kapal": (body.kapal or "").strip(), "voyage": (body.voyage or "").strip(),
         "instruksi": (body.instruksi or "").strip(), "checklist": checklist,
         "units": units, "unit_ids": body.unit_ids or [],
+        "batas_hari": (body.batas_hari if body.batas_hari and 0 < body.batas_hari <= 60 else None),
         # scope + config peran (di-enforce di endpoint publik)
         "album_key": cfg["album_key"], "album_stage": cfg["album_key"],
         "tabs": cfg["tabs"], "foto_title": cfg["foto_title"], "foto_instruksi": cfg["foto_instruksi"],
@@ -4031,7 +4058,15 @@ async def create_leg_task_link(trip_id: str, leg_index: int, body: LegTaskBody):
 async def list_leg_tasks(trip_id: str):
     """Daftar task per-trip buat kartu di admin."""
     items = []
+    trip = await db.trips.find_one({"trip_id": trip_id}, {"legs": 1})
+    legs = (trip or {}).get("legs") or []
     async for t in db.leg_tasks.find({"trip_id": trip_id}).sort("leg_index", 1):
+        # batas hari yang diisi admin di leg selalu menang (bisa diubah tanpa buat link baru)
+        leg = next((l for l in legs if t.get("route_leg_id") and l.get("route_leg_id") == t.get("route_leg_id")), None)
+        if leg is None and isinstance(t.get("leg_index"), int) and 0 <= t["leg_index"] < len(legs):
+            leg = legs[t["leg_index"]]
+        if leg and leg.get("batas_hari") not in (None, ""):
+            t = {**t, "batas_hari": leg.get("batas_hari")}
         items.append(_leg_task_admin_view(t))
     return {"items": items}
 
@@ -4299,7 +4334,7 @@ async def public_get_task(token: str):
         now = datetime.now(timezone.utc).isoformat()
         await db.leg_tasks.update_one({"token": token}, {"$set": {"status": "sudah_dibuka", "opened_at": now}})
         t["status"] = "sudah_dibuka"
-    return _leg_task_public_view(t)
+    return await _task_view(t)
 
 
 @api_router.post("/public/task/{token}/upload")
@@ -4329,7 +4364,7 @@ async def public_task_upload(
         "$set": {"updated_at": now},
     })
     t = await db.leg_tasks.find_one({"token": token})
-    return _leg_task_public_view(t)
+    return await _task_view(t)
 
 
 @api_router.delete("/public/task/{token}/upload/{photo_id}")
@@ -4364,7 +4399,7 @@ async def public_task_delete_photo(token: str, photo_id: str):
     if url:
         await db.trips.update_one({"trip_id": trip_id}, {"$pull": {f"album.{stage}": {"url": url}}})
     t = await db.leg_tasks.find_one({"token": token})
-    return _leg_task_public_view(t)
+    return await _task_view(t)
 
 
 @api_router.post("/public/task/{token}/checkpoint")
@@ -4376,20 +4411,28 @@ async def public_task_checkpoint(
     lng: Optional[float] = Form(None),
     acc: Optional[float] = Form(None),
     alamat: str = Form(""),
+    tz_offset_min: Optional[int] = Form(None),
     foto: Optional[UploadFile] = File(None),
 ):
     """CHECKPOINT: histori perjalanan ber-GPS (terpisah dari album). Jenis divalidasi
-    ∈ allowed_checkpoint_types token → di luar itu 403. Foto opsional."""
+    ∈ allowed_checkpoint_types token → di luar itu 403. Foto opsional.
+    Peran "simple" (Driver Tujuan): GPS + foto wajib, terima mobil 1x, lalu 1 checkpoint/hari jam 08-16."""
     t = await db.leg_tasks.find_one({"token": token})
     if not t:
         raise HTTPException(404, "Link tugas tidak ditemukan")
     if t.get("disabled"):
         raise HTTPException(410, "Link tugas sudah dinonaktifkan")
-    allowed = t.get("allowed_checkpoint_types") or _role_cfg(t.get("tipe_tugas"))["checkpoint_types"]
+    cfg_t = _role_cfg(t.get("tipe_tugas"))
+    allowed = cfg_t["checkpoint_types"] if cfg_t.get("simple") else (t.get("allowed_checkpoint_types") or cfg_t["checkpoint_types"])
     if jenis not in allowed:
         raise HTTPException(403, "Jenis checkpoint di luar tugas Anda")
     trip_id = t.get("trip_id")
     now = datetime.now(timezone.utc).isoformat()
+    if cfg_t.get("simple"):
+        err = TR.cek_checkpoint(jenis, now, TR.tz_offset(tz_offset_min), t.get("checkpoints"),
+                                lat is not None and lng is not None, foto is not None)
+        if err:
+            raise HTTPException(err[0], err[1])
     url = None
     if foto is not None:
         url = _save_upload(trip_id, f"cp/{t.get('leg_index')}/{token[:8]}", foto, ALLOWED_IMG)
@@ -4409,7 +4452,7 @@ async def public_task_checkpoint(
         "$push": {"checkpoints": cp}, "$set": {"status": "dikerjakan", "updated_at": now},
     })
     t = await db.leg_tasks.find_one({"token": token})
-    return _leg_task_public_view(t)
+    return await _task_view(t)
 
 
 @api_router.post("/public/task/{token}/document")
@@ -4440,7 +4483,7 @@ async def public_task_document(
         "$set": {"updated_at": now},
     })
     t = await db.leg_tasks.find_one({"token": token})
-    return _leg_task_public_view(t)
+    return await _task_view(t)
 
 
 class TaskSubmitBody(BaseModel):
@@ -4468,7 +4511,7 @@ async def public_task_submit(token: str, body: TaskSubmitBody):
             upd["status"] = "dikerjakan"
     await db.leg_tasks.update_one({"token": token}, {"$set": upd})
     t = await db.leg_tasks.find_one({"token": token})
-    return _leg_task_public_view(t)
+    return await _task_view(t)
 
 
 class KoordinatorBody(BaseModel):
