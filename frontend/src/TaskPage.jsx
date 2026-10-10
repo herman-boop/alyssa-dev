@@ -40,6 +40,8 @@ export default function TaskPage() {
   const [uploadErr, setUploadErr] = useState(""); // notif gagal upload foto (persisten, biar driver ga ngira kesimpen)
   const albumInput = useRef(null);
   const cpInput = useRef(null);
+  const shotInput = useRef(null);   // kamera 1 jepret (Driver Tujuan)
+  const shotJenis = useRef("");
 
   const flash = (m) => { setToast(m); setTimeout(() => setToast(""), 2200); };
   // Checkpoint DRIVER wajib ada foto unit (supir mengira ikon kamera di "Tambah Checkpoint"
@@ -197,6 +199,34 @@ export default function TaskPage() {
     setBusy(false);
   };
 
+  /* ── 1 JEPRET (Driver Tujuan): foto → GPS → langsung jadi checkpoint. Aturan jam & 1x/hari dijaga server. ── */
+  const oneShot = async (file) => {
+    const jenis = shotJenis.current;
+    if (shotInput.current) shotInput.current.value = "";
+    if (!file || !jenis) return;
+    setBusy(true); setUploadErr("");
+    try {
+      const geo = await getGeo();
+      if (!geo) { setUploadErr("📍 Lokasi (GPS) WAJIB. Aktifkan izin Lokasi di HP lalu coba lagi."); setBusy(false); return; }
+      let alamat = ""; try { alamat = await reverseGeocode(geo.lat, geo.lng); } catch { alamat = ""; }
+      let up = file; try { up = await stampPhoto(file, buildStampLines(jenis, geo, alamat)); } catch { up = file; }
+      const fd = new FormData();
+      fd.append("jenis", jenis); fd.append("catatan", "");
+      fd.append("alamat", alamat && alamat !== "Lokasi tidak tersedia" ? alamat : "");
+      fd.append("lat", geo.lat); fd.append("lng", geo.lng); if (geo.acc != null) fd.append("acc", geo.acc);
+      fd.append("tz_offset_min", String(-new Date().getTimezoneOffset()));
+      fd.append("foto", up);
+      const r = await axios.post(`${API}/public/task/${token}/checkpoint`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+      setTask(r.data);
+      flash(jenis === (task.cp_harian || {}).jenis_terima ? "✓ Mobil tercatat diterima" : "✓ Checkpoint hari ini tersimpan");
+    } catch (e) {
+      const d = e?.response?.data?.detail;
+      setUploadErr("❌ " + (typeof d === "string" ? d : "Gagal kirim. Cek sinyal lalu coba lagi. Foto belum tersimpan."));
+    }
+    setBusy(false);
+  };
+  const startShot = (jenis) => { shotJenis.current = jenis; setUploadErr(""); shotInput.current?.click(); };
+
   /* ── DOKUMEN: foto/scan → PDF (reuse CropModal) atau PDF langsung ── */
   const onDocPick = (doc_type, file) => {
     if (!file) return;
@@ -233,8 +263,24 @@ export default function TaskPage() {
   const baseTabs = task.tabs && task.tabs.length ? task.tabs : ["foto", "checkpoint", "dokumen"];
   const ORDER = ["beranda", "checkpoint", "foto", "dokumen", "scan", "info_kapal"];
   const tabs = ["beranda", ...baseTabs].sort((a, b) => ORDER.indexOf(a) - ORDER.indexOf(b));
+  // ── Driver Tujuan (simple): terima mobil 1 jepret + 1 checkpoint/hari jam 08-16 ──
+  const simple = !!task.simple;
+  const cpDef = task.cp_harian || {};
+  const cpsAll = task.checkpoints || [];
+  const sudahTerima = simple && cpsAll.some((c) => c.jenis === cpDef.jenis_terima);
+  const harianList = simple ? cpsAll.filter((c) => c.jenis === cpDef.jenis) : [];
+  const nowD = new Date();
+  const sudahHariIni = harianList.some((c) => c.ts && new Date(c.ts).toDateString() === nowD.toDateString());
+  const dalamJam = nowD.getHours() >= (cpDef.jam_mulai ?? 8) && nowD.getHours() < (cpDef.jam_akhir ?? 16);
+  const jamTxt = `${String(cpDef.jam_mulai ?? 8).padStart(2, "0")}.00–${String(cpDef.jam_akhir ?? 16).padStart(2, "0")}.00`;
+  const fmtTgl = (iso) => { try { return new Date(iso + "T12:00:00").toLocaleDateString("id-ID", { weekday: "short", day: "2-digit", month: "short", year: "numeric" }); } catch { return iso; } };
   // Checklist & progres (sama seperti Beranda halaman driver); hanya dari data tugas ini.
-  const steps = baseTabs.filter((k) => k !== "scan").map((k) => {
+  const steps = simple ? [
+    { key: "terima", tab: "checkpoint", label: "Terima mobil (1 jepret)", done: sudahTerima },
+    { key: "harian", tab: "checkpoint", label: "Checkpoint harian", done: harianList.length > 0 },
+    { key: "foto", tab: "foto", label: "Foto tujuan", done: (task.photos || []).length > 0 },
+    { key: "dokumen", tab: "dokumen", label: "Dokumen", done: (task.documents || []).length > 0 },
+  ] : baseTabs.filter((k) => k !== "scan").map((k) => {
     const done = k === "foto" ? (task.photos || []).length > 0
       : k === "checkpoint" ? (task.checkpoints || []).length > 0
       : k === "dokumen" ? (task.documents || []).length > 0
@@ -246,7 +292,10 @@ export default function TaskPage() {
   const selesai = task.status === "selesai";
   const doneCount = selesai ? steps.length : steps.filter((x) => x.done).length;
   const pct = steps.length ? Math.round((doneCount / steps.length) * 100) : (selesai ? 100 : 0);
-  const nextStep = steps.find((x) => !x.done);
+  // Driver Tujuan: kalau hari ini belum checkpoint dan sedang jam buka, itu yang diutamakan
+  const nextStep = (simple && sudahTerima && !sudahHariIni && dalamJam && !selesai)
+    ? { key: "harian", tab: "checkpoint", label: "Checkpoint hari ini" }
+    : steps.find((x) => !x.done);
   const unit0 = (task.units || [])[0] || {};
   const bigBtn = { width: "100%", padding: "19px", borderRadius: 18, border: "none", background: C.blue, color: "#fff", fontWeight: 800, fontSize: 16, cursor: "pointer", minHeight: 56, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: "0 10px 26px rgba(37,99,235,0.4)" };
   const hour = new Date().getHours();
@@ -291,6 +340,21 @@ export default function TaskPage() {
         </div>
         {tab === "beranda" && (
           <>
+            {simple && task.batas_hari && (
+              <div style={{ background: task.terlambat ? "#2d1214" : C.card, border: `1px solid ${task.terlambat ? C.red : C.line}`, borderRadius: 20, padding: 18, marginTop: 16 }} data-testid="task-batas">
+                <div style={{ fontSize: 12, fontWeight: 700, color: C.mute, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 6 }}>Batas tiba</div>
+                {task.batas_tanggal ? (
+                  <>
+                    <div style={{ fontSize: 17, fontWeight: 800, color: "#fff" }}>{fmtTgl(task.batas_tanggal)}</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, marginTop: 4, color: task.terlambat ? "#ffb4ab" : (task.sisa_hari <= 1 ? "#e6b450" : C.mute) }}>
+                      {task.terlambat ? `Terlambat ${Math.abs(task.sisa_hari)} hari` : task.sisa_hari === 0 ? "Hari ini batas terakhir" : `Sisa ${task.sisa_hari} hari`}
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "#E2E8F0" }}>Maksimal {task.batas_hari} hari, dihitung sejak mobil diterima.</div>
+                )}
+              </div>
+            )}
             <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 20, padding: 20, marginTop: 16 }} data-testid="task-checklist">
               <div style={{ fontSize: 12, fontWeight: 700, color: C.mute, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 16 }}>Checklist Tugas</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -302,7 +366,7 @@ export default function TaskPage() {
                 ))}
               </div>
             </div>
-            <button onClick={() => nextStep && setTab(nextStep.key)} disabled={!nextStep || selesai}
+            <button onClick={() => nextStep && setTab(nextStep.tab || nextStep.key)} disabled={!nextStep || selesai}
               style={{ width: "100%", marginTop: 16, padding: 19, borderRadius: 18, border: "none", background: (!nextStep || selesai) ? "#166534" : C.blue, color: "#fff", fontSize: 16, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: (!nextStep || selesai) ? "default" : "pointer", boxShadow: (!nextStep || selesai) ? "none" : "0 10px 26px rgba(37,99,235,0.4)" }}
               data-testid="task-btn-lanjut">
               {(!nextStep || selesai) ? "Semua Tugas Selesai ✓" : `Lanjutkan: ${nextStep.label}`}
@@ -355,7 +419,33 @@ export default function TaskPage() {
         {/* ── TAB CHECKPOINT (timeline) ── */}
         {tab === "checkpoint" && (
           <>
-            <button style={bigBtn} disabled={busy} onClick={openCheckpoint}>📷 Tambah Checkpoint</button>
+            {simple ? (
+              <>
+                <input ref={shotInput} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => oneShot(e.target.files?.[0])} />
+                {uploadErr && (
+                  <div style={{ background: "#2d1214", border: `1px solid ${C.red}`, borderRadius: 12, padding: "12px 14px", display: "flex", gap: 10, alignItems: "flex-start" }}>
+                    <div style={{ flex: 1, fontSize: 13, color: "#ffb4ab", fontWeight: 700, lineHeight: 1.45 }}>{uploadErr}</div>
+                    <button onClick={() => setUploadErr("")} style={{ background: "none", border: "none", color: "#ffb4ab", fontSize: 16, cursor: "pointer", lineHeight: 1, flexShrink: 0 }} aria-label="Tutup">✕</button>
+                  </div>
+                )}
+                {!sudahTerima ? (
+                  <button style={{ ...bigBtn, flexDirection: "column", gap: 4, padding: "22px 16px", minHeight: 104, fontSize: 19 }} disabled={busy} onClick={() => startShot(cpDef.jenis_terima)} data-testid="btn-terima-mobil">
+                    <span style={{ fontSize: 34, lineHeight: 1 }}>📷</span>
+                    <span>{busy ? "Mengirim..." : "TERIMA MOBIL · 1 JEPRET"}</span>
+                    {!busy && <span style={{ fontSize: 12.5, fontWeight: 700, opacity: 0.9 }}>Foto mobil, lokasi & jam tercatat otomatis</span>}
+                  </button>
+                ) : (
+                  <button style={{ ...bigBtn, flexDirection: "column", gap: 4, padding: "22px 16px", minHeight: 104, fontSize: 19, ...((sudahHariIni || !dalamJam || busy) ? { background: C.gray, color: C.mute, boxShadow: "none", cursor: "default" } : {}) }}
+                    disabled={busy || sudahHariIni || !dalamJam} onClick={() => startShot(cpDef.jenis)} data-testid="btn-checkpoint-harian">
+                    <span style={{ fontSize: 30, lineHeight: 1 }}>{sudahHariIni ? "✓" : "📍"}</span>
+                    <span>{busy ? "Mengirim..." : sudahHariIni ? "Checkpoint hari ini sudah terkirim" : !dalamJam ? `Checkpoint dibuka jam ${jamTxt}` : "CHECKPOINT HARI INI"}</span>
+                    {!busy && <span style={{ fontSize: 12.5, fontWeight: 700, opacity: 0.9 }}>{sudahHariIni ? `Lanjut besok jam ${String(cpDef.jam_mulai ?? 8).padStart(2, "0")}.00` : !dalamJam ? "1x per hari. Foto mobil, lokasi otomatis" : `1x per hari, jam ${jamTxt}`}</span>}
+                  </button>
+                )}
+              </>
+            ) : (
+              <button style={bigBtn} disabled={busy} onClick={openCheckpoint}>📷 Tambah Checkpoint</button>
+            )}
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {(task.checkpoints || []).slice().reverse().map((c) => (
                 <div key={c.checkpoint_id} style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 20, padding: 14, display: "flex", gap: 12 }}>

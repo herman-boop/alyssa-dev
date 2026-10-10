@@ -7660,6 +7660,7 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
         petugas_id, petugas_nama: pNama, petugas_hp: pHp, tipe_petugas: r0.tipe_petugas, tipe_tugas: r0.tipe_tugas,
         jenis: r0.jenis, asal: leg.asal || "", tujuan: leg.tujuan || "", kapal: leg.kapal || "", voyage: leg.voyage || "",
         instruksi: leg.instruksi || leg.catatan || "", units,
+        batas_hari: roleKey === "driver_tujuan" ? (parseInt(leg.batas_hari, 10) || null) : null,
       }, { headers });
       const token = r.data?.token;
       if (!token) throw new Error("no token");
@@ -8294,6 +8295,11 @@ function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tri
                     <div style={{ fontSize: 9.5, color: "#6b7688", marginBottom: 8, lineHeight: 1.4 }}>
                       Pilih peran → checklist otomatis nyesuaiin. <b>Self Drive full</b> = 1 driver asal→tujuan (nyebrang sendiri). <b>Driver Asal</b>/<b>Tujuan</b> = buat rute kapal/antar-pulau.
                     </div>
+                    <label style={{ ...MINI_LABEL, marginBottom: 8 }}>Estimasi maks. hari Driver Tujuan (mis. Makassar–Manado = 4)
+                      <input type="number" min="1" max="60" inputMode="numeric" value={leg.batas_hari || ""} onChange={(e) => setLeg(i, { batas_hari: e.target.value.replace(/[^0-9]/g, "").slice(0, 2) })}
+                        placeholder="kosong = tanpa batas" style={{ ...MINI_INPUT, maxWidth: 160 }} data-testid={`inp-batas-hari-${i}`} />
+                      <span style={{ display: "block", fontSize: 9.5, color: "#6b7688", marginTop: 2, lineHeight: 1.4 }}>Dihitung sejak mobil diterima driver tujuan. Bisa diubah kapan saja, link yang sudah dikirim ikut berubah. Driver Tujuan: terima mobil 1 jepret, lalu 1 checkpoint per hari jam 08.00–16.00.</span>
+                    </label>
                     <div style={{ display: "grid", gap: 6 }}>
                       <button type="button" onClick={() => copyLegLink(leg, i, "driver_full")} disabled={!tripId}
                         style={{ ...SOLID_BTN_BLUE, width: "100%", background: copiedLeg === `${i}-driver_full` ? "#2ea043" : "#1f6feb" }}>
@@ -8425,6 +8431,13 @@ function PetugasTaskTab({ tripId, headers }) {
                   👷 {t.petugas_nama || "—"}{t.petugas_hp ? ` · ${t.petugas_hp}` : ""}{t.tipe_petugas ? ` · ${t.tipe_petugas}` : ""}
                 </div>
                 <div style={{ fontSize: 10.5, color: "#6b7688", marginTop: 2 }}>Checklist: {done}/{total} · Dibuka: {fmtTs(t.opened_at)}</div>
+                {t.batas_hari && (
+                  <div style={{ fontSize: 11, marginTop: 4, fontWeight: 700, color: t.terlambat ? "#f85149" : "#8b949e" }} data-testid="admin-batas-tiba">
+                    {t.batas_tanggal
+                      ? `${t.terlambat ? "⚠️ LEWAT BATAS" : "🗓 Batas tiba"}: ${t.batas_tanggal}${t.terlambat ? ` (terlambat ${Math.abs(t.sisa_hari)} hari)` : ` (sisa ${t.sisa_hari} hari)`}`
+                      : `🗓 Batas ${t.batas_hari} hari sejak mobil diterima (belum diterima)`}
+                  </div>
+                )}
               </div>
             </div>
             {/* actions */}
