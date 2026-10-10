@@ -1741,6 +1741,11 @@ async def test_payouts_flip():
     http.queue = [TimeoutError("timeout")]
     r = await PO.disburse(db, http, q3["inquiry_id"], "BUDI SANTOSO", src)
     ok(r["log"]["status"] == "tidak_pasti" and r["marked"] == 0, "timeout → tidak_pasti, item TIDAK ditandai dibayar")
+    http.queue = [Resp(200, {"status": "SUCCESS", "account_holder": "BUDI SANTOSO"})]
+    q4 = await PO.inquiry(db, http, "Budi", "bca", "1234567890")
+    nc = len(http.calls)
+    await expect(PO.disburse(db, http, q4["inquiry_id"], "BUDI SANTOSO", src), ValueError, "masih diproses", "item di transfer yang masih diproses/tidak pasti → tidak bisa ditransfer lagi")
+    ok(len(http.calls) == nc, "anti dobel: Flip tidak dipanggil lagi")
     nc = len(http.calls)
     http.queue = [Resp(200, {"data": [{"id": "9002", "status": "DONE"}]})]
     rr = await PO.refresh(db, http, r["log"]["id"])
