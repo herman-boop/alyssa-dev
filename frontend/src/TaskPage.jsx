@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import axios from "axios";
-import { Camera, MapPin, FileText, Ship, Truck } from "lucide-react";
+import { Home, Camera, MapPin, FileText, Ship, Truck, ChevronRight, CheckCircle2, Circle } from "lucide-react";
 import { CropModal, stampPhoto, reverseGeocode } from "./DriverCheckpoint";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "";
@@ -18,6 +18,7 @@ const C = {
 };
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif";
 const TAB_META = {
+  beranda: { Icon: Home, label: "Beranda" },
   foto: { Icon: Camera, label: "Foto" },
   checkpoint: { Icon: MapPin, label: "Checkpoint" },
   dokumen: { Icon: FileText, label: "Dokumen" },
@@ -30,7 +31,7 @@ export default function TaskPage() {
   const [task, setTask] = useState(null);
   const [phase, setPhase] = useState("load"); // load | ok | error | disabled | notfound
   const [errMsg, setErrMsg] = useState("");
-  const [tab, setTab] = useState("foto");
+  const [tab, setTab] = useState("beranda");
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
   const [extra, setExtra] = useState({});
@@ -50,7 +51,6 @@ export default function TaskPage() {
       const r = await axios.get(`${API}/public/task/${token}`);
       setTask(r.data);
       setExtra(r.data.extra_inputs || {});
-      setTab((r.data.tabs && r.data.tabs[0]) || "foto");
       setPhase("ok");
     } catch (e) {
       const s = e?.response?.status;
@@ -230,12 +230,28 @@ export default function TaskPage() {
   if (phase === "disabled") return <Centered wrap={wrap} icon="⛔" title="Link dinonaktifkan" sub="Hubungi admin PT Alyssa Auto Logistik." />;
   if (phase === "error") return <Centered wrap={wrap} icon="⚠️" title="Gagal memuat" sub={errMsg} />;
 
-  const tabs = task.tabs && task.tabs.length ? task.tabs : ["foto", "checkpoint", "dokumen"];
+  const baseTabs = task.tabs && task.tabs.length ? task.tabs : ["foto", "checkpoint", "dokumen"];
+  const ORDER = ["beranda", "checkpoint", "foto", "dokumen", "scan", "info_kapal"];
+  const tabs = ["beranda", ...baseTabs].sort((a, b) => ORDER.indexOf(a) - ORDER.indexOf(b));
+  // Checklist & progres (sama seperti Beranda halaman driver); hanya dari data tugas ini.
+  const steps = baseTabs.filter((k) => k !== "scan").map((k) => {
+    const done = k === "foto" ? (task.photos || []).length > 0
+      : k === "checkpoint" ? (task.checkpoints || []).length > 0
+      : k === "dokumen" ? (task.documents || []).length > 0
+      : k === "info_kapal" ? !!(extra.nama_kapal || task.kapal)
+      : false;
+    const label = { foto: "Foto Kendaraan", checkpoint: "Checkpoint", dokumen: "Dokumen", info_kapal: "Info Kapal" }[k] || k;
+    return { key: k, label, done };
+  });
+  const selesai = task.status === "selesai";
+  const doneCount = selesai ? steps.length : steps.filter((x) => x.done).length;
+  const pct = steps.length ? Math.round((doneCount / steps.length) * 100) : (selesai ? 100 : 0);
+  const nextStep = steps.find((x) => !x.done);
   const unit0 = (task.units || [])[0] || {};
   const bigBtn = { width: "100%", padding: "19px", borderRadius: 18, border: "none", background: C.blue, color: "#fff", fontWeight: 800, fontSize: 16, cursor: "pointer", minHeight: 56, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: "0 10px 26px rgba(37,99,235,0.4)" };
   const hour = new Date().getHours();
   const greeting = hour < 11 ? "Selamat Pagi" : hour < 15 ? "Selamat Siang" : hour < 18 ? "Selamat Sore" : "Selamat Malam";
-  const who = task.petugas_nama || task.role_label || task.tipe_petugas || "Petugas";
+  const who = String(task.petugas_nama || task.role_label || task.tipe_petugas || "Petugas").toUpperCase();
   const unitLabel = `${unit0.vehicle_type || "Kendaraan"} · ${unit0.nopol || unit0.no_rangka || "-"}`;
   const ruteLabel = `${task.asal || "—"}${task.tujuan ? ` → ${task.tujuan}` : ""}`;
   const chipBox = { width: 38, height: 38, borderRadius: 12, background: C.chip, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 };
@@ -248,19 +264,20 @@ export default function TaskPage() {
           <div style={{ fontSize: 14, color: C.mute, fontWeight: 600 }}>{greeting},</div>
           <div style={{ fontSize: 27, fontWeight: 800, color: "#fff", marginTop: 2, letterSpacing: -0.3 }}>{who}</div>
         </div>
-        {/* Kartu tugas (gaya kartu progres halaman driver) */}
-        <div style={{ background: "linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%)", borderRadius: 24, padding: 24, marginBottom: 16, boxShadow: "0 10px 32px rgba(37,99,235,0.35)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
-            <div>
-              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.75)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6 }}>Tugas</div>
-              <div style={{ fontSize: 26, fontWeight: 900, color: "#fff", marginTop: 4, letterSpacing: -0.5 }}>{task.role_label || task.tipe_petugas}</div>
+        {tab === "beranda" && (
+          <div style={{ background: "linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%)", borderRadius: 24, padding: 24, marginBottom: 16, boxShadow: "0 10px 32px rgba(37,99,235,0.35)" }} data-testid="task-progress">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+              <div>
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.75)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6 }}>Progress Perjalanan</div>
+                <div style={{ fontSize: 38, fontWeight: 900, color: "#fff", marginTop: 4, letterSpacing: -1 }}>{pct}%</div>
+              </div>
+              <div style={{ fontSize: 13, color: "#fff", fontWeight: 700, background: "rgba(255,255,255,0.18)", borderRadius: 12, padding: "7px 13px", whiteSpace: "nowrap" }}>{doneCount}/{steps.length} tugas</div>
             </div>
-            <StatusBadge status={task.status} />
+            <div style={{ marginTop: 18, height: 9, background: "rgba(255,255,255,0.22)", borderRadius: 999, overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${pct}%`, background: "#fff", borderRadius: 999, transition: "width .6s cubic-bezier(.4,0,.2,1)" }} />
+            </div>
           </div>
-          <div style={{ marginTop: 14, fontSize: 13, color: "rgba(255,255,255,0.85)", fontWeight: 700 }}>
-            {(task.photos || []).length} foto · {(task.checkpoints || []).length} checkpoint
-          </div>
-        </div>
+        )}
         {/* Info rute & unit */}
         <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 20, padding: 20 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
@@ -272,6 +289,27 @@ export default function TaskPage() {
             <div style={{ fontSize: 14, color: C.mute, fontWeight: 600 }}>{unitLabel}</div>
           </div>
         </div>
+        {tab === "beranda" && (
+          <>
+            <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 20, padding: 20, marginTop: 16 }} data-testid="task-checklist">
+              <div style={{ fontSize: 12, fontWeight: 700, color: C.mute, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 16 }}>Checklist Tugas</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                {steps.map((x) => (
+                  <div key={x.key} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    {x.done || selesai ? <CheckCircle2 size={22} color="#22C55E" style={{ flexShrink: 0 }} /> : <Circle size={22} color="#475569" style={{ flexShrink: 0 }} />}
+                    <div style={{ fontSize: 15, fontWeight: 600, color: x.done || selesai ? "#64748B" : "#E2E8F0", textDecoration: x.done || selesai ? "line-through" : "none" }}>{x.label}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <button onClick={() => nextStep && setTab(nextStep.key)} disabled={!nextStep || selesai}
+              style={{ width: "100%", marginTop: 16, padding: 19, borderRadius: 18, border: "none", background: (!nextStep || selesai) ? "#166534" : C.blue, color: "#fff", fontSize: 16, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: (!nextStep || selesai) ? "default" : "pointer", boxShadow: (!nextStep || selesai) ? "none" : "0 10px 26px rgba(37,99,235,0.4)" }}
+              data-testid="task-btn-lanjut">
+              {(!nextStep || selesai) ? "Semua Tugas Selesai ✓" : `Lanjutkan: ${nextStep.label}`}
+              {nextStep && !selesai && <ChevronRight size={20} />}
+            </button>
+          </>
+        )}
       </div>
 
       <div style={{ maxWidth: 560, margin: "0 auto", padding: "16px 20px 14px", display: "flex", flexDirection: "column", gap: 16 }}>
@@ -532,14 +570,6 @@ function Field({ C, label, value, onChange, type = "text", textarea }) {
         : <input type={type} style={st} value={value} onChange={(e) => onChange(e.target.value)} />}
     </label>
   );
-}
-
-function StatusBadge({ status }) {
-  const t = {
-    belum_dibuka: "Belum Dibuka", sudah_dibuka: "Sudah Dibuka", dikerjakan: "Sedang Dikerjakan", menunggu: "Menunggu Kelengkapan",
-    selesai: "Selesai ✓", dinonaktifkan: "Dinonaktifkan", kedaluwarsa: "Kedaluwarsa",
-  }[status] || "Belum Dibuka";
-  return <span style={{ fontSize: 13, fontWeight: 700, color: "#fff", background: "rgba(255,255,255,0.18)", borderRadius: 12, padding: "7px 13px", whiteSpace: "nowrap" }}>{t}</span>;
 }
 
 function Centered({ wrap, icon, title, sub }) {
