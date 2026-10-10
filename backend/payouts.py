@@ -148,9 +148,14 @@ async def disburse(db, http, inquiry_id, confirm_name, items_source, remark=""):
     if _norm(confirm_name) != _norm(inq.get("account_holder")):
         raise ValueError("Nama pemilik rekening yang diketik tidak sama dengan hasil cek. Periksa lagi")
     items = _pending_items((await items_source())["items"], inq["driver_nama"])
+    busy = set()   # item yang sedang dalam transfer diproses/tidak_pasti jangan ditransfer lagi (anti dobel bayar)
+    async for d in db[COLL].find({}):
+        if d.get("kind") == "disbursement" and d.get("status") in ("diproses", "tidak_pasti"):
+            busy.update(d.get("item_ids") or [])
+    items = [i for i in items if i["id"] not in busy]
     amount = sum(int(i.get("amount") or 0) for i in items)
     if amount <= 0:
-        raise ValueError("Tidak ada insentif menunggu untuk driver ini")
+        raise ValueError("Tidak ada insentif menunggu untuk driver ini (atau sedang dalam transfer yang masih diproses; cek status dulu di Riwayat Transfer)")
     if amount > cfg["max_amount"]:
         raise ValueError(f"Nominal Rp {amount:,} melebihi batas per transfer Rp {cfg['max_amount']:,}".replace(",", "."))
 
