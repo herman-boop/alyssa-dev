@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import axios from "axios";
+import { Camera, MapPin, FileText, Ship, Truck } from "lucide-react";
 import { CropModal, stampPhoto, reverseGeocode } from "./DriverCheckpoint";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "";
@@ -9,17 +10,19 @@ const API = `${BACKEND_URL}/api`;
    tugas /task/{token}. Config-driven: tab/instruksi/checkpoint/dokumen nyesuaiin
    peran (driver asal/tujuan, petugas pelabuhan/kapal). Akses ter-scope: cuma
    data token ini (foto/checkpoint/dokumen dia). Nggak ada harga/HPP/leg lain. */
+// Palet & gaya disamakan dengan halaman driver /trip (DriverCheckpoint → Beranda).
 const C = {
-  bg: "#0d1117", card: "#161b22", line: "#21262d", ink: "#e6edf3", mute: "#8b949e",
-  blue: "#1f6feb", blueSoft: "#58a6ff", green: "#238636", greenSoft: "#3fb950",
-  gray: "#21262d", red: "#f85149",
+  bg: "#0A0E1A", card: "#131A2C", line: "#1E293B", ink: "#F1F5F9", mute: "#94A3B8",
+  blue: "#2563EB", blueSoft: "#60A5FA", green: "#166534", greenSoft: "#22C55E",
+  gray: "#1E293B", red: "#f85149", chip: "#0C2D52",
 };
+const FONT = "'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif";
 const TAB_META = {
-  foto: { icon: "📷", label: "Ambil Foto" },
-  checkpoint: { icon: "📍", label: "Checkpoint" },
-  dokumen: { icon: "📄", label: "Dokumen" },
-  scan: { icon: "📄", label: "Scan" },
-  info_kapal: { icon: "🚢", label: "Info Kapal" },
+  foto: { Icon: Camera, label: "Foto" },
+  checkpoint: { Icon: MapPin, label: "Checkpoint" },
+  dokumen: { Icon: FileText, label: "Dokumen" },
+  scan: { Icon: FileText, label: "Scan" },
+  info_kapal: { Icon: Ship, label: "Info Kapal" },
 };
 
 export default function TaskPage() {
@@ -221,7 +224,7 @@ export default function TaskPage() {
     setBusy(false);
   };
 
-  const wrap = { minHeight: "100vh", background: C.bg, color: C.ink, fontFamily: "system-ui,-apple-system,Segoe UI,Roboto,sans-serif", paddingBottom: "calc(env(safe-area-inset-bottom) + 20px)" };
+  const wrap = { minHeight: "100vh", background: C.bg, color: C.ink, fontFamily: FONT, paddingBottom: "calc(env(safe-area-inset-bottom) + 110px)" };
   if (phase === "load") return <div style={{ ...wrap, display: "flex", alignItems: "center", justifyContent: "center" }}>Memuat tugas…</div>;
   if (phase === "notfound") return <Centered wrap={wrap} icon="🔗" title="Link tidak ditemukan" sub="Link tugas salah atau sudah dihapus." />;
   if (phase === "disabled") return <Centered wrap={wrap} icon="⛔" title="Link dinonaktifkan" sub="Hubungi admin PT Alyssa Auto Logistik." />;
@@ -229,37 +232,53 @@ export default function TaskPage() {
 
   const tabs = task.tabs && task.tabs.length ? task.tabs : ["foto", "checkpoint", "dokumen"];
   const unit0 = (task.units || [])[0] || {};
-  const bigBtn = { width: "100%", padding: "16px", borderRadius: 12, border: "none", background: C.blue, color: "#fff", fontWeight: 800, fontSize: 16, cursor: "pointer", minHeight: 56, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 };
+  const bigBtn = { width: "100%", padding: "19px", borderRadius: 18, border: "none", background: C.blue, color: "#fff", fontWeight: 800, fontSize: 16, cursor: "pointer", minHeight: 56, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: "0 10px 26px rgba(37,99,235,0.4)" };
+  const hour = new Date().getHours();
+  const greeting = hour < 11 ? "Selamat Pagi" : hour < 15 ? "Selamat Siang" : hour < 18 ? "Selamat Sore" : "Selamat Malam";
+  const who = task.petugas_nama || task.role_label || task.tipe_petugas || "Petugas";
+  const unitLabel = `${unit0.vehicle_type || "Kendaraan"} · ${unit0.nopol || unit0.no_rangka || "-"}`;
+  const ruteLabel = `${task.asal || "—"}${task.tujuan ? ` → ${task.tujuan}` : ""}`;
+  const chipBox = { width: 38, height: 38, borderRadius: 12, background: C.chip, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 };
 
   return (
     <div style={wrap}>
-      {/* Header ringkas */}
-      <div style={{ background: C.card, borderBottom: `1px solid ${C.line}`, padding: "14px 16px calc(env(safe-area-inset-top) + 0px)", position: "sticky", top: 0, zIndex: 20 }}>
-        <div style={{ fontSize: 11, color: C.blueSoft, fontWeight: 800 }}>PT ALYSSA AUTO LOGISTIK</div>
-        <div style={{ fontSize: 18, fontWeight: 900, marginTop: 2 }}>Tugas: {task.role_label || task.tipe_petugas}</div>
-        <div style={{ fontSize: 13, marginTop: 4, fontWeight: 700 }}>{unit0.vehicle_type || "Kendaraan"} · {unit0.nopol || unit0.no_rangka || "-"}</div>
-        <div style={{ fontSize: 12, color: C.mute, marginTop: 1 }}>{task.asal || "—"}{task.tujuan ? ` → ${task.tujuan}` : ""}{task.petugas_nama ? ` · ${task.petugas_nama}` : ""}</div>
-        <StatusBadge status={task.status} />
+      <div style={{ maxWidth: 560, margin: "0 auto", padding: "28px 20px 0" }}>
+        {/* Sapaan */}
+        <div style={{ marginBottom: 22 }}>
+          <div style={{ fontSize: 14, color: C.mute, fontWeight: 600 }}>{greeting},</div>
+          <div style={{ fontSize: 27, fontWeight: 800, color: "#fff", marginTop: 2, letterSpacing: -0.3 }}>{who}</div>
+        </div>
+        {/* Kartu tugas (gaya kartu progres halaman driver) */}
+        <div style={{ background: "linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%)", borderRadius: 24, padding: 24, marginBottom: 16, boxShadow: "0 10px 32px rgba(37,99,235,0.35)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+            <div>
+              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.75)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6 }}>Tugas</div>
+              <div style={{ fontSize: 26, fontWeight: 900, color: "#fff", marginTop: 4, letterSpacing: -0.5 }}>{task.role_label || task.tipe_petugas}</div>
+            </div>
+            <StatusBadge status={task.status} />
+          </div>
+          <div style={{ marginTop: 14, fontSize: 13, color: "rgba(255,255,255,0.85)", fontWeight: 700 }}>
+            {(task.photos || []).length} foto · {(task.checkpoints || []).length} checkpoint
+          </div>
+        </div>
+        {/* Info rute & unit */}
+        <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 20, padding: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+            <div style={chipBox}><MapPin size={19} color={C.blueSoft} /></div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#E2E8F0", lineHeight: 1.35 }}>{ruteLabel}</div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={chipBox}><Truck size={19} color={C.blueSoft} /></div>
+            <div style={{ fontSize: 14, color: C.mute, fontWeight: 600 }}>{unitLabel}</div>
+          </div>
+        </div>
       </div>
 
-      {/* Tab bar */}
-      <div style={{ display: "flex", gap: 6, padding: "10px 12px", background: C.card, borderBottom: `1px solid ${C.line}`, position: "sticky", top: 0, zIndex: 15, overflowX: "auto" }}>
-        {tabs.map((k) => {
-          const m = TAB_META[k] || { icon: "•", label: k };
-          const on = tab === k;
-          return (
-            <button key={k} onClick={() => setTab(k)} style={{ flex: "1 0 auto", padding: "10px 10px", borderRadius: 9, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 800, minHeight: 44, whiteSpace: "nowrap", background: on ? C.blue : C.gray, color: on ? "#fff" : C.mute }}>
-              {m.icon} {m.label}
-            </button>
-          );
-        })}
-      </div>
-
-      <div style={{ maxWidth: 560, margin: "0 auto", padding: 14, display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ maxWidth: 560, margin: "0 auto", padding: "16px 20px 14px", display: "flex", flexDirection: "column", gap: 16 }}>
         {/* ── TAB FOTO ── */}
         {tab === "foto" && (
           <>
-            <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 14 }}>
+            <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 20, padding: 18 }}>
               <div style={{ fontSize: 12, color: C.mute, fontWeight: 700, marginBottom: 6 }}>Foto yang harus diambil:</div>
               <div style={{ fontSize: 13, color: C.ink, lineHeight: 1.7 }}>
                 {(task.foto_instruksi || []).map((s, i) => <div key={i}>• {s}</div>)}
@@ -301,7 +320,7 @@ export default function TaskPage() {
             <button style={bigBtn} disabled={busy} onClick={openCheckpoint}>📷 Tambah Checkpoint</button>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {(task.checkpoints || []).slice().reverse().map((c) => (
-                <div key={c.checkpoint_id} style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 12, display: "flex", gap: 10 }}>
+                <div key={c.checkpoint_id} style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 20, padding: 14, display: "flex", gap: 12 }}>
                   {c.url && <SafeImg src={resolveUrl(c.url)} style={{ width: 54, height: 54, borderRadius: 8, objectFit: "cover", flexShrink: 0, border: `1px solid ${C.line}` }} />}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 800, fontSize: 14 }}>{c.jenis}</div>
@@ -369,15 +388,31 @@ export default function TaskPage() {
 
         {/* Selesai */}
         <button onClick={() => saveExtra(true)} disabled={busy || task.status === "selesai"}
-          style={{ width: "100%", padding: 16, borderRadius: 12, border: "none", background: task.status === "selesai" ? C.green : C.greenSoft, color: "#fff", fontWeight: 900, fontSize: 16, cursor: "pointer", minHeight: 56 }}>
+          style={{ width: "100%", padding: 19, borderRadius: 18, border: "none", background: task.status === "selesai" ? C.green : "#16a34a", color: "#fff", fontWeight: 900, fontSize: 16, cursor: "pointer", minHeight: 56 }}>
           {task.status === "selesai" ? "✅ Tugas Selesai" : "✅ Tandai Tugas Selesai"}
         </button>
         <div style={{ textAlign: "center", fontSize: 11, color: C.mute, padding: "4px 0 20px" }}>PT Alyssa Auto Logistik · Logbook Operasional</div>
       </div>
 
+
+      {/* Menu bawah (sama dengan halaman driver) */}
+      <nav style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 500, maxWidth: 560, margin: "0 auto", background: "rgba(15,20,35,0.92)", backdropFilter: "blur(18px)", WebkitBackdropFilter: "blur(18px)", borderTop: "1px solid rgba(255,255,255,0.08)", display: "flex", justifyContent: "space-around", alignItems: "center", padding: "10px 8px calc(10px + env(safe-area-inset-bottom))" }} data-testid="task-bottom-nav">
+        {tabs.map((k) => {
+          const m = TAB_META[k] || { Icon: FileText, label: k };
+          const on = tab === k;
+          return (
+            <button key={k} onClick={() => setTab(k)} data-testid={`task-nav-${k}`}
+              style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", padding: "6px 16px", borderRadius: 14, minWidth: 64, color: on ? C.blueSoft : "#64748B", transition: "color .2s ease" }}>
+              <m.Icon size={22} strokeWidth={on ? 2.5 : 2} />
+              <span style={{ fontSize: 11, fontWeight: on ? 700 : 600 }}>{m.label}</span>
+            </button>
+          );
+        })}
+      </nav>
+
       {/* Sheet checkpoint */}
       {cp && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 60, display: "flex", alignItems: "flex-end" }} onClick={() => !busy && setCp(null)}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 600, display: "flex", alignItems: "flex-end" }} onClick={() => !busy && setCp(null)}>
           <div style={{ width: "100%", maxWidth: 560, margin: "0 auto", background: C.card, borderRadius: "16px 16px 0 0", padding: 16, paddingBottom: "calc(env(safe-area-inset-bottom) + 16px)", maxHeight: "90vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ fontSize: 16, fontWeight: 900, marginBottom: 4 }}>📍 Tambah Checkpoint</div>
             <div style={{ fontSize: 12, color: C.mute, marginBottom: 10 }}>{cp.alamat || "Mengambil lokasi…"}{cp.geo ? ` · ${cp.geo.lat.toFixed(5)}, ${cp.geo.lng.toFixed(5)}` : ""}</div>
@@ -405,7 +440,7 @@ export default function TaskPage() {
         <CropModal url={scan.url} file={scan.file} onCancel={() => setScan(null)} onConfirm={(pdfFile) => uploadDoc(scan.doc_type, pdfFile)} />
       )}
 
-      {toast && <div style={{ position: "fixed", left: "50%", bottom: 24, transform: "translateX(-50%)", background: "#1c2128", color: C.ink, padding: "10px 18px", borderRadius: 24, fontSize: 13, fontWeight: 700, border: `1px solid ${C.line}`, zIndex: 100 }}>{toast}</div>}
+      {toast && <div style={{ position: "fixed", left: "50%", bottom: 96, transform: "translateX(-50%)", background: "#1c2128", color: C.ink, padding: "10px 18px", borderRadius: 24, fontSize: 13, fontWeight: 700, border: `1px solid ${C.line}`, zIndex: 100 }}>{toast}</div>}
     </div>
   );
 }
@@ -480,7 +515,7 @@ function SignaturePad({ C, value, onChange }) {
 
 function Section({ C, title, children }) {
   return (
-    <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 14 }}>
+    <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 20, padding: 18 }}>
       <div style={{ fontSize: 11, color: C.mute, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".4px", marginBottom: 8 }}>{title}</div>
       {children}
     </div>
@@ -500,17 +535,11 @@ function Field({ C, label, value, onChange, type = "text", textarea }) {
 }
 
 function StatusBadge({ status }) {
-  const map = {
-    belum_dibuka: { t: "Belum Dibuka", c: "#8b949e", bg: "#21262d" },
-    sudah_dibuka: { t: "Sudah Dibuka", c: "#58a6ff", bg: "#0d2847" },
-    dikerjakan: { t: "Sedang Dikerjakan", c: "#e6b450", bg: "#2a2410" },
-    menunggu: { t: "Menunggu Kelengkapan", c: "#e6b450", bg: "#2a2410" },
-    selesai: { t: "Selesai", c: "#3fb950", bg: "#0d2818" },
-    dinonaktifkan: { t: "Dinonaktifkan", c: "#f85149", bg: "#2d1214" },
-    kedaluwarsa: { t: "Kedaluwarsa", c: "#f85149", bg: "#2d1214" },
-  };
-  const s = map[status] || map.belum_dibuka;
-  return <span style={{ display: "inline-block", marginTop: 8, fontSize: 11, fontWeight: 800, padding: "3px 10px", borderRadius: 12, background: s.bg, color: s.c }}>{s.t}</span>;
+  const t = {
+    belum_dibuka: "Belum Dibuka", sudah_dibuka: "Sudah Dibuka", dikerjakan: "Sedang Dikerjakan", menunggu: "Menunggu Kelengkapan",
+    selesai: "Selesai ✓", dinonaktifkan: "Dinonaktifkan", kedaluwarsa: "Kedaluwarsa",
+  }[status] || "Belum Dibuka";
+  return <span style={{ fontSize: 13, fontWeight: 700, color: "#fff", background: "rgba(255,255,255,0.18)", borderRadius: 12, padding: "7px 13px", whiteSpace: "nowrap" }}>{t}</span>;
 }
 
 function Centered({ wrap, icon, title, sub }) {
