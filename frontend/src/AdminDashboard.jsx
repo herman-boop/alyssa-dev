@@ -8223,7 +8223,7 @@ function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tri
                         <SmartText style={MINI_INPUT} value={leg.kepala_rombongan ? (leg.kepala_rombongan.hp || "") : (leg.kord_bayangan_hp || "")} onChange={(v) => setKepala(i, { hp: v })} placeholder="08xx-xxxx" testid={`leg-kepala-hp-${i}`} />
                       </label>
                     </div>
-                    <LegSupplierFields index={i} headers={headers} info={leg.supplier_info} onChange={(patch) => setLeg(i, { supplier_info: { ...(leg.supplier_info || {}), ...patch } })} />
+                    <LegSupplierFields index={i} headers={headers} hint={leg.kepala_rombongan ? (leg.kepala_rombongan.nama || "") : (leg.kord_bayangan || "")} info={leg.supplier_info} onChange={(patch) => setLeg(i, { supplier_info: { ...(leg.supplier_info || {}), ...patch } })} />
                     {/* ── Command Center Kepala Rombongan: 1 link untuk seluruh perjalanan ── */}
                     <div style={{ marginTop: 10, borderTop: "1px solid #2f5a1f", paddingTop: 8 }}>
                       <div style={{ fontSize: 9.5, color: "#7ee06b", fontWeight: 700, marginBottom: 6 }}>🎯 COMMAND CENTER (1 link utk seluruh perjalanan)</div>
