@@ -20,6 +20,7 @@ import ais as AIS
 import ship_master as SM
 import leg_supplier as LSP
 import driver_incentive as DI
+import driver_notif as DN
 import flip_client as FL
 import payouts as PO
 import cashbank as CB
@@ -2144,8 +2145,69 @@ async def test_task_link_tutup_dan_menu_mati():
     ok(ns["_leg_task_public_view"]({"token": "t", "tipe_tugas": "driver_asal"})["disabled_tabs"] == [], "driver asal: daftar menu mati kosong")
 
 
+async def test_driver_notif():
+    """Notif WA ke driver saat insentif dibayar: nomor opsional, 1 pesan per driver, anti dobel, gagal kirim
+    tidak menggagalkan, terpasang di jalur Flip (payouts._mark_paid)."""
+    print("test_driver_notif")
+    ok(DN.wa_number("0812-3456-7890") == "6281234567890" and DN.wa_number("+62 812 3456 7890") == "6281234567890", "nomor dinormalisasi ke 62")
+    ok(DN.wa_number("12345") == "" and DN.wa_number("") == "" and DN.wa_number("0211234567") == "", "nomor tidak valid / telepon rumah -> kosong")
+    items = [{"id": "I1", "driver_nama": "Budi Santoso", "amount": 25000, "date": "2026-10-05"},
+             {"id": "I2", "driver_nama": "budi  santoso", "amount": 25000, "date": "2026-10-06"}]
+    msg = DN.build_message("Budi Santoso", items)
+    ok("Rp 50.000" in msg and "(2 titik)" in msg and "05/10, 06/10" in msg and "Halo Budi Santoso" in msg, "pesan memuat total, jumlah titik, tanggal")
+    many = [{"id": f"M{i}", "driver_nama": "A", "amount": 1000, "date": f"2026-10-{i:02d}"} for i in range(1, 10)]
+    ok(DN.build_message("A", many).count("/10") == 6 and " dst" in DN.build_message("A", many), "tanggal dibatasi 6 lalu 'dst'")
+
+    db = FakeDB()
+    for it in items + [{"id": "I3", "driver_nama": "Andi", "amount": 30000, "date": "2026-10-05"}]:
+        db.driver_incentives.docs.append(dict(it, status="dibayar"))
+    sent = []
+    async def send_ok(to, m): sent.append((to, m)); return {"ok": True}
+    r = await DN.notify_paid(db, items + [{"id": "I3", "driver_nama": "Andi", "amount": 30000, "date": "2026-10-05"}], send_ok)
+    ok(r == {"Budi Santoso": "tanpa_nomor", "Andi": "tanpa_nomor"} and not sent, "tanpa nomor WA -> tidak ada pesan, tidak error")
+    ok(all(not d.get("wa_notif") for d in db.driver_incentives.docs), "tanpa nomor: item tidak diklaim (nomor yang diisi belakangan tetap bisa dipakai)")
+
+    try:
+        await DN.save_number(db, "Budi Santoso", "123"); ok(False, "nomor salah ditolak")
+    except ValueError:
+        ok(True, "nomor salah ditolak")
+    await DN.save_number(db, "Budi Santoso", "081234567890")
+    ok(await DN.get_number(db, "BUDI  santoso") == "6281234567890", "nomor ditemukan tanpa peduli huruf besar/kecil")
+    r = await DN.notify_paid(db, items, send_ok)
+    ok(r == {"Budi Santoso": "terkirim"} and len(sent) == 1 and sent[0][0] == "6281234567890", "2 item 1 driver -> 1 pesan ke nomor driver")
+    ok(all(d.get("wa_notif") == "terkirim" for d in db.driver_incentives.docs if d["id"] in ("I1", "I2")), "item ditandai terkirim")
+    r = await DN.notify_paid(db, items, send_ok)
+    ok(r == {"Budi Santoso": "sudah"} and len(sent) == 1, "dipanggil ulang -> tidak kirim lagi (anti dobel)")
+
+    await DN.save_number(db, "Andi", "081111111111")
+    async def send_fail(to, m): return {"ok": False, "error": "fonnte_token_missing"}
+    r = await DN.notify_paid(db, [{"id": "I3", "driver_nama": "Andi", "amount": 30000, "date": "2026-10-05"}], send_fail)
+    ok(r == {"Andi": "gagal"} and [d for d in db.driver_incentives.docs if d["id"] == "I3"][0]["wa_notif"] == "gagal", "gagal kirim dicatat, tidak raise")
+    async def send_boom(to, m): raise RuntimeError("x")
+    db.driver_incentives.docs.append({"id": "I4", "driver_nama": "Andi", "status": "dibayar", "amount": 1000, "date": "2026-10-07"})
+    r = await DN.notify_paid(db, [{"id": "I4", "driver_nama": "Andi", "amount": 1000, "date": "2026-10-07"}], send_boom)
+    ok(r == {"Andi": "gagal"}, "pengirim error -> 'gagal', tidak melempar")
+    await DN.save_number(db, "Andi", "")
+    ok(await DN.get_number(db, "Andi") == "", "nomor dikosongkan -> notif mati untuk driver itu")
+
+    # jalur Flip: _mark_paid memanggil ON_PAID dengan item yang benar-benar ditandai dibayar
+    db2 = FakeDB()
+    for i, drv in enumerate(("Budi", "Budi")):
+        db2.driver_incentives.docs.append({"id": f"F{i}", "driver_nama": drv, "status": "menunggu", "amount": 20000, "date": f"2026-10-0{i+1}"})
+    got = []
+    async def hook(paid): got.append([x["id"] for x in paid])
+    keep = PO.ON_PAID; PO.ON_PAID = hook
+    n = await PO._mark_paid(db2, ["F0", "F1", "NOPE"], "L1", "FL1", "BUDI")
+    ok(n == 2 and got == [["F0", "F1"]], "Flip berhasil -> hook notif dipanggil sekali dengan item yang dibayar")
+    async def bad_hook(paid): raise RuntimeError("wa down")
+    PO.ON_PAID = bad_hook
+    db2.driver_incentives.docs.append({"id": "F2", "driver_nama": "Budi", "status": "menunggu", "amount": 1, "date": "2026-10-03"})
+    ok(await PO._mark_paid(db2, ["F2"], "L2", "FL2", "BUDI") == 1, "hook error tidak menggagalkan penandaan dibayar")
+    PO.ON_PAID = keep
+
+
 async def main():
-    for t in (test_ais_jadwal_hemat_kuota, test_task_link_tutup_dan_menu_mati, test_task_driver_tujuan, test_cashbank_dan_hpp, test_payouts_flip, test_driver_incentive, test_leg_supplier, test_bastk_upload_idempotent, test_daily_upload_idempotent, test_ship_master, test_sync_single_unit_vehicle, test_edit_invoice_lines, test_selisih_ringkasan_auth, test_riwayat_clear, test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
+    for t in (test_driver_notif, test_ais_jadwal_hemat_kuota, test_task_link_tutup_dan_menu_mati, test_task_driver_tujuan, test_cashbank_dan_hpp, test_payouts_flip, test_driver_incentive, test_leg_supplier, test_bastk_upload_idempotent, test_daily_upload_idempotent, test_ship_master, test_sync_single_unit_vehicle, test_edit_invoice_lines, test_selisih_ringkasan_auth, test_riwayat_clear, test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,

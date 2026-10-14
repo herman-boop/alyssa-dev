@@ -40,6 +40,10 @@ export default function DriverIncentivePage() {
   const [cfg, setCfg] = useState(null);
   const [fp, setFp] = useState(null);          // { driver, total, bank, acc, inq, confirm, result }
   const [logs, setLogs] = useState([]);
+  // ── No. WA driver (notif otomatis saat insentif dibayar) ──
+  const [waMap, setWaMap] = useState({});        // kunci nama (huruf kecil) -> no. WA tersimpan
+  const [waDraft, setWaDraft] = useState({});    // isian yang sedang diketik
+  const waKey = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
 
   const load = useCallback(async () => {
     try {
@@ -57,6 +61,21 @@ export default function DriverIncentivePage() {
 
   useEffect(() => { axios.get(`${API}/admin/kas/accounts`, { headers }).then((r) => setAkunList(r.data.items || [])).catch(() => {}); }, [headers]);
   const errOf = (e, d) => e.response?.data?.detail || d;
+  useEffect(() => {
+    axios.get(`${API}/admin/driver-wa`, { headers }).then((r) => {
+      const m = {}; (r.data.items || []).forEach((x) => { m[x.key] = x.no_hp; }); setWaMap(m);
+    }).catch(() => {});
+  }, [headers]);
+  const saveWa = async (nama) => {
+    const k = waKey(nama);
+    const v = (waDraft[k] !== undefined ? waDraft[k] : waMap[k] || "").trim();
+    try {
+      const r = await axios.post(`${API}/admin/driver-wa`, { driver_nama: nama, no_hp: v }, { headers });
+      setWaMap((m) => ({ ...m, [k]: r.data.no_hp })); setWaDraft((d) => { const n = { ...d }; delete n[k]; return n; });
+      setMsg({ t: r.data.no_hp ? `No. WA ${nama} tersimpan. Driver otomatis dapat notif saat insentif dibayar.` : `No. WA ${nama} dihapus (tanpa notif).`, err: false });
+    } catch (e) { setMsg({ t: errOf(e, "Gagal menyimpan No. WA"), err: true }); }
+  };
+  const WA_TXT = { terkirim: "Notif WA terkirim ke driver.", tanpa_nomor: "Driver belum punya No. WA, jadi tidak ada notif (isi di ringkasan atas).", gagal: "Notif WA ke driver gagal terkirim.", };
   const openFlip = async (d) => {
     let bank = "bca", acc = "";
     try { const r = await axios.get(`${API}/admin/payouts/bank`, { headers, params: { driver: d.driver_nama } }); if (r.data.bank) { bank = r.data.bank.bank_code || bank; acc = r.data.bank.account_number || ""; } } catch (e) { /* abaikan */ }
@@ -86,7 +105,8 @@ export default function DriverIncentivePage() {
     setBusy(id); setMsg({ t: "", err: false });
     try {
       const r = await axios.post(`${API}/admin/driver-incentives/${id}/${path}`, form, { headers, timeout: 120000 });
-      setMsg({ t: r.data.kas_warning || r.data.bukti_warning || "Tersimpan", err: !!(r.data.bukti_warning || r.data.kas_warning) });
+      const waNote = WA_TXT[r.data.wa_notif] || "";
+      setMsg({ t: (r.data.kas_warning || r.data.bukti_warning || "Tersimpan") + (waNote ? " · " + waNote : ""), err: !!(r.data.bukti_warning || r.data.kas_warning || r.data.wa_notif === "gagal") });
       setPayFor(null); setPayNote("");
       await load();
     } catch (e) { setMsg({ t: e.response?.data?.detail || "Gagal menyimpan", err: true }); }
@@ -137,8 +157,17 @@ export default function DriverIncentivePage() {
         <div style={{ ...card, marginBottom: 12 }} data-testid="insentif-summary">
           <div style={{ fontSize: 11, color: "#8b949e", fontWeight: 800, textTransform: "uppercase", letterSpacing: ".4px", marginBottom: 8 }}>Yang harus dibayar · total {rp(data.total_menunggu)}</div>
           {data.per_driver.map((d) => (
-            <div key={d.driver_nama} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", fontSize: 13.5 }}>
-              <span style={{ fontWeight: 700 }}>{d.driver_nama} <span style={{ color: "#8b949e", fontWeight: 500 }}>· {d.count} checkpoint</span></span>
+            <div key={d.driver_nama} style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 6, padding: "5px 0", fontSize: 13.5 }}>
+              <span style={{ fontWeight: 700 }}>{d.driver_nama} <span style={{ color: "#8b949e", fontWeight: 500 }}>· {d.count} checkpoint</span>
+                <span style={{ display: "inline-flex", gap: 6, alignItems: "center", marginLeft: 10 }} data-testid={`wa-driver-${d.driver_nama}`}>
+                  <input value={waDraft[waKey(d.driver_nama)] !== undefined ? waDraft[waKey(d.driver_nama)] : (waMap[waKey(d.driver_nama)] || "")}
+                    onChange={(e) => setWaDraft((x) => ({ ...x, [waKey(d.driver_nama)]: e.target.value }))}
+                    placeholder="No. WA driver (08xx)" inputMode="tel"
+                    style={{ width: 150, background: "#0d1117", border: "1px solid #30363d", borderRadius: 8, padding: "4px 8px", color: "#e6edf3", fontSize: 12 }} data-testid={`wa-input-${d.driver_nama}`} />
+                  {waDraft[waKey(d.driver_nama)] !== undefined ? <button type="button" onClick={() => saveWa(d.driver_nama)} style={{ ...btn("#21262d", "#79c0ff"), padding: "4px 9px", fontSize: 11.5 }} data-testid={`wa-save-${d.driver_nama}`}>Simpan</button>
+                    : waMap[waKey(d.driver_nama)] ? <span style={{ fontSize: 11.5, color: "#3fb950" }}>✓ notif WA aktif</span> : <span style={{ fontSize: 11.5, color: "#8b949e" }}>isi agar driver dapat notif</span>}
+                </span>
+              </span>
               <span style={{ fontWeight: 800 }}>{rp(d.total)}
                 {cfg && cfg.enabled ? <button type="button" onClick={() => openFlip(d)} style={{ ...btn("#1D4ED8", "#fff"), marginLeft: 10, padding: "5px 10px" }} data-testid={`flip-open-${d.driver_nama}`}>Transfer via Flip</button> : null}
               </span>

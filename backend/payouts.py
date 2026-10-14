@@ -25,6 +25,7 @@ import cashbank as CB
 
 COLL = "payout_logs"
 BANKS = "driver_bank_accounts"
+ON_PAID = None   # opsional: async (items) dipanggil setelah item insentif berhasil ditandai dibayar (notif WA ke driver); gagal tidak berpengaruh
 INQUIRY_TTL = timedelta(minutes=15)
 BLOCK_MSG = {   # status akhir Flip selain SUCCESS: transfer diblokir (SUSPECTED sengaja diblokir walau Flip masih mengizinkan)
     "INVALID_ACCOUNT_NUMBER": "Nomor rekening tidak valid (bisa juga nomor virtual account). Periksa nomor dan kode bank.",
@@ -189,15 +190,22 @@ async def disburse(db, http, inquiry_id, confirm_name, items_source, remark=""):
 async def _mark_paid(db, item_ids, log_id, flip_id, holder):
     n = 0
     acc = None
+    paid = []
     for iid in item_ids:
         try:
             item = await DI.set_status(db, iid, "dibayar", f"Flip {flip_id} a.n. {holder} ({log_id})")
             n += 1
+            paid.append(item)
         except (ValueError, KeyError):
             continue
         try:   # kas: transfer Flip yang berhasil mengurangi akun "Saldo Flip" (gagal mencatat tidak boleh membatalkan pembayaran)
             acc = acc or await CB.ensure_system_account(db, "flip", "Saldo Flip", "ewallet")
             await CB.post_incentive(db, item, acc["id"], _now().strftime("%Y-%m-%d"))
+        except Exception:
+            pass
+    if paid and ON_PAID:
+        try:
+            await ON_PAID(paid)
         except Exception:
             pass
     return n
