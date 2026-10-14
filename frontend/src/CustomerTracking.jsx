@@ -718,6 +718,8 @@ export default function CustomerTracking() {
   /* Posisi AIS kapal (dari backend, scoped ke trip ini). shipAis.ais bisa null
      kalau belum ada data (fallback link tetap tampil). */
   const shipAis = data.ship_ais || null;
+  // Catatan jadwal pembaruan posisi kapal (supaya pelanggan paham posisi bukan real-time)
+  const shipSched = shipAis && shipAis.jadwal && Array.isArray(shipAis.jadwal.jam) && shipAis.jadwal.jam.length ? shipAis.jadwal : null;
   const shipInfo = shipAis && shipAis.ais ? shipAis.ais : null;
   const shipPos = (shipInfo && shipInfo.latitude != null && shipInfo.longitude != null)
     ? [parseFloat(shipInfo.latitude), parseFloat(shipInfo.longitude)] : null;
@@ -1133,6 +1135,12 @@ export default function CustomerTracking() {
                             ? <>📍 Posisi terakhir AIS: <b style={{ color: frC }}>{aisAgeText(shipInfo.age_seconds)}</b>{shipInfo.freshness !== "fresh" ? " — bukan real-time (sinyal laut terbatas)" : ""}.</>
                             : <>📡 Posisi kapal lagi belum ketangkep AIS. Perjalanan laut dipantau lewat <b style={{ color: "#c9d1d9" }}>checkpoint petugas kapal</b> & update di bawah.</>}
                         </div>
+                        {shipSched ? (
+                          <div style={{ marginTop: 6, fontSize: 11.5, color: "#8b949e", lineHeight: 1.5 }} data-testid="trk-ais-jadwal">
+                            🕒 Posisi kapal diperbarui otomatis <b style={{ color: "#c9d1d9" }}>{shipSched.jam.length}x sehari</b> (jam {shipSched.jam.map((h) => String(h).padStart(2, "0") + ".00").join(", ")} {shipSched.zona}), jadi bukan real-time.
+                            {shipInfo ? <> Terakhir diperbarui: <b style={{ color: "#c9d1d9" }}>{aisAgeText(shipInfo.age_seconds)}</b>.</> : null}
+                          </div>
+                        ) : null}
                       </div>
                     );
                   })()}
