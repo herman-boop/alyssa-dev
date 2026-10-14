@@ -947,6 +947,89 @@ async def test_auto_refresh_cycle():
         AIS._last_pos_fetch.clear(); AIS._last_eta_fetch.clear()
 
 
+async def test_ais_jadwal_hemat_kuota():
+    """Cek otomatis cuma di jam jadwal (default 5x sehari, jam kerja), tiap kapal sekali per slot;
+    pelanggan tidak memicu panggilan berbayar; simpan leg tidak memanggil lagi kalau posisi masih ada."""
+    from datetime import datetime, timezone, timedelta
+    old = {k: os.environ.get(k) for k in ("AIS_REFRESH_HOURS", "AIS_CUSTOMER_REFRESH")}
+    os.environ.pop("AIS_REFRESH_HOURS", None); os.environ.pop("AIS_CUSTOMER_REFRESH", None)
+    U = lambda *a: datetime(*a, tzinfo=timezone.utc)
+    try:
+        ok(AIS.refresh_hours() == {8, 10, 12, 14, 16}, "default jadwal: 08, 10, 12, 14, 16 (5x sehari, jam kerja)")
+        ok(AIS.current_slot(U(2026, 10, 14, 1, 5)) == "2026-10-14@08", "01.05 UTC = 08.05 WIB -> slot 08")
+        ok(AIS.current_slot(U(2026, 10, 14, 2, 0)) is None, "09.00 WIB (jam lompat) -> di luar jadwal")
+        ok(AIS.current_slot(U(2026, 10, 14, 11, 0)) is None and AIS.current_slot(U(2026, 10, 14, 15, 0)) is None, "18.00 dan 22.00 WIB (di luar jam kerja) -> tidak ada")
+        ok(AIS.current_slot(U(2026, 10, 14, 9, 30)) == "2026-10-14@16", "16.30 WIB -> slot 16")
+        os.environ["AIS_REFRESH_HOURS"] = "always"
+        ok(AIS.refresh_hours() is None and AIS.current_slot(U(2026, 10, 14, 15, 0)) == "always", "'always' = tanpa jadwal (perilaku lama)")
+        os.environ["AIS_REFRESH_HOURS"] = "7, 13,xx,30"
+        ok(AIS.refresh_hours() == {7, 13}, "jam ngawur diabaikan")
+        os.environ.pop("AIS_REFRESH_HOURS", None)
+        ok(AIS.jadwal_info() == {"jam": [8, 10, 12, 14, 16], "zona": "WIB"}, "info jadwal buat halaman pelanggan")
+
+        class _R:
+            def __init__(self, st, body=None): self.status_code = st; self._b = body or {}; self.headers = {}; self.text = ""
+            def json(self): return self._b
+        calls = []
+        def fake_get(path, params, timeout=15):
+            calls.append(path); return _R(404)
+        db = FakeDB()
+        await db.trips.insert_one({"trip_id": "T1", "legs": [{"route_leg_id": "l1", "tipe": "Kapal RoRo", "kapal": "MUTIARA", "mmsi": "525200343", "status": "Berlangsung"}]})
+        saved = (AIS.vesselapi_enabled, AIS._vesselapi_use_sat, AIS._vesselapi_get, AIS.vesselfinder_enabled)
+        AIS.vesselapi_enabled = lambda: True; AIS._vesselapi_use_sat = lambda: False; AIS.vesselfinder_enabled = lambda: False; AIS._vesselapi_get = fake_get
+        state = {}
+        try:
+            AIS._last_pos_fetch.clear(); AIS._last_eta_fetch.clear()
+            r = await AIS.auto_refresh_cycle(db, state, 1000.0, now_utc=U(2026, 10, 14, 2, 0))
+            ok(r["outside_schedule"] and r["attempted"] == 0 and not calls, "09.00 WIB: tidak ada panggilan sama sekali")
+            r = await AIS.auto_refresh_cycle(db, state, 1000.0, now_utc=U(2026, 10, 14, 3, 0))
+            ok(r["attempted"] == 1 and len([c for c in calls if c.endswith("/position")]) == 1, "10.00 WIB (slot jadwal): kapal dicek sekali")
+            calls.clear(); AIS._last_pos_fetch.clear()
+            r = await AIS.auto_refresh_cycle(db, state, 1000.0 + 600, now_utc=U(2026, 10, 14, 3, 10))
+            ok(r["attempted"] == 0 and not calls, "10.10 WIB (slot sama): tidak dicek lagi")
+            state[("slot", "525200343")] = "2026-10-14@10"; state.pop("525200343", None)
+            r = await AIS.auto_refresh_cycle(db, state, 1000.0 + 8000, now_utc=U(2026, 10, 14, 5, 0))
+            ok(r["attempted"] == 1, "12.00 WIB: slot berikutnya, dicek lagi")
+            # 5 slot sehari = paling banyak 5 percobaan per kapal per hari
+            state.clear(); calls.clear(); n = 0
+            for h in range(0, 24):
+                AIS._last_pos_fetch.clear(); state.pop("525200343", None)
+                for minute in (0, 10, 20, 30, 40, 50):
+                    rr = await AIS.auto_refresh_cycle(db, state, 10000.0 + h * 3600 + minute * 60, now_utc=U(2026, 10, 14, 0, 0) + timedelta(hours=h, minutes=minute))
+                    n += rr["attempted"]
+            ok(n == 5, f"sehari penuh (tiap 10 menit): tepat 5 percobaan per kapal (dapat {n})")
+        finally:
+            AIS.vesselapi_enabled, AIS._vesselapi_use_sat, AIS._vesselapi_get, AIS.vesselfinder_enabled = saved
+            AIS._last_pos_fetch.clear(); AIS._last_eta_fetch.clear()
+
+        # pelanggan: baca cache saja
+        ok(AIS.customer_refresh_enabled() is False, "default: pelanggan tidak memicu panggilan berbayar")
+        calls.clear()
+        AIS.vesselapi_enabled = lambda: True; AIS._vesselapi_get = fake_get; AIS.vesselfinder_enabled = lambda: False
+        try:
+            out = await AIS.position_for_legs(db, [{"route_leg_id": "l1", "tipe": "Kapal RoRo", "kapal": "MUTIARA", "mmsi": "525200343", "status": "Berlangsung"}])
+            ok(not calls, "halaman tracking pelanggan dibuka: 0 panggilan ke VesselAPI")
+            ok(out["jadwal"] == {"jam": [8, 10, 12, 14, 16], "zona": "WIB"}, "halaman tracking membawa info jadwal buat catatan")
+            os.environ["AIS_CUSTOMER_REFRESH"] = "on"; AIS._last_pos_fetch.clear()
+            await AIS.position_for_legs(db, [{"route_leg_id": "l1", "tipe": "Kapal RoRo", "kapal": "MUTIARA", "mmsi": "525200343", "status": "Berlangsung"}])
+            ok(len(calls) >= 1, "AIS_CUSTOMER_REFRESH=on mengembalikan perilaku lama (opsional)")
+            os.environ.pop("AIS_CUSTOMER_REFRESH", None)
+            # simpan leg: kapal dengan posisi segar di cache tidak dipanggil lagi
+            calls.clear(); AIS._last_pos_fetch.clear()
+            await db.ais_positions.insert_one({"mmsi": "525200343", "latitude": 1.0, "longitude": 118.0, "position_timestamp": datetime.now(timezone.utc).isoformat()})
+            await AIS.warm_ships(db, [{"mmsi": "525200343"}])
+            ok(not calls, "simpan leg: posisi masih ada di cache -> tidak ada panggilan")
+            await AIS.warm_ships(db, [{"mmsi": "525999999"}])
+            ok(len(calls) >= 1, "simpan leg: kapal baru tanpa posisi -> tetap diambil sekali")
+        finally:
+            AIS.vesselapi_enabled, AIS._vesselapi_use_sat, AIS._vesselapi_get, AIS.vesselfinder_enabled = saved
+            AIS._last_pos_fetch.clear(); AIS._last_eta_fetch.clear()
+    finally:
+        for k, v in old.items():
+            if v is None: os.environ.pop(k, None)
+            else: os.environ[k] = v
+
+
 async def test_trace_probe_dedupe_sat():
     """Trace per Kapal: 1 kapal dites SEKALI walau muncul di banyak trip, dan
     ikut tes jalur satelit (sama dgn halaman tracking). Hemat kuota provider."""
@@ -2062,7 +2145,7 @@ async def test_task_link_tutup_dan_menu_mati():
 
 
 async def main():
-    for t in (test_task_link_tutup_dan_menu_mati, test_task_driver_tujuan, test_cashbank_dan_hpp, test_payouts_flip, test_driver_incentive, test_leg_supplier, test_bastk_upload_idempotent, test_daily_upload_idempotent, test_ship_master, test_sync_single_unit_vehicle, test_edit_invoice_lines, test_selisih_ringkasan_auth, test_riwayat_clear, test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
+    for t in (test_ais_jadwal_hemat_kuota, test_task_link_tutup_dan_menu_mati, test_task_driver_tujuan, test_cashbank_dan_hpp, test_payouts_flip, test_driver_incentive, test_leg_supplier, test_bastk_upload_idempotent, test_daily_upload_idempotent, test_ship_master, test_sync_single_unit_vehicle, test_edit_invoice_lines, test_selisih_ringkasan_auth, test_riwayat_clear, test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,

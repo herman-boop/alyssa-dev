@@ -46,7 +46,44 @@ VESSELAPI_MAX_AGE_MIN = int(os.environ.get("VESSELAPI_MAX_AGE_MIN") or "45")
 # semua paket termasuk Free. Default 480 (8 jam) -> lebih banyak dapat posisi
 # untuk kapal offshore. (satMaxAgeMinutes TIDAK dipakai: khusus paket berbayar.)
 VESSELAPI_SAT_LOOKBACK = int(os.environ.get("VESSELAPI_SAT_LOOKBACK") or "480")
+# Jadwal cek OTOMATIS (hemat kuota): jam lokal dipisah koma. Default "8,10,12,14,16" =
+# 5x sehari, jam kerja, jeda 2 jam. Kosong / "always" = perilaku lama (tiap putaran).
+AIS_TZ_OFFSET_MIN = int(os.environ.get("AIS_TZ_OFFSET_MIN") or "420")   # WIB = UTC+7
+
+
+def refresh_hours():
+    """Set jam jadwal cek otomatis, atau None kalau tanpa jadwal (selalu)."""
+    raw = os.environ.get("AIS_REFRESH_HOURS")
+    raw = "8,10,12,14,16" if raw is None else raw.strip().lower()
+    if raw in ("", "always", "semua"):
+        return None
+    hrs = set()
+    for x in raw.split(","):
+        x = x.strip()
+        if x.isdigit() and 0 <= int(x) <= 23:
+            hrs.add(int(x))
+    return hrs or None
+
+
+def current_slot(now_utc):
+    """Slot jadwal saat ini ("YYYY-MM-DD@HH" jam lokal) atau None kalau di luar jadwal.
+    Tanpa jadwal -> "always" (tiap putaran boleh)."""
+    hrs = refresh_hours()
+    if hrs is None:
+        return "always"
+    from datetime import timedelta
+    lt = now_utc + timedelta(minutes=AIS_TZ_OFFSET_MIN)
+    return f"{lt.date().isoformat()}@{lt.hour:02d}" if lt.hour in hrs else None
+
+
+def customer_refresh_enabled():
+    """Pelanggan yang membuka halaman tracking BOLEH memicu panggilan berbayar? Default: tidak
+    (halaman tracking cuma baca cache; yang menyegarkan cache = jadwal otomatis)."""
+    return (os.environ.get("AIS_CUSTOMER_REFRESH") or "off").strip().lower() in ("1", "true", "yes", "on")
+
+
 # Jeda minimum antar-panggil VesselAPI untuk 1 kapal (detik) — cegah boros kuota:
+WARM_MAX_AGE_MIN = int(os.environ.get("AIS_WARM_MAX_AGE_MIN") or "360")   # simpan leg: ambil posisi hanya kalau cache kosong / lebih tua dari ini
 _MIN_FETCH_INTERVAL = 300
 _ETA_FETCH_INTERVAL = 3600
 _last_pos_fetch = {}
@@ -602,6 +639,18 @@ def pick_active_ship_leg(legs):
     return legs[ship_idx[0]]
 
 
+def jadwal_info():
+    """Info jadwal pembaruan buat ditampilkan ke pelanggan (None kalau tanpa jadwal)."""
+    hrs = refresh_hours()
+    if not hrs:
+        return None
+    zona = {420: "WIB", 480: "WITA", 540: "WIT"}.get(AIS_TZ_OFFSET_MIN)
+    if zona is None:
+        h = AIS_TZ_OFFSET_MIN / 60
+        zona = f"UTC{h:+g}"
+    return {"jam": sorted(hrs), "zona": zona}
+
+
 async def position_for_legs(db, legs):
     """Ambil identitas kapal dari leg AKTIF (mmsi/imo) + posisi AIS dari cache.
     Dipanggil oleh view per-trip supaya SELALU scoped ke trip pemiliknya
@@ -622,8 +671,10 @@ async def position_for_legs(db, legs):
     except Exception as e:
         logger.warning("[ais] lookup gagal: %s", e)
 
-    # On-demand refresh via VesselAPI kalau cache kosong / basi (hemat kuota via throttle)
-    if vesselapi_enabled():
+    # On-demand refresh via VesselAPI kalau cache kosong / basi (hemat kuota via throttle).
+    # Default MATI untuk pelanggan (AIS_CUSTOMER_REFRESH=off): halaman tracking cuma baca cache,
+    # yang menyegarkan cache adalah jadwal otomatis, jadi jumlah pembuka halaman tidak menambah pemakaian kuota.
+    if vesselapi_enabled() and customer_refresh_enabled():
         age = _doc_age_seconds(doc)
         if doc is None or age is None or age > VESSELAPI_MAX_AGE_MIN * 60:
             fresh = await _vesselapi_refresh(db, chosen["mmsi"], chosen["imo"])
@@ -633,7 +684,7 @@ async def position_for_legs(db, legs):
     # Fallback terakhir: VesselFinder API (sumber sama dgn vesselfinder.com) kalau
     # masih kosong/basi — paling ampuh utk kapal sandar/pesisir (terrestrial).
     # Dipanggil cuma kalau provider sebelumnya belum dapat → hemat kredit.
-    if vesselfinder_enabled():
+    if vesselfinder_enabled() and customer_refresh_enabled():
         age = _doc_age_seconds(doc)
         if doc is None or age is None or age > VESSELAPI_MAX_AGE_MIN * 60:
             fresh = await _vesselfinder_refresh(db, chosen["mmsi"], chosen["imo"])
@@ -649,6 +700,7 @@ async def position_for_legs(db, legs):
         "imo": chosen["imo"],
         "provider_enabled": any_provider_enabled(),
         "ais": public_ais(doc),
+        "jadwal": jadwal_info(),      # mis. {"jam": [8,10,12,14,16], "zona": "WIB"} -> catatan "diperbarui 5x sehari" di halaman tracking
     }
 
 
@@ -667,6 +719,17 @@ async def warm_ships(db, legs):
         if not key or key in seen:
             continue
         seen.add(key)
+        try:     # hemat kuota: kapal yang posisinya sudah ada di cache (< WARM_MAX_AGE_MIN) tidak diambil lagi tiap simpan leg
+            doc = None
+            if mmsi:
+                doc = await db.ais_positions.find_one({"mmsi": mmsi}, {"_id": 0})
+            if not doc and imo:
+                doc = await db.ais_positions.find_one({"imo": imo}, {"_id": 0})
+            age = _doc_age_seconds(doc) if (doc and doc.get("latitude") is not None) else None
+            if age is not None and age <= WARM_MAX_AGE_MIN * 60:
+                continue
+        except Exception:
+            pass
         try:
             # read timeout lebih panjang: warm jalan di latar belakang (tidak
             # memblok respons simpan leg), jadi query satelit yang lambat tetap
@@ -1080,10 +1143,19 @@ def auto_refresh_running():
     return bool(_auto_task and not _auto_task.done())
 
 
-async def auto_refresh_cycle(db, state, now_m, max_ships=10):
+async def auto_refresh_cycle(db, state, now_m, max_ships=10, now_utc=None):
     """Satu putaran cek otomatis. `state` = {ident: {"fails", "next"}} (in-memory),
-    `now_m` = time.monotonic(). Return ringkasan putaran (buat log & tes)."""
-    res = {"candidates": 0, "attempted": 0, "ok": 0, "fail": 0, "skipped_fresh": 0, "skipped_backoff": 0}
+    `now_m` = time.monotonic(). Return ringkasan putaran (buat log & tes).
+    `now_utc` (opsional): kalau diisi, putaran hanya jalan di jam jadwal (AIS_REFRESH_HOURS) dan
+    tiap kapal dicek MAKSIMAL SEKALI per slot jam -> default 5x sehari di jam kerja."""
+    res = {"candidates": 0, "attempted": 0, "ok": 0, "fail": 0, "skipped_fresh": 0, "skipped_backoff": 0,
+           "skipped_slot": 0, "outside_schedule": False}
+    slot = None
+    if now_utc is not None:
+        slot = current_slot(now_utc)
+        if slot is None:                 # di luar jam jadwal: tidak ada panggilan, tidak ada scan DB
+            res["outside_schedule"] = True
+            return res
     ships = {}
     try:
         cur = db.trips.find({"legs": {"$exists": True}}, {"_id": 0, "legs": 1})
@@ -1116,11 +1188,16 @@ async def auto_refresh_cycle(db, state, now_m, max_ships=10):
             state.pop(ident, None)
             res["skipped_fresh"] += 1
             continue
+        if slot is not None and state.get(("slot", ident)) == slot:
+            res["skipped_slot"] += 1     # sudah dicek di slot jam ini
+            continue
         st = state.get(ident)
         if st and now_m < st["next"]:
             res["skipped_backoff"] += 1
             continue
         res["attempted"] += 1
+        if slot is not None:
+            state[("slot", ident)] = slot
         fresh = None
         try:
             if vesselapi_enabled():
@@ -1147,7 +1224,8 @@ async def _auto_refresh_run(db):
     await asyncio.sleep(120)          # biar server selesai start dulu
     while True:
         try:
-            r = await auto_refresh_cycle(db, state, time.monotonic())
+            from datetime import datetime, timezone
+            r = await auto_refresh_cycle(db, state, time.monotonic(), now_utc=datetime.now(timezone.utc))
             if r["attempted"]:
                 logger.info("[ais] auto-refresh: %s", r)
         except Exception as e:
@@ -1165,7 +1243,8 @@ def start_auto_refresh(db):
         return
     try:
         _auto_task = asyncio.create_task(_auto_refresh_run(db))
-        logger.info("[ais] auto-refresh dimulai (tiap %ss, kapal 'Berlangsung' tanpa posisi segar).", AUTO_REFRESH_TICK)
+        logger.info("[ais] auto-refresh dimulai (cek tiap %ss; jadwal jam %s, zona UTC%+d menit; pelanggan memicu panggilan: %s).",
+                    AUTO_REFRESH_TICK, sorted(refresh_hours()) if refresh_hours() else "selalu", AIS_TZ_OFFSET_MIN, customer_refresh_enabled())
     except Exception as e:
         logger.warning("[ais] gagal start auto-refresh: %s", e)
 
