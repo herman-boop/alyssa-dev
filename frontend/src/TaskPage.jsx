@@ -56,12 +56,20 @@ export default function TaskPage() {
       setPhase("ok");
     } catch (e) {
       const s = e?.response?.status;
-      if (s === 410) setPhase("disabled");
+      if (s === 410) setPhase(/selesai/i.test(String(e?.response?.data?.detail || "")) ? "closed" : "disabled");
       else if (s === 404) setPhase("notfound");
       else { setErrMsg("Gagal memuat tugas. Coba muat ulang."); setPhase("error"); }
     }
   }, [token]);
   useEffect(() => { load(); }, [load]);
+  // Admin memilih leg Selesai saat halaman masih terbuka: aksi berikutnya (foto/checkpoint/dokumen) dijawab 410 -> tutup halaman
+  useEffect(() => {
+    const id = axios.interceptors.response.use((r) => r, (e) => {
+      if (e?.response?.status === 410 && /selesai/i.test(String(e.response.data?.detail || ""))) setPhase("closed");
+      return Promise.reject(e);
+    });
+    return () => axios.interceptors.response.eject(id);
+  }, []);
 
   const getGeo = () => new Promise((resolve) => {
     if (!navigator.geolocation) return resolve(null);
@@ -257,9 +265,11 @@ export default function TaskPage() {
   const wrap = { minHeight: "100vh", background: C.bg, color: C.ink, fontFamily: FONT, paddingBottom: "calc(env(safe-area-inset-bottom) + 110px)" };
   if (phase === "load") return <div style={{ ...wrap, display: "flex", alignItems: "center", justifyContent: "center" }}>Memuat tugas…</div>;
   if (phase === "notfound") return <Centered wrap={wrap} icon="🔗" title="Link tidak ditemukan" sub="Link tugas salah atau sudah dihapus." />;
+  if (phase === "closed") return <Centered wrap={wrap} icon="✅" title="Tugas sudah selesai" sub="Link ini sudah ditutup oleh admin. Terima kasih, tugas Anda tercatat." />;
   if (phase === "disabled") return <Centered wrap={wrap} icon="⛔" title="Link dinonaktifkan" sub="Hubungi admin PT Alyssa Auto Logistik." />;
   if (phase === "error") return <Centered wrap={wrap} icon="⚠️" title="Gagal memuat" sub={errMsg} />;
 
+  const disabledTabs = task.disabled_tabs || [];
   const baseTabs = task.tabs && task.tabs.length ? task.tabs : ["foto", "checkpoint", "dokumen"];
   const ORDER = ["beranda", "checkpoint", "foto", "dokumen", "scan", "info_kapal"];
   const tabs = ["beranda", ...baseTabs].sort((a, b) => ORDER.indexOf(a) - ORDER.indexOf(b));
@@ -280,7 +290,7 @@ export default function TaskPage() {
     { key: "harian", tab: "checkpoint", label: "Checkpoint harian", done: harianList.length > 0 },
     { key: "foto", tab: "foto", label: "Foto tujuan", done: (task.photos || []).length > 0 },
     { key: "dokumen", tab: "dokumen", label: "Dokumen", done: (task.documents || []).length > 0 },
-  ] : baseTabs.filter((k) => k !== "scan").map((k) => {
+  ] : baseTabs.filter((k) => k !== "scan" && !disabledTabs.includes(k)).map((k) => {
     const done = k === "foto" ? (task.photos || []).length > 0
       : k === "checkpoint" ? (task.checkpoints || []).length > 0
       : k === "dokumen" ? (task.documents || []).length > 0
@@ -528,9 +538,10 @@ export default function TaskPage() {
         {tabs.map((k) => {
           const m = TAB_META[k] || { Icon: FileText, label: k };
           const on = tab === k;
+          const off = disabledTabs.includes(k);   // menu dimatikan untuk peran ini (tidak bisa diklik)
           return (
-            <button key={k} onClick={() => setTab(k)} data-testid={`task-nav-${k}`}
-              style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", padding: "6px 16px", borderRadius: 14, minWidth: 64, color: on ? C.blueSoft : "#64748B", transition: "color .2s ease" }}>
+            <button key={k} onClick={() => !off && setTab(k)} disabled={off} aria-disabled={off} title={off ? "Tidak aktif untuk tugas ini" : undefined} data-testid={`task-nav-${k}`}
+              style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, background: "none", border: "none", cursor: off ? "not-allowed" : "pointer", opacity: off ? 0.3 : 1, padding: "6px 16px", borderRadius: 14, minWidth: 64, color: on ? C.blueSoft : "#64748B", transition: "color .2s ease" }}>
               <m.Icon size={22} strokeWidth={on ? 2.5 : 2} />
               <span style={{ fontSize: 11, fontWeight: on ? 700 : 600 }}>{m.label}</span>
             </button>

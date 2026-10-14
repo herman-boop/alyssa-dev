@@ -8109,6 +8109,11 @@ function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tri
                   <select style={MINI_INPUT} value={leg.status} onChange={e => setLeg(i, { status: e.target.value })}>
                     {LEG_STATUS.map(s => <option key={s}>{s}</option>)}
                   </select>
+                  {leg.status === "Selesai" && (
+                    <span style={{ display: "block", fontSize: 9.5, color: "#e6b450", marginTop: 3, lineHeight: 1.4 }} data-testid={`leg-selesai-note-${i}`}>
+                      🔒 Semua link tugas leg ini (driver, pelabuhan, self drive) ditutup. Ganti status lagi untuk membukanya.
+                    </span>
+                  )}
                 </label>
                 <label style={MINI_LABEL}>ETA
                   <input type="date" style={MINI_INPUT} value={leg.eta} onChange={e => setLeg(i, { eta: e.target.value })} />

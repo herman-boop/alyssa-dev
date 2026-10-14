@@ -3809,7 +3809,7 @@ ROLE_CONFIG = {
     },
     "pelabuhan_asal": {
         "label": "Petugas Pelabuhan Asal", "petugas_tipe": "Petugas Pelabuhan", "album_key": "pelabuhan",
-        "tabs": ["foto", "checkpoint", "dokumen"],
+        "tabs": ["foto", "checkpoint", "dokumen"], "disabled_tabs": ["foto", "dokumen"],
         "foto_title": "Tambah Foto Pelabuhan",
         "foto_instruksi": ["Kendaraan di luar pelabuhan (menuju masuk)", "Kendaraan tiba di pelabuhan",
                            "Area antre", "Area parkir", "Sebelum naik kapal", "Proses loading / naik kapal",
@@ -3819,7 +3819,7 @@ ROLE_CONFIG = {
     },
     "pelabuhan_tujuan": {
         "label": "Petugas Pelabuhan Tujuan", "petugas_tipe": "Petugas Pelabuhan", "album_key": "pelabuhan",
-        "tabs": ["foto", "checkpoint", "dokumen"],
+        "tabs": ["foto", "checkpoint", "dokumen"], "disabled_tabs": ["foto", "dokumen"],
         "foto_title": "Tambah Foto Pelabuhan",
         "foto_instruksi": ["Kendaraan turun dari kapal", "Kondisi setelah turun", "Area pelabuhan tujuan",
                            "Serah terima ke driver berikutnya", "Dokumen keluar pelabuhan"],
@@ -3960,6 +3960,7 @@ def _leg_task_public_view(t: dict) -> dict:
         "allowed_checkpoint_types": cfg["checkpoint_types"] if cfg.get("simple") else t.get("allowed_checkpoint_types", cfg["checkpoint_types"]),
         "allowed_document_types": t.get("allowed_document_types", cfg["document_types"]),
         "simple": bool(cfg.get("simple")),
+        "disabled_tabs": list(cfg.get("disabled_tabs") or []),
         "cp_harian": ({"jam_mulai": TR.CP_JAM_MULAI, "jam_akhir": TR.CP_JAM_AKHIR, "jenis": TR.JENIS_HARIAN, "jenis_terima": TR.JENIS_TERIMA}
                       if cfg.get("simple") else None),
         **(TR.batas_info(t) if cfg.get("simple") else {}),
@@ -4321,14 +4322,32 @@ async def list_rombongan_reports(token: str, tanggal: Optional[str] = None):
     return {"ok": True, "items": items}
 
 
-@api_router.get("/public/task/{token}")
-async def public_get_task(token: str):
-    """Halaman petugas — akses ter-scope, cuma data leg dia."""
+async def _load_task(token: str, tab: Optional[str] = None) -> dict:
+    """Ambil tugas buat endpoint publik: 404 kalau tidak ada, 410 kalau link dinonaktifkan atau
+    leg-nya sudah dipilih Selesai oleh admin (link ditutup, bisa dibuka lagi dengan mengganti status leg).
+    `tab` = menu yang dipakai endpoint ini; kalau menu itu dimatikan untuk peran ini -> 403."""
     t = await db.leg_tasks.find_one({"token": token})
     if not t:
         raise HTTPException(404, "Link tugas tidak ditemukan")
     if t.get("disabled"):
         raise HTTPException(410, "Link tugas sudah dinonaktifkan")
+    try:
+        trip = await db.trips.find_one({"trip_id": t.get("trip_id")}, {"legs": 1})
+        if TR.leg_selesai((trip or {}).get("legs"), t):
+            raise HTTPException(410, "Tugas ini sudah selesai. Link ditutup.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"[task] gagal cek status leg: {e}")
+    if tab and tab in (_role_cfg(t.get("tipe_tugas")).get("disabled_tabs") or []):
+        raise HTTPException(403, "Menu ini tidak aktif untuk tugas Anda")
+    return t
+
+
+@api_router.get("/public/task/{token}")
+async def public_get_task(token: str):
+    """Halaman petugas — akses ter-scope, cuma data leg dia."""
+    t = await _load_task(token)
     # tandai sudah dibuka (sekali)
     if t.get("status") == "belum_dibuka":
         now = datetime.now(timezone.utc).isoformat()
@@ -4345,11 +4364,7 @@ async def public_task_upload(
 ):
     """ALBUM: petugas upload foto dokumentasi → task.photos + album leg (album_key
     token). TERPISAH dari checkpoint (album = dokumentasi, checkpoint = histori GPS)."""
-    t = await db.leg_tasks.find_one({"token": token})
-    if not t:
-        raise HTTPException(404, "Link tugas tidak ditemukan")
-    if t.get("disabled"):
-        raise HTTPException(410, "Link tugas sudah dinonaktifkan")
+    t = await _load_task(token, "foto")
     trip_id = t.get("trip_id")
     url = _save_upload(trip_id, f"leg/{t.get('leg_index')}/{token[:8]}", foto, ALLOWED_IMG | ALLOWED_DOC)
     now = datetime.now(timezone.utc).isoformat()
@@ -4372,11 +4387,7 @@ async def public_task_delete_photo(token: str, photo_id: str):
     """Hapus 1 foto album yang diupload lewat link tugas (kalau salah upload).
     Dihapus dari task.photos DAN dari trip.album.{stage} biar hilang juga di
     tracking/consumen & admin. Scope: cuma foto milik token ini."""
-    t = await db.leg_tasks.find_one({"token": token})
-    if not t:
-        raise HTTPException(404, "Link tugas tidak ditemukan")
-    if t.get("disabled"):
-        raise HTTPException(410, "Link tugas sudah dinonaktifkan")
+    t = await _load_task(token, "foto")
     photos = t.get("photos") or []
     target = next((p for p in photos if p.get("id") == photo_id), None)
     if not target:
@@ -4417,11 +4428,7 @@ async def public_task_checkpoint(
     """CHECKPOINT: histori perjalanan ber-GPS (terpisah dari album). Jenis divalidasi
     ∈ allowed_checkpoint_types token → di luar itu 403. Foto opsional.
     Peran "simple" (Driver Tujuan): GPS + foto wajib, terima mobil 1x, lalu 1 checkpoint/hari jam 08-16."""
-    t = await db.leg_tasks.find_one({"token": token})
-    if not t:
-        raise HTTPException(404, "Link tugas tidak ditemukan")
-    if t.get("disabled"):
-        raise HTTPException(410, "Link tugas sudah dinonaktifkan")
+    t = await _load_task(token)
     cfg_t = _role_cfg(t.get("tipe_tugas"))
     allowed = cfg_t["checkpoint_types"] if cfg_t.get("simple") else (t.get("allowed_checkpoint_types") or cfg_t["checkpoint_types"])
     if jenis not in allowed:
@@ -4463,11 +4470,7 @@ async def public_task_document(
 ):
     """DOKUMEN: scan/foto berkas (BASTK/PoD/Surat Jalan). doc_type divalidasi ∈
     allowed_document_types token → di luar itu 403."""
-    t = await db.leg_tasks.find_one({"token": token})
-    if not t:
-        raise HTTPException(404, "Link tugas tidak ditemukan")
-    if t.get("disabled"):
-        raise HTTPException(410, "Link tugas sudah dinonaktifkan")
+    t = await _load_task(token, "dokumen")
     allowed = t.get("allowed_document_types") or _role_cfg(t.get("tipe_tugas"))["document_types"]
     if doc_type not in allowed:
         raise HTTPException(403, "Jenis dokumen di luar tugas Anda")
@@ -4494,11 +4497,7 @@ class TaskSubmitBody(BaseModel):
 @api_router.post("/public/task/{token}/submit")
 async def public_task_submit(token: str, body: TaskSubmitBody):
     """Petugas simpan input tambahan (nama kapal/voyage/penerima/ttd) & tandai selesai."""
-    t = await db.leg_tasks.find_one({"token": token})
-    if not t:
-        raise HTTPException(404, "Link tugas tidak ditemukan")
-    if t.get("disabled"):
-        raise HTTPException(410, "Link tugas sudah dinonaktifkan")
+    t = await _load_task(token)
     now = datetime.now(timezone.utc).isoformat()
     upd = {"updated_at": now}
     if body.extra_inputs:
