@@ -15,6 +15,7 @@ from playwright.async_api import async_playwright
 import ship_master  # master kapal (panjang/lebar/tipe)
 import leg_supplier  # supplier per leg + pembayaran supplier
 import driver_incentive  # insentif per checkpoint driver borongan (antrean bayar)
+import driver_notif  # notif WhatsApp ke driver saat insentif dibayar
 import flip_client  # adapter Flip (transfer ke rekening driver)
 import payouts  # transfer driver lewat Flip dengan pengaman (inquiry wajib, anti dobel, payout_logs)
 import cashbank  # Kas & Bank: akun + mutasi + saldo
@@ -4602,6 +4603,7 @@ async def pay_driver_incentive(item_id: str, catatan: str = Form(""), akun_id: s
     except ValueError as e:
         raise HTTPException(400, str(e))
     res["bukti_warning"] = warn
+    res["wa_notif"] = await _notify_incentives_paid([res])
     if (akun_id or "").strip():     # kas: pembayaran manual mengurangi akun yang dipilih (gagal tidak membatalkan pembayaran)
         try:
             await cashbank.post_incentive(db, res, akun_id.strip(), today_wib(), url)
@@ -4609,6 +4611,43 @@ async def pay_driver_incentive(item_id: str, catatan: str = Form(""), akun_id: s
             logger.warning(f"[kas] gagal catat mutasi insentif: {e}")
             res["kas_warning"] = "Tersimpan dibayar, tetapi mutasi kas gagal dicatat. Catat manual di Kas & Bank."
     return res
+
+
+# Notif WhatsApp ke driver saat insentif dibayar (driver_notif.py). Aktif default; DRIVER_PAID_NOTIF=false untuk mematikan.
+DRIVER_PAID_NOTIF = (os.environ.get("DRIVER_PAID_NOTIF", "true").strip().lower() not in ("false", "0", "no", "off"))
+
+
+async def _notify_incentives_paid(items):
+    """Kirim notif WA ke driver untuk item yang baru dibayar. Tidak pernah raise / menggagalkan pembayaran.
+    Return satu kata untuk tampilan admin: terkirim | tanpa_nomor | sudah | gagal | nonaktif."""
+    if not DRIVER_PAID_NOTIF:
+        return "nonaktif"
+    try:
+        r = await driver_notif.notify_paid(db, items, wa_send)
+    except Exception as e:
+        logger.warning(f"[notif-driver] gagal: {e}")
+        return "gagal"
+    vals = set(r.values())
+    for v in ("gagal", "tanpa_nomor", "terkirim", "sudah"):
+        if v in vals:
+            return v
+    return "sudah"
+
+
+payouts.ON_PAID = _notify_incentives_paid
+
+
+@api_router.get("/admin/driver-wa", dependencies=[Depends(require_admin_pin)])
+async def list_driver_wa():
+    return {"items": await driver_notif.list_numbers(db)}
+
+
+@api_router.post("/admin/driver-wa", dependencies=[Depends(require_admin_pin)])
+async def save_driver_wa(body: dict = Body(...)):
+    try:
+        return await driver_notif.save_number(db, str(body.get("driver_nama") or ""), str(body.get("no_hp") or ""))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @api_router.post("/admin/driver-incentives/{item_id}/tolak", dependencies=[Depends(require_admin_pin)])
