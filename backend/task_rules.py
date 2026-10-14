@@ -78,3 +78,23 @@ def batas_info(task, now=None):
     out["sisa_hari"] = sisa
     out["terlambat"] = sisa < 0 and task.get("status") != "selesai"
     return out
+
+
+def leg_for(legs, task):
+    """Leg milik tugas ini (cocok route_leg_id, kalau tidak ada: leg_index)."""
+    legs = legs or []
+    rid = task.get("route_leg_id")
+    if rid:
+        for l in legs:
+            if l.get("route_leg_id") == rid:
+                return l
+    i = task.get("leg_index")
+    if isinstance(i, int) and 0 <= i < len(legs):
+        return legs[i]
+    return None
+
+
+def leg_selesai(legs, task):
+    """True kalau admin sudah memilih status leg = Selesai -> semua link tugas leg itu ditutup."""
+    l = leg_for(legs, task)
+    return bool(l) and str(l.get("status") or "").strip().lower() == "selesai"

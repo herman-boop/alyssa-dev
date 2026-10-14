@@ -2028,8 +2028,41 @@ async def test_task_driver_tujuan():
     ok("_id" not in ad and ad["terlambat"] is True, "admin view: terlambat kalau lewat batas")
 
 
+async def test_task_link_tutup_dan_menu_mati():
+    """Link tugas: leg dipilih Selesai -> link ditutup (semua peran, termasuk self drive); petugas pelabuhan: Foto & Dokumen mati."""
+    leg = lambda st, rid="r1": {"route_leg_id": rid, "status": st}
+    ok(TR.leg_selesai([leg("Selesai")], {"route_leg_id": "r1"}) is True, "leg Selesai -> tugas tertutup")
+    ok(TR.leg_selesai([leg("selesai ")], {"route_leg_id": "r1"}) is True, "huruf besar/kecil & spasi tidak masalah")
+    ok(TR.leg_selesai([leg("Berlangsung")], {"route_leg_id": "r1"}) is False, "Berlangsung -> link tetap hidup")
+    ok(TR.leg_selesai([leg("Menunggu")], {"route_leg_id": "r1"}) is False, "Menunggu -> link tetap hidup")
+    ok(TR.leg_selesai([leg("Selesai", "r2"), leg("Berlangsung", "r1")], {"route_leg_id": "r1"}) is False, "leg lain Selesai tidak menutup leg ini (cocok per route_leg_id)")
+    ok(TR.leg_selesai([leg("Berlangsung", ""), leg("Selesai", "")], {"leg_index": 1}) is True, "tanpa route_leg_id: cocok per urutan leg")
+    ok(TR.leg_selesai([], {"route_leg_id": "x"}) is False and TR.leg_selesai(None, {}) is False, "leg tidak ketemu -> tidak ditutup")
+    ok(TR.leg_selesai([leg("Selesai")], {"route_leg_id": "r1", "tipe_tugas": "driver_full"}) is True, "berlaku untuk Self Drive juga")
+    # dibuka lagi: ganti status
+    ok(TR.leg_selesai([leg("Berlangsung")], {"route_leg_id": "r1"}) is False, "status diganti lagi -> link hidup kembali")
+
+    import ast
+    src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "server.py")).read()
+    tree = ast.parse(src)
+    ns = {"TR": TR, "DEFAULT_TIPE_TUGAS": "driver_asal"}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(getattr(x, "id", "") in ("ROLE_CONFIG", "DEFAULT_TIPE_TUGAS") for x in node.targets):
+            exec(compile(ast.Module([node], []), "server", "exec"), ns)
+        if isinstance(node, ast.FunctionDef) and node.name in ("_role_cfg", "_leg_task_public_view"):
+            exec(compile(ast.Module([node], []), "server", "exec"), ns)
+    rc = ns["ROLE_CONFIG"]
+    for r in ("pelabuhan_asal", "pelabuhan_tujuan"):
+        ok(rc[r]["disabled_tabs"] == ["foto", "dokumen"] and "checkpoint" not in rc[r]["disabled_tabs"], f"{r}: Foto & Dokumen mati, Checkpoint hidup")
+        v = ns["_leg_task_public_view"]({"token": "t", "tipe_tugas": r, "status": "dikerjakan"})
+        ok(v["disabled_tabs"] == ["foto", "dokumen"] and v["tabs"] == ["foto", "checkpoint", "dokumen"], f"{r}: tampilan publik membawa menu yang dimatikan")
+    for r in ("driver_asal", "driver_tujuan", "driver_full", "kapal"):
+        ok(not rc[r].get("disabled_tabs"), f"{r}: menu tidak ada yang dimatikan")
+    ok(ns["_leg_task_public_view"]({"token": "t", "tipe_tugas": "driver_asal"})["disabled_tabs"] == [], "driver asal: daftar menu mati kosong")
+
+
 async def main():
-    for t in (test_task_driver_tujuan, test_cashbank_dan_hpp, test_payouts_flip, test_driver_incentive, test_leg_supplier, test_bastk_upload_idempotent, test_daily_upload_idempotent, test_ship_master, test_sync_single_unit_vehicle, test_edit_invoice_lines, test_selisih_ringkasan_auth, test_riwayat_clear, test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
+    for t in (test_task_link_tutup_dan_menu_mati, test_task_driver_tujuan, test_cashbank_dan_hpp, test_payouts_flip, test_driver_incentive, test_leg_supplier, test_bastk_upload_idempotent, test_daily_upload_idempotent, test_ship_master, test_sync_single_unit_vehicle, test_edit_invoice_lines, test_selisih_ringkasan_auth, test_riwayat_clear, test_imports_exclude_compact, test_pisah_faktur, test_tembak_semua, test_rekon_other_payments, test_vendor_pay_rute_override, test_tembak_rekon_ke_unit_terpilih, test_vendor_trip_search_fast, test_smart_allocation_and_restore, test_vendor_pin_embedded, test_auto_refresh_cycle, test_trace_probe_dedupe_sat, test_invoice_payments, test_ingest_basic, test_idempotent, test_idempotency_key_only,
               test_supplier_not_found, test_entity_validation, test_reverse,
               test_allocate, test_koreksi, test_pull_ack_selection,
               test_preview_readonly, test_waterfall_auto_alloc, test_dedup_suggest,
