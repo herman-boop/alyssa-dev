@@ -6088,16 +6088,26 @@ async def add_pelanggan_harga(pelanggan_id: str, body: PelangganHargaBody):
 
 
 class PelangganHargaPatchBody(BaseModel):
-    harga_deal: int
+    # Semua opsional, tapi minimal satu harus diisi. Harga dan Tipe Kendaraan/Moda
+    # bisa diubah sendiri-sendiri, jadi tipe unit nggak perlu input ulang satu rute.
+    harga_deal: Optional[int] = None
+    tipe_kendaraan: Optional[str] = None
+    moda: Optional[str] = None
 
 
 @api_router.patch("/admin/pelanggan/{pelanggan_id}/harga/{harga_id}", dependencies=[Depends(require_admin_pin)])
 async def patch_pelanggan_harga(pelanggan_id: str, harga_id: str, body: PelangganHargaPatchBody):
-    """Ubah harga_deal 1 entry yang udah ada -- buat kasus pelanggan nego dan
-    harga final beda dari hasil kalkulasi HPP+margin awal. margin_aktual
-    dihitung ulang otomatis biar tetap konsisten sama harga_deal barunya."""
-    if body.harga_deal <= 0:
+    """Ubah 1 entry harga yang udah ada: harga_deal (kasus nego; margin_aktual dihitung
+    ulang otomatis), tipe_kendaraan, dan/atau moda -- salah ketik tipe unit cukup
+    dikoreksi di sini tanpa input ulang rute."""
+    if body.harga_deal is None and body.tipe_kendaraan is None and body.moda is None:
+        raise HTTPException(400, "Tidak ada field yang diubah")
+    if body.harga_deal is not None and body.harga_deal <= 0:
         raise HTTPException(400, "harga_deal harus lebih dari 0")
+    tipe = body.tipe_kendaraan.strip() if body.tipe_kendaraan is not None else None
+    if tipe is not None and (not tipe or len(tipe) > 80):
+        raise HTTPException(400, "Tipe kendaraan wajib diisi (maks. 80 karakter)")
+    moda = body.moda.strip()[:120] if body.moda is not None else None
     doc = await db.pelanggan_profiles.find_one({"id": pelanggan_id}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Pelanggan tidak ditemukan")
@@ -6105,9 +6115,14 @@ async def patch_pelanggan_harga(pelanggan_id: str, harga_id: str, body: Pelangga
     idx = next((i for i, h in enumerate(history) if h.get("id") == harga_id), None)
     if idx is None:
         raise HTTPException(404, "Data harga tidak ditemukan")
-    history[idx]["harga_deal"] = body.harga_deal
-    hpp = history[idx].get("hpp") or 0
-    history[idx]["margin_aktual"] = round((body.harga_deal / hpp - 1) * 100, 1) if hpp else 0
+    if body.harga_deal is not None:
+        history[idx]["harga_deal"] = body.harga_deal
+        hpp = history[idx].get("hpp") or 0
+        history[idx]["margin_aktual"] = round((body.harga_deal / hpp - 1) * 100, 1) if hpp else 0
+    if tipe is not None:
+        history[idx]["tipe_kendaraan"] = tipe
+    if moda is not None:
+        history[idx]["moda"] = moda
     await db.pelanggan_profiles.update_one({"id": pelanggan_id}, {"$set": {"harga_history": history}})
     updated = await db.pelanggan_profiles.find_one({"id": pelanggan_id}, {"_id": 0})
     updated["harga_history"] = (updated.get("harga_history") or [])[-200:]
