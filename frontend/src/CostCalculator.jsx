@@ -425,6 +425,48 @@ export default function CostCalculator() {
     } catch { alert("Gagal ubah harga"); }
   };
 
+  const MANUAL_TIPE = "__manual__";
+  // Ubah Tipe Kendaraan 1 rute yang sudah tersimpan: pilih dari daftar, atau ketik
+  // sendiri. Cuma tipenya yang berubah -- rute, harga, dan margin tetap.
+  const ubahTipeHargaPT = async (entry, nilai) => {
+    if (!selectedPt) return;
+    let tipeBaru = nilai;
+    if (nilai === MANUAL_TIPE) {
+      const input = window.prompt(`Ketik Tipe Kendaraan untuk rute "${entry.rute}":`, entry.tipe_kendaraan || "");
+      if (input === null) return;
+      tipeBaru = input;
+    }
+    tipeBaru = (tipeBaru || "").trim();
+    if (!tipeBaru) { alert("Tipe kendaraan tidak boleh kosong"); return; }
+    if (tipeBaru === entry.tipe_kendaraan) return;
+    try {
+      const res = await axios.patch(`${API}/admin/pelanggan/${selectedPt.id}/harga/${entry.id}`, { tipe_kendaraan: tipeBaru }, { headers: { "x-admin-pin": adminPin } });
+      setSelectedPt(res.data);
+    } catch (e) { alert("Gagal ubah tipe: " + (e.response?.data?.detail || e.message)); }
+  };
+  // Sama, tapi untuk rute di List yang belum disimpan.
+  const ubahTipeList = (i, nilai) => {
+    let tipeBaru = nilai;
+    if (nilai === MANUAL_TIPE) {
+      const input = window.prompt("Ketik Tipe Kendaraan:", routeList[i]?.tipe || "");
+      if (input === null) return;
+      tipeBaru = input;
+    }
+    tipeBaru = (tipeBaru || "").trim();
+    if (!tipeBaru) { alert("Tipe kendaraan tidak boleh kosong"); return; }
+    setRouteList((rl) => rl.map((r, idx) => (idx === i ? { ...r, tipe: tipeBaru } : r)));
+  };
+  const tipeSelectStyle = { background: "#0d1117", border: "1px solid #30363d", borderRadius: 5, color: "#c9d1d9", fontSize: 10, padding: "3px 4px", maxWidth: 150, fontFamily: "inherit" };
+  const renderTipeSelect = (nilai, onPilih, testId) => {
+    const daftar = tipeOptsDynamic.includes(nilai) || !nilai ? tipeOptsDynamic : [nilai, ...tipeOptsDynamic];
+    return (
+      <select data-testid={testId} value={nilai || ""} onChange={(e) => onPilih(e.target.value)} style={tipeSelectStyle} title="Ubah tipe kendaraan">
+        {daftar.map((t) => <option key={t} value={t}>{t}</option>)}
+        <option value={MANUAL_TIPE}>✏️ Ketik sendiri…</option>
+      </select>
+    );
+  };
+
   const clearAllHarga = async () => {
     if (!selectedPt) return;
     if (!window.confirm(`Hapus SEMUA ${ptHistory.length} rute harga dari ${selectedPt.nama_pt}?\nTidak bisa dibatalkan!`)) return;
@@ -881,7 +923,7 @@ export default function CostCalculator() {
                 {routeList.map((r, i) => (
                   <tr key={i}>
                     <td style={TD}>{r.asal}</td><td style={TD}>{r.tujuan}</td>
-                    <td style={{ ...TD, color: "#8b949e", fontSize: 10 }}>{r.tipe}</td>
+                    <td style={{ ...TD, color: "#8b949e", fontSize: 10 }}>{renderTipeSelect(r.tipe, (v) => ubahTipeList(i, v), `tipe-list-${i}`)}</td>
                     <td style={{ ...TD, fontSize: 10 }}>{r.top}</td>
                     <td style={{ ...TD, fontSize: 10 }}>{r.risiko}</td>
                     <td style={{ ...TD, textAlign: "right", color: "#8b949e" }}>{fRp(r.hpp)}</td>
@@ -932,7 +974,7 @@ export default function CostCalculator() {
                         {entry.catatan && <div style={{ fontSize: 10, color: "#8b949e", fontStyle: "italic", marginTop: 2 }}>{entry.catatan}</div>}
                       </td>
                       <td style={{ ...TD, fontSize: 10, color: "#58a6ff", fontWeight: 600 }}>{entry.moda || "—"}</td>
-                      <td style={{ ...TD, fontSize: 10, color: "#8b949e" }}>{entry.tipe_kendaraan}</td>
+                      <td style={{ ...TD, fontSize: 10, color: "#8b949e" }}>{renderTipeSelect(entry.tipe_kendaraan, (v) => ubahTipeHargaPT(entry, v), `tipe-pt-${entry.id || i}`)}</td>
                       <td style={{ ...TD, textAlign: "right" }}>
                         <div style={{ color: "#EF9F27", fontWeight: 800 }}>{fRp(entry.harga_deal)}</div>
                         <div style={{ fontSize: 9, marginTop: 2, color: sudahAsuransi ? "#3fb950" : "#f85149", fontWeight: 600 }}>{sudahAsuransi ? "✓ Termasuk asuransi" : "⚠ Belum termasuk asuransi"}</div>
