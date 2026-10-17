@@ -300,12 +300,24 @@ export default function TaskPage() {
     return { key: k, label, done };
   });
   const selesai = task.status === "selesai";
-  const doneCount = selesai ? steps.length : steps.filter((x) => x.done).length;
+  // Centang & progres JUJUR: hijau hanya kalau pekerjaannya benar-benar sudah terkirim.
+  // Tombol "Tandai Tugas Selesai" saja tidak lagi mencentang semuanya. Pengecualian:
+  // langkah tambahan (mis. Dokumen) ikut dianggap beres kalau tugas ditandai selesai
+  // DAN langkah inti (foto + checkpoint; untuk Driver Tujuan: terima mobil) sudah ada.
+  const requiredKeys = simple ? ["terima"] : ["foto", "checkpoint"];
+  const kurang = steps.filter((x) => requiredKeys.includes(x.key) && !x.done);
+  const stepDone = (x) => x.done || (selesai && kurang.length === 0 && !requiredKeys.includes(x.key));
+  const doneCount = steps.filter(stepDone).length;
   const pct = steps.length ? Math.round((doneCount / steps.length) * 100) : (selesai ? 100 : 0);
+  const semuaBeres = steps.length === 0 ? selesai : doneCount === steps.length;
+  const tandaiSelesai = () => {
+    if (kurang.length > 0 && !window.confirm(`Belum ada ${kurang.map((x) => x.label.toLowerCase()).join(" dan ")} yang terkirim.\n\nYakin tandai tugas selesai?`)) return;
+    saveExtra(true);
+  };
   // Driver Tujuan: kalau hari ini belum checkpoint dan sedang jam buka, itu yang diutamakan
   const nextStep = (simple && sudahTerima && !sudahHariIni && dalamJam && !selesai)
     ? { key: "harian", tab: "checkpoint", label: "Checkpoint hari ini" }
-    : steps.find((x) => !x.done);
+    : steps.find((x) => !stepDone(x));
   const unit0 = (task.units || [])[0] || {};
   const bigBtn = { width: "100%", padding: "19px", borderRadius: 18, border: "none", background: C.blue, color: "#fff", fontWeight: 800, fontSize: 16, cursor: "pointer", minHeight: 56, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: "0 10px 26px rgba(37,99,235,0.4)" };
   const hour = new Date().getHours();
@@ -370,17 +382,22 @@ export default function TaskPage() {
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                 {steps.map((x) => (
                   <div key={x.key} style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    {x.done || selesai ? <CheckCircle2 size={22} color="#22C55E" style={{ flexShrink: 0 }} /> : <Circle size={22} color="#475569" style={{ flexShrink: 0 }} />}
-                    <div style={{ fontSize: 15, fontWeight: 600, color: x.done || selesai ? "#64748B" : "#E2E8F0", textDecoration: x.done || selesai ? "line-through" : "none" }}>{x.label}</div>
+                    {stepDone(x) ? <CheckCircle2 size={22} color="#22C55E" style={{ flexShrink: 0 }} /> : <Circle size={22} color="#475569" style={{ flexShrink: 0 }} />}
+                    <div style={{ fontSize: 15, fontWeight: 600, color: stepDone(x) ? "#64748B" : "#E2E8F0", textDecoration: stepDone(x) ? "line-through" : "none" }}>{x.label}</div>
                   </div>
                 ))}
               </div>
             </div>
-            <button onClick={() => nextStep && setTab(nextStep.tab || nextStep.key)} disabled={!nextStep || selesai}
-              style={{ width: "100%", marginTop: 16, padding: 19, borderRadius: 18, border: "none", background: (!nextStep || selesai) ? "#166534" : C.blue, color: "#fff", fontSize: 16, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: (!nextStep || selesai) ? "default" : "pointer", boxShadow: (!nextStep || selesai) ? "none" : "0 10px 26px rgba(37,99,235,0.4)" }}
+            {selesai && !semuaBeres && (
+              <div style={{ background: "#2d2410", border: "1px solid #e6b450", borderRadius: 14, padding: "12px 14px", marginTop: 16, fontSize: 13, color: "#f5d88a", fontWeight: 700, lineHeight: 1.5 }} data-testid="task-belum-lengkap">
+                Tugas sudah ditandai selesai, tapi belum ada {kurang.map((x) => x.label.toLowerCase()).join(" dan ")} yang terkirim. Kirim sekarang supaya tampil di tracking.
+              </div>
+            )}
+            <button onClick={() => nextStep && setTab(nextStep.tab || nextStep.key)} disabled={!nextStep}
+              style={{ width: "100%", marginTop: 16, padding: 19, borderRadius: 18, border: "none", background: !nextStep ? "#166534" : C.blue, color: "#fff", fontSize: 16, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: !nextStep ? "default" : "pointer", boxShadow: !nextStep ? "none" : "0 10px 26px rgba(37,99,235,0.4)" }}
               data-testid="task-btn-lanjut">
-              {(!nextStep || selesai) ? "Semua Tugas Selesai ✓" : `Lanjutkan: ${nextStep.label}`}
-              {nextStep && !selesai && <ChevronRight size={20} />}
+              {!nextStep ? "Semua Tugas Selesai ✓" : `Lanjutkan: ${nextStep.label}`}
+              {nextStep && <ChevronRight size={20} />}
             </button>
           </>
         )}
@@ -525,7 +542,7 @@ export default function TaskPage() {
         )}
 
         {/* Selesai */}
-        <button onClick={() => saveExtra(true)} disabled={busy || task.status === "selesai"}
+        <button onClick={tandaiSelesai} disabled={busy || task.status === "selesai"}
           style={{ width: "100%", padding: 19, borderRadius: 18, border: "none", background: task.status === "selesai" ? C.green : "#16a34a", color: "#fff", fontWeight: 900, fontSize: 16, cursor: "pointer", minHeight: 56 }}>
           {task.status === "selesai" ? "✅ Tugas Selesai" : "✅ Tandai Tugas Selesai"}
         </button>
