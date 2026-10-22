@@ -3281,7 +3281,9 @@ function InvoiceModal({ order, headers, onClose, onPrint, onSave }) {
     checked: (u.status_invoice || "Belum Ditagih") === "Belum Ditagih",
     harga: "",
     po: (u.customer_po_number || "").toString(),  // No. PO Customer per unit (opsional)
+    ins: "",                                       // Nilai pertanggungan asuransi per unit (opsional)
   })));
+  const [insRate, setInsRate] = useState("0.15");  // rate asuransi (%), sama untuk semua unit
   const [withTax, setWithTax] = useState(true);
   const [taxInclusive, setTaxInclusive] = useState(false); // true = harga SUDAH termasuk 1.1% (pajak dipecah dari dalam)
   const [withPph23, setWithPph23] = useState(true); // potong PPh 23 (2%) dari DPP
@@ -3329,15 +3331,22 @@ function InvoiceModal({ order, headers, onClose, onPrint, onSave }) {
   const dpp = withTax && taxInclusive ? Math.round(subtotal / 1.011) : subtotal;
   const ppn = !withTax ? 0 : (taxInclusive ? subtotal - dpp : Math.round(subtotal * 0.011));
   const pph23 = withPph23 ? Math.round(dpp * 0.02) : 0;
-  const total = (taxInclusive ? subtotal : subtotal + ppn) - pph23;
+  // Asuransi: premi per unit = nilai × rate%, dibulatkan per unit; hanya unit yang dicentang & berharga.
+  // DI LUAR PPN/PPh, ditambahkan ke total (sama dengan Penawaran & Invoice Gabungan).
+  const rateNum = (() => { const v = parseFloat(String(insRate).replace(",", ".")); return Number.isFinite(v) && v >= 0 ? v : 0.15; })();
+  const premiRow = (r) => (r.checked && hargaNum(r.harga) > 0 && hargaNum(r.ins) > 0) ? Math.round(hargaNum(r.ins) * rateNum / 100) : 0;
+  const premiTotal = rows.reduce((s, r) => s + premiRow(r), 0);
+  const anyIns = rows.some((r) => hargaNum(r.ins) > 0);
+  const total = (taxInclusive ? subtotal : subtotal + ppn) - pph23 + premiTotal;
   const checkedCount = rows.filter((r) => r.checked && hargaNum(r.harga) > 0).length;
   const fRp = (n) => "Rp " + n.toLocaleString("id-ID");
 
   const buildLines = () => rows
     .map((r, i) => ({ r, u: orderUnits[i] }))
     .filter(({ r }) => r.checked && hargaNum(r.harga) > 0)
-    .map(({ r, u }) => ({ nama: isCargo ? "Jasa Pengiriman Cargo" : "Jasa Pengiriman", ket: unitKet(u), qty: 1, harga: hargaNum(r.harga), customer_po_number: (r.po || "").trim() || null }));
-  const buildExtra = () => ({ jatuhTempo, tanggalInvoice, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23, no_invoice: noInvoiceManual.trim() || undefined });
+    .map(({ r, u }) => ({ nama: isCargo ? "Jasa Pengiriman Cargo" : "Jasa Pengiriman", ket: unitKet(u), qty: 1, harga: hargaNum(r.harga), customer_po_number: (r.po || "").trim() || null,
+      ...(hargaNum(r.ins) > 0 ? { ins_nilai: hargaNum(r.ins) } : {}) }));
+  const buildExtra = () => ({ jatuhTempo, tanggalInvoice, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23, insRate: rateNum, no_invoice: noInvoiceManual.trim() || undefined });
   const markInvoiced = () => {
     const ids = rows.filter((r) => r.checked && hargaNum(r.harga) > 0 && r.unit_id !== "legacy" && r.unit_id !== "cargo").map((r) => r.unit_id);
     if (ids.length && headers) axios.post(`${API}/admin/orders/${order.order_id}/units/mark-invoiced`, { unit_ids: ids }, { headers }).catch(() => {});
@@ -3402,12 +3411,25 @@ function InvoiceModal({ order, headers, onClose, onPrint, onSave }) {
                   <input type="text" className="adm-input" style={{ flexBasis: "100%", fontSize: 12, padding: "7px 9px" }}
                     value={r.po} onChange={(e) => setRow(i, { po: e.target.value })}
                     placeholder="No. PO Customer (opsional) — kosongkan jika tanpa PO" data-testid={`adm-invu-po-${i}`} />
+                  <div style={{ flexBasis: "100%", display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 700, whiteSpace: "nowrap" }}>🛡️ Nilai asuransi Rp</span>
+                    <input inputMode="numeric" className="adm-input" style={{ flex: 1, fontSize: 12, padding: "7px 9px", textAlign: "right" }}
+                      value={r.ins ? hargaNum(r.ins).toLocaleString("id-ID") : ""} placeholder="0 = tanpa asuransi"
+                      onChange={(e) => setRow(i, { ins: e.target.value })} data-testid={`adm-invu-ins-${i}`} />
+                    <span style={{ fontSize: 11, color: "var(--text-mute)", whiteSpace: "nowrap", minWidth: 84, textAlign: "right" }} data-testid={`adm-invu-premi-${i}`}>{premiRow(r) > 0 ? `Premi ${fRp(premiRow(r))}` : ""}</span>
+                  </div>
                 </div>
               );
             })}
           </div>
           <div style={{ fontSize: 10.5, color: "var(--text-mute)", marginTop: -8, marginBottom: 16 }}>
             💡 Isi <b>No. PO Customer</b> kalau transaksi pakai PO — otomatis muncul di invoice sebagai pengganti "Jasa Pengiriman". Kosongkan kalau tanpa PO. Tak perlu pilih Retail/Corporate.
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: -6, marginBottom: 16, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12, color: "var(--text-3)", fontWeight: 700 }}>🛡️ Rate asuransi (%)</span>
+            <input className="adm-input" inputMode="decimal" style={{ width: 80, fontSize: 12, padding: "6px 8px", textAlign: "right" }} value={insRate}
+              onChange={(e) => setInsRate(e.target.value)} data-testid="adm-invoice-ins-rate" />
+            <span style={{ fontSize: 10.5, color: "var(--text-mute)", flex: 1, minWidth: 180 }}>Premi = nilai asuransi × rate, per unit. Tidak kena PPN/PPh, ditambahkan ke total. Unit tanpa nilai = tanpa asuransi.</span>
           </div>
           <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
             <label style={{ flex: 1 }}>
@@ -3491,6 +3513,7 @@ function InvoiceModal({ order, headers, onClose, onPrint, onSave }) {
               <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>{withTax && taxInclusive ? `DPP (${checkedCount} unit)` : `Subtotal (${checkedCount} unit)`}</span><span>{fRp(withTax && taxInclusive ? dpp : subtotal)}</span></div>
               <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>PPN 1.1%{withTax && taxInclusive ? " (termasuk)" : ""}</span><span>{withTax ? fRp(ppn) : "—"}</span></div>
               {withPph23 && <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "#e6a23c" }}><span>Potongan PPh 23 (2%)</span><span>- {fRp(pph23)}</span></div>}
+              {anyIns && <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>Premi Asuransi ({rateNum}%, di luar pajak)</span><span>{fRp(premiTotal)}</span></div>}
               <div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0 0", marginTop: 4, borderTop: "1px solid var(--border)", fontWeight: 800 }}><span>Total Tagihan</span><span>{fRp(total)}</span></div>
             </div>
           )}
