@@ -1207,7 +1207,7 @@ async def list_doc_history(jenis: Optional[str] = None, limit: int = 300):
         "_id": 0, "id": 1, "jenis": 1, "jenis_label": 1, "no_dokumen": 1,
         "judul": 1, "customer": 1, "order_ids": 1, "created_at": 1, "lines": 1,
         "meta.tanggalInvoice": 1, "meta.jatuhTempo": 1, "meta.metode": 1,
-        "meta.withTax": 1, "meta.withPph23": 1, "meta.taxInclusive": 1,
+        "meta.withTax": 1, "meta.withPph23": 1, "meta.taxInclusive": 1, "meta.insRate": 1,
         "meta.asal_kota": 1, "meta.tujuan_kota": 1, "meta.order_id": 1,
         "meta.pesan": 1, "meta.no_invoice": 1, "meta.customer_nama": 1,
         "meta.ttdNama": 1, "meta.ttdJabatan": 1, "meta.entity_id": 1,

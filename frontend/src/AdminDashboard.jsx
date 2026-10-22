@@ -3985,6 +3985,17 @@ function saveDocHistory(rec, headers) {
    staf yang input ke Mekari. Status "sudah diinput Mekari" disimpan lokal
    (localStorage) di browser admin — tidak menyentuh backend.
 ════════════════════════════════════════ */
+// Asuransi pengiriman di invoice (DI LUAR pajak, sama dgn Penawaran): premi per baris =
+// nilai pertanggungan (l.ins_nilai) × rate%, dibulatkan per baris. Baris tanpa nilai = tanpa asuransi.
+const INS_RATE_DEFAULT = 0.15;
+function insRateOf(meta) {
+  const r = meta && meta.insRate;
+  return ((r === 0 || r) && Number.isFinite(Number(r)) && Number(r) >= 0) ? Number(r) : INS_RATE_DEFAULT;
+}
+function insPremiLine(l, rate) {
+  const n = Number(l && l.ins_nilai) || 0;
+  return n > 0 ? Math.round(n * (rate / 100)) : 0;
+}
 function invTotalFromRec(rec) {
   const lines = Array.isArray(rec.lines) ? rec.lines : [];
   const subtotal = lines.reduce((s, l) => s + (Number(l.harga) || 0) * (Number(l.qty) || 1), 0);
@@ -3993,8 +4004,10 @@ function invTotalFromRec(rec) {
   const dpp = withTax && taxIncl ? Math.round(subtotal / 1.011) : subtotal;
   const ppn = !withTax ? 0 : (taxIncl ? subtotal - dpp : Math.round(subtotal * 0.011));
   const pph = withPph ? Math.round(dpp * 0.02) : 0;
-  const total = (taxIncl ? subtotal : subtotal + ppn) - pph;
-  return { subtotal, ppn, pph, total };
+  const rate = insRateOf(m);
+  const premi = lines.reduce((s, l) => s + insPremiLine(l, rate), 0);   // di luar PPN & PPh
+  const total = (taxIncl ? subtotal : subtotal + ppn) - pph + premi;
+  return { subtotal, ppn, pph, premi, total };
 }
 // Ringkasan pembayaran customer per faktur: total − pembayaran tercatat (rec.payments).
 // Total faktur asli tidak diubah. Status sama dgn backend invoice_payments.summarize.
@@ -5271,7 +5284,13 @@ async function printInvoiceDoc(lines, withTax, extra) {
   const ppn = !withTax ? 0 : (taxInclusive ? subtotal - dpp : Math.round(subtotal * 0.011));
   // PPh 23 dipotong 2% dari DPP (nilai jasa). Grand Total = DPP + PPN − PPh23.
   const pph23 = withPph23 ? Math.round(dpp * 0.02) : 0;
-  const total = (taxInclusive ? subtotal : subtotal + ppn) - pph23;
+  // Asuransi (nilai pertanggungan × rate%, per baris) — DI LUAR PPN & PPh, ditambahkan ke total.
+  const insRate = insRateOf(extra);
+  const premiOf = (l) => insPremiLine(l, insRate);
+  const perRowIns = lines.some((l) => premiOf(l) > 0);
+  const premi = lines.reduce((s, l) => s + premiOf(l), 0);
+  const insBase = lines.reduce((s, l) => s + (premiOf(l) > 0 ? Number(l.ins_nilai) || 0 : 0), 0);
+  const total = (taxInclusive ? subtotal : subtotal + ppn) - pph23 + premi;
   const fRp = (n) => n.toLocaleString("id-ID") + ",00";
   // Pembayaran customer yang sudah diterima (rincian) → faktur nampilin sisa tagihan.
   // Tanpa pembayaran, tampilan faktur sama persis seperti sebelumnya.
@@ -5368,7 +5387,7 @@ async function printInvoiceDoc(lines, withTax, extra) {
       const col2 = withPO === lines.length ? "No. PO" : withPO === 0 ? "Nama Barang" : "Referensi";
       const cell2 = (l) => poOf(l) || (l.nama || "Jasa Pengiriman");
       return `<table class="inv-items">
-      <thead><tr><th style="width:26px">No</th><th>${col2}</th><th>Keterangan</th><th>Qty</th><th>Harga Satuan (Rp)</th><th>Jumlah (Rp)</th></tr></thead>
+      <thead><tr><th style="width:26px">No</th><th>${col2}</th><th>Keterangan</th><th>Qty</th><th>Harga Satuan (Rp)</th>${perRowIns ? "<th>Premi Asuransi (Rp)</th>" : ""}<th>Jumlah (Rp)</th></tr></thead>
       <tbody>
         ${lines.map((l, i) => `
         <tr>
@@ -5377,6 +5396,7 @@ async function printInvoiceDoc(lines, withTax, extra) {
           <td>${l.ket || "&nbsp;"}</td>
           <td class="num">${l.qty || 1}</td>
           <td class="num">${fRp(l.harga)}</td>
+          ${perRowIns ? `<td class="num">${premiOf(l) > 0 ? `${fRp(premiOf(l))}<div style="font-size:8.5px;opacity:.7">Nilai Rp ${fRp(Number(l.ins_nilai) || 0)}</div>` : "-"}</td>` : ""}
           <td class="num">${fRp((l.harga || 0) * (l.qty || 1))}</td>
         </tr>`).join("")}
       </tbody>
@@ -5386,12 +5406,14 @@ async function printInvoiceDoc(lines, withTax, extra) {
       <div class="inv-note">
         ${pesan ? `<b>Pesan:</b> ${pesan}<br>` : ""}
         <b>Jumlah Unit:</b> ${lines.length}<br>
+        ${premi > 0 ? `<b>Asuransi:</b> premi ${insRate}% dari nilai pertanggungan Rp ${fRp(insBase)}, tidak dikenakan PPN.<br>` : ""}
         <b>Terbilang${hasPay ? " (Sisa)" : ""}:</b> <i class="inv-terbilang">${terbilangRupiah(hasPay ? Math.abs(sisa) : total)}</i>
       </div>
       <div class="inv-totals-box">
         <div class="row"><span>${withTax && taxInclusive ? "DPP (Dasar Pengenaan Pajak)" : "Subtotal"}</span><span>Rp ${fRp(withTax && taxInclusive ? dpp : subtotal)}</span></div>
         <div class="row"><span>PPN Logistik (1.1%)${withTax && taxInclusive ? " — termasuk" : ""}</span><span>${withTax ? "Rp " + fRp(ppn) : "—"}</span></div>
         ${withPph23 ? `<div class="row"><span>Potongan PPh 23 (2%)</span><span>- Rp ${fRp(pph23)}</span></div>` : ""}
+        ${premi > 0 ? `<div class="row"><span>Premi Asuransi (${insRate}%)</span><span>Rp ${fRp(premi)}</span></div>` : ""}
         <div class="row grand"><span>TOTAL TAGIHAN</span><span>Rp ${fRp(total)}</span></div>
         ${hasPay ? `<div class="row"><span>Pembayaran Diterima</span><span>- Rp ${fRp(diterima)}</span></div>
         <div class="row grand sisa"><span>${sisa < 0 ? "KELEBIHAN BAYAR" : "SISA TAGIHAN"}</span><span>Rp ${fRp(Math.abs(sisa))}</span></div>` : ""}
@@ -5928,7 +5950,9 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
     order_id: c.order_id, customer_nama: c.customer_nama,
     asal_kota: c.asal_kota, tujuan_kota: c.tujuan_kota, unit: c.unit, harga: "",
     po: (c.unit?.customer_po_number || "").toString(),  // No. PO Customer per unit (opsional)
+    ins: "",                                            // Nilai pertanggungan asuransi per unit (opsional)
   })));
+  const [insRate, setInsRate] = useState("0.15");       // rate asuransi (%), sama untuk semua unit
   // Auto-isi harga dari harga deal PO (cuma PO 1 unit biar akurat) — biar nggak ketik manual
   useEffect(() => {
     let alive = true;
@@ -5978,7 +6002,12 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
   const dpp = withTax && taxInclusive ? Math.round(subtotal / 1.011) : subtotal;
   const ppn = !withTax ? 0 : (taxInclusive ? subtotal - dpp : Math.round(subtotal * 0.011));
   const pph23 = withPph23 ? Math.round(dpp * 0.02) : 0;
-  const total = (taxInclusive ? subtotal : subtotal + ppn) - pph23;
+  // Asuransi: premi per unit = nilai × rate%, dibulatkan per unit; hanya unit yang ikut ditagih (harga > 0).
+  const rateNum = (() => { const v = parseFloat(String(insRate).replace(",", ".")); return Number.isFinite(v) && v >= 0 ? v : 0.15; })();
+  const premiRow = (r) => (hargaNum(r.harga) > 0 && hargaNum(r.ins) > 0) ? Math.round(hargaNum(r.ins) * rateNum / 100) : 0;
+  const premiTotal = rows.reduce((s, r) => s + premiRow(r), 0);
+  const anyIns = rows.some((r) => hargaNum(r.ins) > 0);
+  const total = (taxInclusive ? subtotal : subtotal + ppn) - pph23 + premiTotal;
   const okCount = rows.filter((r) => hargaNum(r.harga) > 0).length;
   const fRp = (n) => "Rp " + n.toLocaleString("id-ID");
 
@@ -6000,10 +6029,11 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
   };
   const buildGab = () => {
     const lines = rows.filter((r) => hargaNum(r.harga) > 0)
-      .map((r) => ({ nama: "Jasa Pengiriman", ket: unitKet(r), qty: 1, harga: hargaNum(r.harga), customer_po_number: (r.po || "").trim() || null }));
+      .map((r) => ({ nama: "Jasa Pengiriman", ket: unitKet(r), qty: 1, harga: hargaNum(r.harga), customer_po_number: (r.po || "").trim() || null,
+        ...(hargaNum(r.ins) > 0 ? { ins_nilai: hargaNum(r.ins) } : {}) }));
     const orderIds = Array.from(new Set(rows.map((r) => r.order_id).filter(Boolean)));
     const cust = billTo.trim() || (customers.length === 1 ? customers[0] : `${customers.length} customer`);
-    const extra = { jatuhTempo, tanggalInvoice, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23, customer_nama: cust, order_id: orderIds.join(", "), no_invoice: noInvoiceManual.trim() || undefined };
+    const extra = { jatuhTempo, tanggalInvoice, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23, insRate: rateNum, customer_nama: cust, order_id: orderIds.join(", "), no_invoice: noInvoiceManual.trim() || undefined };
     return { lines, orderIds, cust, extra };
   };
   const doPrint = async () => {
@@ -6058,12 +6088,25 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
                   <input type="text" className="adm-input" style={{ flexBasis: "100%", fontSize: 12, padding: "7px 9px" }}
                     value={r.po} onChange={(e) => setRow(i, { po: e.target.value })}
                     placeholder="No. PO Customer (opsional) — kosongkan jika tanpa PO" data-testid={`adm-invgab-po-${i}`} />
+                  <div style={{ flexBasis: "100%", display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 700, whiteSpace: "nowrap" }}>🛡️ Nilai asuransi Rp</span>
+                    <input inputMode="numeric" className="adm-input" style={{ flex: 1, fontSize: 12, padding: "7px 9px", textAlign: "right" }}
+                      value={r.ins ? hargaNum(r.ins).toLocaleString("id-ID") : ""} placeholder="0 = tanpa asuransi"
+                      onChange={(e) => setRow(i, { ins: e.target.value })} data-testid={`adm-invgab-ins-${i}`} />
+                    <span style={{ fontSize: 11, color: "var(--text-mute)", whiteSpace: "nowrap", minWidth: 84, textAlign: "right" }} data-testid={`adm-invgab-premi-${i}`}>{premiRow(r) > 0 ? `Premi ${fRp(premiRow(r))}` : ""}</span>
+                  </div>
                 </div>
               );
             })}
           </div>
           <div style={{ fontSize: 10.5, color: "var(--text-mute)", marginTop: -8, marginBottom: 16 }}>
             💡 Isi <b>No. PO Customer</b> per unit kalau pakai PO — otomatis muncul di invoice. Kosongkan kalau tanpa PO.
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: -6, marginBottom: 16, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12, color: "var(--text-3)", fontWeight: 700 }}>🛡️ Rate asuransi (%)</span>
+            <input className="adm-input" inputMode="decimal" style={{ width: 80, fontSize: 12, padding: "6px 8px", textAlign: "right" }} value={insRate}
+              onChange={(e) => setInsRate(e.target.value)} data-testid="adm-invgab-ins-rate" />
+            <span style={{ fontSize: 10.5, color: "var(--text-mute)", flex: 1, minWidth: 180 }}>Premi = nilai asuransi × rate, per unit. Tidak kena PPN/PPh, ditambahkan ke total. Unit tanpa nilai = tanpa asuransi.</span>
           </div>
           <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
             <label style={{ flex: 1 }}>
@@ -6132,6 +6175,7 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
               <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>{withTax && taxInclusive ? `DPP (${okCount} unit)` : `Subtotal (${okCount} unit)`}</span><span>{fRp(withTax && taxInclusive ? dpp : subtotal)}</span></div>
               <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>PPN 1.1%{withTax && taxInclusive ? " (termasuk)" : ""}</span><span>{withTax ? fRp(ppn) : "—"}</span></div>
               {withPph23 && <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "#e6a23c" }}><span>Potongan PPh 23 (2%)</span><span>- {fRp(pph23)}</span></div>}
+              {anyIns && <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "var(--text-3)" }}><span>Premi Asuransi ({rateNum}%, di luar pajak)</span><span>{fRp(premiTotal)}</span></div>}
               <div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0 0", marginTop: 4, borderTop: "1px solid var(--border)", fontWeight: 800 }}><span>Total Tagihan</span><span>{fRp(total)}</span></div>
             </div>
           )}
