@@ -10,6 +10,7 @@ import DriverData from "@/DriverData";
 import SupplierPage, { printSupplierA4 } from "@/SupplierPage";
 import SelisihPage from "@/SelisihPage";
 import ShipMasterPage from "@/ShipMasterPage";
+import UsersPage from "@/UsersPage";
 import DriverIncentivePage from "@/DriverIncentivePage";
 import KasBankPage from "@/KasBankPage";
 import "@/OrderCardBright.css";
@@ -429,6 +430,7 @@ function Dashboard({ pin, onLogout }) {
     koordinator:  { title: "Koordinator", sub: "Kelola akun koordinator lapangan" },
     supplier:     { title: "Supplier", sub: "Kelola unit titipan & selisih harga supplier" },
     "insentif-driver": { title: "Insentif Driver", sub: "Bonus per foto checkpoint driver borongan: cek foto, lalu bayar atau tolak" },
+    pengguna:     { title: "Pengaturan Pengguna", sub: "Undang, ubah peran, nonaktifkan atau hapus akun" },
     "master-kapal": { title: "Master Kapal", sub: "Panjang, lebar & tipe kapal (tampil di layar Lihat Posisi Kapal)" },
     selisih:      { title: "Selisih Harga", sub: "Bandingkan HPP vs harga deal pelanggan" },
     biaya:        { title: "Biaya / Beban", sub: "Biaya operasional (non-HPP) per PT/CV — terpisah dari tagihan supplier" },
@@ -539,6 +541,10 @@ function Dashboard({ pin, onLogout }) {
 
       {activeTab === "master-kapal" && (
         <ShipMasterPage />
+      )}
+
+      {activeTab === "pengguna" && (
+        <UsersPage />
       )}
 
       {activeTab === "biaya" && (
@@ -876,7 +882,7 @@ const SIDEBAR_ICON = {
   pesanan: "▦", "route-leg": "🧭", drivers: "👤", supplier: "🌿", koordinator: "🧑‍💼",
   kendaraan: "🚙", "master-kapal": "🚢", dokumen: "📄", histori: "🗂️", laporan: "📑", kalkulator: "🧮", selisih: "📊",
   kompensasi: "🔄", "minta-harga": "📩", pengaturan: "⚙️", "pembayaran-vendor": "🏢", "insentif-driver": "🎯", "kas-bank": "🏦",
-  biaya: "🧾", "laba-rugi": "📈",
+  biaya: "🧾", "laba-rugi": "📈", pengguna: "👥",
 };
 
 /* ════════════════════════════════════════
@@ -1143,6 +1149,9 @@ const SIDEBAR_GROUPS = [
   { title: "Keuangan", items: [
     { key: "kas-bank", label: "Kas & Bank" },
     { key: "laba-rugi", label: "Laba Rugi" },
+  ] },
+  { title: "Pengaturan", items: [
+    { key: "pengguna", label: "Pengguna" },
   ] },
   { title: "Arsip & Laporan", items: [
     { key: "dokumen", label: "Dokumen" },
