@@ -2380,6 +2380,9 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
   const [nopolDraft, setNopolDraft] = useState(order.nopol || u0.nopol || "");
   const [editRangka, setEditRangka] = useState(false);
   const [rangkaDraft, setRangkaDraft] = useState(order.no_rangka || u0.no_rangka || "");
+  const [editRute, setEditRute] = useState(false);
+  const [asalDraft, setAsalDraft] = useState(order.asal_kota || "");
+  const [tujuanDraft, setTujuanDraft] = useState(order.tujuan_kota || "");
   const [editColly, setEditColly] = useState(false);
   const [collyDraft, setCollyDraft] = useState(order.jumlah_colly || "");
   const [editArrival, setEditArrival] = useState(false);
@@ -2428,6 +2431,12 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
 
   const saveDriver = async () => { await onPatch({ driver_id: driverDraft }); setEditDriver(false); };
   const saveNama = async () => { await onPatch({ nama_driver: namaDraft.trim() }); setEditNama(false); };
+  const saveRute = async () => {
+    const a = asalDraft.trim(), t = tujuanDraft.trim();
+    if (!a || !t) { alert("Kota asal dan tujuan wajib diisi"); return; }
+    await onPatch({ asal_kota: a, tujuan_kota: t });
+    setEditRute(false);
+  };
   const saveRangka = async () => { await onPatch({ no_rangka: rangkaDraft.trim().toUpperCase() }); setEditRangka(false); };
   const saveColly = async () => { await onPatch({ jumlah_colly: collyDraft.replace(/[^0-9]/g, "") }); setEditColly(false); };
   const saveArrival = async () => { await onPatch({ pickup_arrival: arrivalDraft }); setEditArrival(false); };
@@ -2581,7 +2590,22 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
         <div className="adm-field-row">
           <div className="adm-field-key">Rute</div>
           <div className="adm-field-val">
-            <span className="adm-route-bright">{order.asal_kota || "—"} <span className="adm-route-arrow" aria-hidden="true">➔</span> {order.tujuan_kota || "—"}</span>
+            {editRute ? (
+              <span className="adm-driver-edit-row" style={{ flexWrap: "wrap" }}>
+                <input className="adm-input-inline" value={asalDraft} onChange={(e) => setAsalDraft(e.target.value)}
+                  placeholder="Kota asal" autoFocus data-testid={`adm-rute-asal-${order.order_id}`} />
+                <span className="adm-route-arrow" aria-hidden="true">➔</span>
+                <input className="adm-input-inline" value={tujuanDraft} onChange={(e) => setTujuanDraft(e.target.value)}
+                  placeholder="Kota tujuan" data-testid={`adm-rute-tujuan-${order.order_id}`} />
+                <button className="adm-btn adm-btn-gold adm-btn-xs" onClick={saveRute} data-testid={`adm-rute-save-${order.order_id}`}>OK</button>
+                <button className="adm-btn adm-btn-ghost adm-btn-xs" onClick={() => { setEditRute(false); setAsalDraft(order.asal_kota || ""); setTujuanDraft(order.tujuan_kota || ""); }}><IcoX /></button>
+              </span>
+            ) : (
+              <span className="adm-driver-row">
+                <span className="adm-route-bright">{order.asal_kota || "—"} <span className="adm-route-arrow" aria-hidden="true">➔</span> {order.tujuan_kota || "—"}</span>
+                <button className="adm-link" onClick={() => { setAsalDraft(order.asal_kota || ""); setTujuanDraft(order.tujuan_kota || ""); setEditRute(true); }} data-testid={`adm-rute-edit-${order.order_id}`}><IcoPencil /></button>
+              </span>
+            )}
           </div>
         </div>
         <div className="adm-field-row">
