@@ -108,12 +108,18 @@ def public_user(d):
     }
 
 
+_SECRET_CACHE = {}
+
+
 async def _secret(db):
+    if _SECRET_CACHE.get("v"):
+        return _SECRET_CACHE["v"]
     doc = await db[SETTINGS].find_one_and_update(
         {"key": "user_jwt_secret"},
         {"$setOnInsert": {"key": "user_jwt_secret", "value": secrets.token_hex(32)}},
         upsert=True, return_document=True,
     )
+    _SECRET_CACHE["v"] = doc["value"]
     return doc["value"]
 
 
@@ -317,3 +323,63 @@ async def delete_user(db, user_id):
         raise ValueError("Akun Pemilik tidak bisa dihapus")
     await db[COLL].delete_one({"user_id": user_id})
     return {"ok": True, "email": u.get("email")}
+
+
+# ───────────── Tahap 2: hak akses per peran + saklar "wajib login akun" ─────────────
+# Path dinilai relatif terhadap /api. Keuangan = semua yang menyangkut uang/dokumen tagihan.
+FINANCE_PREFIXES = (
+    "/admin/kas", "/admin/expenses", "/admin/expense-categories", "/admin/payouts",
+    "/admin/payout-logs", "/admin/driver-incentives", "/admin/finance", "/admin/rekap-penagihan",
+    "/admin/doc-history", "/admin/selisih", "/admin/kompensasi", "/admin/rekon", "/admin/reports",
+    "/vendor-mobile",
+)
+_SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
+
+
+def _rel(path):
+    p = path or ""
+    return p[4:] if p.startswith("/api/") else p
+
+
+def can(role, method, path):
+    """Boleh/tidaknya `role` memanggil `method path`. Pemilik boleh semua."""
+    if role == "pemilik":
+        return True
+    p = _rel(path)
+    if p.startswith("/admin/users"):
+        return False
+    finance = p.startswith(FINANCE_PREFIXES)
+    safe = (method or "").upper() in _SAFE_METHODS
+    if role == "pembaca":
+        return safe and not finance
+    if role == "admin_operasional":
+        return not finance
+    if role == "keuangan":
+        return finance or safe
+    return False
+
+
+ENFORCE_CACHE = {"v": False, "t": 0.0}
+_ENFORCE_TTL = 15.0
+
+
+async def get_enforce(db, fresh=False):
+    import time
+    now = time.monotonic()
+    if not fresh and now - ENFORCE_CACHE["t"] < _ENFORCE_TTL:
+        return ENFORCE_CACHE["v"]
+    try:
+        d = await db[SETTINGS].find_one({"key": "enforce_login"})
+        ENFORCE_CACHE["v"] = bool(d and d.get("value"))
+    except Exception:
+        pass  # DB error: pakai nilai terakhir
+    ENFORCE_CACHE["t"] = now
+    return ENFORCE_CACHE["v"]
+
+
+async def set_enforce(db, enabled):
+    import time
+    await db[SETTINGS].update_one({"key": "enforce_login"}, {"$set": {"key": "enforce_login", "value": bool(enabled)}}, upsert=True)
+    ENFORCE_CACHE["v"] = bool(enabled)
+    ENFORCE_CACHE["t"] = time.monotonic()
+    return bool(enabled)

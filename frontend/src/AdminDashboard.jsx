@@ -159,6 +159,7 @@ export default function AdminDashboard() {
   const [probing, setProbing] = useState(true);    // lagi cek ke backend: butuh PIN atau engga
   const [authError, setAuthError] = useState("");
   const [authing, setAuthing] = useState(false);
+  const [me, setMe] = useState(null);              // akun yang sedang masuk (null = PIN/terbuka)
 
   useEffect(() => {
     const cached = localStorage.getItem(PIN_KEY) || "";
@@ -166,7 +167,8 @@ export default function AdminDashboard() {
       try {
         // Probe: kalau admin OPEN (ADMIN_PIN env kosong) backend balas ok walau
         // pin kosong → langsung masuk tanpa password. Kalau masih terkunci → 401.
-        await axios.post(`${API}/admin/auth`, { pin: cached });
+        const pr = await axios.post(`${API}/admin/auth`, { pin: cached });
+        setMe(pr.data?.user || null);
         setAuthed(true);
       } catch {
         localStorage.removeItem(PIN_KEY);
@@ -179,8 +181,9 @@ export default function AdminDashboard() {
   const doLogin = async () => {
     setAuthing(true); setAuthError("");
     try {
-      await axios.post(`${API}/admin/auth`, { pin: pin.trim() });
+      const pr = await axios.post(`${API}/admin/auth`, { pin: pin.trim() });
       localStorage.setItem(PIN_KEY, pin.trim());
+      setMe(pr.data?.user || null);
       setAuthed(true);
     } catch (e) {
       setAuthError(e?.response?.data?.detail || "PIN salah");
@@ -189,6 +192,7 @@ export default function AdminDashboard() {
 
   const logout = () => {
     localStorage.removeItem(PIN_KEY); setPin("");
+    try { localStorage.removeItem("aal_user_token"); } catch (e) { /* abaikan */ }
     // Reload → probe jalan lagi. Kalau admin OPEN, langsung masuk lagi; kalau
     // terkunci (ADMIN_PIN di-set), baru muncul layar PIN.
     try { window.location.reload(); } catch { setAuthed(false); setNeedPin(true); }
@@ -204,7 +208,7 @@ export default function AdminDashboard() {
   );
   if (!authed && needPin) return <PinScreen pin={pin} setPin={setPin} doLogin={doLogin} authing={authing} authError={authError} />;
   if (!authed) return null;
-  return <Dashboard pin={pin} onLogout={logout} />;
+  return <Dashboard pin={pin} me={me} onLogout={logout} />;
 }
 
 /* ════════════════════════════════════════
@@ -243,6 +247,7 @@ function PinScreen({ pin, setPin, doLogin, authing, authError }) {
             {authing ? "Memverifikasi..." : "Masuk ke Dashboard"}
           </button>
           <div className="adm-pin-hint">Hubungi admin sistem jika lupa PIN.</div>
+          <a href="/masuk" className="adm-pin-hint" style={{ display: "block", marginTop: 10, textDecoration: "underline" }} data-testid="adm-login-akun">Masuk dengan akun (email &amp; password)</a>
         </div>
       </div>
     </div>
@@ -252,11 +257,14 @@ function PinScreen({ pin, setPin, doLogin, authing, authError }) {
 /* ════════════════════════════════════════
    DASHBOARD
 ════════════════════════════════════════ */
-function Dashboard({ pin, onLogout }) {
+function Dashboard({ pin, me, onLogout }) {
   const headers = useMemo(() => ({ "X-Admin-Pin": pin }), [pin]);
   const [dark, setDark] = useState(() => document.documentElement.getAttribute("data-theme") === "dark");
   // Default: HP → Beranda (home mobile ala aplikasi), desktop → Dashboard/Pesanan.
   const [activeTab, setActiveTab] = useState(() => (typeof window !== "undefined" && window.innerWidth <= 640) ? "beranda" : "pesanan");
+  useEffect(() => {
+    if (me?.role && !tabAllowedForRole(me.role, activeTab)) setActiveTab(me.role === "keuangan" ? "kas-bank" : "pesanan");
+  }, [me?.role]); // eslint-disable-line
   const [createSheet, setCreateSheet] = useState(false);
   const [stats, setStats] = useState(null);
   const [orders, setOrders] = useState([]);
@@ -455,11 +463,12 @@ function Dashboard({ pin, onLogout }) {
           langsung nyaring, sisanya (nama kapal / rute) diketik manual. */}
       <datalist id="kapal-dl">{["Self Drive", "Car Carrier", "Towing", "Kapal", "Self Loader", "Low Bed", "Trucking", "Container"].map((n) => <option key={n} value={n} />)}</datalist>
       <div className={`adm-sidebar-backdrop${sidebarOpen ? " open" : ""}`} onClick={() => setSidebarOpen(false)} />
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} open={sidebarOpen} onNavigate={() => setSidebarOpen(false)} />
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} open={sidebarOpen} onNavigate={() => setSidebarOpen(false)} role={me?.role} />
 
       <div className="adm-main" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
         {activeTab !== "beranda" && (
         <TopHeader
+          me={me}
           title={section.title}
           sub={section.sub}
           category={categoryOfTab(activeTab, SIDEBAR_GROUPS)}
@@ -1120,6 +1129,16 @@ function CreateSheet({ onClose, onJadwalGab, onInvoiceGab, onNav, flash }) {
 // & routing tab tetap sama) — cuma label, urutan, dan header grup yang dirapikan
 // biar tidak muter-muter. BIAYA/BEBAN menyusul di Fase 3 (modulnya belum ada,
 // jadi belum dibuatkan menu kosong). Tidak ada halaman baru / tanpa tujuan.
+/* Menu yang ditampilkan per peran (UI saja; pembatasan sebenarnya dijaga backend). */
+const FINANCE_TABS = ["kas-bank", "laba-rugi", "biaya", "insentif-driver", "selisih", "kompensasi", "rekap-invoice", "rekap-tagih", "pembayaran-vendor", "histori", "dokumen", "laporan"];
+function tabAllowedForRole(role, key) {
+  if (!role || role === "pemilik") return true;           // PIN / terbuka / Pemilik: semua
+  if (key === "pengguna") return false;
+  if (key === "beranda" || key === "pengaturan") return true;
+  const fin = FINANCE_TABS.includes(key);
+  if (role === "keuangan") return fin || ["pesanan", "kontak", "route-leg"].includes(key);
+  return !fin;                                             // admin_operasional & pembaca
+}
 const SIDEBAR_GROUPS = [
   { title: "", items: [
     { key: "beranda", label: "Beranda" },
@@ -1161,7 +1180,7 @@ const SIDEBAR_GROUPS = [
   ] },
 ];
 
-function Sidebar({ activeTab, setActiveTab, open, onNavigate }) {
+function Sidebar({ activeTab, setActiveTab, open, onNavigate, role }) {
   const NavItem = ({ item, i, cat }) => (
     <button
       key={`${item.key}-${i}`}
@@ -1194,7 +1213,9 @@ function Sidebar({ activeTab, setActiveTab, open, onNavigate }) {
       </div>
 
       <nav style={{ flex: 1 }}>
-        {SIDEBAR_GROUPS.map((grp, gi) => {
+        {SIDEBAR_GROUPS.map((grp0, gi) => {
+          const grp = { ...grp0, items: grp0.items.filter((it) => tabAllowedForRole(role, it.key)) };
+          if (!grp.items.length) return null;
           const cat = categoryOfGroupTitle(grp.title);
           return (
             <div key={gi}>
@@ -1227,7 +1248,7 @@ function Sidebar({ activeTab, setActiveTab, open, onNavigate }) {
 /* ════════════════════════════════════════
    TOP HEADER
 ════════════════════════════════════════ */
-function TopHeader({ title, sub, category, search, onSearch, onExport, onRefresh, profileMenuOpen, setProfileMenuOpen, onLogout, onOpenSidebar, dark, onToggleTheme }) {
+function TopHeader({ me, title, sub, category, search, onSearch, onExport, onRefresh, profileMenuOpen, setProfileMenuOpen, onLogout, onOpenSidebar, dark, onToggleTheme }) {
   const iconBtn = { width: 34, height: 34, borderRadius: 8, border: "1px solid #1f2937", background: "#111826", color: "#9aa4b6", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: 14, flexShrink: 0 };
   return (
     <header className="adm-topheader-v2" style={{ padding: "18px 28px", borderBottom: "1px solid #171e2c", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap", background: "#0a0e14" }}>
@@ -1271,10 +1292,10 @@ function TopHeader({ title, sub, category, search, onSearch, onExport, onRefresh
             onClick={() => setProfileMenuOpen((v) => !v)}
             style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 10px 5px 5px", borderRadius: 20, border: "1px solid #1f2937", background: "#111826", cursor: "pointer" }}
           >
-            <div style={{ width: 26, height: 26, borderRadius: "50%", background: "linear-gradient(135deg,#5b8def,#8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color: "#fff" }}>A</div>
+            <div style={{ width: 26, height: 26, borderRadius: "50%", background: "linear-gradient(135deg,#5b8def,#8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color: "#fff" }}>{(me?.nama || me?.email || "A").charAt(0).toUpperCase()}</div>
             <div style={{ textAlign: "left" }}>
-              <div style={{ fontSize: 11.5, fontWeight: 700, color: "#e6edf3", lineHeight: 1.1 }}>Admin</div>
-              <div style={{ fontSize: 9.5, color: "#6b7688", lineHeight: 1.1 }}>Super Admin</div>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: "#e6edf3", lineHeight: 1.1 }}>{me?.nama || "Admin"}</div>
+              <div style={{ fontSize: 9.5, color: "#6b7688", lineHeight: 1.1 }}>{me?.role_label || "Super Admin"}</div>
             </div>
           </button>
           {profileMenuOpen && (
