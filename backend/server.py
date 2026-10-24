@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Form, Header, Depends, Query, Body
+from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Form, Header, Depends, Query, Body, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, Response
 from dotenv import load_dotenv
@@ -179,6 +179,14 @@ async def _ensure_indexes():
 
 
 @app.on_event("startup")
+async def _load_enforce_flag():
+    try:
+        await app_users.get_enforce(db, fresh=True)
+    except Exception as e:
+        logger.warning(f"[startup] gagal memuat saklar wajib-login: {e}")
+
+
+@app.on_event("startup")
 async def _rekon_startup():
     """UNIQUE index anti-duplikat pembayaran dari Audit Rekon (bank_transaction_id).
     Additive — tidak menyentuh collection existing."""
@@ -259,21 +267,49 @@ def _admin_locked() -> bool:
     return (os.environ.get("ADMIN_LOCK") or "").strip().lower() in ("1", "true", "yes", "on")
 
 
-def require_admin_pin(x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin")) -> bool:
-    """Default: akses terbuka. Terkunci hanya kalau ADMIN_LOCK aktif + ADMIN_PIN di-set."""
-    if not _admin_locked():
-        return True  # mode terbuka: tanpa password
+def _pin_matches(x_admin_pin: Optional[str]) -> bool:
     expected = (os.environ.get("ADMIN_PIN") or "").strip()
-    if not expected:
-        return True
-    if not x_admin_pin or x_admin_pin.strip() != expected:
-        raise HTTPException(401, "Invalid or missing admin PIN")
+    return bool(expected and x_admin_pin and x_admin_pin.strip() == expected)
+
+
+async def _resolve_admin(request: Request, x_admin_pin: Optional[str], authorization: Optional[str]):
+    """Siapa yang memanggil endpoint admin.
+    1) Token akun valid → hak akses mengikuti peran (403 kalau di luar haknya).
+    2) PIN admin valid → akses penuh (jalur darurat).
+    3) Kalau saklar 'wajib login akun' aktif → selain di atas ditolak (401).
+    4) Selain itu perilaku lama: mode terbuka, atau PIN bila ADMIN_LOCK+ADMIN_PIN."""
+    if authorization and authorization.lower().startswith("bearer "):
+        u = await app_users.verify_token(db, authorization[7:].strip())
+        if u:
+            if not app_users.can(u.get("role"), request.method, request.url.path):
+                raise HTTPException(403, f"Peran {app_users.ROLES.get(u.get('role'), '')} tidak punya akses ke fitur ini")
+            return {"kind": "user", "user": u}
+        # token basi/tidak valid → lanjut cek PIN, jangan putus
+    if _pin_matches(x_admin_pin):
+        return {"kind": "pin", "user": None}
+    if await app_users.get_enforce(db):
+        raise HTTPException(401, "Silakan masuk dengan akun atau PIN admin")
+    if _admin_locked():
+        expected = (os.environ.get("ADMIN_PIN") or "").strip()
+        if expected:
+            raise HTTPException(401, "Invalid or missing admin PIN")
+    return {"kind": "open", "user": None}
+
+
+async def require_admin_pin(
+    request: Request,
+    x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> bool:
+    await _resolve_admin(request, x_admin_pin, authorization)
     return True
 
 
 def _admin_is_open() -> bool:
     """True kalau admin lagi mode TERBUKA (tanpa PIN) — sama dengan syarat require_admin_pin:
     ADMIN_LOCK mati, atau ADMIN_PIN tidak di-set."""
+    if app_users.ENFORCE_CACHE.get("v"):
+        return False  # saklar wajib login aktif → tidak ada mode terbuka
     return (not _admin_locked()) or not (os.environ.get("ADMIN_PIN") or "").strip()
 
 
@@ -301,6 +337,19 @@ def require_vendor_pin(
     if not given:
         raise HTTPException(401, "Missing PIN")
     raise HTTPException(401, "Invalid PIN")
+
+
+async def require_vendor_access(
+    x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
+    x_admin_embedded: Optional[str] = Header(default=None, alias="X-Admin-Embedded"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> bool:
+    """Akun Pemilik/Keuangan boleh catat bayar vendor; selain itu aturan PIN lama (require_vendor_pin)."""
+    if authorization and authorization.lower().startswith("bearer "):
+        u = await app_users.verify_token(db, authorization[7:].strip())
+        if u and u.get("role") in ("pemilik", "keuangan"):
+            return True
+    return require_vendor_pin(x_admin_pin, x_admin_embedded)
 
 
 # WIB timezone helper (UTC+7) for daily checkpoint
@@ -3204,18 +3253,26 @@ class AdminAuthBody(BaseModel):
 
 
 @api_router.post("/admin/auth")
-async def admin_auth(body: AdminAuthBody):
-    """Validate PIN. Returns 200 if valid. Frontend stores PIN client-side.
-    Default mode terbuka (ADMIN_LOCK tidak aktif) → selalu ok, frontend langsung
-    masuk tanpa layar PIN."""
+async def admin_auth(
+    request: Request,
+    body: AdminAuthBody,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    """Validasi masuk admin: token akun ATAU PIN. Mode terbuka (ADMIN_LOCK tidak aktif)
+    tetap langsung ok, kecuali saklar 'wajib login akun' aktif."""
+    if authorization and authorization.lower().startswith("bearer "):
+        u = await app_users.verify_token(db, authorization[7:].strip())
+        if u:
+            return {"ok": True, "open": False, "user": app_users.public_user(u)}
+    if _pin_matches(body.pin):
+        return {"ok": True, "open": False, "user": None}
+    if await app_users.get_enforce(db):
+        raise HTTPException(401, "Silakan masuk dengan akun atau PIN admin")
     if not _admin_locked():
-        return {"ok": True, "open": True}  # tanpa password
-    expected = (os.environ.get("ADMIN_PIN") or "").strip()
-    if not expected:
-        return {"ok": True, "open": True}
-    if not body.pin or body.pin.strip() != expected:
-        raise HTTPException(401, "Invalid PIN")
-    return {"ok": True, "open": False}
+        return {"ok": True, "open": True, "user": None}  # tanpa password
+    if not (os.environ.get("ADMIN_PIN") or "").strip():
+        return {"ok": True, "open": True, "user": None}
+    raise HTTPException(401, "Invalid PIN")
 
 
 _HEIC_URL_RE = re.compile(r"\.hei[cf](\?|$)", re.I)
@@ -5152,7 +5209,7 @@ def _rute_str(a: str, b: str) -> str:
     return a or b or "-"
 
 
-@api_router.get("/vendor-mobile/bootstrap", dependencies=[Depends(require_vendor_pin)])
+@api_router.get("/vendor-mobile/bootstrap", dependencies=[Depends(require_vendor_access)])
 async def vendor_mobile_bootstrap():
     """Data awal buat form: kategori biaya, metode bayar, & daftar vendor."""
     vendors = []
@@ -5167,7 +5224,7 @@ def _norm_cari(x: str) -> str:
     return re.sub(r"[^a-z0-9]", "", (x or "").lower())
 
 
-@api_router.get("/vendor-mobile/trips", dependencies=[Depends(require_vendor_pin)])
+@api_router.get("/vendor-mobile/trips", dependencies=[Depends(require_vendor_access)])
 async def vendor_mobile_trips(q: Optional[str] = None, limit: int = 25):
     """Cari trip by nopol / trip_id / customer / kota. Ringkas buat picker.
     Cepat: 1 query trip + 1 query order (bukan 1 query per trip). Kosong = trip terbaru."""
@@ -5202,7 +5259,7 @@ async def vendor_mobile_trips(q: Optional[str] = None, limit: int = 25):
     return {"items": out}
 
 
-@api_router.get("/vendor-mobile/unpaid", dependencies=[Depends(require_vendor_pin)])
+@api_router.get("/vendor-mobile/unpaid", dependencies=[Depends(require_vendor_access)])
 async def vendor_mobile_unpaid(limit: int = 200):
     """Semua tagihan vendor yang masih ada sisa (belum lunas), lintas vendor."""
     out = []
@@ -5223,7 +5280,7 @@ async def vendor_mobile_unpaid(limit: int = 200):
     return {"items": out[:limit]}
 
 
-@api_router.get("/vendor-mobile/history", dependencies=[Depends(require_vendor_pin)])
+@api_router.get("/vendor-mobile/history", dependencies=[Depends(require_vendor_access)])
 async def vendor_mobile_history(q: Optional[str] = None, limit: int = 200):
     """Riwayat pembayaran vendor terbaru (semua vendor)."""
     ql = (q or "").strip().lower()
@@ -5250,7 +5307,7 @@ async def vendor_mobile_history(q: Optional[str] = None, limit: int = 200):
     return {"items": out[:limit]}
 
 
-@api_router.post("/vendor-mobile/pay", dependencies=[Depends(require_vendor_pin)])
+@api_router.post("/vendor-mobile/pay", dependencies=[Depends(require_vendor_access)])
 async def vendor_mobile_pay(
     amount: int = Form(...),
     tanggal: Optional[str] = Form(None),
@@ -5325,7 +5382,7 @@ async def vendor_mobile_pay(
     }
 
 
-@api_router.get("/vendor-mobile/vendors-unpaid", dependencies=[Depends(require_vendor_pin)])
+@api_router.get("/vendor-mobile/vendors-unpaid", dependencies=[Depends(require_vendor_access)])
 async def vendor_mobile_vendors_unpaid(limit: int = 300):
     """Tagihan vendor DIKELOMPOKKAN per vendor (buat halaman 'Bayar per Vendor').
     Tiap vendor: ringkasan total tagihan/terbayar/sisa + daftar PO/job-nya
@@ -5369,7 +5426,7 @@ async def vendor_mobile_vendors_unpaid(limit: int = 300):
     return {"items": vendors[:limit]}
 
 
-@api_router.post("/vendor-mobile/pay-batch", dependencies=[Depends(require_vendor_pin)])
+@api_router.post("/vendor-mobile/pay-batch", dependencies=[Depends(require_vendor_access)])
 async def vendor_mobile_pay_batch(
     supplier_id: str = Form(...),
     job_ids: str = Form(...),            # id job dipisah koma, urutan = urutan bayar
@@ -8840,15 +8897,12 @@ async def kompensasi_ringkasan_image(pihak_id: str, x_admin_pin: str = Header(..
 # ---------- Akun pengguna (Tahap 1) ----------
 # Pengelolaan akun: Pemilik (login akun) ATAU PIN admin yang sudah ada. PIN tetap jalur darurat.
 async def require_users_admin(
+    request: Request,
     x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ):
-    if authorization and authorization.lower().startswith("bearer "):
-        u = await app_users.verify_token(db, authorization[7:].strip())
-        if u and u.get("role") == "pemilik":
-            return u.get("email")
-    require_admin_pin(x_admin_pin)
-    return "pin-admin"
+    r = await _resolve_admin(request, x_admin_pin, authorization)
+    return r["user"]["email"] if r["user"] else "pin-admin"
 
 
 def _uerr(e: Exception):
@@ -8857,6 +8911,33 @@ def _uerr(e: Exception):
     if isinstance(e, PermissionError):
         return HTTPException(403, str(e))
     return HTTPException(400, str(e))
+
+
+class EnforceBody(BaseModel):
+    enabled: bool
+
+
+@api_router.get("/admin/users/enforce")
+async def admin_users_enforce_get(_by: str = Depends(require_users_admin)):
+    return {"enabled": await app_users.get_enforce(db, fresh=True)}
+
+
+@api_router.put("/admin/users/enforce")
+async def admin_users_enforce_put(
+    body: EnforceBody,
+    request: Request,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+    _by: str = Depends(require_users_admin),
+):
+    """Nyalakan hanya oleh Pemilik yang sedang masuk dengan akun (supaya pasti bisa masuk lagi).
+    Mematikan boleh lewat PIN admin juga (jalur darurat)."""
+    if body.enabled:
+        u = None
+        if authorization and authorization.lower().startswith("bearer "):
+            u = await app_users.verify_token(db, authorization[7:].strip())
+        if not u or u.get("role") != "pemilik":
+            raise HTTPException(403, "Masuk dulu sebagai Pemilik dengan akun (halaman Masuk) untuk menyalakan ini")
+    return {"enabled": await app_users.set_enforce(db, body.enabled)}
 
 
 class LoginBody(BaseModel):

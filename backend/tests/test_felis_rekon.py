@@ -834,7 +834,8 @@ async def test_vendor_pin_embedded():
 
     class _HTTPException(Exception):
         def __init__(self, status_code, detail=""): self.status_code = status_code; self.detail = detail
-    ns = {"os": os, "Optional": __import__("typing").Optional, "Header": lambda **k: None, "HTTPException": _HTTPException}
+    ns = {"os": os, "Optional": __import__("typing").Optional, "Header": lambda **k: None, "HTTPException": _HTTPException,
+          "app_users": __import__("types").SimpleNamespace(ENFORCE_CACHE={"v": False})}
     exec(code, ns)
     rv = ns["require_vendor_pin"]
 

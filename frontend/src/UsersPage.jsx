@@ -32,6 +32,7 @@ export default function UsersPage() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState({ t: "", err: false });
   const [link, setLink] = useState(null); // { email, url }
+  const [enforce, setEnforce] = useState(null); // null = belum dimuat
 
   const load = useCallback(async () => {
     try {
@@ -39,6 +40,10 @@ export default function UsersPage() {
       setItems(r.data.items || []);
       setRoles(r.data.roles || {});
       setInvitable(r.data.invitable || []);
+      try {
+        const en = await axios.get(`${API}/admin/users/enforce`, { headers: getHeaders() });
+        setEnforce(!!en.data.enabled);
+      } catch (e) { /* abaikan */ }
     } catch (e) {
       setMsg({ t: e.response?.data?.detail || "Gagal memuat pengguna", err: true });
     }
@@ -86,6 +91,19 @@ export default function UsersPage() {
     } catch (e) { fail(e, "Gagal menghapus"); }
   };
 
+  const toggleEnforce = async () => {
+    const next = !enforce;
+    const ask = next
+      ? "Nyalakan WAJIB LOGIN? Setelah ini semua orang harus masuk dengan akun (atau PIN admin). Pastikan akun Pemilik sudah bisa masuk."
+      : "Matikan wajib login? Admin kembali seperti semula (terbuka atau PIN).";
+    if (!window.confirm(ask)) return;
+    try {
+      const r = await axios.put(`${API}/admin/users/enforce`, { enabled: next }, { headers: getHeaders() });
+      setEnforce(!!r.data.enabled);
+      setMsg({ t: next ? "✓ Wajib login aktif" : "✓ Wajib login dimatikan", err: false });
+    } catch (e) { fail(e, "Gagal mengubah"); }
+  };
+
   const copy = async (text) => {
     try { await navigator.clipboard.writeText(text); setMsg({ t: "✓ Link disalin", err: false }); }
     catch (e) { window.prompt("Salin link ini:", text); }
@@ -93,6 +111,18 @@ export default function UsersPage() {
 
   return (
     <div style={{ maxWidth: 860, margin: "0 auto", padding: "16px 14px", color: "#e6edf3" }} data-testid="users-page">
+      {enforce !== null ? (
+        <div style={{ background: enforce ? "#0f2417" : "#2a1d0a", border: `1px solid ${enforce ? "#1f6f3f" : "#6b4a14"}`, borderRadius: 12, padding: 14, marginBottom: 12 }} data-testid="usr-enforce-box">
+          <div style={{ fontWeight: 800 }}>{enforce ? "🔒 Wajib login akun: AKTIF" : "🔓 Wajib login akun: belum aktif"}</div>
+          <div style={{ fontSize: 12, color: "#8b949e", marginTop: 4 }}>
+            {enforce
+              ? "Semua orang harus masuk dengan akun atau PIN admin. Peran membatasi menu dan data yang bisa dibuka."
+              : "Admin masih bisa dibuka tanpa akun (seperti sekarang). Nyalakan setelah akun Pemilik bisa masuk lewat halaman Masuk."}
+          </div>
+          <button style={{ ...BTN2, marginTop: 8 }} onClick={toggleEnforce} data-testid="usr-enforce-toggle">{enforce ? "Matikan" : "Nyalakan wajib login"}</button>
+        </div>
+      ) : null}
+
       <div style={{ background: "#11161f", border: "1px solid #232a36", borderRadius: 12, padding: 14 }}>
         <div style={{ fontWeight: 800, marginBottom: 10 }}>Undang pengguna</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 10 }}>
