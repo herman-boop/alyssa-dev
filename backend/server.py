@@ -3510,6 +3510,8 @@ class OrderPatchBody(BaseModel):
     customer_nama: Optional[str] = None   # edit pelanggan dari kartu PO
     customer_hp: Optional[str] = None
     entity_id: Optional[str] = None       # PT/CV (pembukuan) — additive, boleh diubah
+    asal_kota: Optional[str] = None       # edit rute manual dari kartu PO
+    tujuan_kota: Optional[str] = None
 
 
 @api_router.patch("/admin/orders/{order_id}", dependencies=[Depends(require_admin_pin)])
@@ -3550,6 +3552,13 @@ async def admin_patch_order(order_id: str, payload: OrderPatchBody):
         upd["customer_nama"] = cn
     if payload.customer_hp is not None:
         upd["customer_hp"] = payload.customer_hp.strip()[:30]
+    for fld in ("asal_kota", "tujuan_kota"):
+        v = getattr(payload, fld)
+        if v is not None:
+            v = v.strip()[:80]
+            if not v:
+                raise HTTPException(400, f"{fld} tidak boleh kosong")
+            upd[fld] = v
     if payload.entity_id is not None:
         ent = _norm_doc_entity(payload.entity_id)
         if payload.entity_id.strip() and not ent:
@@ -3573,6 +3582,10 @@ async def admin_patch_order(order_id: str, payload: OrderPatchBody):
     # Mirror nama_driver to linked trip (shown on BASTK)
     if tid and "nama_driver" in upd:
         await db.trips.update_one({"trip_id": tid}, {"$set": {"nama_driver": upd["nama_driver"], "updated_at": upd["updated_at"]}})
+    # Mirror rute ke trip (teks route dipakai tracking/BASTK)
+    if tid and ("asal_kota" in upd or "tujuan_kota" in upd):
+        rt = f'{upd.get("asal_kota", order.get("asal_kota", ""))} - {upd.get("tujuan_kota", order.get("tujuan_kota", ""))}'.strip(" -") or "—"
+        await db.trips.update_one({"trip_id": tid}, {"$set": {"route": rt[:200], "updated_at": upd["updated_at"]}})
     # Mirror vehicle changes to linked trip too
     if tid and ("vehicle_type" in upd or "nopol" in upd or "no_rangka" in upd):
         tupd = {"updated_at": upd["updated_at"]}
