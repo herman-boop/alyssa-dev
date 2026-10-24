@@ -144,3 +144,6 @@ curl -X POST -H "Content-Type: application/json" \
 
 ## 7. Version History
 See `/app/memory/CHANGELOG.md` for full release notes. v1.0 = v2.6d.1 + this guide.
+
+## Catatan deploy
+- 2026-10-24: deploy ulang dipicu setelah gangguan Railway (PR #110 dan #111 belum ter-deploy sebelumnya). Tidak ada perubahan kode.
