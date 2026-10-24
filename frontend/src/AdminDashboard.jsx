@@ -5433,10 +5433,10 @@ async function printInvoiceDoc(lines, withTax, extra) {
         <b>Terbilang${hasPay ? " (Sisa)" : ""}:</b> <i class="inv-terbilang">${terbilangRupiah(hasPay ? Math.abs(sisa) : total)}</i>
       </div>
       <div class="inv-totals-box">
-        <div class="row"><span>${withTax && taxInclusive ? "DPP (Dasar Pengenaan Pajak)" : "Subtotal"}</span><span>Rp ${fRp(withTax && taxInclusive ? dpp : subtotal)}</span></div>
+        <div class="row"><span>${withTax && taxInclusive ? "DPP (Dasar Pengenaan Pajak)" : premi > 0 ? "Ongkos Pengiriman" : "Subtotal"}</span><span>Rp ${fRp(withTax && taxInclusive ? dpp : subtotal)}</span></div>
         <div class="row"><span>PPN Logistik (1.1%)${withTax && taxInclusive ? " — termasuk" : ""}</span><span>${withTax ? "Rp " + fRp(ppn) : "—"}</span></div>
         ${withPph23 ? `<div class="row"><span>Potongan PPh 23 (2%)</span><span>- Rp ${fRp(pph23)}</span></div>` : ""}
-        ${premi > 0 ? `<div class="row"><span>Premi Asuransi (${insRate}%)</span><span>Rp ${fRp(premi)}</span></div>` : ""}
+        ${premi > 0 ? `<div class="row" style="border-top:1px dashed #cbd5e1;margin-top:6px;padding-top:6px"><span>Premi Asuransi (${insRate}%) <i style="font-size:10px;color:#64748b">— tanpa PPN</i></span><span>Rp ${fRp(premi)}</span></div>` : ""}
         <div class="row grand"><span>TOTAL TAGIHAN</span><span>Rp ${fRp(total)}</span></div>
         ${hasPay ? `<div class="row"><span>Pembayaran Diterima</span><span>- Rp ${fRp(diterima)}</span></div>
         <div class="row grand sisa"><span>${sisa < 0 ? "KELEBIHAN BAYAR" : "SISA TAGIHAN"}</span><span>Rp ${fRp(Math.abs(sisa))}</span></div>` : ""}
