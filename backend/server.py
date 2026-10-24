@@ -13,6 +13,7 @@ from datetime import datetime, timezone, timedelta
 from odoo_client import OdooClient
 from playwright.async_api import async_playwright
 import ship_master  # master kapal (panjang/lebar/tipe)
+import app_users  # akun pengguna (Pemilik, undangan, login) — Tahap 1
 import leg_supplier  # supplier per leg + pembayaran supplier
 import driver_incentive  # insentif per checkpoint driver borongan (antrean bayar)
 import driver_notif  # notif WhatsApp ke driver saat insentif dibayar
@@ -8834,6 +8835,131 @@ async def kompensasi_ringkasan_image(pihak_id: str, x_admin_pin: str = Header(..
         media_type="image/png",
         headers={"Content-Disposition": f'attachment; filename="Ringkasan-Kompensasi-{fname}.png"'},
     )
+
+
+# ---------- Akun pengguna (Tahap 1) ----------
+# Pengelolaan akun: Pemilik (login akun) ATAU PIN admin yang sudah ada. PIN tetap jalur darurat.
+async def require_users_admin(
+    x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    if authorization and authorization.lower().startswith("bearer "):
+        u = await app_users.verify_token(db, authorization[7:].strip())
+        if u and u.get("role") == "pemilik":
+            return u.get("email")
+    require_admin_pin(x_admin_pin)
+    return "pin-admin"
+
+
+def _uerr(e: Exception):
+    if isinstance(e, LookupError):
+        return HTTPException(404, str(e))
+    if isinstance(e, PermissionError):
+        return HTTPException(403, str(e))
+    return HTTPException(400, str(e))
+
+
+class LoginBody(BaseModel):
+    email: str
+    password: str
+
+
+class AcceptInviteBody(BaseModel):
+    token: str
+    password: str
+    nama: Optional[str] = ""
+
+
+class InviteBody(BaseModel):
+    email: str
+    nama: Optional[str] = ""
+    role: str
+    access_days: Optional[int] = None
+
+
+class UserPatchBody(BaseModel):
+    nama: Optional[str] = None
+    role: Optional[str] = None
+    status: Optional[str] = None
+    access_days: Optional[int] = None
+    clear_access: Optional[bool] = False
+
+
+@api_router.post("/auth/login")
+async def auth_login(body: LoginBody):
+    try:
+        u, token = await app_users.login(db, body.email, body.password)
+    except (ValueError, PermissionError) as e:
+        raise HTTPException(401 if isinstance(e, ValueError) else 403, str(e))
+    return {"token": token, "user": app_users.public_user(u)}
+
+
+@api_router.get("/auth/me")
+async def auth_me(authorization: Optional[str] = Header(default=None, alias="Authorization")):
+    if not (authorization and authorization.lower().startswith("bearer ")):
+        raise HTTPException(401, "Belum masuk")
+    u = await app_users.verify_token(db, authorization[7:].strip())
+    if not u:
+        raise HTTPException(401, "Sesi habis, silakan masuk lagi")
+    return {"user": app_users.public_user(u)}
+
+
+@api_router.get("/auth/invite/{token}")
+async def auth_invite_info(token: str):
+    info = await app_users.invite_info(db, token)
+    if not info:
+        raise HTTPException(404, "Link undangan tidak valid atau sudah kedaluwarsa")
+    return info
+
+
+@api_router.post("/auth/accept-invite")
+async def auth_accept_invite(body: AcceptInviteBody):
+    try:
+        u = await app_users.accept_invite(db, body.token, body.password, body.nama or "")
+    except (LookupError, ValueError) as e:
+        raise _uerr(e)
+    return {"token": await app_users.issue_token(db, u), "user": app_users.public_user(u)}
+
+
+@api_router.get("/admin/users")
+async def admin_users_list(_by: str = Depends(require_users_admin)):
+    return {"items": await app_users.list_users(db), "roles": app_users.ROLES, "invitable": list(app_users.INVITABLE)}
+
+
+@api_router.post("/admin/users/invite")
+async def admin_users_invite(body: InviteBody, by: str = Depends(require_users_admin)):
+    try:
+        user, token = await app_users.invite(db, body.email, body.nama or "", body.role, body.access_days, by)
+    except ValueError as e:
+        raise _uerr(e)
+    return {"user": user, "invite_path": f"/undangan/{token}", "expires_days": app_users.INVITE_DAYS}
+
+
+@api_router.post("/admin/users/{user_id}/invite-link")
+async def admin_users_reinvite(user_id: str, _by: str = Depends(require_users_admin)):
+    try:
+        token = await app_users.reinvite(db, user_id)
+    except (LookupError, ValueError) as e:
+        raise _uerr(e)
+    return {"invite_path": f"/undangan/{token}", "expires_days": app_users.INVITE_DAYS}
+
+
+@api_router.patch("/admin/users/{user_id}")
+async def admin_users_patch(user_id: str, body: UserPatchBody, _by: str = Depends(require_users_admin)):
+    try:
+        acc = None if body.clear_access else (body.access_days if body.access_days is not None else "__keep__")
+        user = await app_users.update_user(db, user_id, role=body.role, nama=body.nama, status=body.status, access_days=acc)
+    except (LookupError, ValueError) as e:
+        raise _uerr(e)
+    return {"user": user}
+
+
+@api_router.delete("/admin/users/{user_id}")
+async def admin_users_delete(user_id: str, _by: str = Depends(require_users_admin)):
+    try:
+        return await app_users.delete_user(db, user_id)
+    except (LookupError, ValueError) as e:
+        raise _uerr(e)
 
 
 # ---------- Static file serving for uploads ----------
