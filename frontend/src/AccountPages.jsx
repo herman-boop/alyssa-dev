@@ -8,7 +8,7 @@ const TOKEN_KEY = "aal_user_token";
 
 const WRAP = { minHeight: "100vh", background: "#f3f5f9", color: "#1f2937", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px 16px", fontFamily: "Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif", boxSizing: "border-box" };
 const CARD = { width: "100%", maxWidth: 400, background: "#fff", borderRadius: 10, boxShadow: "0 1px 3px rgba(16,24,40,.08), 0 8px 24px rgba(16,24,40,.06)", padding: "32px 28px 28px", boxSizing: "border-box" };
-const H1 = { fontSize: 28, fontWeight: 700, margin: "28px 0 24px", color: "#111827" };
+const H1 = { fontSize: 28, fontWeight: 700, margin: "8px 0 24px", color: "#111827" };
 const LBL = { display: "block", fontSize: 15, fontWeight: 600, margin: "0 0 8px", color: "#111827" };
 const INPUT = { width: "100%", boxSizing: "border-box", height: 48, border: "1px solid #d1d5db", borderRadius: 6, padding: "0 14px", fontSize: 16, color: "#111827", background: "#fff", outline: "none", fontFamily: "inherit" };
 const BTN = { width: "100%", height: 48, marginTop: 8, border: "none", borderRadius: 6, background: "#0b5ec2", color: "#fff", fontSize: 16, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" };
@@ -17,13 +17,10 @@ const ERR = { color: "#b42318", background: "#fef3f2", border: "1px solid #fecdc
 const saveToken = (t) => { try { localStorage.setItem(TOKEN_KEY, t); } catch (e) { /* abaikan */ } };
 
 function Brand() {
+  // Logo sudah memuat tulisan "PT. Alyssa Auto Logistik", jadi tidak perlu teks tambahan.
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-      <img src="/logo.png" alt="Alyssa Auto Logistik" width={52} height={52} style={{ objectFit: "contain" }} />
-      <div style={{ lineHeight: 1.1 }}>
-        <div style={{ fontSize: 13, color: "#6b7280", fontWeight: 600, letterSpacing: 0.3 }}>PT Alyssa</div>
-        <div style={{ fontSize: 24, fontWeight: 800, color: "#111827" }}>Auto Logistik</div>
-      </div>
+    <div style={{ display: "flex", justifyContent: "center" }}>
+      <img src="/logo.png" alt="PT. Alyssa Auto Logistik" width={150} height={150} style={{ objectFit: "contain" }} />
     </div>
   );
 }
