@@ -91,6 +91,9 @@ export function LoginPage() {
       <label style={L}>Password</label><input style={I} type="password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} data-testid="login-pw" />
       {err ? <div style={{ color: "#f85149", fontSize: 13, marginTop: 10 }}>{err}</div> : null}
       <button style={{ ...BTN, opacity: busy ? 0.6 : 1 }} disabled={busy} type="submit" data-testid="login-submit">Masuk</button>
+      <div style={{ marginTop: 14, fontSize: 11.5, color: "#6b7688", textAlign: "center" }}>
+        Belum punya akun? Minta link undangan ke Pemilik. <a href="/admin?pin=1" style={{ color: "#6b7688" }} data-testid="login-pin-darurat">PIN darurat</a>
+      </div>
     </form></div>
   );
 }
