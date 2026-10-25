@@ -267,6 +267,7 @@ function PinScreen({ pin, setPin, doLogin, authing, authError }) {
    DASHBOARD
 ════════════════════════════════════════ */
 function Dashboard({ pin, me, onLogout }) {
+  CURRENT_ROLE = me?.role || null;
   const headers = useMemo(() => ({ "X-Admin-Pin": pin }), [pin]);
   const [dark, setDark] = useState(() => document.documentElement.getAttribute("data-theme") === "dark");
   // Default: HP → Beranda (home mobile ala aplikasi), desktop → Dashboard/Pesanan.
@@ -731,10 +732,10 @@ function Dashboard({ pin, me, onLogout }) {
               {search.trim() ? <>Hasil "{search.trim()}": </> : null}{visibleOrders.length} PO · {total} unit
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button className="adm-btn adm-btn-sm adm-btn-gold" onClick={() => setActiveTab("rekap-tagih")} data-testid="adm-po-tagihan">
+              {roleCanInvoice() && (<button className="adm-btn adm-btn-sm adm-btn-gold" onClick={() => setActiveTab("rekap-tagih")} data-testid="adm-po-tagihan">
                 💰 Tagihan Hari Ini
-              </button>
-              <button className="adm-btn adm-btn-sm adm-btn-blue" onClick={() => {
+              </button>)}
+              {roleCanInvoice() && (<button className="adm-btn adm-btn-sm adm-btn-blue" onClick={() => {
                 // Tarik SEMUA unit yang lagi tampil (sudah kefilter pelanggan + tanggal) langsung ke Invoice Gabungan.
                 const rows = [];
                 visibleOrders.forEach((o) => (Array.isArray(o.units) ? o.units : []).forEach((unit) =>
@@ -742,7 +743,7 @@ function Dashboard({ pin, me, onLogout }) {
                 if (!rows.length) return;
                 setJadwalCart(rows);
                 setShowInvoiceGab(true);
-              }} data-testid="adm-tarik-invoice">🧾 Tarik ke Invoice ({total})</button>
+              }} data-testid="adm-tarik-invoice">🧾 Tarik ke Invoice ({total})</button>)}
               <button className="adm-btn adm-btn-sm adm-btn-gold" onClick={() => setAll(!allSel)} data-testid="adm-selectall-units">
                 {allSel ? "✕ Batalkan pilih semua" : `☑️ Pilih semua unit → keranjang jadwal (${total})`}
               </button>
@@ -801,7 +802,7 @@ function Dashboard({ pin, me, onLogout }) {
           <div className="adm-cartbar-info">✅ <b>{jadwalCart.length} unit</b> dipilih</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button className="adm-btn adm-btn-sm" onClick={clearCart}>Kosongkan</button>
-            <button className="adm-btn adm-btn-sm adm-btn-blue" onClick={() => setShowInvoiceGab(true)} data-testid="adm-cartbar-invoice">Buat Invoice Gabungan</button>
+            {roleCanInvoice() && <button className="adm-btn adm-btn-sm adm-btn-blue" onClick={() => setShowInvoiceGab(true)} data-testid="adm-cartbar-invoice">Buat Invoice Gabungan</button>}
             <button className="adm-btn adm-btn-sm adm-btn-gold" onClick={() => setShowJadwalGab(true)} data-testid="adm-cartbar-jadwal">Buat Jadwal Gabungan</button>
           </div>
         </div>
@@ -814,7 +815,7 @@ function Dashboard({ pin, me, onLogout }) {
           onDone={() => { setShowJadwalGab(false); }}
         />
       )}
-      {showInvoiceGab && (
+      {showInvoiceGab && roleCanInvoice() && (
         <InvoiceGabunganModal
           cart={jadwalCart}
           headers={headers}
@@ -1068,11 +1069,13 @@ function MobileHome({ stats, orders, onNav, onTrip, onSearchSubmit, onOpenSideba
           <span className="mh-act-body"><b>Jadwal Gabungan</b><small>Atur beberapa unit sekaligus</small></span>
           <span className="mh-act-arrow">›</span>
         </button>
+        {roleCanInvoice() && (
         <button className="mh-act" onClick={onOpenInvoiceGab}>
           <span className="mh-act-ic">🧾</span>
           <span className="mh-act-body"><b>Invoice Gabungan</b><small>Tagih beberapa unit dalam 1 invoice</small></span>
           <span className="mh-act-arrow">›</span>
         </button>
+        )}
       </section>
     </div>
   );
@@ -1110,7 +1113,7 @@ function CreateSheet({ onClose, onJadwalGab, onInvoiceGab, onNav, flash }) {
   const items = [
     { ic: "🔗", t: "Link Form Pesanan", s: "Salin & bagikan ke customer", go: async () => { const ok = await copyToClipboard(`${window.location.origin}/order`); flash(ok ? "✓ Link form pesanan disalin" : "Gagal menyalin"); onClose(); } },
     { ic: "📅", t: "Jadwal Gabungan", s: "Gabung beberapa unit ke 1 jadwal", go: () => { onClose(); onJadwalGab(); } },
-    { ic: "🧾", t: "Invoice Gabungan", s: "Tagih beberapa unit dalam 1 invoice", go: () => { onClose(); onInvoiceGab(); } },
+    ...(roleCanInvoice() ? [{ ic: "🧾", t: "Invoice Gabungan", s: "Tagih beberapa unit dalam 1 invoice", go: () => { onClose(); onInvoiceGab(); } }] : []),
     { ic: "📋", t: "Lihat Pesanan Baru", s: "Proses pesanan yang masuk", go: () => { onClose(); onNav("pesanan"); } },
   ];
   return createPortal(
@@ -1139,6 +1142,9 @@ function CreateSheet({ onClose, onJadwalGab, onInvoiceGab, onNav, flash }) {
 // biar tidak muter-muter. BIAYA/BEBAN menyusul di Fase 3 (modulnya belum ada,
 // jadi belum dibuatkan menu kosong). Tidak ada halaman baru / tanpa tujuan.
 /* Menu yang ditampilkan per peran (UI saja; pembatasan sebenarnya dijaga backend). */
+/* Invoice = keuangan. Peran operasional/pembaca tidak melihat tombolnya (backend juga menolak simpan). */
+let CURRENT_ROLE = null;
+const roleCanInvoice = () => !CURRENT_ROLE || CURRENT_ROLE === "pemilik" || CURRENT_ROLE === "keuangan";
 const FINANCE_TABS = ["kas-bank", "laba-rugi", "biaya", "insentif-driver", "selisih", "kompensasi", "rekap-invoice", "rekap-tagih", "pembayaran-vendor", "histori", "dokumen", "laporan"];
 const OPS1_TABS = ["pesanan", "minta-harga", "supplier", "kalkulator", "kontak"];
 const OPS2_TABS = ["pesanan", "route-leg", "drivers", "koordinator", "kendaraan", "master-kapal", "kontak"];
@@ -3027,10 +3033,12 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
           style={{ background: "#DCFCE7", border: "1px solid #4ADE80", color: "#166534" }}>
           📄 Surat Jalan
         </button>
+        {roleCanInvoice() && (
         <button className="adm-btn adm-btn-sm" onClick={(e) => { e.stopPropagation(); setShowInvoice(true); }} data-testid={`adm-invoice-${order.order_id}`}
           style={{ background: "#DBEAFE", border: "1px solid #60A5FA", color: "#1D4ED8" }}>
           🧾 Invoice
         </button>
+        )}
         <button className="adm-btn adm-btn-sm" onClick={(e) => { e.stopPropagation(); setShowJadwal(true); }} data-testid={`adm-jadwal-${order.order_id}`}
           style={{ background: "#FEF3C7", border: "1px solid #FBBF24", color: "#92400E" }}>
           🚢 Jadwal Pengiriman
@@ -3119,7 +3127,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
             }}
           />
         )}
-        {showInvoice && (
+        {showInvoice && roleCanInvoice() && (
           <InvoiceModal
             order={order}
             headers={headers}
@@ -3154,7 +3162,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
             onClose={() => setShowTrip360(false)}
             onEditLegs={() => { setShowTrip360(false); onOpenLegs(); }}
             onPrintSuratJalan={() => printSuratJalan()}
-            onOpenInvoice={() => { setShowTrip360(false); setShowInvoice(true); }}
+            onOpenInvoice={() => { setShowTrip360(false); if (roleCanInvoice()) setShowInvoice(true); }}
           />
         )}
         {order.trip_id && (
