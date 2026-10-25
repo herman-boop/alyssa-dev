@@ -1131,13 +1131,17 @@ function CreateSheet({ onClose, onJadwalGab, onInvoiceGab, onNav, flash }) {
 // jadi belum dibuatkan menu kosong). Tidak ada halaman baru / tanpa tujuan.
 /* Menu yang ditampilkan per peran (UI saja; pembatasan sebenarnya dijaga backend). */
 const FINANCE_TABS = ["kas-bank", "laba-rugi", "biaya", "insentif-driver", "selisih", "kompensasi", "rekap-invoice", "rekap-tagih", "pembayaran-vendor", "histori", "dokumen", "laporan"];
+const OPS1_TABS = ["pesanan", "minta-harga", "supplier", "kalkulator", "kontak"];
+const OPS2_TABS = ["pesanan", "route-leg", "drivers", "koordinator", "kendaraan", "master-kapal", "kontak"];
 function tabAllowedForRole(role, key) {
   if (!role || role === "pemilik") return true;           // PIN / terbuka / Pemilik: semua
   if (key === "pengguna") return false;
   if (key === "beranda" || key === "pengaturan") return true;
+  if (role === "admin_ops_1" || role === "admin_operasional") return OPS1_TABS.includes(key);
+  if (role === "admin_ops_2") return OPS2_TABS.includes(key);
   const fin = FINANCE_TABS.includes(key);
   if (role === "keuangan") return fin || ["pesanan", "kontak", "route-leg"].includes(key);
-  return !fin;                                             // admin_operasional & pembaca
+  return !fin;                                             // pembaca
 }
 const SIDEBAR_GROUPS = [
   { title: "", items: [
