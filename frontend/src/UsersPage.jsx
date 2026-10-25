@@ -186,6 +186,7 @@ export default function UsersPage() {
                   </select>
                 )}
                 {!u.has_password && u.status !== "nonaktif" ? <button style={BTN2} onClick={() => reinvite(u)}>🔗 {u.is_owner ? "Link aktivasi Pemilik" : "Buat ulang link"}</button> : null}
+                {u.has_password && !u.is_owner && u.status !== "nonaktif" ? <button style={BTN2} onClick={() => reinvite(u)} data-testid={`usr-reset-${u.user_id}`}>🔑 Reset password</button> : null}
                 {!u.is_owner && u.status === "aktif" ? <button style={BTN2} onClick={() => patch(u, { status: "nonaktif" })}>⏸ Nonaktifkan</button> : null}
                 {!u.is_owner && u.status === "nonaktif" ? <button style={BTN2} onClick={() => patch(u, { status: "aktif" })}>▶ Aktifkan</button> : null}
                 {!u.is_owner ? <button style={{ ...BTN2, color: "#f85149" }} onClick={() => remove(u)} data-testid={`usr-del-${u.user_id}`}>🗑 Hapus</button> : null}
