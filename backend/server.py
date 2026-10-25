@@ -13,6 +13,7 @@ from datetime import datetime, timezone, timedelta
 from odoo_client import OdooClient
 from playwright.async_api import async_playwright
 import ship_master  # master kapal (panjang/lebar/tipe)
+import customer_name  # nama pelanggan tunggal (kunci & tulisan resmi)
 import app_users  # akun pengguna (Pemilik, undangan, login) — Tahap 1
 import leg_supplier  # supplier per leg + pembayaran supplier
 import driver_incentive  # insentif per checkpoint driver borongan (antrean bayar)
@@ -1580,8 +1581,21 @@ CONTACT_JENIS = {"pelanggan", "supplier"}
 
 
 def _norm_contact_name(s: str) -> str:
-    import re as _re
-    return _re.sub(r"\s+", " ", _re.sub(r"[.,]", "", (s or "").lower())).strip()
+    # Kunci penyamaan nama: huruf kecil, hanya huruf & angka (titik/koma/spasi dibuang), supaya
+    # "PT. Transkon Jaya, Tbk" = "PT.TRANSKON JAYA,TBK" = "PT Transkon Jaya TBK".
+    return customer_name.name_key(s)
+
+
+async def _master_customer_names() -> list:
+    """Nama pelanggan resmi yang sudah ada: Daftar Pelanggan (harga) + Kontak jenis pelanggan."""
+    names = []
+    async for p in db.pelanggan_profiles.find({}, {"_id": 0, "nama_pt": 1}):
+        if p.get("nama_pt"):
+            names.append(p["nama_pt"])
+    async for c in db.contacts.find({"jenis": "pelanggan"}, {"_id": 0, "nama": 1}):
+        if c.get("nama"):
+            names.append(c["nama"])
+    return names
 
 
 class ContactBody(BaseModel):
@@ -1694,7 +1708,7 @@ async def import_contacts_from_orders():
                 cur["email"] = (o.get("customer_email") or "").strip()
     now = datetime.now(timezone.utc).isoformat()
     docs = [{
-        "id": "CT-" + uuid.uuid4().hex[:10], "nama": v["nama"][:200], "jenis": "pelanggan",
+        "id": "CT-" + uuid.uuid4().hex[:10], "nama": (customer_name.canon_display(v["nama"]) or v["nama"])[:200], "jenis": "pelanggan",
         "perusahaan": "", "no_hp": v["no_hp"][:40], "email": v["email"][:120], "alamat": "",
         "catatan": "", "created_at": now,
     } for v in seen.values()]
@@ -2425,6 +2439,16 @@ async def create_order(payload: OrderBody):
         "customer_email": (payload.customer_email or "").strip()[:120],
         "catatan": (payload.catatan or "").strip()[:500],
     }
+    # Nama pelanggan tunggal: samakan ejaan dengan nama resmi yang sudah ada (atau tulisan resmi baru).
+    typed_nama = shared["customer_nama"]
+    try:
+        final_nama = customer_name.resolve(typed_nama, await _master_customer_names())[:120] or typed_nama
+    except Exception as e:  # jangan sampai order gagal gara-gara perapian nama
+        logger.warning(f"[customer_name] gagal merapikan '{typed_nama}': {e}")
+        final_nama = typed_nama
+    if final_nama != typed_nama:
+        shared["customer_nama_input"] = typed_nama   # tulisan asli pelanggan, untuk jejak
+        shared["customer_nama"] = final_nama
     created = []
     for u in units:
         order_id = f"ORD-{uuid.uuid4().hex[:10].upper()}"
@@ -3607,6 +3631,10 @@ async def admin_patch_order(order_id: str, payload: OrderPatchBody):
         cn = payload.customer_nama.strip()[:120]
         if not cn:
             raise HTTPException(400, "Nama pelanggan tidak boleh kosong")
+        try:
+            cn = customer_name.resolve(cn, await _master_customer_names())[:120] or cn
+        except Exception as e:
+            logger.warning(f"[customer_name] gagal merapikan edit '{cn}': {e}")
         upd["customer_nama"] = cn
     if payload.customer_hp is not None:
         upd["customer_hp"] = payload.customer_hp.strip()[:30]
