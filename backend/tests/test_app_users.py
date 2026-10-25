@@ -183,17 +183,45 @@ def test_can_matrix():
     c = au.can
     # Pemilik: semua
     assert c("pemilik", "DELETE", "/api/admin/users/x") and c("pemilik", "PATCH", "/api/admin/kas/1")
+    assert c("pemilik", "POST", "/api/admin/pelanggan") and c("pemilik", "POST", "/api/admin/suppliers")
     # Kelola pengguna hanya Pemilik
-    for r in ("admin_operasional", "keuangan", "pembaca"):
+    for r in ("admin_ops_1", "admin_ops_2", "keuangan", "pembaca"):
         assert not c(r, "GET", "/api/admin/users")
-    # Admin Operasional: operasional ya, keuangan tidak
-    assert c("admin_operasional", "PATCH", "/api/admin/orders/ORD-1")
-    assert c("admin_operasional", "POST", "/api/admin/trips")
-    assert not c("admin_operasional", "GET", "/api/admin/kas")
-    assert not c("admin_operasional", "POST", "/api/admin/expenses")
-    assert not c("admin_operasional", "GET", "/api/admin/doc-history")
+    # Pelanggan/supplier baru & Kontak hanya Pemilik
+    for r in ("admin_ops_1", "admin_ops_2", "keuangan", "pembaca"):
+        assert not c(r, "POST", "/api/admin/pelanggan")
+        assert not c(r, "POST", "/api/admin/suppliers")
+        assert not c(r, "POST", "/api/admin/contacts")
+        assert not c(r, "PATCH", "/api/admin/contacts/x")
+        assert not c(r, "DELETE", "/api/admin/pelanggan/x")
+    # Admin Ops 1: PO, minta harga, supplier, daftar harga; bukan lapangan/keuangan
+    o1 = "admin_ops_1"
+    assert c(o1, "PATCH", "/api/admin/orders/ORD-1")
+    assert c(o1, "POST", "/api/admin/orders/ORD-1/resend-wa")
+    assert c(o1, "POST", "/api/admin/permintaan-harga")
+    assert c(o1, "PATCH", "/api/admin/suppliers/S1")
+    assert c(o1, "PATCH", "/api/admin/pelanggan/P1/harga/H1")  # edit harga per pelanggan
+    assert c(o1, "POST", "/api/vehicle-types")
+    assert not c(o1, "POST", "/api/admin/trips")
+    assert not c(o1, "PUT", "/api/admin/ship-master")
+    assert not c(o1, "POST", "/api/admin/suppliers/S1/jobs/J1/payments")  # bayar supplier = keuangan
+    assert not c(o1, "GET", "/api/admin/kas") and not c(o1, "GET", "/api/admin/doc-history")
+    assert c(o1, "GET", "/api/admin/trips")  # boleh melihat
+    # Admin Ops 2: trip/leg/driver/koordinator/kapal; bukan PO/harga/keuangan
+    o2 = "admin_ops_2"
+    assert c(o2, "PATCH", "/api/admin/trips/T1/legs")
+    assert c(o2, "POST", "/api/admin/trips/T1/legs/0/task-link")
+    assert c(o2, "PUT", "/api/admin/ship-master")
+    assert c(o2, "POST", "/api/admin/drivers")
+    assert c(o2, "POST", "/api/admin/koordinators")
+    assert not c(o2, "PATCH", "/api/admin/orders/ORD-1")
+    assert not c(o2, "PATCH", "/api/admin/pelanggan/P1/harga/H1")
+    assert not c(o2, "PUT", "/api/admin/trips/T1/legs/L1/supplier/payments")
+    assert not c(o2, "POST", "/api/admin/trips/T1/legs/L1/supplier/payments")
+    assert c(o2, "GET", "/api/admin/orders")
     # Keuangan: keuangan penuh, selain itu hanya lihat
     assert c("keuangan", "POST", "/api/admin/kas/transfer")
+    assert c("keuangan", "POST", "/api/admin/suppliers/S1/pay-batch")
     assert c("keuangan", "GET", "/api/admin/orders")
     assert not c("keuangan", "PATCH", "/api/admin/orders/ORD-1")
     assert not c("keuangan", "DELETE", "/api/admin/trips/T1")
@@ -202,7 +230,8 @@ def test_can_matrix():
     assert not c("pembaca", "PATCH", "/api/admin/orders/ORD-1")
     assert not c("pembaca", "GET", "/api/admin/kas")
     assert not c("pembaca", "GET", "/api/admin/doc-history")
-    # Peran tidak dikenal ditolak
+    # Peran lama dianggap Ops 1; peran tidak dikenal ditolak
+    assert c("admin_operasional", "PATCH", "/api/admin/orders/ORD-1")
     assert not c("ngawur", "GET", "/api/admin/orders")
 
 

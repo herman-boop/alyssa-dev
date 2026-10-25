@@ -27,11 +27,13 @@ OWNER_EMAIL = (os.environ.get("OWNER_EMAIL") or "syahh6260@gmail.com").strip().l
 OWNER_NAME = "Hermansyah"
 ROLES = {
     "pemilik": "Pemilik",
-    "admin_operasional": "Admin Operasional",
+    "admin_ops_1": "Admin Operasional 1 (Pesanan & Harga)",
+    "admin_ops_2": "Admin Operasional 2 (Pengiriman & Lapangan)",
     "keuangan": "Keuangan",
     "pembaca": "Pembaca",
 }
-INVITABLE = ("admin_operasional", "keuangan", "pembaca")
+INVITABLE = ("admin_ops_1", "admin_ops_2", "keuangan", "pembaca")
+LEGACY_ROLES = {"admin_operasional": "admin_ops_1"}  # peran lama → Operasional 1
 INVITE_DAYS = 7
 TOKEN_HOURS = 12
 MAX_FAIL = 5
@@ -127,6 +129,11 @@ async def ensure_owner(db):
     try:
         await db[COLL].create_index("email", unique=True)
         await db[COLL].create_index("user_id", unique=True)
+    except Exception:
+        pass
+    try:
+        for old, new in LEGACY_ROLES.items():
+            await db[COLL].update_many({"role": old}, {"$set": {"role": new}})
     except Exception:
         pass
     o = await db[COLL].find_one({"role": "pemilik"})
@@ -333,7 +340,16 @@ FINANCE_PREFIXES = (
     "/admin/doc-history", "/admin/selisih", "/admin/kompensasi", "/admin/rekon", "/admin/reports",
     "/vendor-mobile",
 )
+# Bagian keuangan yang menumpang di bawah path lain (pembayaran supplier, pajak, riwayat bayar, dst.)
+FINANCE_FRAGMENTS = ("/payments", "/pay-batch", "/rekon-payments", "/pajak", "/riwayat/", "/pisah-faktur", "/no-faktur")
+# Wilayah TULIS per peran operasional. Membaca (GET) terbuka untuk semua peran non-keuangan.
+OPS1_WRITE = ("/admin/orders", "/admin/permintaan-harga", "/admin/permintaan-templates",
+              "/admin/suppliers", "/admin/pelanggan", "/admin/deal-prices", "/vehicle-types")
+OPS2_WRITE = ("/admin/trips", "/admin/drivers", "/admin/koordinators", "/admin/leg-tasks",
+              "/admin/ship-master", "/admin/kapal-master", "/admin/petugas", "/admin/driver-wa",
+              "/admin/ais", "/admin/migrate-heic")
 _SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
+_OWNER_ONLY_DELETE = re.compile(r"^/admin/(pelanggan|suppliers)/[^/]+$")
 
 
 def _rel(path):
@@ -341,21 +357,40 @@ def _rel(path):
     return p[4:] if p.startswith("/api/") else p
 
 
+def is_finance(p):
+    return p.startswith(FINANCE_PREFIXES) or any(f in p for f in FINANCE_FRAGMENTS)
+
+
+def _owner_only(method, p):
+    """Data induk dirapikan: pelanggan/supplier baru dan seluruh Kontak hanya Pemilik."""
+    if p.startswith("/admin/contacts") and method not in _SAFE_METHODS:
+        return True
+    if method == "POST" and p in ("/admin/pelanggan", "/admin/suppliers"):
+        return True
+    if method == "DELETE" and _OWNER_ONLY_DELETE.match(p):
+        return True
+    return False
+
+
 def can(role, method, path):
     """Boleh/tidaknya `role` memanggil `method path`. Pemilik boleh semua."""
+    role = LEGACY_ROLES.get(role, role)
     if role == "pemilik":
         return True
     p = _rel(path)
+    m = (method or "").upper()
     if p.startswith("/admin/users"):
         return False
-    finance = p.startswith(FINANCE_PREFIXES)
-    safe = (method or "").upper() in _SAFE_METHODS
-    if role == "pembaca":
-        return safe and not finance
-    if role == "admin_operasional":
-        return not finance
-    if role == "keuangan":
-        return finance or safe
+    if is_finance(p):
+        return role == "keuangan"
+    if m in _SAFE_METHODS:
+        return role in ROLES
+    if _owner_only(m, p):
+        return False
+    if role == "admin_ops_1":
+        return p.startswith(OPS1_WRITE)
+    if role == "admin_ops_2":
+        return p.startswith(OPS2_WRITE)
     return False
 
 

@@ -13,7 +13,13 @@ const L = { fontSize: 11, color: "#8b949e", display: "block", marginBottom: 4, f
 const BTN = { padding: "9px 16px", borderRadius: 8, border: "none", background: "#EF9F27", color: "#1a1208", fontWeight: 800, fontSize: 13, cursor: "pointer" };
 const BTN2 = { padding: "6px 10px", borderRadius: 7, border: "1px solid #30363d", background: "#1c2128", color: "#e6edf3", fontWeight: 700, fontSize: 12, cursor: "pointer" };
 const STATUS_TXT = { aktif: ["Aktif", "#3fb950"], undangan: ["Menunggu aktivasi", "#d29922"], nonaktif: ["Nonaktif", "#f85149"] };
-const EMPTY = { email: "", nama: "", role: "admin_operasional", access_days: "" };
+const ROLE_HELP = {
+  admin_ops_1: "Pesanan (PO), Minta Harga, Supplier, Kalkulator HPP & Daftar Harga. Tanpa keuangan.",
+  admin_ops_2: "Route Leg, trip & link driver, Driver, Koordinator, Kendaraan, Master Kapal, tracking, upload manual. Tanpa keuangan.",
+  keuangan: "Kas & Bank, biaya, insentif, pembayaran supplier, invoice, laporan. Lainnya hanya lihat.",
+  pembaca: "Hanya melihat, tanpa keuangan.",
+};
+const EMPTY = { email: "", nama: "", role: "admin_ops_1", access_days: "" };
 
 export default function UsersPage() {
   const getHeaders = () => {
@@ -133,6 +139,7 @@ export default function UsersPage() {
               {invitable.map((r) => <option key={r} value={r}>{roles[r] || r}</option>)}
             </select>
           </div>
+          <div style={{ gridColumn: "1/-1", fontSize: 11.5, color: "#8b949e", marginTop: -4 }} data-testid="usr-role-help">{ROLE_HELP[f.role] || ""} Pelanggan &amp; supplier baru hanya bisa diinput Pemilik.</div>
           <div><label style={L}>Batas akses (hari, opsional)</label><input style={I} inputMode="numeric" value={f.access_days} onChange={(e) => setF({ ...f, access_days: e.target.value.replace(/\D/g, "") })} placeholder="kosong = tanpa batas" data-testid="usr-days" /></div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
