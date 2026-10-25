@@ -170,9 +170,16 @@ export default function AdminDashboard() {
         const pr = await axios.post(`${API}/admin/auth`, { pin: cached });
         setMe(pr.data?.user || null);
         setAuthed(true);
-      } catch {
+      } catch (e) {
         localStorage.removeItem(PIN_KEY);
         setPin("");
+        // Wajib login akun aktif → semua orang masuk lewat akun dulu. PIN tetap ada sebagai
+        // jalur darurat lewat /admin?pin=1 (tidak ditawarkan ke staf).
+        const wajibAkun = /dengan akun/i.test(String(e?.response?.data?.detail || ""));
+        if (wajibAkun && !/[?&]pin=1\b/.test(window.location.search)) {
+          window.location.replace("/masuk");
+          return;
+        }
         setNeedPin(true);   // backend masih minta PIN → tampilkan layar PIN
       } finally { setProbing(false); }
     })();
@@ -192,7 +199,9 @@ export default function AdminDashboard() {
 
   const logout = () => {
     localStorage.removeItem(PIN_KEY); setPin("");
+    const hadAccount = (() => { try { return !!localStorage.getItem("aal_user_token"); } catch (e) { return false; } })();
     try { localStorage.removeItem("aal_user_token"); } catch (e) { /* abaikan */ }
+    if (hadAccount) { window.location.href = "/masuk"; return; }
     // Reload → probe jalan lagi. Kalau admin OPEN, langsung masuk lagi; kalau
     // terkunci (ADMIN_PIN di-set), baru muncul layar PIN.
     try { window.location.reload(); } catch { setAuthed(false); setNeedPin(true); }
