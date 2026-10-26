@@ -5611,7 +5611,7 @@ async function printInvoiceDoc(lines, withTax, extra) {
     .inv-sign-jab { font-size:9.5px; color:${DOC_BRAND.muted}; margin-top:2px; }
   </style></head><body>
   <div class="doc-sheet">
-    ${docHeader({ docTitle: extra.tipe === "asuransi" ? "INVOICE ASURANSI" : "FAKTUR / INVOICE", logoUrl: "/logo.png" })}
+    ${docHeader({ docTitle: "FAKTUR / INVOICE", logoUrl: "/logo.png" })}
     <div class="inv-meta-row">
       <div class="inv-billto">
         <div class="lbl">Ditagihkan Kepada</div>
