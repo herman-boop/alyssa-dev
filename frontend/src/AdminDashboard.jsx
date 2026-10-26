@@ -5293,6 +5293,21 @@ function HistoriDokumen({ headers }) {
     }
   };
 
+  // Koreksi nomor faktur (mis. salah ketik nomor manual). Baris & nominal tidak berubah.
+  const ubahNomor = async (rec) => {
+    const lama = rec.no_dokumen || rec.meta?.no_invoice || "";
+    const baru = window.prompt(`Nomor faktur untuk ${rec.customer || "faktur ini"}:\n(sekarang: ${lama})`, lama);
+    if (baru == null) return;
+    const nomor = baru.trim();
+    if (!nomor || nomor === lama) return;
+    try {
+      await axios.patch(`${API}/admin/doc-history/${rec.id}/nomor`, { no_dokumen: nomor }, { headers });
+      setItems((xs) => xs.map((x) => (x.id === rec.id ? { ...x, no_dokumen: nomor, meta: { ...(x.meta || {}), no_invoice: nomor } } : x)));
+    } catch (e) {
+      alert(e.response?.data?.detail || "Gagal mengubah nomor");
+    }
+  };
+
   const del = async (rec) => {
     if (!window.confirm(`Hapus dokumen ini dari histori?\n\n${rec.no_dokumen || rec.jenis_label}\n${rec.customer || ""}`)) return;
     // optimistic
@@ -5446,16 +5461,19 @@ function HistoriDokumen({ headers }) {
                 <div className="adm-dochist-when">{fmtWhen(rec.created_at)}</div>
                 <div className="adm-dochist-actions">
                   {rec.jenis === "invoice" && (
-                    <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={() => setPayRec(rec)} data-testid="dochist-pay">💰 Pembayaran</button>
+                    <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={() => setPayRec(rec)} title="Pembayaran" data-testid="dochist-pay">💰 Bayar</button>
                   )}
                   {rec.jenis === "invoice" && (
-                    <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={() => setStempelRec(rec)} data-testid="dochist-stempel">🖋️ TTD / Stempel</button>
+                    <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={() => setStempelRec(rec)} title="TTD / Stempel / Materai" data-testid="dochist-stempel">🖋️ TTD</button>
                   )}
                   {rec.jenis === "invoice" && (
-                    <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={async () => { let full = rec; try { const r = await axios.get(`${API}/admin/doc-history/${rec.id}`, { headers }); if (r.data) full = r.data; } catch {} setEditRec(full); }} data-testid="dochist-edit">✏️ Edit / Tambah Unit</button>
+                    <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={() => ubahNomor(rec)} title="Ubah nomor faktur" data-testid="dochist-nomor">🔢 No.</button>
                   )}
-                  <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={() => reprint(rec)} data-testid="dochist-print">🖨️ Cetak ulang</button>
-                  <button className="adm-btn adm-dochist-btn adm-dochist-del" onClick={() => del(rec)} data-testid="dochist-del">🗑️ Hapus</button>
+                  {rec.jenis === "invoice" && (
+                    <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={async () => { let full = rec; try { const r = await axios.get(`${API}/admin/doc-history/${rec.id}`, { headers }); if (r.data) full = r.data; } catch {} setEditRec(full); }} title="Edit / Tambah Unit" data-testid="dochist-edit">✏️ Edit</button>
+                  )}
+                  <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={() => reprint(rec)} title="Cetak ulang" data-testid="dochist-print">🖨️ Cetak</button>
+                  <button className="adm-btn adm-dochist-btn adm-dochist-del" onClick={() => del(rec)} title="Hapus" data-testid="dochist-del">🗑️</button>
                 </div>
               </div>
             );
