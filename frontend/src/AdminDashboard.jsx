@@ -297,6 +297,7 @@ function Dashboard({ pin, me, onLogout }) {
   const [jadwalCart, setJadwalCart] = useState([]); // [{order_id, customer_nama, asal_kota, tujuan_kota, unit}]
   const [showJadwalGab, setShowJadwalGab] = useState(false);
   const [showInvoiceGab, setShowInvoiceGab] = useState(false);
+  const [showInvAsuransi, setShowInvAsuransi] = useState(false);
   const cartHas = useCallback((uid) => jadwalCart.some((c) => c.unit?.unit_id === uid), [jadwalCart]);
   const toggleCartUnit = useCallback((order, unit) => {
     setJadwalCart((c) => c.some((x) => x.unit?.unit_id === unit.unit_id)
@@ -744,6 +745,7 @@ function Dashboard({ pin, me, onLogout }) {
                 setJadwalCart(rows);
                 setShowInvoiceGab(true);
               }} data-testid="adm-tarik-invoice">🧾 Tarik ke Invoice ({total})</button>)}
+              {roleCanInvoice() && (<button className="adm-btn adm-btn-sm adm-btn-blue" onClick={() => setShowInvAsuransi(true)} data-testid="adm-invoice-asuransi">🛡️ Invoice Asuransi</button>)}
               <button className="adm-btn adm-btn-sm adm-btn-gold" onClick={() => setAll(!allSel)} data-testid="adm-selectall-units">
                 {allSel ? "✕ Batalkan pilih semua" : `☑️ Pilih semua unit → keranjang jadwal (${total})`}
               </button>
@@ -815,6 +817,14 @@ function Dashboard({ pin, me, onLogout }) {
           onDone={() => { setShowJadwalGab(false); }}
         />
       )}
+      {showInvAsuransi && roleCanInvoice() && (
+        <InvoiceAsuransiModal
+          headers={headers}
+          customerNames={Array.from(new Set((orders || []).map((o) => o.customer_nama).filter(Boolean)))}
+          onClose={() => setShowInvAsuransi(false)}
+          onDone={() => { setShowInvAsuransi(false); flash("✓ Invoice Asuransi tersimpan di Histori Dokumen"); }}
+        />
+      )}
       {showInvoiceGab && roleCanInvoice() && (
         <InvoiceGabunganModal
           cart={jadwalCart}
@@ -874,6 +884,7 @@ function Dashboard({ pin, me, onLogout }) {
           onClose={() => setCreateSheet(false)}
           onJadwalGab={() => setShowJadwalGab(true)}
           onInvoiceGab={() => setShowInvoiceGab(true)}
+          onInvoiceAsuransi={() => setShowInvAsuransi(true)}
           onNav={setActiveTab}
           flash={flash}
         />
@@ -1109,11 +1120,151 @@ function BottomNav({ activeTab, onNav, onTrip }) {
 }
 
 /* Bottom-sheet "Buat" — aksi bikin cepat. */
-function CreateSheet({ onClose, onJadwalGab, onInvoiceGab, onNav, flash }) {
+/* ── Invoice Asuransi (terpisah dari PO) ──
+   Tagihan reimburse asuransi: tidak harus terkait pesanan. Disimpan ke Histori Dokumen
+   sebagai invoice biasa (tipe "asuransi"), jadi ikut Rekap Invoice & pencatatan pembayaran. */
+function InvoiceAsuransiModal({ headers, customerNames, onClose, onDone }) {
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const plusDays = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+  const hargaNum = (s) => parseInt(String(s || "").replace(/[^0-9]/g, ""), 10) || 0;
+  const [billTo, setBillTo] = useState("");
+  const [poCust, setPoCust] = useState("");
+  const [tanggalInvoice, setTanggalInvoice] = useState(todayIso);
+  const [jatuhTempo, setJatuhTempo] = useState(plusDays(30));
+  const [metode, setMetode] = useState("Transfer");
+  const [pesan, setPesan] = useState("");
+  const [withTax, setWithTax] = useState(false);
+  const [ttdNama, setTtdNama] = useState("");
+  const [ttdJabatan, setTtdJabatan] = useState("Finance & Accounting Controller");
+  const [noInvoiceManual, setNoInvoiceManual] = useState("");
+  const [rows, setRows] = useState([{ ket: "", qty: "1", harga: "" }]);
+  const [saving, setSaving] = useState(false);
+  const setRow = (i, patch) => setRows((rs) => rs.map((r, x) => x === i ? { ...r, ...patch } : r));
+  const fRp = (n) => "Rp " + n.toLocaleString("id-ID");
+  const escH = (t) => String(t == null ? "" : t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  const valid = rows.filter((r) => hargaNum(r.harga) > 0 && (r.ket || "").trim());
+  const subtotal = valid.reduce((s, r) => s + hargaNum(r.harga) * (hargaNum(r.qty) || 1), 0);
+  const ppn = withTax ? Math.round(subtotal * 0.011) : 0;
+  const total = subtotal + ppn;
+
+  const build = () => {
+    const lines = valid.map((r) => ({
+      nama: "Reimburse Asuransi", ket: escH(r.ket.trim()).replace(/\n/g, "<br>"),
+      qty: hargaNum(r.qty) || 1, harga: hargaNum(r.harga),
+    }));
+    const extra = { tipe: "asuransi", po_customer: poCust.trim(), jatuhTempo, tanggalInvoice, metode, pesan,
+      ttdNama, ttdJabatan, customer_nama: billTo.trim(), no_invoice: noInvoiceManual.trim() || undefined };
+    return { lines, extra };
+  };
+  const check = () => {
+    if (!billTo.trim()) { alert("Isi nama yang ditagih dulu."); return false; }
+    if (!valid.length) { alert("Isi keterangan dan harga minimal 1 baris."); return false; }
+    return true;
+  };
+  const persist = (lines, extra, noInv) => {
+    saveDocHistory({
+      jenis: "invoice", no_dokumen: noInv, customer: billTo.trim(),
+      judul: `${billTo.trim()} · Invoice Asuransi${poCust.trim() ? ` · PO ${poCust.trim()}` : ""}`,
+      meta: { ...extra, withTax: !!withTax, no_invoice: noInv }, lines, order_ids: [],
+    }, headers);
+    onDone();
+  };
+  const doPrint = async () => {
+    if (!check()) return;
+    const { lines, extra } = build();
+    const noInv = await printInvoiceDoc(lines, withTax, extra);
+    persist(lines, extra, noInv);
+  };
+  const doSave = async () => {
+    if (!check()) return;
+    const { lines, extra } = build();
+    setSaving(true);
+    try { const noInv = extra.no_invoice || await nextDocNo("invoice", "INV"); persist(lines, extra, noInv); }
+    finally { setSaving(false); }
+  };
+  const lbl = { display: "block", fontSize: 12, color: "var(--text-3)", fontWeight: 700, marginBottom: 6 };
+
+  return createPortal((
+    <div className="adm-vars">
+    <div className="adm-modal-bg" onClick={onClose} data-testid="adm-invasr-modal">
+      <div className="adm-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
+        <div className="adm-modal-head">
+          <div>
+            <div className="adm-modal-title">🛡️ Invoice Asuransi</div>
+            <div className="adm-modal-sub">Tagihan reimburse asuransi, terpisah dari pesanan</div>
+          </div>
+          <button className="adm-modal-close" onClick={onClose} aria-label="Tutup">✕</button>
+        </div>
+        <div className="adm-modal-body">
+          <div style={{ marginBottom: 14 }}>
+            <label style={lbl}>Ditagihkan Kepada</label>
+            <input type="text" className="adm-input" list="invasr-cust" value={billTo} onChange={(e) => setBillTo(e.target.value)} placeholder="contoh: PT TRANSKON JAYA TBK" data-testid="adm-invasr-billto" />
+            <datalist id="invasr-cust">{(customerNames || []).map((n) => <option key={n} value={n} />)}</datalist>
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <label style={lbl}>No. PO Customer (opsional)</label>
+            <input type="text" className="adm-input" value={poCust} onChange={(e) => setPoCust(e.target.value)} placeholder="contoh: 00128698" data-testid="adm-invasr-po" />
+          </div>
+          <div style={{ fontSize: 12, color: "var(--text-3)", fontWeight: 700, marginBottom: 8 }}>Rincian tagihan</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
+            {rows.map((r, i) => (
+              <div key={i} className="adm-invu" style={{ flexWrap: "wrap" }}>
+                <textarea className="adm-input" rows={3} style={{ flexBasis: "100%", fontSize: 12, padding: "7px 9px" }} value={r.ket}
+                  onChange={(e) => setRow(i, { ket: e.target.value })}
+                  placeholder={"Keterangan, contoh:\nReimburse Asuransi Mobilization 4x Unit Toyota Hilux DC E dari Halmahera ke JBA Manado\nTK6050 / DG 8078 SB ..."} data-testid={`adm-invasr-ket-${i}`} />
+                <input inputMode="numeric" className="adm-input" style={{ width: 70, fontSize: 12, padding: "7px 9px", textAlign: "right" }} value={r.qty}
+                  onChange={(e) => setRow(i, { qty: e.target.value.replace(/\D/g, "") })} placeholder="Qty" data-testid={`adm-invasr-qty-${i}`} />
+                <div className="adm-invu-harga" style={{ flex: 1 }}>
+                  <span>Rp</span>
+                  <input inputMode="numeric" value={r.harga ? hargaNum(r.harga).toLocaleString("id-ID") : ""} placeholder="Harga satuan"
+                    onChange={(e) => setRow(i, { harga: e.target.value })} data-testid={`adm-invasr-harga-${i}`} />
+                </div>
+                {rows.length > 1 ? <button type="button" className="adm-btn adm-btn-sm" onClick={() => setRows((rs) => rs.filter((_, x) => x !== i))}>🗑</button> : null}
+              </div>
+            ))}
+          </div>
+          <button type="button" className="adm-btn adm-btn-sm" onClick={() => setRows((rs) => [...rs, { ket: "", qty: "1", harga: "" }])} data-testid="adm-invasr-add">+ Tambah baris</button>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, margin: "16px 0" }}>
+            <div><label style={lbl}>Tanggal Invoice</label><input type="date" className="adm-input" value={tanggalInvoice} onChange={(e) => setTanggalInvoice(e.target.value)} /></div>
+            <div><label style={lbl}>Jatuh Tempo</label><input type="date" className="adm-input" value={jatuhTempo} onChange={(e) => setJatuhTempo(e.target.value)} /></div>
+            <div><label style={lbl}>Metode Pembayaran</label><input type="text" className="adm-input" value={metode} onChange={(e) => setMetode(e.target.value)} /></div>
+            <div><label style={lbl}>No. Invoice (opsional)</label><input type="text" className="adm-input" value={noInvoiceManual} onChange={(e) => setNoInvoiceManual(e.target.value)} placeholder="kosong = otomatis" /></div>
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <label style={lbl}>Pesan / Catatan (opsional)</label>
+            <input type="text" className="adm-input" value={pesan} onChange={(e) => setPesan(e.target.value)} />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
+            <div><label style={lbl}>Penandatangan</label><input type="text" className="adm-input" value={ttdNama} onChange={(e) => setTtdNama(e.target.value)} placeholder="contoh: Ulpah" /></div>
+            <div><label style={lbl}>Jabatan</label><input type="text" className="adm-input" value={ttdJabatan} onChange={(e) => setTtdJabatan(e.target.value)} /></div>
+          </div>
+          <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 12 }}>
+            <input type="checkbox" checked={withTax} onChange={(e) => setWithTax(e.target.checked)} data-testid="adm-invasr-ppn" /> Kenakan PPN Logistik (1.1%) <span style={{ color: "var(--text-mute)", fontSize: 11 }}>(umumnya tidak, reimburse asuransi)</span>
+          </label>
+          <div style={{ background: "var(--surface-2, rgba(255,255,255,.04))", borderRadius: 8, padding: "10px 12px", fontSize: 13 }} data-testid="adm-invasr-total">
+            <div style={{ display: "flex", justifyContent: "space-between" }}><span>Subtotal</span><b>{fRp(subtotal)}</b></div>
+            {withTax ? <div style={{ display: "flex", justifyContent: "space-between" }}><span>PPN 1.1%</span><b>{fRp(ppn)}</b></div> : null}
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4, fontSize: 15 }}><span>Total Tagihan</span><b>{fRp(total)}</b></div>
+          </div>
+        </div>
+        <div className="adm-modal-foot">
+          <button className="adm-btn adm-btn-ghost" onClick={onClose}>Batal</button>
+          <button className="adm-btn adm-btn-green" disabled={saving} onClick={doSave} data-testid="adm-invasr-save">💾 Simpan</button>
+          <button className="adm-btn adm-btn-gold" onClick={doPrint} data-testid="adm-invasr-print">🖨️ Cetak Invoice</button>
+        </div>
+      </div>
+    </div>
+    </div>
+  ), document.body);
+}
+
+function CreateSheet({ onClose, onJadwalGab, onInvoiceGab, onInvoiceAsuransi, onNav, flash }) {
   const items = [
     { ic: "🔗", t: "Link Form Pesanan", s: "Salin & bagikan ke customer", go: async () => { const ok = await copyToClipboard(`${window.location.origin}/order`); flash(ok ? "✓ Link form pesanan disalin" : "Gagal menyalin"); onClose(); } },
     { ic: "📅", t: "Jadwal Gabungan", s: "Gabung beberapa unit ke 1 jadwal", go: () => { onClose(); onJadwalGab(); } },
     ...(roleCanInvoice() ? [{ ic: "🧾", t: "Invoice Gabungan", s: "Tagih beberapa unit dalam 1 invoice", go: () => { onClose(); onInvoiceGab(); } }] : []),
+    ...(roleCanInvoice() && onInvoiceAsuransi ? [{ ic: "🛡️", t: "Invoice Asuransi", s: "Tagih reimburse asuransi terpisah", go: () => { onClose(); onInvoiceAsuransi(); } }] : []),
     { ic: "📋", t: "Lihat Pesanan Baru", s: "Proses pesanan yang masuk", go: () => { onClose(); onNav("pesanan"); } },
   ];
   return createPortal(
@@ -5460,7 +5611,7 @@ async function printInvoiceDoc(lines, withTax, extra) {
     .inv-sign-jab { font-size:9.5px; color:${DOC_BRAND.muted}; margin-top:2px; }
   </style></head><body>
   <div class="doc-sheet">
-    ${docHeader({ docTitle: "FAKTUR / INVOICE", logoUrl: "/logo.png" })}
+    ${docHeader({ docTitle: extra.tipe === "asuransi" ? "INVOICE ASURANSI" : "FAKTUR / INVOICE", logoUrl: "/logo.png" })}
     <div class="inv-meta-row">
       <div class="inv-billto">
         <div class="lbl">Ditagihkan Kepada</div>
@@ -5471,7 +5622,9 @@ async function printInvoiceDoc(lines, withTax, extra) {
         <tr><td>Tanggal</td><td>${tgl}</td></tr>
         <tr><td>Jatuh Tempo</td><td>${fmtTgl(jatuhTempo)}</td></tr>
         <tr><td>Metode Pembayaran</td><td>${metode || "Cash on Delivery"}</td></tr>
-        <tr><td>No. Pesanan</td><td>${extra.order_id || "—"}</td></tr>
+        ${extra.tipe === "asuransi"
+          ? `<tr><td>No. PO Customer</td><td>${escH(extra.po_customer) || "—"}</td></tr>`
+          : `<tr><td>No. Pesanan</td><td>${extra.order_id || "—"}</td></tr>`}
       </table>
     </div>
     <div class="inv-total-bar"><span>${hasPay ? sisaLabel : "Total Tagihan"}</span><span>Rp ${fRp(hasPay ? Math.abs(sisa) : total)}</span></div>
@@ -5503,7 +5656,9 @@ async function printInvoiceDoc(lines, withTax, extra) {
     <div class="inv-summary">
       <div class="inv-note">
         ${pesan ? `<b>Pesan:</b> ${pesan}<br>` : ""}
-        <b>Jumlah Unit:</b> ${lines.length}<br>
+        ${extra.tipe === "asuransi"
+          ? `<b>Jenis:</b> Reimburse asuransi${withTax ? "" : ", tidak dikenakan PPN"}.<br>`
+          : `<b>Jumlah Unit:</b> ${lines.length}<br>`}
         ${premi > 0 ? `<b>Asuransi:</b> premi ${insRate}% dari nilai pertanggungan Rp ${fRp(insBase)}, tidak dikenakan PPN.<br>` : ""}
         <b>Terbilang${hasPay ? " (Sisa)" : ""}:</b> <i class="inv-terbilang">${terbilangRupiah(hasPay ? Math.abs(sisa) : total)}</i>
       </div>
