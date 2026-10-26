@@ -9,6 +9,7 @@ import requests as _requests
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Any, Dict
+import urllib.parse
 from datetime import datetime, timezone, timedelta
 from odoo_client import OdooClient
 from playwright.async_api import async_playwright
@@ -4817,6 +4818,35 @@ payouts.ON_PAID = _notify_incentives_paid
 @api_router.get("/admin/driver-wa", dependencies=[Depends(require_admin_pin)])
 async def list_driver_wa():
     return {"items": await driver_notif.list_numbers(db)}
+
+
+@api_router.post("/admin/driver-wa/ingatkan", dependencies=[Depends(require_admin_pin)])
+async def ingatkan_driver(body: dict = Body(...)):
+    """Kirim pengingat WA yang sopan ke driver / petugas untuk 1 hal yang belum dikerjakan.
+    Kalau WA otomatis tidak aktif atau nomor belum ada, balikin teks (+ link wa.me kalau nomor ada)
+    supaya admin tinggal kirim sendiri."""
+    order_id = str(body.get("order_id") or "").strip()
+    butir = str(body.get("butir") or "").strip()[:300]
+    if not order_id or not butir:
+        raise HTTPException(400, "order_id dan butir wajib diisi")
+    order = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(404, "Order not found")
+    legs = order.get("legs") if isinstance(order.get("legs"), list) else []
+    leg = next((l for l in legs if (l.get("status") or "") not in ("", "Menunggu", "Selesai")), None) or next((l for l in legs if l.get("status") != "Selesai"), None) or {}
+    nama = str(body.get("driver_nama") or leg.get("driver") or order.get("nama_driver") or "").strip()[:120]
+    hp = str(body.get("no_hp") or leg.get("hp") or leg.get("no_hp") or "").strip()
+    if not hp and (order.get("driver_id") or nama):
+        drv = (await db.drivers.find_one({"driver_id": order.get("driver_id")}, {"_id": 0}) if order.get("driver_id") else None) \
+            or (await db.drivers.find_one({"nama": nama}, {"_id": 0}) if nama else None) or {}
+        hp = str(drv.get("no_hp") or "").strip()
+    unit = " ".join(x for x in [order.get("vehicle_type") or order.get("isi_kiriman"), order.get("nopol")] if x)
+    hour = (datetime.now(timezone.utc) + timedelta(hours=7)).hour      # WIB
+    r = await driver_notif.remind(db, nama, hp, unit, order_id, butir, wa_send, hour=hour)
+    r["driver_nama"] = nama
+    to = r.get("to") or driver_notif.wa_number(hp)
+    r["wa_link"] = f"https://wa.me/{to}?text={urllib.parse.quote(r['text'])}" if to and r["status"] in ("gagal", "sudah") else ""
+    return r
 
 
 @api_router.post("/admin/driver-wa", dependencies=[Depends(require_admin_pin)])

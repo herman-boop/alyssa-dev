@@ -116,3 +116,56 @@ async def notify_paid(db, items, send):
         except Exception:
             result[label] = "gagal"
     return result
+
+
+# ── Pengingat lembut ke driver (admin tekan tombol di dasbor) ──
+REMIND = "driver_reminders"
+REMIND_COOLDOWN_MIN = 30
+
+
+def _sapaan(hour):
+    h = 8 if hour is None else int(hour)
+    return "Selamat pagi" if h < 11 else "Selamat siang" if h < 15 else "Selamat sore" if h < 18 else "Selamat malam"
+
+
+def build_reminder(driver_nama, unit, order_id, butir, hour=None):
+    """Pesan sopan: minta tolong, bukan menegur. Memberi ruang kalau ada kendala."""
+    nama = (driver_nama or "").strip() or "Pak/Bu"
+    unit = (unit or "").strip() or "unit"
+    return "\n".join([
+        f"{_sapaan(hour)} {nama}, semoga sehat selalu 🙏", "",
+        f"Mohon maaf mengganggu. Kami ingin mengingatkan dengan lembut untuk {unit} (order {order_id}):",
+        f"• {(butir or '').strip()}", "",
+        "Kalau sudah dikerjakan, mohon kabari kami ya. Kalau ada kendala di jalan, tidak apa-apa, langsung kabari saja supaya kami bisa bantu.", "",
+        "Terima kasih banyak 🙏", f"- {SIGN}",
+    ])
+
+
+async def remind(db, driver_nama, hp_cadangan, unit, order_id, butir, send, now=None, hour=None):
+    """Kirim 1 pengingat. Nomor dari `driver_wa` (kunci nama), kalau kosong pakai hp_cadangan.
+    Anti-spam: butir yang sama untuk order yang sama tidak dikirim ulang < REMIND_COOLDOWN_MIN menit.
+    Return {status: terkirim|gagal|tanpa_nomor|sudah, to, text}. Tidak pernah raise."""
+    now = now or datetime.now(timezone.utc)
+    text = build_reminder(driver_nama, unit, order_id, butir, hour)
+    try:
+        to = await get_number(db, driver_nama) or wa_number(hp_cadangan)
+        if not to:
+            return {"status": "tanpa_nomor", "to": "", "text": text}
+        key = f"{order_id}|{norm(butir)}"
+        last = await db[REMIND].find_one({"key": key, "status": "terkirim"})
+        if last:
+            try:
+                age = (now - datetime.fromisoformat(str(last.get("sent_at")).replace("Z", "+00:00"))).total_seconds() / 60
+            except ValueError:
+                age = 9999
+            if age < REMIND_COOLDOWN_MIN:
+                return {"status": "sudah", "to": to, "text": text}
+        res = await send(to, text)
+        good = bool(res and res.get("ok"))
+        await db[REMIND].update_one({"key": key}, {"$set": {
+            "key": key, "order_id": order_id, "driver_nama": (driver_nama or "").strip(), "butir": butir,
+            "status": "terkirim" if good else "gagal", "sent_at": now.isoformat(),
+            "error": "" if good else str((res or {}).get("error") or "gagal kirim")[:200]}}, upsert=True)
+        return {"status": "terkirim" if good else "gagal", "to": to, "text": text}
+    except Exception:
+        return {"status": "gagal", "to": "", "text": text}
