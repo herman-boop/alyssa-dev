@@ -9075,21 +9075,39 @@ class NamaKembarBody(BaseModel):
     key: str
     nama_resmi: str
     dry_run: bool = True
+    jenis: str = "pelanggan"
+
+
+class NamaKembarSemuaBody(BaseModel):
+    dry_run: bool = True
+    jenis: str = "pelanggan"
 
 
 @api_router.get("/admin/nama-kembar")
-async def admin_nama_kembar_list(_by: str = Depends(require_users_admin)):
-    """Kelompok nama pelanggan yang dobel (beda titik/koma/spasi/huruf besar). Hanya Pemilik."""
-    return {"groups": await nama_kembar.list_groups(db)}
+async def admin_nama_kembar_list(jenis: str = "pelanggan", _by: str = Depends(require_users_admin)):
+    """Kelompok nama pelanggan/supplier yang dobel (beda titik/koma/spasi/huruf besar). Hanya Pemilik."""
+    try:
+        return {"jenis": jenis, "groups": await nama_kembar.list_groups(db, jenis)}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @api_router.post("/admin/nama-kembar/gabung")
 async def admin_nama_kembar_gabung(body: NamaKembarBody, by: str = Depends(require_users_admin)):
     """Pratinjau (dry_run=true, default) atau terapkan penggabungan 1 kelompok. Hanya Pemilik."""
     try:
-        return await nama_kembar.merge_group(db, body.key, body.nama_resmi, dry_run=body.dry_run, by=by or "pemilik")
+        return await nama_kembar.merge_group(db, body.key, body.nama_resmi, dry_run=body.dry_run, by=by or "pemilik", jenis=body.jenis)
     except LookupError as e:
         raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@api_router.post("/admin/nama-kembar/gabung-semua")
+async def admin_nama_kembar_gabung_semua(body: NamaKembarSemuaBody, by: str = Depends(require_users_admin)):
+    """Pratinjau (dry_run=true, default) atau terapkan SEMUA kelompok sekaligus dengan nama resmi saran. Hanya Pemilik."""
+    try:
+        return await nama_kembar.merge_all(db, body.jenis, dry_run=body.dry_run, by=by or "pemilik")
     except ValueError as e:
         raise HTTPException(400, str(e))
 
