@@ -1,7 +1,7 @@
 /* eslint-disable */
 import LegSupplierModal from "./LegSupplierModal";
 import LegSupplierFields from "./LegSupplierFields";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import axios from "axios";
 import { VEHICLE_TYPE_LIST } from "@/VehicleSketches";
@@ -5119,6 +5119,116 @@ function InvoicePaymentModal({ rec, headers, onClose, onChanged, onPrint }) {
 const HIST_PAGE_SIZE = 50;
 /* ── Nomor faktur dobel: 1 nomor tersimpan lebih dari sekali. Pilih 1 yang dipertahankan; sisanya
    dipindah ke cadangan (bukan dihapus permanen). Faktur yang sudah punya pembayaran dilindungi. ── */
+/* ── Laporan "Penjualan per Pelanggan" (seperti Jurnal Mekari) dari faktur di Histori Dokumen ──
+   Hanya membaca daftar yang sedang tampil (ikut filter entitas / tanggal / pelanggan / cari). Tidak mengubah data. */
+function PenjualanPelangganModal({ docs, periode, onClose }) {
+  const nkey = (v) => String(v || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const rp = (n) => (Number(n) || 0).toLocaleString("id-ID", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const tglOf = (rec) => { const t = rec.meta && rec.meta.tanggalInvoice; const d = t && /^\d{4}-\d{2}-\d{2}/.test(t) ? t.slice(0, 10) : (rec.created_at || "").slice(0, 10); return d ? d.split("-").reverse().join("/") : ""; };
+  const ketBersih = (k) => ketSatuBaris(k).replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+  const data = useMemo(() => {
+    const inv = (docs || []).filter((r) => r.jenis === "invoice");
+    const g = {};
+    inv.forEach((rec) => {
+      const k = nkey(rec.customer) || "-";
+      const o = g[k] || (g[k] = { key: k, names: {}, docs: [] });
+      o.names[rec.customer || "(tanpa nama)"] = (o.names[rec.customer || "(tanpa nama)"] || 0) + 1;
+      o.docs.push(rec);
+    });
+    const out = Object.values(g).map((o) => {
+      o.nama = Object.entries(o.names).sort((a, b) => b[1] - a[1])[0][0];
+      o.docs.sort((a, b) => (tglOf(a).split("/").reverse().join("") + (a.no_dokumen || "")).localeCompare(tglOf(b).split("/").reverse().join("") + (b.no_dokumen || "")));
+      o.rows = [];
+      const t = { subtotal: 0, ppn: 0, pph: 0, premi: 0, total: 0, diterima: 0 };
+      o.docs.forEach((rec) => {
+        const tot = invTotalFromRec(rec); const pay = invPayFromRec(rec);
+        (rec.lines || []).filter((l) => (Number(l.harga) || 0) > 0).forEach((l) => {
+          const q = Number(l.qty) || 1;
+          o.rows.push({ tgl: tglOf(rec), no: rec.no_dokumen || rec.meta?.no_invoice || "", ket: ketBersih(l.ket) || l.nama || "", qty: q, harga: Number(l.harga) || 0, jumlah: (Number(l.harga) || 0) * q });
+        });
+        t.subtotal += tot.subtotal; t.ppn += tot.ppn; t.pph += tot.pph; t.premi += tot.premi; t.total += tot.total; t.diterima += pay.diterima;
+      });
+      o.t = t; o.sisa = t.total - t.diterima;
+      return o;
+    });
+    out.sort((a, b) => a.nama.localeCompare(b.nama));
+    const G = out.reduce((a, o) => ({ subtotal: a.subtotal + o.t.subtotal, ppn: a.ppn + o.t.ppn, pph: a.pph + o.t.pph, premi: a.premi + o.t.premi, total: a.total + o.t.total, diterima: a.diterima + o.t.diterima }), { subtotal: 0, ppn: 0, pph: 0, premi: 0, total: 0, diterima: 0 });
+    return { groups: out, G, n: inv.length };
+  }, [docs]); // eslint-disable-line
+  const esc = (v) => String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const tabelHtml = () => {
+    let h = `<table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-family:Arial;font-size:11px">`;
+    h += `<tr><th>Pelanggan / Tanggal</th><th>No. Faktur</th><th>Keterangan</th><th>Qty</th><th>Harga Satuan</th><th>Jumlah</th></tr>`;
+    data.groups.forEach((o) => {
+      h += `<tr><td colSpan="6"><b>${esc(o.nama)}</b></td></tr>`;
+      o.rows.forEach((r) => { h += `<tr><td>${esc(r.tgl)}</td><td>${esc(r.no)}</td><td>${esc(r.ket)}</td><td align="right">${r.qty}</td><td align="right">${rp(r.harga)}</td><td align="right">${rp(r.jumlah)}</td></tr>`; });
+      const sm = (lbl, v, b) => `<tr><td colSpan="5" align="right">${b ? "<b>" : ""}${lbl}${b ? "</b>" : ""}</td><td align="right">${b ? "<b>" : ""}${rp(v)}${b ? "</b>" : ""}</td></tr>`;
+      h += sm("Subtotal", o.t.subtotal);
+      if (o.t.ppn) h += sm("PPN", o.t.ppn);
+      if (o.t.pph) h += sm("PPh 23 (dipotong)", -o.t.pph);
+      if (o.t.premi) h += sm("Asuransi", o.t.premi);
+      h += sm(`Total tagihan ${o.nama}`, o.t.total, true);
+      if (o.t.diterima) { h += sm("Sudah dibayar", o.t.diterima); h += sm("Sisa", o.sisa, true); }
+    });
+    h += `<tr><td colSpan="5" align="right"><b>TOTAL SEMUA</b></td><td align="right"><b>${rp(data.G.total)}</b></td></tr></table>`;
+    return h;
+  };
+  const kop = `<div style="font-family:Arial;text-align:center;margin-bottom:10px"><b style="font-size:15px">Penjualan per Pelanggan</b><br/>${esc(periode)}<br/>(dalam IDR)</div>`;
+  const unduh = () => {
+    const html = `<html><head><meta charset="utf-8"></head><body>${kop}${tabelHtml()}</body></html>`;
+    const blob = new Blob(["\ufeff", html], { type: "application/vnd.ms-excel" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+    a.download = `penjualan_per_pelanggan_${new Date().toISOString().slice(0, 10)}.xls`;
+    document.body.appendChild(a); a.click(); a.remove();
+  };
+  const cetak = () => {
+    const w = window.open("", "aal_print"); if (!w) return;
+    w.document.write(`<html><head><meta charset="utf-8"><title>Penjualan per Pelanggan</title><style>@page{size:A4 landscape;margin:10mm}body{font-family:Arial}</style></head><body>${kop}${tabelHtml()}</body></html>`);
+    w.document.close(); w.focus(); setTimeout(() => w.print(), 300);
+  };
+  return createPortal((
+    <div className="adm-vars"><div className="adm-modal-bg" onClick={onClose} data-testid="adm-ppp-modal">
+      <div className="adm-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 980 }}>
+        <div className="adm-modal-head">
+          <div>
+            <div className="adm-modal-title">📊 Penjualan per Pelanggan</div>
+            <div className="adm-modal-sub">{periode} · {data.n} faktur · {data.groups.length} pelanggan. Ikut filter yang sedang dipakai.</div>
+          </div>
+          <button className="adm-modal-close" onClick={onClose} aria-label="Tutup">✕</button>
+        </div>
+        <div className="adm-modal-body" style={{ overflowX: "auto" }}>
+          {data.n === 0 ? <div>Tidak ada faktur pada filter ini.</div> : (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+              <thead><tr style={{ textAlign: "left", opacity: 0.7 }}><th>Pelanggan / Tanggal</th><th>No. Faktur</th><th>Keterangan</th><th style={{ textAlign: "right" }}>Qty</th><th style={{ textAlign: "right" }}>Harga</th><th style={{ textAlign: "right" }}>Jumlah</th></tr></thead>
+              <tbody>
+                {data.groups.map((o) => (
+                  <Fragment key={o.key}>
+                    <tr><td colSpan="6" style={{ paddingTop: 12, fontWeight: 800, color: "#58a6ff" }}>{o.nama}</td></tr>
+                    {o.rows.map((r, i) => (
+                      <tr key={i} style={{ borderTop: "1px solid rgba(255,255,255,0.07)" }}>
+                        <td>{r.tgl}</td><td>{r.no}</td><td>{r.ket}</td>
+                        <td style={{ textAlign: "right" }}>{r.qty}</td><td style={{ textAlign: "right" }}>{rp(r.harga)}</td><td style={{ textAlign: "right" }}>{rp(r.jumlah)}</td>
+                      </tr>
+                    ))}
+                    <tr><td colSpan="5" style={{ textAlign: "right", opacity: 0.75 }}>Subtotal{o.t.ppn ? " · PPN " + rp(o.t.ppn) : ""}{o.t.pph ? " · PPh23 −" + rp(o.t.pph) : ""}{o.t.premi ? " · Asuransi " + rp(o.t.premi) : ""}</td><td style={{ textAlign: "right" }}>{rp(o.t.subtotal)}</td></tr>
+                    <tr><td colSpan="5" style={{ textAlign: "right", fontWeight: 800 }}>Total tagihan {o.nama}{o.t.diterima ? ` · dibayar ${rp(o.t.diterima)} · sisa ${rp(o.sisa)}` : ""}</td><td style={{ textAlign: "right", fontWeight: 800 }}>{rp(o.t.total)}</td></tr>
+                  </Fragment>
+                ))}
+                <tr><td colSpan="5" style={{ textAlign: "right", fontWeight: 900, paddingTop: 12 }}>TOTAL SEMUA</td><td style={{ textAlign: "right", fontWeight: 900, paddingTop: 12, color: "#3fb950" }}>{rp(data.G.total)}</td></tr>
+              </tbody>
+            </table>
+          )}
+        </div>
+        <div className="adm-modal-foot">
+          <button className="adm-btn adm-btn-gold" onClick={unduh} disabled={!data.n} data-testid="adm-ppp-xls">⬇️ Unduh Excel</button>
+          <button className="adm-btn" onClick={cetak} disabled={!data.n}>🖨️ Cetak / PDF</button>
+          <button className="adm-btn adm-btn-ghost" onClick={onClose}>Tutup</button>
+        </div>
+      </div>
+    </div></div>
+  ), document.body);
+}
+
 function DupFakturModal({ headers, onClose, onDone }) {
   const [groups, setGroups] = useState(null);
   const [keep, setKeep] = useState({});      // no -> id yang dipertahankan
@@ -5308,6 +5418,7 @@ function HistoriDokumen({ headers }) {
   const [editRec, setEditRec] = useState(null);      // faktur yang lagi dibuka modal Edit / Tambah Unit
   const [stempelRec, setStempelRec] = useState(null); // faktur yang lagi dibuka modal TTD / Stempel / Materai
   const [showDup, setShowDup] = useState(false);      // modal nomor faktur dobel
+  const [showPPP, setShowPPP] = useState(false);      // laporan penjualan per pelanggan
 
   const isPrice = filter === "__pricelist";
   // Nomor faktur yang tersimpan lebih dari sekali (untuk lencana & banner; tampilan saja).
@@ -5486,6 +5597,7 @@ function HistoriDokumen({ headers }) {
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 10 }}>
               <button style={btnS} onClick={quickBulan} data-testid="dochist-bulan">Bulan ini</button>
               <button style={btnS} onClick={quickTahun} data-testid="dochist-tahun">Tahun ini</button>
+              <button style={{ ...btnS, borderColor: "#3fb950", color: "#3fb950" }} onClick={() => setShowPPP(true)} data-testid="dochist-ppp">📊 Laporan Penjualan per Pelanggan</button>
               <div style={{ flex: 1 }} />
               <button style={{ ...btnS, borderColor: "#1f6feb", color: "#58a6ff" }} onClick={load} data-testid="dochist-apply">Terapkan Filter</button>
               <button style={btnS} onClick={resetFilter} data-testid="dochist-reset">Reset Filter</button>
@@ -5622,6 +5734,9 @@ function HistoriDokumen({ headers }) {
           onSaved={(upd) => { setEditRec(upd); setItems((xs) => xs.map((x) => (x.id === upd.id ? { ...x, lines: upd.lines, order_ids: upd.order_ids, judul: upd.judul } : x))); }}
           onPrint={() => reprint(editRec)}
         />
+      )}
+      {showPPP && (
+        <PenjualanPelangganModal docs={filteredDocs} periode={fDari || fSampai ? `${fDari ? fDari.split("-").reverse().join("/") : "awal"} - ${fSampai ? fSampai.split("-").reverse().join("/") : "sekarang"}` : "Semua tanggal"} onClose={() => setShowPPP(false)} />
       )}
       {showDup && (
         <DupFakturModal headers={headers} onClose={() => setShowDup(false)} onDone={() => load()} />
