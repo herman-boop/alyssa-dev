@@ -5553,11 +5553,14 @@ function InvoiceEditModal({ rec, headers, onClose, onSaved, onPrint }) {
   const clean = (v) => String(v || "").replace(/[<>]/g, "");
   const buildKet = (f) => `${clean(f.unit).trim()}${f.rute.trim() ? ` (${clean(f.rute).trim()})` : ""}${f.rangka.trim() ? `<br>No. Rangka: ${clean(f.rangka).trim()}` : ""}`;
   const [editIdx, setEditIdx] = useState(-1);
-  const setKetField = (i, field, val) => setLines((ls) => ls.map((l, x) => {
-    if (x !== i) return l;
-    const f = parseKet(l.ket); f[field] = val;
-    return { ...l, ket: buildKet(f) };
-  }));
+  // Draft isian: nilai persis seperti diketik (spasi tidak dipangkas). Yang dirapikan (trim) hanya
+  // keterangan hasil susunannya — kalau tidak, spasi di ujung hilang tiap ketukan dan kata jadi menempel.
+  const [draft, setDraft] = useState(null);
+  const setKetField = (i, field, val) => {
+    const nf = { ...(draft || parseKet(lines[i]?.ket)), [field]: val };
+    setDraft(nf);
+    setLines((ls) => ls.map((l, x) => (x === i ? { ...l, ket: buildKet(nf) } : l)));
+  };
 
   useEffect(() => {
     if (!q.trim()) { setOrders([]); return; }
@@ -5623,12 +5626,12 @@ function InvoiceEditModal({ rec, headers, onClose, onSaved, onPrint }) {
 
           <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: ".4px", marginBottom: 6 }}>Unit di invoice</div>
           {lines.map((l, i) => {
-            const f = parseKet(l.ket);
+            const f = (editIdx === i && draft) ? draft : parseKet(l.ket);
             return (
             <div key={i} style={{ padding: "7px 0", borderBottom: "1px solid var(--border)" }}>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: "var(--text)" }}>{i + 1}. {plain(l.ket)}</div>
-                <button className="adm-btn adm-btn-sm adm-btn-ghost" onClick={() => setEditIdx(editIdx === i ? -1 : i)} title="Ubah nopol / rute / no. rangka" data-testid={`invedit-ubah-${i}`}>✏️</button>
+                <button className="adm-btn adm-btn-sm adm-btn-ghost" onClick={() => { if (editIdx === i) { setEditIdx(-1); setDraft(null); } else { setEditIdx(i); setDraft(parseKet(l.ket)); } }} title="Ubah nopol / rute / no. rangka" data-testid={`invedit-ubah-${i}`}>✏️</button>
                 <input className="adm-input" style={{ width: 120, textAlign: "right" }} inputMode="numeric" value={(Number(l.harga) || 0).toLocaleString("id-ID")} onChange={(e) => setHarga(i, e.target.value)} />
                 <button className="adm-btn adm-btn-sm adm-btn-ghost" onClick={() => removeLine(i)} title="Hapus baris">✕</button>
               </div>
