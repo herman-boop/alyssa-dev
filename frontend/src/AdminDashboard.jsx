@@ -7270,6 +7270,35 @@ function T360_Empty({ text, sub, actionLabel, onAction }) {
   );
 }
 
+// Kirim 1 pengingat sopan ke driver / petugas lewat WA otomatis. Kalau WA otomatis mati / nomor belum ada:
+// pesan disalin (dan WhatsApp dibuka bila nomor ada). Dipakai panel langkah progres & tombol "Ingatkan Driver".
+async function t360KirimPengingat(order, butir, headers, flash) {
+  try {
+    const { data } = await axios.post(`${API}/admin/driver-wa/ingatkan`, { order_id: order.order_id, butir }, { headers });
+    const nm = data.driver_nama || "driver";
+    if (data.status === "terkirim") flash(`Pengingat lembut terkirim ke ${nm}.`);
+    else if (data.status === "sudah") flash(`Pengingat yang sama baru saja dikirim ke ${nm}. Tunggu 30 menit.`);
+    else {
+      try { await navigator.clipboard.writeText(data.text || ""); } catch {}
+      if (data.status === "tanpa_nomor") flash(`Nomor WA ${nm} belum tersimpan. Pesan disalin, isi nomornya di data driver.`);
+      else { flash("WA otomatis belum aktif. Pesan disalin / dibuka di WhatsApp."); if (data.wa_link) window.open(data.wa_link, "_blank"); }
+    }
+  } catch (e) { flash(e.response?.data?.detail || "Gagal mengirim pengingat"); }
+}
+
+// Hal yang paling perlu diingatkan sekarang, dipilih otomatis dari tahap trip. "" = tidak ada.
+function t360AutoButir(order, legs, progDone, docReady) {
+  if (order.status === "CANCELLED") return "";
+  if (!progDone.driver) return "";                       // belum ada driver: tidak ada yang bisa diingatkan
+  if (!progDone.berangkat) return "Unit belum berangkat dari lokasi asal.";
+  const kapal = legs.find((l) => (l.tipe || "").startsWith("Kapal") && l.status !== "Selesai");
+  if (kapal) return `Kapal ${kapal.kapal || ""} belum selesai. Minta kabar posisi / ETA.`.replace("  ", " ");
+  if (order.status !== "DELIVERED") return "Unit belum sampai tujuan.";
+  if (!docReady.bastk) return "BASTK belum diunggah.";
+  if (!docReady.resi) return "Foto resi pengiriman belum diunggah.";
+  return "";
+}
+
 /* ── Panel langkah progres: klik Baru / Driver / Berangkat / Kapal / Sampai / Dokumen ──
    Menampilkan apa yang SUDAH terjadi, yang MASIH PERLU DIUBER (dengan pesan WA siap kirim),
    dan 3 aktivitas terakhir. Hanya membaca data trip yang sudah ada. */
@@ -7324,17 +7353,7 @@ function T360StepDetail({ stepKey, order, legs, checkpoints, detail, docReady, p
   // Kirim pengingat sopan lewat WA otomatis; kalau WA otomatis mati / nomor belum ada, pesan disalin (atau dibuka di WhatsApp).
   const kirim = async (it, i) => {
     setSending(i);
-    try {
-      const { data } = await axios.post(`${API}/admin/driver-wa/ingatkan`, { order_id: order.order_id, butir: it.t }, { headers });
-      const nm = data.driver_nama || "driver";
-      if (data.status === "terkirim") flash(`Pengingat lembut terkirim ke ${nm}.`);
-      else if (data.status === "sudah") flash(`Pengingat yang sama baru saja dikirim ke ${nm}. Tunggu 30 menit.`);
-      else {
-        try { await navigator.clipboard.writeText(data.text || ""); } catch {}
-        if (data.status === "tanpa_nomor") flash(`Nomor WA ${nm} belum tersimpan. Pesan disalin, isi nomornya di data driver.`);
-        else { flash("WA otomatis belum aktif. Pesan disalin / dibuka di WhatsApp."); if (data.wa_link) window.open(data.wa_link, "_blank"); }
-      }
-    } catch (e) { flash(e.response?.data?.detail || "Gagal mengirim pengingat"); }
+    await t360KirimPengingat(order, it.t, headers, flash);
     setSending(-1);
   };
   const box = { background: "var(--panel, #11161f)", border: "1px solid var(--border, #30363d)", borderRadius: 10, padding: "10px 12px", margin: "8px 0" };
@@ -7501,6 +7520,15 @@ function Trip360Modal({ order, headers, onClose, onEditLegs, onPrintSuratJalan, 
   const qaCheckpoint = () => { if (!busy) cpInputRef.current?.click(); };
   const qaDokumen = () => { if (!busy) docInputRef.current?.click(); };
   const qaTagih = () => onOpenInvoice();
+  const [waBusy, setWaBusy] = useState(false);
+  const qaIngatkan = async () => {
+    const butir = t360AutoButir(order, legs, progDone, docReady);
+    if (!butir) { flash(progDone.driver ? "Tidak ada yang perlu diingatkan sekarang." : "Driver belum ditugaskan. Atur dulu lewat Kelola Leg."); return; }
+    if (!window.confirm(`Kirim pengingat lembut ke ${holder}?\n\n${butir}`)) return;
+    setWaBusy(true);
+    await t360KirimPengingat(order, butir, headers, flash);
+    setWaBusy(false);
+  };
   const qaBayarVendor = () => { setTab("keuangan"); flash("Pembayaran vendor per-trip menyusul di Financial Command Center"); };
 
   const stop = (e) => e.stopPropagation();
@@ -7537,6 +7565,7 @@ function Trip360Modal({ order, headers, onClose, onEditLegs, onPrintSuratJalan, 
             <button className="t360-qabtn" onClick={qaDokumen} disabled={busy} data-testid="t360-qa-dokumen">{T360_ICONS.upload}Upload Dokumen</button>
             <button className="t360-qabtn gold" onClick={qaTagih} data-testid="t360-qa-tagih">{T360_ICONS.bill}Tagih Customer</button>
             <button className="t360-qabtn green" onClick={qaBayarVendor} data-testid="t360-qa-bayar">{T360_ICONS.wallet}Bayar Vendor</button>
+            <button className="t360-qabtn" disabled={busy || waBusy} onClick={qaIngatkan} data-testid="t360-qa-ingatkan" title="Kirim WhatsApp pengingat yang lembut ke driver">📨 {waBusy ? "Mengirim…" : "Ingatkan Driver"}</button>
             <input ref={cpInputRef} type="file" accept="image/*" multiple hidden onChange={(e) => { runUpload(t360StageForLeg(activeLeg), e.target.files, "checkpoint"); e.target.value = ""; }} />
             <input ref={docInputRef} type="file" accept="image/*" multiple hidden onChange={(e) => { runUpload("dokumen", e.target.files, "dokumen"); e.target.value = ""; }} />
           </div>
