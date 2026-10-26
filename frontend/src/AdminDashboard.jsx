@@ -269,6 +269,10 @@ function PinScreen({ pin, setPin, doLogin, authing, authError }) {
 ════════════════════════════════════════ */
 function Dashboard({ pin, me, onLogout }) {
   CURRENT_ROLE = me?.role || null;
+  useEffect(() => {
+    if (!roleCanInvoice()) return;
+    axios.get(`${API}/admin/doc-stempel`, { headers }).then((r) => { DOC_DEFAULT_STEMPEL = r.data?.stempel || null; }).catch(() => {});
+  }, [me?.role]); // eslint-disable-line
   const headers = useMemo(() => ({ "X-Admin-Pin": pin }), [pin]);
   const [dark, setDark] = useState(() => document.documentElement.getAttribute("data-theme") === "dark");
   // Default: HP → Beranda (home mobile ala aplikasi), desktop → Dashboard/Pesanan.
@@ -1301,6 +1305,7 @@ function CreateSheet({ onClose, onJadwalGab, onInvoiceGab, onInvoiceAsuransi, on
 /* Menu yang ditampilkan per peran (UI saja; pembatasan sebenarnya dijaga backend). */
 /* Invoice = keuangan. Peran operasional/pembaca tidak melihat tombolnya (backend juga menolak simpan). */
 let CURRENT_ROLE = null;
+let DOC_DEFAULT_STEMPEL = null;   // gambar TTD+stempel+materai bawaan (dimuat sekali oleh Dashboard)
 const roleCanInvoice = () => !CURRENT_ROLE || CURRENT_ROLE === "pemilik" || CURRENT_ROLE === "keuangan";
 const FINANCE_TABS = ["kas-bank", "laba-rugi", "biaya", "insentif-driver", "selisih", "kompensasi", "rekap-invoice", "rekap-tagih", "pembayaran-vendor", "histori", "dokumen", "laporan"];
 const OPS1_TABS = ["pesanan", "minta-harga", "supplier", "kalkulator", "kontak"];
@@ -5062,6 +5067,88 @@ function InvoicePaymentModal({ rec, headers, onClose, onChanged, onPrint }) {
 }
 
 const HIST_PAGE_SIZE = 50;
+/* ── TTD + Stempel + Materai untuk faktur yang sudah tersimpan ──
+   Satu gambar gabungan (PNG latar transparan paling bagus). Dipasang ke faktur ini saja,
+   atau sekalian dijadikan bawaan untuk semua faktur baru. Nomor, baris, dan nominal tidak berubah. */
+function StempelModal({ rec, headers, onClose, onDone }) {
+  const [img, setImg] = useState(null);            // gambar baru yang dipilih
+  const [cur, setCur] = useState(null);            // gambar yang sudah terpasang di faktur
+  const [asDefault, setAsDefault] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    axios.get(`${API}/admin/doc-history/${rec.id}`, { headers }).then((r) => setCur(r.data?.meta?.stempel || null)).catch(() => {});
+  }, [rec.id]); // eslint-disable-line
+  const onFile = (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    if (!/^image\/(png|jpe?g|webp)$/.test(f.type)) { setErr("Gambar harus PNG, JPG, atau WEBP."); return; }
+    if (f.size > 3 * 1024 * 1024) { setErr("Ukuran gambar maksimal 3 MB."); return; }
+    setErr("");
+    const r = new FileReader();
+    r.onload = () => setImg(r.result);
+    r.readAsDataURL(f);
+  };
+  const save = async (andPrint) => {
+    if (!img) { setErr("Pilih gambarnya dulu."); return; }
+    setBusy(true); setErr("");
+    try {
+      await axios.patch(`${API}/admin/doc-history/${rec.id}/stempel`, { stempel: img }, { headers });
+      if (asDefault) {
+        await axios.put(`${API}/admin/doc-stempel`, { stempel: img }, { headers });
+        DOC_DEFAULT_STEMPEL = img;
+      }
+      onDone(andPrint);
+    } catch (e) { setErr(e.response?.data?.detail || "Gagal menyimpan"); } finally { setBusy(false); }
+  };
+  const remove = async () => {
+    if (!window.confirm("Hapus TTD/stempel dari faktur ini?")) return;
+    setBusy(true);
+    try { await axios.patch(`${API}/admin/doc-history/${rec.id}/stempel`, { stempel: null }, { headers }); onDone(false); }
+    catch (e) { setErr(e.response?.data?.detail || "Gagal menghapus"); } finally { setBusy(false); }
+  };
+  const shown = img || cur;
+  return createPortal((
+    <div className="adm-vars">
+    <div className="adm-modal-bg" onClick={onClose} data-testid="adm-stempel-modal">
+      <div className="adm-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
+        <div className="adm-modal-head">
+          <div>
+            <div className="adm-modal-title">🖋️ TTD, Stempel &amp; Materai</div>
+            <div className="adm-modal-sub">{rec.no_dokumen || rec.jenis_label} · {rec.customer || ""}</div>
+          </div>
+          <button className="adm-modal-close" onClick={onClose} aria-label="Tutup">✕</button>
+        </div>
+        <div className="adm-modal-body">
+          <div style={{ border: "1px dashed var(--border, #30363d)", borderRadius: 8, minHeight: 130, display: "flex", alignItems: "center", justifyContent: "center", background: "#fff", marginBottom: 12, padding: 8 }}>
+            {shown ? <img src={shown} alt="TTD stempel" style={{ maxWidth: "100%", maxHeight: 180, objectFit: "contain" }} data-testid="adm-stempel-preview" />
+              : <span style={{ color: "#6b7280", fontSize: 13 }}>Belum ada gambar terpasang di faktur ini</span>}
+          </div>
+          <label className="adm-btn adm-btn-sm" style={{ display: "inline-block", cursor: "pointer" }}>
+            📁 {shown ? "Ganti gambar" : "Pilih gambar"} (PNG / JPG)
+            <input type="file" accept="image/png,image/jpeg,image/webp" onChange={onFile} style={{ display: "none" }} data-testid="adm-stempel-file" />
+          </label>
+          <div style={{ fontSize: 11, color: "var(--text-mute)", margin: "8px 0 12px" }}>
+            Pakai gambar gabungan TTD + stempel + materai. PNG dengan latar transparan paling rapi. Maksimal 3 MB.
+          </div>
+          <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
+            <input type="checkbox" checked={asDefault} onChange={(e) => setAsDefault(e.target.checked)} data-testid="adm-stempel-default" />
+            Jadikan bawaan untuk semua faktur baru juga
+          </label>
+          {err ? <div style={{ color: "#f85149", fontSize: 13, marginTop: 10 }}>{err}</div> : null}
+        </div>
+        <div className="adm-modal-foot">
+          {cur ? <button className="adm-btn adm-btn-ghost" disabled={busy} onClick={remove}>🗑 Hapus dari faktur</button> : null}
+          <button className="adm-btn adm-btn-green" disabled={busy || !img} onClick={() => save(false)} data-testid="adm-stempel-save">💾 Simpan</button>
+          <button className="adm-btn adm-btn-gold" disabled={busy || !img} onClick={() => save(true)} data-testid="adm-stempel-print">🖨️ Simpan &amp; Cetak</button>
+        </div>
+      </div>
+    </div>
+    </div>
+  ), document.body);
+}
+
 function HistoriDokumen({ headers }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -5078,6 +5165,7 @@ function HistoriDokumen({ headers }) {
   const [page, setPage] = useState(1);
   const [payRec, setPayRec] = useState(null);        // faktur yang lagi dibuka modal pembayarannya
   const [editRec, setEditRec] = useState(null);      // faktur yang lagi dibuka modal Edit / Tambah Unit
+  const [stempelRec, setStempelRec] = useState(null); // faktur yang lagi dibuka modal TTD / Stempel / Materai
 
   const isPrice = filter === "__pricelist";
 
@@ -5311,6 +5399,9 @@ function HistoriDokumen({ headers }) {
                     <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={() => setPayRec(rec)} data-testid="dochist-pay">💰 Pembayaran</button>
                   )}
                   {rec.jenis === "invoice" && (
+                    <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={() => setStempelRec(rec)} data-testid="dochist-stempel">🖋️ TTD / Stempel</button>
+                  )}
+                  {rec.jenis === "invoice" && (
                     <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={async () => { let full = rec; try { const r = await axios.get(`${API}/admin/doc-history/${rec.id}`, { headers }); if (r.data) full = r.data; } catch {} setEditRec(full); }} data-testid="dochist-edit">✏️ Edit / Tambah Unit</button>
                   )}
                   <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={() => reprint(rec)} data-testid="dochist-print">🖨️ Cetak ulang</button>
@@ -5336,6 +5427,14 @@ function HistoriDokumen({ headers }) {
           onClose={() => setEditRec(null)}
           onSaved={(upd) => { setEditRec(upd); setItems((xs) => xs.map((x) => (x.id === upd.id ? { ...x, lines: upd.lines, order_ids: upd.order_ids, judul: upd.judul } : x))); }}
           onPrint={() => reprint(editRec)}
+        />
+      )}
+      {stempelRec && (
+        <StempelModal
+          rec={stempelRec}
+          headers={headers}
+          onClose={() => setStempelRec(null)}
+          onDone={(andPrint) => { const r = stempelRec; setStempelRec(null); if (andPrint) reprint(r); }}
         />
       )}
       {payRec && (
@@ -5533,7 +5632,8 @@ async function printInvoiceDoc(lines, withTax, extra) {
   lines = (lines || []).filter((l) => (l.harga || 0) > 0);
   if (!lines.length) return "";
   const w = window.open("", "aal_print"); // buka dulu (gesture) biar nggak keblok popup
-  const { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23 } = extra;
+  const { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, taxInclusive, withPph23 } = extra;
+  const stempel = extra.stempel || DOC_DEFAULT_STEMPEL;   // per-faktur, kalau tidak ada pakai gambar bawaan
   const subtotal = lines.reduce((s, l) => s + (l.harga || 0) * (l.qty || 1), 0);
   // taxInclusive: harga SUDAH termasuk 1.1% → pajak dipecah dari dalam (total = subtotal).
   const dpp = withTax && taxInclusive ? Math.round(subtotal / 1.011) : subtotal;
@@ -5610,8 +5710,8 @@ async function printInvoiceDoc(lines, withTax, extra) {
     .inv-sign-row { display:flex; justify-content:flex-end; margin-top:26px; }
     .inv-sign-cell { width:260px; text-align:center; position:relative; }
     .inv-sign-lbl { font-size:10px; color:${DOC_BRAND.muted}; margin-bottom:6px; }
-    .inv-sign-stamp { height:78px; display:flex; align-items:center; justify-content:center; margin-bottom:2px; }
-    .inv-sign-stamp img { max-height:78px; max-width:200px; object-fit:contain; }
+    .inv-sign-stamp { min-height:78px; display:flex; align-items:center; justify-content:center; margin-bottom:2px; }
+    .inv-sign-stamp img { max-height:120px; max-width:240px; object-fit:contain; }
     .inv-sign-stamp.empty { height:56px; }
     .inv-sign-pt { font-size:11px; font-weight:800; color:${DOC_BRAND.ink}; }
     .inv-sign-name { font-size:11px; font-weight:800; color:${DOC_BRAND.ink}; margin-top:2px; }
