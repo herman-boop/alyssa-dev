@@ -5152,6 +5152,13 @@ function StempelModal({ rec, headers, onClose, onDone }) {
       onDone(andPrint);
     } catch (e) { setErr(e.response?.data?.detail || "Gagal menyimpan"); } finally { setBusy(false); }
   };
+  const [bawaanAda, setBawaanAda] = useState(!!DOC_DEFAULT_STEMPEL);
+  const matikanBawaan = async () => {
+    if (!window.confirm("Matikan gambar bawaan? Faktur BARU tidak lagi otomatis bertanda tangan/berstempel. Faktur yang sudah dipasangi gambar tidak berubah.")) return;
+    setBusy(true);
+    try { await axios.put(`${API}/admin/doc-stempel`, { stempel: null }, { headers }); DOC_DEFAULT_STEMPEL = null; setBawaanAda(false); }
+    catch (e) { setErr(e.response?.data?.detail || "Gagal mematikan bawaan"); } finally { setBusy(false); }
+  };
   const remove = async () => {
     if (!window.confirm("Hapus TTD/stempel dari faktur ini?")) return;
     setBusy(true);
@@ -5186,6 +5193,14 @@ function StempelModal({ rec, headers, onClose, onDone }) {
             <input type="checkbox" checked={asDefault} onChange={(e) => setAsDefault(e.target.checked)} data-testid="adm-stempel-default" />
             Jadikan bawaan untuk semua faktur baru juga
           </label>
+          {bawaanAda ? (
+            <div style={{ marginTop: 10, fontSize: 12, color: "var(--text-mute)" }}>
+              Ada gambar bawaan untuk faktur baru. <button type="button" className="adm-btn adm-btn-sm adm-btn-ghost" onClick={matikanBawaan} disabled={busy} data-testid="adm-stempel-matikan-bawaan">Matikan bawaan</button>
+            </div>
+          ) : null}
+          <div style={{ marginTop: 10, fontSize: 11.5, color: "var(--text-mute)" }}>
+            Mau cetak <b>tanpa</b> TTD/stempel (untuk stempel basah)? Pakai tombol <b>📄 Polos</b> di daftar histori, gambar tetap tersimpan di faktur.
+          </div>
           {err ? <div style={{ color: "#f85149", fontSize: 13, marginTop: 10 }}>{err}</div> : null}
         </div>
         <div className="adm-modal-foot">
@@ -5278,12 +5293,12 @@ function HistoriDokumen({ headers }) {
   const quickTahun = () => { const d = new Date(); setFDari(`${d.getFullYear()}-01-01`); setFSampai(isoToday()); };
   const resetFilter = () => { setFEntity("all"); setFDari(""); setFSampai(""); setFQ(""); setFilter(""); setPage(1); };
 
-  const reprint = async (rec0) => {
+  const reprint = async (rec0, opts) => {
     // Ambil record lengkap (termasuk stempel yang di-exclude dari daftar).
     let rec = rec0;
     try { const resp = await axios.get(`${API}/admin/doc-history/${rec0.id}`, { headers }); if (resp.data) rec = resp.data; } catch {}
     if (rec.jenis === "invoice") {
-      printInvoiceDoc(rec.lines, rec.meta?.withTax, { ...(rec.meta || {}), payments: rec.payments || [] });
+      printInvoiceDoc(rec.lines, rec.meta?.withTax, { ...(rec.meta || {}), payments: rec.payments || [], tanpaStempel: !!(opts && opts.polos) });
     } else if (rec.jenis === "supplier") {
       printSupplierA4({ nama: rec.meta?.supplier_nama || rec.customer || "-", jobs: rec.units || [] }, null, rec.meta?.no_dokumen || rec.no_dokumen, rec.meta?.tanggal);
     } else if (rec.jenis === "jadwal") {
@@ -5472,7 +5487,10 @@ function HistoriDokumen({ headers }) {
                   {rec.jenis === "invoice" && (
                     <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={async () => { let full = rec; try { const r = await axios.get(`${API}/admin/doc-history/${rec.id}`, { headers }); if (r.data) full = r.data; } catch {} setEditRec(full); }} title="Edit / Tambah Unit" data-testid="dochist-edit">✏️ Edit</button>
                   )}
-                  <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={() => reprint(rec)} title="Cetak ulang" data-testid="dochist-print">🖨️ Cetak</button>
+                  <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={() => reprint(rec)} title="Cetak ulang (dengan TTD/stempel kalau terpasang)" data-testid="dochist-print">🖨️ Cetak</button>
+                  {rec.jenis === "invoice" && (
+                    <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={() => reprint(rec, { polos: true })} title="Cetak polos tanpa TTD/stempel (untuk stempel basah)" data-testid="dochist-print-polos">📄 Polos</button>
+                  )}
                   <button className="adm-btn adm-dochist-btn adm-dochist-del" onClick={() => del(rec)} title="Hapus" data-testid="dochist-del">🗑️</button>
                 </div>
               </div>
@@ -5704,7 +5722,7 @@ async function printInvoiceDoc(lines, withTax, extra) {
   if (!lines.length) return "";
   const w = window.open("", "aal_print"); // buka dulu (gesture) biar nggak keblok popup
   const { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, taxInclusive, withPph23 } = extra;
-  const stempel = extra.stempel || DOC_DEFAULT_STEMPEL;   // per-faktur, kalau tidak ada pakai gambar bawaan
+  const stempel = extra.tanpaStempel ? null : (extra.stempel || DOC_DEFAULT_STEMPEL);   // per-faktur, kalau tidak ada pakai bawaan; "tanpaStempel" = cetak polos (untuk stempel basah)
   const subtotal = lines.reduce((s, l) => s + (l.harga || 0) * (l.qty || 1), 0);
   // taxInclusive: harga SUDAH termasuk 1.1% → pajak dipecah dari dalam (total = subtotal).
   const dpp = withTax && taxInclusive ? Math.round(subtotal / 1.011) : subtotal;
