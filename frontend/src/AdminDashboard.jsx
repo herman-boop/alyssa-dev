@@ -5721,7 +5721,7 @@ function ketSatuBaris(ket) {
   return String(ket == null ? "" : ket).replace(/<br\s*\/?>\s*No\.?\s*Rangka:\s*([^<]*)/gi, (_, r) => {
     const v = String(r).trim();
     const t = v.length > 7 ? v.slice(-7) : v;
-    return t ? ` · No. Rangka: ${t}` : "";
+    return t ? ` · Rangka: ${t}` : "";
   });
 }
 async function printInvoiceDoc(lines, withTax, extra) {
@@ -5791,6 +5791,7 @@ async function printInvoiceDoc(lines, withTax, extra) {
     table.inv-items th { text-align:left; font-size:10px; text-transform:uppercase; letter-spacing:.4px; color:${DOC_BRAND.muted}; font-weight:700; padding:7px 8px; border-bottom:1.5px solid ${DOC_BRAND.navy}; }
     table.inv-items td { padding:${lines.length >= 8 ? 6 : 10}px 8px; font-size:10px; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; background:${DOC_BRAND.paperMist}; }
     table.inv-items .num { text-align:right; }
+    table.inv-items td.ket1 { white-space:nowrap; font-size:${lines.length >= 8 ? 9.5 : 10}px; }   /* unit + rute + rangka = 1 baris */
     .inv-summary { display:flex; justify-content:space-between; gap:24px; margin-bottom:18px; }
     .inv-note { flex:1; font-size:10px; color:${DOC_BRAND.muted}; line-height:1.7; }
     .inv-note b { color:${DOC_BRAND.ink}; }
@@ -5850,7 +5851,7 @@ async function printInvoiceDoc(lines, withTax, extra) {
         <tr>
           <td class="num">${i + 1}</td>
           <td>${cell2(l)}</td>
-          <td>${ketSatuBaris(l.ket) || "&nbsp;"}</td>
+          <td class="${/ · Rangka: /.test(ketSatuBaris(l.ket)) ? "ket1" : ""}">${ketSatuBaris(l.ket) || "&nbsp;"}</td>
           <td class="num">${l.qty || 1}</td>
           <td class="num">${fRp(l.harga)}</td>
           ${perRowIns ? `<td class="num">${premiOf(l) > 0 ? `${fRp(premiOf(l))}<div style="font-size:8.5px;opacity:.7">Nilai Rp ${fRp(Number(l.ins_nilai) || 0)}</div>` : "-"}</td>` : ""}
