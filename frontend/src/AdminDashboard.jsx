@@ -5714,6 +5714,16 @@ function InvoiceEditModal({ rec, headers, onClose, onSaved, onPrint }) {
 /* ── Cetak Faktur/Invoice (fungsi modul, bisa dicetak ulang dari Histori) ──
    extra: { customer_nama, order_id, jatuhTempo, metode, pesan, ttdNama,
             ttdJabatan, stempel, no_invoice? }  → return nomor faktur */
+// Cetak faktur: "No. Rangka" dipindah ke baris yang sama dengan unit dan dipendekkan ke 7 karakter
+// terakhir (mis. MMBENKL30PH080777 → H080777) supaya tiap unit 1 baris dan faktur muat 1 halaman.
+// Hanya tampilan cetak; data tersimpan tetap lengkap.
+function ketSatuBaris(ket) {
+  return String(ket == null ? "" : ket).replace(/<br\s*\/?>\s*No\.?\s*Rangka:\s*([^<]*)/gi, (_, r) => {
+    const v = String(r).trim();
+    const t = v.length > 7 ? v.slice(-7) : v;
+    return t ? ` · No. Rangka: ${t}` : "";
+  });
+}
 async function printInvoiceDoc(lines, withTax, extra) {
   extra = extra || {};
   // Back-compat: kalau dipanggil dengan angka tunggal, bungkus jadi 1 baris.
@@ -5779,7 +5789,7 @@ async function printInvoiceDoc(lines, withTax, extra) {
     table.inv-items thead { display:table-header-group; }
     table.inv-items tr { break-inside:avoid; page-break-inside:avoid; }
     table.inv-items th { text-align:left; font-size:10px; text-transform:uppercase; letter-spacing:.4px; color:${DOC_BRAND.muted}; font-weight:700; padding:7px 8px; border-bottom:1.5px solid ${DOC_BRAND.navy}; }
-    table.inv-items td { padding:10px 8px; font-size:10px; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; background:${DOC_BRAND.paperMist}; }
+    table.inv-items td { padding:${lines.length >= 8 ? 6 : 10}px 8px; font-size:10px; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; background:${DOC_BRAND.paperMist}; }
     table.inv-items .num { text-align:right; }
     .inv-summary { display:flex; justify-content:space-between; gap:24px; margin-bottom:18px; }
     .inv-note { flex:1; font-size:10px; color:${DOC_BRAND.muted}; line-height:1.7; }
@@ -5796,7 +5806,7 @@ async function printInvoiceDoc(lines, withTax, extra) {
     .inv-pay-badge { width:40px; height:40px; border-radius:7px; background:${DOC_BRAND.navy}; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:900; font-size:10px; flex-shrink:0; }
     .inv-pay-num { font-size:14px; font-weight:900; letter-spacing:.5px; color:${DOC_BRAND.ink}; }
     .inv-pay-name { font-size:10px; color:${DOC_BRAND.muted}; margin-top:1px; }
-    .inv-sign-row { display:flex; justify-content:flex-end; margin-top:26px; }
+    .inv-sign-row { display:flex; justify-content:flex-end; margin-top:${lines.length >= 8 ? 12 : 26}px; }
     .inv-sign-cell { width:260px; text-align:center; position:relative; }
     .inv-sign-lbl { font-size:10px; color:${DOC_BRAND.muted}; margin-bottom:6px; }
     .inv-sign-stamp { min-height:78px; display:flex; align-items:center; justify-content:center; margin-bottom:2px; }
@@ -5840,7 +5850,7 @@ async function printInvoiceDoc(lines, withTax, extra) {
         <tr>
           <td class="num">${i + 1}</td>
           <td>${cell2(l)}</td>
-          <td>${l.ket || "&nbsp;"}</td>
+          <td>${ketSatuBaris(l.ket) || "&nbsp;"}</td>
           <td class="num">${l.qty || 1}</td>
           <td class="num">${fRp(l.harga)}</td>
           ${perRowIns ? `<td class="num">${premiOf(l) > 0 ? `${fRp(premiOf(l))}<div style="font-size:8.5px;opacity:.7">Nilai Rp ${fRp(Number(l.ins_nilai) || 0)}</div>` : "-"}</td>` : ""}
