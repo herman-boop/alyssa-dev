@@ -1277,6 +1277,53 @@ async def list_doc_history(jenis: Optional[str] = None, limit: int = 300):
     return {"items": items}
 
 
+_STEMPEL_RE = re.compile(r"^data:image/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$")
+_STEMPEL_MAX = 4_200_000   # ± 3 MB gambar setelah base64
+
+
+def _valid_stempel(v):
+    if v in (None, ""):
+        return None
+    if not isinstance(v, str) or len(v) > _STEMPEL_MAX or not _STEMPEL_RE.match(v):
+        raise HTTPException(400, "Gambar harus PNG/JPG/WEBP, maksimal 3 MB")
+    return v
+
+
+class StempelBody(BaseModel):
+    stempel: Optional[str] = None
+
+
+@api_router.get("/admin/doc-stempel", dependencies=[Depends(require_admin_pin)])
+async def get_doc_stempel_default():
+    """Gambar TTD+stempel+materai bawaan untuk faktur baru (keuangan)."""
+    d = await db.app_settings.find_one({"key": "doc_stempel_default"}, {"_id": 0, "value": 1})
+    return {"stempel": (d or {}).get("value")}
+
+
+@api_router.put("/admin/doc-stempel", dependencies=[Depends(require_admin_pin)])
+async def set_doc_stempel_default(body: StempelBody):
+    v = _valid_stempel(body.stempel)
+    await db.app_settings.update_one({"key": "doc_stempel_default"}, {"$set": {"key": "doc_stempel_default", "value": v}}, upsert=True)
+    return {"ok": True, "ada": bool(v)}
+
+
+@api_router.patch("/admin/doc-history/{doc_id}/stempel", dependencies=[Depends(require_admin_pin)])
+async def set_doc_history_stempel(doc_id: str, body: StempelBody):
+    """Pasang / ganti / hapus gambar TTD+stempel+materai pada 1 faktur yang sudah tersimpan.
+    Hanya mengubah meta.stempel; nomor, baris, dan nominal tidak disentuh."""
+    v = _valid_stempel(body.stempel)
+    d = await db.doc_history.find_one({"id": doc_id}, {"_id": 0, "jenis": 1})
+    if not d:
+        raise HTTPException(404, "Dokumen tidak ditemukan")
+    if d.get("jenis") != "invoice":
+        raise HTTPException(400, "Hanya untuk faktur")
+    if v:
+        await db.doc_history.update_one({"id": doc_id}, {"$set": {"meta.stempel": v}})
+    else:
+        await db.doc_history.update_one({"id": doc_id}, {"$unset": {"meta.stempel": ""}})
+    return {"ok": True, "ada": bool(v)}
+
+
 @api_router.get("/admin/doc-history/{doc_id}", dependencies=[Depends(require_admin_pin)])
 async def get_doc_history(doc_id: str):
     """Ambil 1 record arsip LENGKAP (termasuk stempel) — buat cetak ulang."""

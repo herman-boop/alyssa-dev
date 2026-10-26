@@ -234,6 +234,9 @@ def test_can_matrix():
     assert not c("pembaca", "PATCH", "/api/admin/orders/ORD-1")
     assert not c("pembaca", "GET", "/api/admin/kas")
     assert not c("pembaca", "GET", "/api/admin/doc-history")
+    # TTD/stempel faktur = keuangan
+    assert c("keuangan", "PATCH", "/api/admin/doc-history/D1/stempel") and c("keuangan", "PUT", "/api/admin/doc-stempel")
+    assert not c(o1, "PATCH", "/api/admin/doc-history/D1/stempel") and not c(o2, "PUT", "/api/admin/doc-stempel")
     # Peran lama dianggap Ops 1; peran tidak dikenal ditolak
     assert c("admin_operasional", "PATCH", "/api/admin/orders/ORD-1")
     assert not c("ngawur", "GET", "/api/admin/orders")
