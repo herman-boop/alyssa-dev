@@ -1149,6 +1149,25 @@ function InvoiceAsuransiModal({ headers, customerNames, onClose, onDone }) {
   const [noInvoiceManual, setNoInvoiceManual] = useState("");
   const [rows, setRows] = useState([{ ket: "", qty: "1", harga: "" }]);
   const [saving, setSaving] = useState(false);
+  const [showBulk, setShowBulk] = useState(false);
+  const [bulkPrefix, setBulkPrefix] = useState("");
+  const [bulkList, setBulkList] = useState("");
+  const [bulkHarga, setBulkHarga] = useState("");
+  const addRow = () => setRows((rs) => [...rs, { ket: "", qty: "1", harga: rs.length ? rs[rs.length - 1].harga : "" }]);
+  // Banyak unit sekaligus: tiap baris daftar jadi 1 baris tagihan (qty 1) dengan awalan & harga yang sama.
+  const addBulk = () => {
+    const units = bulkList.split("\n").map((x) => x.trim()).filter(Boolean);
+    if (!units.length) { alert("Isi daftar unit dulu (satu unit per baris)."); return; }
+    if (!(parseInt(String(bulkHarga || "").replace(/[^0-9]/g, ""), 10) > 0)) { alert("Isi harga per unit dulu."); return; }
+    const pre = bulkPrefix.trim();
+    const add = units.map((u) => ({ ket: pre ? `${pre}\n${u}` : u, qty: "1", harga: bulkHarga }));
+    setRows((rs) => {
+      const kosong = rs.length === 1 && !rs[0].ket.trim() && !rs[0].harga;   // buang baris kosong bawaan
+      return kosong ? add : [...rs, ...add];
+    });
+    setBulkList("");
+    setShowBulk(false);
+  };
   const setRow = (i, patch) => setRows((rs) => rs.map((r, x) => x === i ? { ...r, ...patch } : r));
   const fRp = (n) => "Rp " + n.toLocaleString("id-ID");
   const escH = (t) => String(t == null ? "" : t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -1216,11 +1235,41 @@ function InvoiceAsuransiModal({ headers, customerNames, onClose, onDone }) {
             <label style={lbl}>No. PO Customer (opsional)</label>
             <input type="text" className="adm-input" value={poCust} onChange={(e) => setPoCust(e.target.value)} placeholder="contoh: 00128698" data-testid="adm-invasr-po" />
           </div>
-          <div style={{ fontSize: 12, color: "var(--text-3)", fontWeight: 700, marginBottom: 8 }}>Rincian tagihan</div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 12, color: "var(--text-3)", fontWeight: 700 }}>Rincian tagihan · {rows.length} baris</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <button type="button" className="adm-btn adm-btn-sm adm-btn-blue" onClick={addRow} data-testid="adm-invasr-add">＋ Tambah baris</button>
+              <button type="button" className="adm-btn adm-btn-sm adm-btn-gold" onClick={() => setShowBulk((v) => !v)} data-testid="adm-invasr-bulk-toggle">📝 Tambah banyak unit</button>
+            </div>
+          </div>
+          {showBulk ? (
+            <div style={{ border: "1px solid var(--border, #30363d)", borderRadius: 8, padding: 10, marginBottom: 10 }} data-testid="adm-invasr-bulk">
+              <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginBottom: 6 }}>
+                Satu unit per baris (nopol atau nomor unit). Tiap unit jadi 1 baris tagihan, qty 1.
+              </div>
+              <label style={lbl}>Awalan keterangan (sama untuk semua unit)</label>
+              <input type="text" className="adm-input" value={bulkPrefix} onChange={(e) => setBulkPrefix(e.target.value)}
+                placeholder="Reimburse Asuransi Mobilization 1x Unit Toyota Hilux DC E dari Halmahera ke JBA Manado (Drive)" data-testid="adm-invasr-bulk-prefix" />
+              <label style={{ ...lbl, marginTop: 8 }}>Daftar unit</label>
+              <textarea className="adm-input" rows={5} value={bulkList} onChange={(e) => setBulkList(e.target.value)}
+                placeholder={"TK6050 / DG 8078 SB\nTK6052 / DG 8077 SB\nTK6053 / DG 8082 SB"} data-testid="adm-invasr-bulk-list" />
+              <label style={{ ...lbl, marginTop: 8 }}>Harga per unit</label>
+              <div className="adm-invu-harga"><span>Rp</span>
+                <input inputMode="numeric" value={bulkHarga ? hargaNum(bulkHarga).toLocaleString("id-ID") : ""} placeholder="contoh: 675.000"
+                  onChange={(e) => setBulkHarga(e.target.value)} data-testid="adm-invasr-bulk-harga" /></div>
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <button type="button" className="adm-btn adm-btn-sm adm-btn-green" onClick={addBulk} data-testid="adm-invasr-bulk-apply">
+                  Buat {bulkList.split("\n").filter((x) => x.trim()).length} baris
+                </button>
+                <button type="button" className="adm-btn adm-btn-sm adm-btn-ghost" onClick={() => setShowBulk(false)}>Tutup</button>
+              </div>
+            </div>
+          ) : null}
           <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
             {rows.map((r, i) => (
               <div key={i} className="adm-invu" style={{ flexWrap: "wrap" }}>
-                <textarea className="adm-input" rows={3} style={{ flexBasis: "100%", fontSize: 12, padding: "7px 9px" }} value={r.ket}
+                <div style={{ flexBasis: "100%", fontSize: 11, color: "var(--text-mute)", fontWeight: 700 }}>Baris {i + 1}</div>
+                <textarea className="adm-input" rows={2} style={{ flexBasis: "100%", fontSize: 12, padding: "7px 9px" }} value={r.ket}
                   onChange={(e) => setRow(i, { ket: e.target.value })}
                   placeholder={"Keterangan, contoh:\nReimburse Asuransi Mobilization 4x Unit Toyota Hilux DC E dari Halmahera ke JBA Manado\nTK6050 / DG 8078 SB ..."} data-testid={`adm-invasr-ket-${i}`} />
                 <input inputMode="numeric" className="adm-input" style={{ width: 70, fontSize: 12, padding: "7px 9px", textAlign: "right" }} value={r.qty}
@@ -1230,11 +1279,12 @@ function InvoiceAsuransiModal({ headers, customerNames, onClose, onDone }) {
                   <input inputMode="numeric" value={r.harga ? hargaNum(r.harga).toLocaleString("id-ID") : ""} placeholder="Harga satuan"
                     onChange={(e) => setRow(i, { harga: e.target.value })} data-testid={`adm-invasr-harga-${i}`} />
                 </div>
-                {rows.length > 1 ? <button type="button" className="adm-btn adm-btn-sm" onClick={() => setRows((rs) => rs.filter((_, x) => x !== i))}>🗑</button> : null}
+                <button type="button" className="adm-btn adm-btn-sm" title="Duplikat baris" onClick={() => setRows((rs) => [...rs.slice(0, i + 1), { ...r }, ...rs.slice(i + 1)])} data-testid={`adm-invasr-dup-${i}`}>📋</button>
+                {rows.length > 1 ? <button type="button" className="adm-btn adm-btn-sm" title="Hapus baris" onClick={() => setRows((rs) => rs.filter((_, x) => x !== i))}>🗑</button> : null}
               </div>
             ))}
           </div>
-          <button type="button" className="adm-btn adm-btn-sm" onClick={() => setRows((rs) => [...rs, { ket: "", qty: "1", harga: "" }])} data-testid="adm-invasr-add">+ Tambah baris</button>
+          <button type="button" className="adm-btn adm-btn-sm adm-btn-blue" onClick={addRow}>＋ Tambah baris</button>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, margin: "16px 0" }}>
             <div><label style={lbl}>Tanggal Invoice</label><input type="date" className="adm-input" value={tanggalInvoice} onChange={(e) => setTanggalInvoice(e.target.value)} /></div>
             <div><label style={lbl}>Jatuh Tempo</label><input type="date" className="adm-input" value={jatuhTempo} onChange={(e) => setJatuhTempo(e.target.value)} /></div>
