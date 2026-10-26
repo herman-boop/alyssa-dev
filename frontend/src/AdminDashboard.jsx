@@ -7273,7 +7273,8 @@ function T360_Empty({ text, sub, actionLabel, onAction }) {
 /* ── Panel langkah progres: klik Baru / Driver / Berangkat / Kapal / Sampai / Dokumen ──
    Menampilkan apa yang SUDAH terjadi, yang MASIH PERLU DIUBER (dengan pesan WA siap kirim),
    dan 3 aktivitas terakhir. Hanya membaca data trip yang sudah ada. */
-function T360StepDetail({ stepKey, order, legs, checkpoints, detail, docReady, progDone, holder, activeLeg, flash, onGo, onEditLegs, onClose }) {
+function T360StepDetail({ stepKey, order, legs, checkpoints, detail, docReady, progDone, holder, activeLeg, flash, headers, onGo, onEditLegs, onClose }) {
+  const [sending, setSending] = useState(-1);
   const step = PROGRESS_STEPS.find((s) => s.key === stepKey) || PROGRESS_STEPS[0];
   const cancelled = order.status === "CANCELLED";
   const done = !!progDone[stepKey] && !cancelled;
@@ -7320,6 +7321,22 @@ function T360StepDetail({ stepKey, order, legs, checkpoints, detail, docReady, p
     try { await navigator.clipboard.writeText(txt); flash("Pesan WhatsApp disalin. Tinggal tempel."); }
     catch { window.prompt("Salin pesan ini:", txt); }
   };
+  // Kirim pengingat sopan lewat WA otomatis; kalau WA otomatis mati / nomor belum ada, pesan disalin (atau dibuka di WhatsApp).
+  const kirim = async (it, i) => {
+    setSending(i);
+    try {
+      const { data } = await axios.post(`${API}/admin/driver-wa/ingatkan`, { order_id: order.order_id, butir: it.t }, { headers });
+      const nm = data.driver_nama || "driver";
+      if (data.status === "terkirim") flash(`Pengingat lembut terkirim ke ${nm}.`);
+      else if (data.status === "sudah") flash(`Pengingat yang sama baru saja dikirim ke ${nm}. Tunggu 30 menit.`);
+      else {
+        try { await navigator.clipboard.writeText(data.text || ""); } catch {}
+        if (data.status === "tanpa_nomor") flash(`Nomor WA ${nm} belum tersimpan. Pesan disalin, isi nomornya di data driver.`);
+        else { flash("WA otomatis belum aktif. Pesan disalin / dibuka di WhatsApp."); if (data.wa_link) window.open(data.wa_link, "_blank"); }
+      }
+    } catch (e) { flash(e.response?.data?.detail || "Gagal mengirim pengingat"); }
+    setSending(-1);
+  };
   const box = { background: "var(--panel, #11161f)", border: "1px solid var(--border, #30363d)", borderRadius: 10, padding: "10px 12px", margin: "8px 0" };
   return (
     <div style={{ ...box, marginTop: 10 }} data-testid="t360-stepdetail">
@@ -7341,6 +7358,7 @@ function T360StepDetail({ stepKey, order, legs, checkpoints, detail, docReady, p
           {todo.map((it, i) => (
             <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "4px 0", fontSize: 13 }}>
               <span style={{ flex: 1, minWidth: 180 }}>⚠ {it.t} <span style={{ opacity: 0.65 }}>({it.who})</span></span>
+              {it.fix !== "Kelola Leg" ? <button className="adm-btn adm-btn-sm adm-btn-blue" disabled={sending === i} onClick={() => kirim(it, i)} data-testid="t360-step-ingatkan">{sending === i ? "Mengirim…" : "📨 Kirim pengingat"}</button> : null}
               <button className="adm-btn adm-btn-sm adm-btn-gold" onClick={() => salin(it)} data-testid="t360-step-wa">📋 Salin pesan WA</button>
               {it.fix === "Kelola Leg" ? <button className="adm-btn adm-btn-sm" onClick={onEditLegs}>Kelola Leg</button> : null}
               {it.fix === "Dokumen" ? <button className="adm-btn adm-btn-sm" onClick={() => onGo("dokumen")}>Ke Dokumen</button> : null}
@@ -7542,7 +7560,7 @@ function Trip360Modal({ order, headers, onClose, onEditLegs, onPrintSuratJalan, 
           </div>
           {stepOpen && (
             <T360StepDetail stepKey={stepOpen} order={order} legs={legs} checkpoints={checkpoints} detail={detail} docReady={docReady}
-              progDone={progDone} holder={holder} activeLeg={activeLeg} flash={flash}
+              progDone={progDone} holder={holder} activeLeg={activeLeg} flash={flash} headers={headers}
               onGo={(t) => { setTab(t); setStepOpen(null); }} onEditLegs={onEditLegs} onClose={() => setStepOpen(null)} />
           )}
         </div>
