@@ -4834,8 +4834,11 @@ async def ingatkan_driver(body: dict = Body(...)):
         raise HTTPException(404, "Order not found")
     legs = order.get("legs") if isinstance(order.get("legs"), list) else []
     leg = next((l for l in legs if (l.get("status") or "") not in ("", "Menunggu", "Selesai")), None) or next((l for l in legs if l.get("status") != "Selesai"), None) or {}
-    nama = str(body.get("driver_nama") or leg.get("driver") or order.get("nama_driver") or "").strip()[:120]
-    hp = str(body.get("no_hp") or leg.get("hp") or leg.get("no_hp") or "").strip()
+    kapal = str(leg.get("tipe") or "").startswith("Kapal")   # leg kapal: petugas/koordinator kapal; selain itu driver
+    leg_nama = (leg.get("kord_kapal") if kapal else leg.get("driver")) or leg.get("petugas_nama") or ""
+    leg_hp = (leg.get("kord_kapal_hp") if kapal else leg.get("driver_hp")) or leg.get("petugas_hp") or ""
+    nama = str(body.get("driver_nama") or leg_nama or order.get("nama_driver") or "").strip()[:120]
+    hp = str(body.get("no_hp") or leg_hp or "").strip()
     if not hp and (order.get("driver_id") or nama):
         drv = (await db.drivers.find_one({"driver_id": order.get("driver_id")}, {"_id": 0}) if order.get("driver_id") else None) \
             or (await db.drivers.find_one({"nama": nama}, {"_id": 0}) if nama else None) or {}
