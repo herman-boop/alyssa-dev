@@ -5117,6 +5117,81 @@ function InvoicePaymentModal({ rec, headers, onClose, onChanged, onPrint }) {
 }
 
 const HIST_PAGE_SIZE = 50;
+/* ── Nomor faktur dobel: 1 nomor tersimpan lebih dari sekali. Pilih 1 yang dipertahankan; sisanya
+   dipindah ke cadangan (bukan dihapus permanen). Faktur yang sudah punya pembayaran dilindungi. ── */
+function DupFakturModal({ headers, onClose, onDone }) {
+  const [groups, setGroups] = useState(null);
+  const [keep, setKeep] = useState({});      // no -> id yang dipertahankan
+  const [plan, setPlan] = useState({});      // no -> pratinjau
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState("");
+  const rp = (n) => "Rp " + (Number(n) || 0).toLocaleString("id-ID");
+  const fmt = (iso) => { try { return new Date(iso).toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); } catch { return iso || "—"; } };
+  const load = useCallback(async () => {
+    try {
+      const r = await axios.get(`${API}/admin/doc-duplikat`, { headers });
+      const gs = r.data.groups || [];
+      setGroups(gs);
+      setKeep((k) => { const x = { ...k }; gs.forEach((g) => { if (!x[g.no_dokumen]) x[g.no_dokumen] = g.saran_pertahankan; }); return x; });
+    } catch (e) { setErr(e.response?.data?.detail || "Gagal memuat"); setGroups([]); }
+  }, [headers]); // eslint-disable-line
+  useEffect(() => { load(); }, [load]);
+  const call = async (g, dry) => {
+    setBusy(g.no_dokumen); setErr("");
+    try {
+      const r = await axios.post(`${API}/admin/doc-duplikat/bereskan`, { no_dokumen: g.no_dokumen, keep_id: keep[g.no_dokumen], dry_run: dry }, { headers });
+      if (dry) setPlan((p) => ({ ...p, [g.no_dokumen]: r.data }));
+      else { setPlan((p) => { const x = { ...p }; delete x[g.no_dokumen]; return x; }); await load(); onDone(); }
+    } catch (e) { setErr(e.response?.data?.detail || "Gagal"); } finally { setBusy(""); }
+  };
+  const apply = (g) => {
+    const p = plan[g.no_dokumen];
+    if (!p) return;
+    if (window.confirm(`Pertahankan 1 faktur ${g.no_dokumen} dan pindahkan ${p.dihapus} lainnya ke cadangan?`)) call(g, false);
+  };
+  return createPortal((
+    <div className="adm-vars"><div className="adm-modal-bg" onClick={onClose} data-testid="adm-dup-modal">
+      <div className="adm-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 640 }}>
+        <div className="adm-modal-head">
+          <div>
+            <div className="adm-modal-title">⚠️ Nomor Faktur Dobel</div>
+            <div className="adm-modal-sub">Pilih yang dipertahankan. Sisanya dipindah ke cadangan, bukan dihapus permanen.</div>
+          </div>
+          <button className="adm-modal-close" onClick={onClose} aria-label="Tutup">✕</button>
+        </div>
+        <div className="adm-modal-body">
+          {err ? <div style={{ color: "#f85149", fontSize: 13, marginBottom: 10 }}>{err}</div> : null}
+          {groups === null ? <div>Memuat…</div> : null}
+          {groups && groups.length === 0 ? <div style={{ color: "#3fb950", fontWeight: 700 }}>✓ Tidak ada nomor faktur yang dobel.</div> : null}
+          {(groups || []).map((g) => (
+            <div key={g.no_dokumen} style={{ border: "1px solid var(--border, #30363d)", borderRadius: 10, padding: 10, marginBottom: 10 }}>
+              <div style={{ fontWeight: 800, marginBottom: 6 }}>{g.no_dokumen} · {g.items.length} salinan</div>
+              {g.items.map((it) => (
+                <label key={it.id} style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "6px 0", borderTop: "1px solid var(--border, #30363d)", cursor: "pointer", fontSize: 12.5 }}>
+                  <input type="radio" name={`keep-${g.no_dokumen}`} checked={keep[g.no_dokumen] === it.id}
+                    onChange={() => { setKeep({ ...keep, [g.no_dokumen]: it.id }); setPlan((p) => { const x = { ...p }; delete x[g.no_dokumen]; return x; }); }} data-testid={`adm-dup-keep-${it.id}`} />
+                  <span style={{ flex: 1 }}>
+                    <b>{fmt(it.created_at)}</b> · {it.customer || "—"}<br />
+                    {it.baris} baris · subtotal {rp(it.subtotal)}
+                    {it.pembayaran_n ? <span style={{ color: "#3fb950" }}> · 💰 {it.pembayaran_n} pembayaran ({rp(it.pembayaran_total)})</span> : null}
+                    {it.stempel ? " · 🖋️ ada TTD/stempel" : ""}
+                    {g.saran_pertahankan === it.id ? <span style={{ color: "#EF9F27" }}> · disarankan</span> : null}
+                  </span>
+                </label>
+              ))}
+              <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                <button className="adm-btn adm-btn-sm" disabled={busy === g.no_dokumen} onClick={() => call(g, true)}>🔍 Pratinjau</button>
+                {plan[g.no_dokumen] ? <button className="adm-btn adm-btn-sm adm-btn-gold" disabled={busy === g.no_dokumen} onClick={() => apply(g)} data-testid={`adm-dup-apply-${g.no_dokumen}`}>✅ Rapikan ({plan[g.no_dokumen].dihapus} dipindah ke cadangan)</button> : null}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="adm-modal-foot"><button className="adm-btn adm-btn-ghost" onClick={onClose}>Tutup</button></div>
+      </div>
+    </div></div>
+  ), document.body);
+}
+
 /* ── TTD + Stempel + Materai untuk faktur yang sudah tersimpan ──
    Satu gambar gabungan (PNG latar transparan paling bagus). Dipasang ke faktur ini saja,
    atau sekalian dijadikan bawaan untuk semua faktur baru. Nomor, baris, dan nominal tidak berubah. */
@@ -5227,12 +5302,21 @@ function HistoriDokumen({ headers }) {
   const [fDari, setFDari] = useState("");
   const [fSampai, setFSampai] = useState("");
   const [fQ, setFQ] = useState("");                  // no dokumen / customer / PO
+  const [fCust, setFCust] = useState("");            // kunci nama pelanggan (alfanumerik saja)
   const [page, setPage] = useState(1);
   const [payRec, setPayRec] = useState(null);        // faktur yang lagi dibuka modal pembayarannya
   const [editRec, setEditRec] = useState(null);      // faktur yang lagi dibuka modal Edit / Tambah Unit
   const [stempelRec, setStempelRec] = useState(null); // faktur yang lagi dibuka modal TTD / Stempel / Materai
+  const [showDup, setShowDup] = useState(false);      // modal nomor faktur dobel
 
   const isPrice = filter === "__pricelist";
+  // Nomor faktur yang tersimpan lebih dari sekali (untuk lencana & banner; tampilan saja).
+  const dupCount = useMemo(() => {
+    const c = {};
+    items.forEach((r) => { if (r.jenis === "invoice" && r.no_dokumen) c[r.no_dokumen] = (c[r.no_dokumen] || 0) + 1; });
+    return c;
+  }, [items]);
+  const dupNomor = Object.values(dupCount).filter((n) => n > 1).length;
 
   const load = useCallback(async () => {
     setLoading(true); setErr("");
@@ -5265,25 +5349,39 @@ function HistoriDokumen({ headers }) {
     return "";
   };
   const poOfRec = (rec) => (rec.lines || []).map((l) => (l.customer_po_number ?? l.po ?? "")).filter(Boolean).join(" ");
-  const searchBlob = (rec) => [
+  // Pencarian abaikan titik/koma/spasi/strip: "PT.Transkon" = "PT TRANSKON", "INV-0171" = "INV0171".
+  const nk = (v) => String(v || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const searchBlob = (rec) => nk([
     rec.no_dokumen, rec.meta && rec.meta.no_invoice, rec.customer, rec.meta && rec.meta.customer_nama,
     rec.judul, (rec.order_ids || []).join(" "), poOfRec(rec),
-  ].filter(Boolean).join(" ").toLowerCase();
+  ].filter(Boolean).join(" "));
+  // Daftar pelanggan unik (nama beda titik/spasi dianggap satu) untuk dropdown.
+  const custOptions = useMemo(() => {
+    const m = {};
+    items.forEach((r) => {
+      const k = nk(r.customer); if (!k) return;
+      const o = m[k] || (m[k] = { key: k, n: 0, names: {} });
+      o.n += 1; o.names[r.customer] = (o.names[r.customer] || 0) + 1;
+    });
+    return Object.values(m).map((o) => ({ key: o.key, n: o.n, label: Object.entries(o.names).sort((a, b) => b[1] - a[1])[0][0] }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [items]);
 
   const filteredDocs = useMemo(() => {
-    const q = fQ.trim().toLowerCase();
+    const toks = fQ.trim().split(/\s+/).map(nk).filter(Boolean);
     return items.filter((rec) => {
       if (fEntity !== "all" && entityOf(rec) !== fEntity) return false;
+      if (fCust && nk(rec.customer) !== fCust) return false;
       const d = docDate(rec);
       if (fDari && (!d || d < fDari)) return false;
       if (fSampai && (!d || d > fSampai)) return false;
-      if (q && !searchBlob(rec).includes(q)) return false;
+      if (toks.length) { const blob = searchBlob(rec); if (!toks.every((t) => blob.includes(t))) return false; }
       return true;
     });
-  }, [items, fEntity, fDari, fSampai, fQ]);
+  }, [items, fEntity, fCust, fDari, fSampai, fQ]);
 
   // Reset ke halaman 1 tiap filter berubah (termasuk jenis chip).
-  useEffect(() => { setPage(1); }, [fEntity, fDari, fSampai, fQ, filter]);
+  useEffect(() => { setPage(1); }, [fEntity, fCust, fDari, fSampai, fQ, filter]);
   const totalPages = Math.max(1, Math.ceil(filteredDocs.length / HIST_PAGE_SIZE));
   const pageSafe = Math.min(page, totalPages);
   const pageItems = filteredDocs.slice((pageSafe - 1) * HIST_PAGE_SIZE, pageSafe * HIST_PAGE_SIZE);
@@ -5291,7 +5389,7 @@ function HistoriDokumen({ headers }) {
   const isoToday = () => new Date().toISOString().slice(0, 10);
   const quickBulan = () => { const d = new Date(); setFDari(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`); setFSampai(isoToday()); };
   const quickTahun = () => { const d = new Date(); setFDari(`${d.getFullYear()}-01-01`); setFSampai(isoToday()); };
-  const resetFilter = () => { setFEntity("all"); setFDari(""); setFSampai(""); setFQ(""); setFilter(""); setPage(1); };
+  const resetFilter = () => { setFEntity("all"); setFCust(""); setFDari(""); setFSampai(""); setFQ(""); setFilter(""); setPage(1); };
 
   const reprint = async (rec0, opts) => {
     // Ambil record lengkap (termasuk stempel yang di-exclude dari daftar).
@@ -5374,6 +5472,13 @@ function HistoriDokumen({ headers }) {
                   {Object.values(DOC_ENTITIES).map((en) => (<option key={en.id} value={en.id}>{en.name}</option>))}
                 </select>
               </div>
+              <div>
+                <label style={lblS}>Pelanggan</label>
+                <select style={inpS} value={fCust} onChange={(e) => setFCust(e.target.value)} data-testid="dochist-cust">
+                  <option value="">Semua Pelanggan</option>
+                  {custOptions.map((o) => (<option key={o.key} value={o.key}>{o.label} ({o.n})</option>))}
+                </select>
+              </div>
               <div><label style={lblS}>Dari Tanggal</label><input type="date" style={inpS} value={fDari} onChange={(e) => setFDari(e.target.value)} data-testid="dochist-dari" /></div>
               <div><label style={lblS}>Sampai Tanggal</label><input type="date" style={inpS} value={fSampai} onChange={(e) => setFSampai(e.target.value)} data-testid="dochist-sampai" /></div>
               <div><label style={lblS}>Cari (No. Dok / Customer / PO)</label><input type="text" style={inpS} value={fQ} onChange={(e) => setFQ(e.target.value)} placeholder="cth: INV-000123 / PT Maju / PO-77" data-testid="dochist-q" /></div>
@@ -5448,6 +5553,7 @@ function HistoriDokumen({ headers }) {
       ) : (
         <>
         <div style={{ fontSize: 12.5, color: "#8b949e", margin: "0 2px 8px" }} data-testid="dochist-count">
+          {dupNomor > 0 ? <button className="adm-btn adm-btn-sm adm-btn-gold" style={{ marginRight: 10 }} onClick={() => setShowDup(true)} data-testid="dochist-dup-btn">⚠ {dupNomor} nomor dobel · Bereskan</button> : null}
           <b style={{ color: "#3fb950" }}>{filteredDocs.length}</b> dokumen ditemukan{totalPages > 1 ? ` · halaman ${pageSafe} dari ${totalPages}` : ""}
         </div>
         <div className="adm-dochist-list">
@@ -5459,7 +5565,9 @@ function HistoriDokumen({ headers }) {
               <div key={rec.id} className="adm-dochist-row" data-testid="dochist-row">
                 <span className="adm-dochist-badge" style={{ background: badge.bg, color: badge.fg }}>{badge.txt}</span>
                 <div className="adm-dochist-main">
-                  <div className="adm-dochist-no">{rec.no_dokumen || "(tanpa nomor)"}</div>
+                  <div className="adm-dochist-no">{rec.no_dokumen || "(tanpa nomor)"}
+                    {rec.jenis === "invoice" && dupCount[rec.no_dokumen] > 1 ? <span title="Nomor ini tersimpan lebih dari sekali" style={{ marginLeft: 8, fontSize: 10.5, color: "#EF9F27", fontWeight: 800 }} data-testid="dochist-dobel">⚠ dobel ×{dupCount[rec.no_dokumen]}</span> : null}
+                  </div>
                   <div className="adm-dochist-sub">
                     {rec.customer || "—"} · {countUnits(rec)}
                     {rec.order_ids?.length > 1 ? ` · ${rec.order_ids.length} PO` : ""}
@@ -5514,6 +5622,9 @@ function HistoriDokumen({ headers }) {
           onSaved={(upd) => { setEditRec(upd); setItems((xs) => xs.map((x) => (x.id === upd.id ? { ...x, lines: upd.lines, order_ids: upd.order_ids, judul: upd.judul } : x))); }}
           onPrint={() => reprint(editRec)}
         />
+      )}
+      {showDup && (
+        <DupFakturModal headers={headers} onClose={() => setShowDup(false)} onDone={() => load()} />
       )}
       {stempelRec && (
         <StempelModal

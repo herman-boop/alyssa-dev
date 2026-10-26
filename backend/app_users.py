@@ -337,7 +337,7 @@ async def delete_user(db, user_id):
 FINANCE_PREFIXES = (
     "/admin/kas", "/admin/expenses", "/admin/expense-categories", "/admin/payouts",
     "/admin/payout-logs", "/admin/driver-incentives", "/admin/finance", "/admin/rekap-penagihan",
-    "/admin/doc-history", "/admin/doc-stempel", "/admin/selisih", "/admin/kompensasi", "/admin/rekon", "/admin/reports",
+    "/admin/doc-history", "/admin/doc-stempel", "/admin/doc-duplikat", "/admin/selisih", "/admin/kompensasi", "/admin/rekon", "/admin/reports",
     "/vendor-mobile",
 )
 # Bagian keuangan yang menumpang di bawah path lain (pembayaran supplier, pajak, riwayat bayar, dst.)
