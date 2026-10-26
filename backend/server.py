@@ -13,6 +13,7 @@ from datetime import datetime, timezone, timedelta
 from odoo_client import OdooClient
 from playwright.async_api import async_playwright
 import ship_master  # master kapal (panjang/lebar/tipe)
+import doc_duplikat  # nomor faktur dobel di Histori Dokumen
 import nama_kembar  # gabung nama pelanggan kembar (Langkah 2)
 import customer_name  # nama pelanggan tunggal (kunci & tulisan resmi)
 import app_users  # akun pengguna (Pemilik, undangan, login) — Tahap 1
@@ -9069,6 +9070,29 @@ class UserPatchBody(BaseModel):
     status: Optional[str] = None
     access_days: Optional[int] = None
     clear_access: Optional[bool] = False
+
+
+class DocDupBody(BaseModel):
+    no_dokumen: str
+    keep_id: Optional[str] = None
+    dry_run: bool = True
+
+
+@api_router.get("/admin/doc-duplikat", dependencies=[Depends(require_admin_pin)])
+async def admin_doc_duplikat_list():
+    """Nomor faktur yang tersimpan lebih dari sekali (keuangan)."""
+    return {"groups": await doc_duplikat.list_dups(db)}
+
+
+@api_router.post("/admin/doc-duplikat/bereskan", dependencies=[Depends(require_admin_pin)])
+async def admin_doc_duplikat_bereskan(body: DocDupBody):
+    """Pratinjau (dry_run=true, default) atau rapikan 1 nomor dobel: pertahankan 1, pindahkan sisanya ke cadangan."""
+    try:
+        return await doc_duplikat.bereskan(db, body.no_dokumen, body.keep_id, body.dry_run)
+    except LookupError as e:
+        raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 class NamaKembarBody(BaseModel):

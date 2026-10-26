@@ -2,6 +2,8 @@
 Nama kembar (Langkah 2): gabungkan penulisan nama pelanggan yang dobel menjadi satu nama resmi.
 
 Cakupan yang DIUBAH (dengan pratinjau dulu):
+  - doc_history.customer            → HANYA label daftar/pencarian di Histori Dokumen. Isi dokumen
+                                      (meta.customer_nama, baris, nominal) yang dicetak TIDAK diubah.
   - orders.customer_nama            → nama resmi (nama lama disimpan di customer_nama_sebelumnya)
   - contacts (jenis pelanggan)      → 1 baris dipertahankan (paling lama, dilengkapi dari yang lain);
                                       baris lain dipindah ke `contacts_merged_backup`, bukan dihapus permanen
@@ -15,6 +17,7 @@ from datetime import datetime, timezone
 
 import customer_name as cn
 
+DOC_JENIS_PELANGGAN = ("invoice", "jadwal", "jadwal_gabungan")   # arsip dokumen yang berlabel nama pelanggan
 BACKUP = "contacts_merged_backup"
 LOG = "nama_merge_log"
 FILL_FIELDS = ("perusahaan", "no_hp", "email", "alamat", "catatan")
@@ -40,7 +43,7 @@ async def _collect(db, jenis="pelanggan"):
     groups = {}
 
     def g(key):
-        return groups.setdefault(key, {"orders": {}, "contacts": [], "profiles": []})
+        return groups.setdefault(key, {"orders": {}, "contacts": [], "profiles": [], "docs": {}})
 
     if jenis == "pelanggan":
         async for o in db.orders.find({}, {"_id": 0, "customer_nama": 1}):
@@ -49,6 +52,15 @@ async def _collect(db, jenis="pelanggan"):
             if k:
                 d = g(k)["orders"]
                 d[raw] = d.get(raw, 0) + 1
+    if jenis == "pelanggan":
+        async for d in db.doc_history.find({}, {"_id": 0, "jenis": 1, "customer": 1}):
+            if d.get("jenis") not in DOC_JENIS_PELANGGAN:
+                continue
+            raw = d.get("customer") or ""
+            k = cn.name_key(raw)
+            if k:
+                x = g(k)["docs"]
+                x[raw] = x.get(raw, 0) + 1
     async for c in db.contacts.find({"jenis": jenis}, {"_id": 0}):
         k = cn.name_key(c.get("nama"))
         if k:
@@ -65,15 +77,18 @@ async def _collect(db, jenis="pelanggan"):
 
 def _variants(grp):
     v = {}
+
+    def e(raw):
+        return v.setdefault(raw, {"nama": raw, "orders": 0, "contacts": 0, "profiles": 0, "docs": 0})
+
     for raw, n in grp["orders"].items():
-        raw = raw.strip()
-        v.setdefault(raw, {"nama": raw, "orders": 0, "contacts": 0, "profiles": 0})["orders"] += n
+        e(raw.strip())["orders"] += n
+    for raw, n in grp["docs"].items():
+        e(raw.strip())["docs"] += n
     for c in grp["contacts"]:
-        raw = (c.get("nama") or "").strip()
-        v.setdefault(raw, {"nama": raw, "orders": 0, "contacts": 0, "profiles": 0})["contacts"] += 1
+        e((c.get("nama") or "").strip())["contacts"] += 1
     for p in grp["profiles"]:
-        raw = (p.get("_nm") or "").strip()
-        v.setdefault(raw, {"nama": raw, "orders": 0, "contacts": 0, "profiles": 0})["profiles"] += 1
+        e((p.get("_nm") or "").strip())["profiles"] += 1
     return sorted(v.values(), key=lambda x: (-(x["orders"] + x["contacts"] + x["profiles"]), x["nama"]))
 
 
@@ -90,6 +105,7 @@ async def list_groups(db, jenis="pelanggan"):
             "total_orders": sum(x["orders"] for x in vs),
             "total_contacts": sum(x["contacts"] for x in vs),
             "total_profiles": sum(x["profiles"] for x in vs),
+            "total_docs": sum(x["docs"] for x in vs),
         })
     out.sort(key=lambda x: -x["total_orders"])
     return out
@@ -106,6 +122,7 @@ async def merge_group(db, key, nama_resmi, dry_run=True, by="pemilik", jenis="pe
     if not grp or len(_variants(grp)) < 1:
         raise LookupError("Kelompok nama tidak ditemukan")
 
+    raw_doc_names = [r for r in grp["docs"] if r != nama_resmi]
     raw_order_names = [r for r in grp["orders"] if r != nama_resmi]
     order_n = sum(grp["orders"][r] for r in raw_order_names)
     contacts = sorted(grp["contacts"], key=lambda c: c.get("created_at") or "")
@@ -117,6 +134,7 @@ async def merge_group(db, key, nama_resmi, dry_run=True, by="pemilik", jenis="pe
         "jenis": jenis,
         "nama_resmi": nama_resmi,
         "orders_diubah": order_n,
+        "dokumen_label_diubah": sum(grp["docs"][r] for r in raw_doc_names),
         "kontak_dipertahankan": 1 if keeper else 0,
         "kontak_digabung_dihapus": len(removed),
         "profil_harga_diubah": 1 if profile_rename else 0,
@@ -131,6 +149,9 @@ async def merge_group(db, key, nama_resmi, dry_run=True, by="pemilik", jenis="pe
             {"customer_nama": raw},
             {"$set": {"customer_nama": nama_resmi, "customer_nama_sebelumnya": raw}},
         )
+    for raw in raw_doc_names:       # hanya label daftar; isi dokumen tidak disentuh
+        for j in DOC_JENIS_PELANGGAN:
+            await db.doc_history.update_many({"customer": raw, "jenis": j}, {"$set": {"customer": nama_resmi}})
     removed_ids = []
     if keeper:
         upd = {"nama": nama_resmi}
@@ -167,7 +188,7 @@ async def merge_all(db, jenis="pelanggan", dry_run=True, by="pemilik"):
             hasil.append({"key": g["key"], "varian": [v["nama"] for v in g["variants"]], **plan})
         except (ValueError, LookupError) as e:
             gagal.append({"key": g["key"], "varian": [v["nama"] for v in g["variants"]], "alasan": str(e)})
-    keys = ("orders_diubah", "kontak_digabung_dihapus", "profil_harga_diubah", "profil_harga_perlu_manual")
+    keys = ("orders_diubah", "dokumen_label_diubah", "kontak_digabung_dihapus", "profil_harga_diubah", "profil_harga_perlu_manual")
     return {
         "jenis": jenis, "dry_run": bool(dry_run), "kelompok": len(hasil), "hasil": hasil, "gagal": gagal,
         **{k: sum(h.get(k, 0) for h in hasil) for k in keys},

@@ -133,7 +133,7 @@ export default function NamaKembarPage() {
                 {g.variants.map((v) => (
                   <div key={v.nama} style={{ fontSize: 12.5, color: "#c9d1d9", display: "flex", justifyContent: "space-between", gap: 8 }}>
                     <span style={{ wordBreak: "break-word" }}>{v.nama || "(kosong)"}</span>
-                    <span style={{ color: "#8b949e", whiteSpace: "nowrap" }}>{jenis === "pelanggan" ? `${v.orders} PO · ` : ""}{v.contacts} kontak{v.profiles ? ` · ${v.profiles} profil` : ""}</span>
+                    <span style={{ color: "#8b949e", whiteSpace: "nowrap" }}>{jenis === "pelanggan" ? `${v.orders} PO · ${v.docs || 0} dok · ` : ""}{v.contacts} kontak{v.profiles ? ` · ${v.profiles} profil` : ""}</span>
                   </div>
                 ))}
               </div>
@@ -145,7 +145,7 @@ export default function NamaKembarPage() {
               </div>
               {p ? (
                 <div style={{ marginTop: 10, fontSize: 12.5, background: "#0f1722", border: "1px solid #232a36", borderRadius: 8, padding: "8px 10px" }} data-testid={`nk-plan-${g.key}`}>
-                  Akan berubah: <b>{p.orders_diubah}</b> PO diganti namanya · <b>{p.kontak_digabung_dihapus}</b> kontak kembar digabung · <b>{p.profil_harga_diubah}</b> profil harga diganti namanya
+                  Akan berubah: <b>{p.orders_diubah}</b> PO diganti namanya{p.dokumen_label_diubah ? <> · <b>{p.dokumen_label_diubah}</b> label dokumen histori</> : null} · <b>{p.kontak_digabung_dihapus}</b> kontak kembar digabung · <b>{p.profil_harga_diubah}</b> profil harga diganti namanya
                   {p.profil_harga_perlu_manual ? <div style={{ color: "#d29922", marginTop: 4 }}>⚠ Ada {p.profil_harga_perlu_manual} profil harga terpisah. Tidak disentuh, perlu dirapikan manual.</div> : null}
                 </div>
               ) : null}
