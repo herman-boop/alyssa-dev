@@ -1324,6 +1324,35 @@ async def set_doc_history_stempel(doc_id: str, body: StempelBody):
     return {"ok": True, "ada": bool(v)}
 
 
+class NomorBody(BaseModel):
+    no_dokumen: str
+
+
+@api_router.patch("/admin/doc-history/{doc_id}/nomor", dependencies=[Depends(require_admin_pin)])
+async def set_doc_history_nomor(doc_id: str, body: NomorBody):
+    """Koreksi nomor faktur (mis. salah ketik nomor manual). Hanya faktur; baris & nominal tidak
+    disentuh; nomor lama disimpan di no_dokumen_sebelumnya; nomor tidak boleh kembar dengan faktur lain.
+    Penghitung nomor otomatis (doc_counters) tidak ikut berubah."""
+    nomor = " ".join((body.no_dokumen or "").split())[:80]
+    if not nomor:
+        raise HTTPException(400, "Nomor faktur tidak boleh kosong")
+    d = await db.doc_history.find_one({"id": doc_id}, {"_id": 0, "jenis": 1, "no_dokumen": 1})
+    if not d:
+        raise HTTPException(404, "Dokumen tidak ditemukan")
+    if d.get("jenis") != "invoice":
+        raise HTTPException(400, "Hanya untuk faktur")
+    if nomor == (d.get("no_dokumen") or ""):
+        return {"ok": True, "no_dokumen": nomor, "berubah": False}
+    kembar = await db.doc_history.find_one({"jenis": "invoice", "no_dokumen": nomor, "id": {"$ne": doc_id}}, {"_id": 0, "id": 1})
+    if kembar:
+        raise HTTPException(409, f"Nomor {nomor} sudah dipakai faktur lain")
+    await db.doc_history.update_one(
+        {"id": doc_id},
+        {"$set": {"no_dokumen": nomor, "meta.no_invoice": nomor, "no_dokumen_sebelumnya": d.get("no_dokumen") or ""}},
+    )
+    return {"ok": True, "no_dokumen": nomor, "berubah": True}
+
+
 @api_router.get("/admin/doc-history/{doc_id}", dependencies=[Depends(require_admin_pin)])
 async def get_doc_history(doc_id: str):
     """Ambil 1 record arsip LENGKAP (termasuk stempel) — buat cetak ulang."""
