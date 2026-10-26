@@ -5302,6 +5302,7 @@ function HistoriDokumen({ headers }) {
   const [fDari, setFDari] = useState("");
   const [fSampai, setFSampai] = useState("");
   const [fQ, setFQ] = useState("");                  // no dokumen / customer / PO
+  const [fCust, setFCust] = useState("");            // kunci nama pelanggan (alfanumerik saja)
   const [page, setPage] = useState(1);
   const [payRec, setPayRec] = useState(null);        // faktur yang lagi dibuka modal pembayarannya
   const [editRec, setEditRec] = useState(null);      // faktur yang lagi dibuka modal Edit / Tambah Unit
@@ -5348,25 +5349,39 @@ function HistoriDokumen({ headers }) {
     return "";
   };
   const poOfRec = (rec) => (rec.lines || []).map((l) => (l.customer_po_number ?? l.po ?? "")).filter(Boolean).join(" ");
-  const searchBlob = (rec) => [
+  // Pencarian abaikan titik/koma/spasi/strip: "PT.Transkon" = "PT TRANSKON", "INV-0171" = "INV0171".
+  const nk = (v) => String(v || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const searchBlob = (rec) => nk([
     rec.no_dokumen, rec.meta && rec.meta.no_invoice, rec.customer, rec.meta && rec.meta.customer_nama,
     rec.judul, (rec.order_ids || []).join(" "), poOfRec(rec),
-  ].filter(Boolean).join(" ").toLowerCase();
+  ].filter(Boolean).join(" "));
+  // Daftar pelanggan unik (nama beda titik/spasi dianggap satu) untuk dropdown.
+  const custOptions = useMemo(() => {
+    const m = {};
+    items.forEach((r) => {
+      const k = nk(r.customer); if (!k) return;
+      const o = m[k] || (m[k] = { key: k, n: 0, names: {} });
+      o.n += 1; o.names[r.customer] = (o.names[r.customer] || 0) + 1;
+    });
+    return Object.values(m).map((o) => ({ key: o.key, n: o.n, label: Object.entries(o.names).sort((a, b) => b[1] - a[1])[0][0] }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [items]);
 
   const filteredDocs = useMemo(() => {
-    const q = fQ.trim().toLowerCase();
+    const toks = fQ.trim().split(/\s+/).map(nk).filter(Boolean);
     return items.filter((rec) => {
       if (fEntity !== "all" && entityOf(rec) !== fEntity) return false;
+      if (fCust && nk(rec.customer) !== fCust) return false;
       const d = docDate(rec);
       if (fDari && (!d || d < fDari)) return false;
       if (fSampai && (!d || d > fSampai)) return false;
-      if (q && !searchBlob(rec).includes(q)) return false;
+      if (toks.length) { const blob = searchBlob(rec); if (!toks.every((t) => blob.includes(t))) return false; }
       return true;
     });
-  }, [items, fEntity, fDari, fSampai, fQ]);
+  }, [items, fEntity, fCust, fDari, fSampai, fQ]);
 
   // Reset ke halaman 1 tiap filter berubah (termasuk jenis chip).
-  useEffect(() => { setPage(1); }, [fEntity, fDari, fSampai, fQ, filter]);
+  useEffect(() => { setPage(1); }, [fEntity, fCust, fDari, fSampai, fQ, filter]);
   const totalPages = Math.max(1, Math.ceil(filteredDocs.length / HIST_PAGE_SIZE));
   const pageSafe = Math.min(page, totalPages);
   const pageItems = filteredDocs.slice((pageSafe - 1) * HIST_PAGE_SIZE, pageSafe * HIST_PAGE_SIZE);
@@ -5374,7 +5389,7 @@ function HistoriDokumen({ headers }) {
   const isoToday = () => new Date().toISOString().slice(0, 10);
   const quickBulan = () => { const d = new Date(); setFDari(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`); setFSampai(isoToday()); };
   const quickTahun = () => { const d = new Date(); setFDari(`${d.getFullYear()}-01-01`); setFSampai(isoToday()); };
-  const resetFilter = () => { setFEntity("all"); setFDari(""); setFSampai(""); setFQ(""); setFilter(""); setPage(1); };
+  const resetFilter = () => { setFEntity("all"); setFCust(""); setFDari(""); setFSampai(""); setFQ(""); setFilter(""); setPage(1); };
 
   const reprint = async (rec0, opts) => {
     // Ambil record lengkap (termasuk stempel yang di-exclude dari daftar).
@@ -5455,6 +5470,13 @@ function HistoriDokumen({ headers }) {
                 <select style={inpS} value={fEntity} onChange={(e) => setFEntity(e.target.value)} data-testid="dochist-entity">
                   <option value="all">Semua Entitas</option>
                   {Object.values(DOC_ENTITIES).map((en) => (<option key={en.id} value={en.id}>{en.name}</option>))}
+                </select>
+              </div>
+              <div>
+                <label style={lblS}>Pelanggan</label>
+                <select style={inpS} value={fCust} onChange={(e) => setFCust(e.target.value)} data-testid="dochist-cust">
+                  <option value="">Semua Pelanggan</option>
+                  {custOptions.map((o) => (<option key={o.key} value={o.key}>{o.label} ({o.n})</option>))}
                 </select>
               </div>
               <div><label style={lblS}>Dari Tanggal</label><input type="date" style={inpS} value={fDari} onChange={(e) => setFDari(e.target.value)} data-testid="dochist-dari" /></div>
