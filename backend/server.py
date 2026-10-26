@@ -13,6 +13,7 @@ from datetime import datetime, timezone, timedelta
 from odoo_client import OdooClient
 from playwright.async_api import async_playwright
 import ship_master  # master kapal (panjang/lebar/tipe)
+import nama_kembar  # gabung nama pelanggan kembar (Langkah 2)
 import customer_name  # nama pelanggan tunggal (kunci & tulisan resmi)
 import app_users  # akun pengguna (Pemilik, undangan, login) — Tahap 1
 import leg_supplier  # supplier per leg + pembayaran supplier
@@ -8992,6 +8993,29 @@ class UserPatchBody(BaseModel):
     status: Optional[str] = None
     access_days: Optional[int] = None
     clear_access: Optional[bool] = False
+
+
+class NamaKembarBody(BaseModel):
+    key: str
+    nama_resmi: str
+    dry_run: bool = True
+
+
+@api_router.get("/admin/nama-kembar")
+async def admin_nama_kembar_list(_by: str = Depends(require_users_admin)):
+    """Kelompok nama pelanggan yang dobel (beda titik/koma/spasi/huruf besar). Hanya Pemilik."""
+    return {"groups": await nama_kembar.list_groups(db)}
+
+
+@api_router.post("/admin/nama-kembar/gabung")
+async def admin_nama_kembar_gabung(body: NamaKembarBody, by: str = Depends(require_users_admin)):
+    """Pratinjau (dry_run=true, default) atau terapkan penggabungan 1 kelompok. Hanya Pemilik."""
+    try:
+        return await nama_kembar.merge_group(db, body.key, body.nama_resmi, dry_run=body.dry_run, by=by or "pemilik")
+    except LookupError as e:
+        raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @api_router.post("/auth/login")

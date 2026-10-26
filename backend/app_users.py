@@ -379,8 +379,8 @@ def can(role, method, path):
         return True
     p = _rel(path)
     m = (method or "").upper()
-    if p.startswith("/admin/users"):
-        return False
+    if p.startswith(("/admin/users", "/admin/nama-kembar")):
+        return False   # hanya Pemilik
     if is_finance(p):
         return role == "keuangan"
     if m in _SAFE_METHODS:

@@ -187,6 +187,10 @@ def test_can_matrix():
     # Kelola pengguna hanya Pemilik
     for r in ("admin_ops_1", "admin_ops_2", "keuangan", "pembaca"):
         assert not c(r, "GET", "/api/admin/users")
+    # Gabung nama kembar hanya Pemilik
+    for r in ("admin_ops_1", "admin_ops_2", "keuangan", "pembaca"):
+        assert not c(r, "GET", "/api/admin/nama-kembar") and not c(r, "POST", "/api/admin/nama-kembar/gabung")
+    assert c("pemilik", "POST", "/api/admin/nama-kembar/gabung")
     # Pelanggan/supplier baru & Kontak hanya Pemilik
     for r in ("admin_ops_1", "admin_ops_2", "keuangan", "pembaca"):
         assert not c(r, "POST", "/api/admin/pelanggan")

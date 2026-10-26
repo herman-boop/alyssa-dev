@@ -11,6 +11,7 @@ import SupplierPage, { printSupplierA4 } from "@/SupplierPage";
 import SelisihPage from "@/SelisihPage";
 import ShipMasterPage from "@/ShipMasterPage";
 import UsersPage from "@/UsersPage";
+import NamaKembarPage from "@/NamaKembarPage";
 import DriverIncentivePage from "@/DriverIncentivePage";
 import KasBankPage from "@/KasBankPage";
 import "@/OrderCardBright.css";
@@ -449,6 +450,7 @@ function Dashboard({ pin, me, onLogout }) {
     koordinator:  { title: "Koordinator", sub: "Kelola akun koordinator lapangan" },
     supplier:     { title: "Supplier", sub: "Kelola unit titipan & selisih harga supplier" },
     "insentif-driver": { title: "Insentif Driver", sub: "Bonus per foto checkpoint driver borongan: cek foto, lalu bayar atau tolak" },
+    "nama-kembar":{ title: "Nama Kembar", sub: "Gabungkan nama pelanggan yang tertulis dobel menjadi satu nama resmi" },
     pengguna:     { title: "Pengaturan Pengguna", sub: "Undang, ubah peran, nonaktifkan atau hapus akun" },
     "master-kapal": { title: "Master Kapal", sub: "Panjang, lebar & tipe kapal (tampil di layar Lihat Posisi Kapal)" },
     selisih:      { title: "Selisih Harga", sub: "Bandingkan HPP vs harga deal pelanggan" },
@@ -565,6 +567,10 @@ function Dashboard({ pin, me, onLogout }) {
 
       {activeTab === "pengguna" && (
         <UsersPage />
+      )}
+
+      {activeTab === "nama-kembar" && (
+        <NamaKembarPage />
       )}
 
       {activeTab === "biaya" && (
@@ -912,7 +918,7 @@ const SIDEBAR_ICON = {
   pesanan: "▦", "route-leg": "🧭", drivers: "👤", supplier: "🌿", koordinator: "🧑‍💼",
   kendaraan: "🚙", "master-kapal": "🚢", dokumen: "📄", histori: "🗂️", laporan: "📑", kalkulator: "🧮", selisih: "📊",
   kompensasi: "🔄", "minta-harga": "📩", pengaturan: "⚙️", "pembayaran-vendor": "🏢", "insentif-driver": "🎯", "kas-bank": "🏦",
-  biaya: "🧾", "laba-rugi": "📈", pengguna: "👥",
+  biaya: "🧾", "laba-rugi": "📈", pengguna: "👥", "nama-kembar": "🧬",
 };
 
 /* ════════════════════════════════════════
@@ -1301,7 +1307,7 @@ const OPS1_TABS = ["pesanan", "minta-harga", "supplier", "kalkulator", "kontak"]
 const OPS2_TABS = ["pesanan", "route-leg", "drivers", "koordinator", "kendaraan", "master-kapal", "kontak"];
 function tabAllowedForRole(role, key) {
   if (!role || role === "pemilik") return true;           // PIN / terbuka / Pemilik: semua
-  if (key === "pengguna") return false;
+  if (key === "pengguna" || key === "nama-kembar") return false;
   if (key === "beranda" || key === "pengaturan") return true;
   if (role === "admin_ops_1" || role === "admin_operasional") return OPS1_TABS.includes(key);
   if (role === "admin_ops_2") return OPS2_TABS.includes(key);
@@ -1341,6 +1347,7 @@ const SIDEBAR_GROUPS = [
   ] },
   { title: "Pengaturan", items: [
     { key: "pengguna", label: "Pengguna" },
+    { key: "nama-kembar", label: "Nama Kembar" },
   ] },
   { title: "Arsip & Laporan", items: [
     { key: "dokumen", label: "Dokumen" },
