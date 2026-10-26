@@ -7270,6 +7270,102 @@ function T360_Empty({ text, sub, actionLabel, onAction }) {
   );
 }
 
+/* ── Panel langkah progres: klik Baru / Driver / Berangkat / Kapal / Sampai / Dokumen ──
+   Menampilkan apa yang SUDAH terjadi, yang MASIH PERLU DIUBER (dengan pesan WA siap kirim),
+   dan 3 aktivitas terakhir. Hanya membaca data trip yang sudah ada. */
+function T360StepDetail({ stepKey, order, legs, checkpoints, detail, docReady, progDone, holder, activeLeg, flash, onGo, onEditLegs, onClose }) {
+  const step = PROGRESS_STEPS.find((s) => s.key === stepKey) || PROGRESS_STEPS[0];
+  const cancelled = order.status === "CANCELLED";
+  const done = !!progDone[stepKey] && !cancelled;
+  const idx = PROGRESS_STEPS.findIndex((s) => s.key === stepKey);
+  const prevDone = idx === 0 || !!progDone[PROGRESS_STEPS[idx - 1].key];
+  const status = cancelled ? "Dibatalkan" : done ? "Selesai" : prevDone ? "Sedang berjalan" : "Belum mulai";
+  const stColor = cancelled ? "#8b949e" : done ? "#3fb950" : prevDone ? "#EF9F27" : "#8b949e";
+  const fmtT = (v) => { try { return v ? new Date(v).toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : ""; } catch { return ""; } };
+  const kapalLegs = legs.filter((l) => (l.tipe || "").startsWith("Kapal"));
+  const lastCp = [...(checkpoints || [])].reverse()[0];
+  const unit = [order.vehicle_type || order.isi_kiriman, order.nopol].filter(Boolean).join(" ") || "unit";
+  const did = [];      // yang sudah terjadi
+  const todo = [];     // yang perlu diuber: { t, who }
+  if (stepKey === "baru") {
+    did.push(`Pesanan ${order.order_id} dibuat${order.created_at ? " " + fmtT(order.created_at) : ""} untuk ${order.customer_nama || "pelanggan"}.`);
+  } else if (stepKey === "driver") {
+    if (progDone.driver) did.push(`Pemegang unit: ${holder}${order.koordinator_nama ? " · koordinator " + order.koordinator_nama : ""}.`);
+    else todo.push({ t: "Driver / petugas belum ditugaskan.", who: order.koordinator_nama || "koordinator", fix: "Kelola Leg" });
+    if (!legs.length) todo.push({ t: "Rute (leg) belum disusun.", who: order.koordinator_nama || "koordinator", fix: "Kelola Leg" });
+  } else if (stepKey === "berangkat") {
+    legs.slice(0, 1).forEach((l) => did.push(`Leg 1 ${l.tipe || ""}: ${l.status || "Menunggu"}${l.driver ? " · " + l.driver : ""}.`));
+    if (!progDone.berangkat) todo.push({ t: "Unit belum berangkat dari lokasi asal.", who: legs[0]?.driver || holder, fix: "" });
+  } else if (stepKey === "kapal") {
+    if (!kapalLegs.length) did.push("Pengiriman ini tidak memakai leg kapal.");
+    kapalLegs.forEach((l, i) => {
+      const nama = [l.kapal, l.tipe].filter(Boolean).join(" · ") || `Leg kapal ${i + 1}`;
+      if (l.status === "Selesai") did.push(`${nama}: selesai.`);
+      else { did.push(`${nama}: ${l.status || "Menunggu"}.`); todo.push({ t: `Kapal ${l.kapal || ""} belum selesai. Minta kabar posisi / ETA.`.replace("  ", " "), who: l.driver || l.kapal || "petugas kapal", fix: "" }); }
+    });
+  } else if (stepKey === "sampai") {
+    if (order.status === "DELIVERED") did.push("Unit sudah diserahterimakan (status Selesai).");
+    else todo.push({ t: "Unit belum sampai tujuan.", who: activeLeg?.driver || holder, fix: "" });
+  } else if (stepKey === "dokumen") {
+    if (docReady.bastk) did.push("BASTK sudah diunggah.");
+    if (docReady.resi) did.push("Foto resi sudah diunggah.");
+    if (!docReady.bastk) todo.push({ t: "BASTK belum diunggah.", who: holder, fix: "Dokumen" });
+    if (!docReady.resi) todo.push({ t: "Foto resi pengiriman belum diunggah.", who: holder, fix: "Dokumen" });
+  }
+  if (!cancelled && !done && !todo.length && prevDone === false) todo.push({ t: `Langkah sebelumnya belum selesai, ${step.label} belum bisa jalan.`, who: holder, fix: "" });
+  const recent = buildTrip360Activity(order, detail, checkpoints).slice(0, 3);
+  const pesan = (it) => `Halo ${it.who}, mohon update untuk ${unit} (${order.order_id}${order.customer_nama ? " · " + order.customer_nama : ""}): ${it.t} Terima kasih.`;
+  const salin = async (it) => {
+    const txt = pesan(it);
+    try { await navigator.clipboard.writeText(txt); flash("Pesan WhatsApp disalin. Tinggal tempel."); }
+    catch { window.prompt("Salin pesan ini:", txt); }
+  };
+  const box = { background: "var(--panel, #11161f)", border: "1px solid var(--border, #30363d)", borderRadius: 10, padding: "10px 12px", margin: "8px 0" };
+  return (
+    <div style={{ ...box, marginTop: 10 }} data-testid="t360-stepdetail">
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <b style={{ fontSize: 14 }}>{step.label}</b>
+        <span style={{ fontSize: 11, fontWeight: 800, color: stColor, border: `1px solid ${stColor}`, borderRadius: 999, padding: "1px 8px" }}>{status}</span>
+        <span style={{ flex: 1 }} />
+        <button className="adm-btn adm-btn-sm" onClick={onClose} aria-label="Tutup panel">✕</button>
+      </div>
+      {did.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", opacity: 0.6 }}>Sudah dilakukan</div>
+          {did.map((t, i) => <div key={i} style={{ fontSize: 13, padding: "2px 0" }}>✓ {t}</div>)}
+        </div>
+      )}
+      {todo.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", color: "#EF9F27" }}>Perlu diuber</div>
+          {todo.map((it, i) => (
+            <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "4px 0", fontSize: 13 }}>
+              <span style={{ flex: 1, minWidth: 180 }}>⚠ {it.t} <span style={{ opacity: 0.65 }}>({it.who})</span></span>
+              <button className="adm-btn adm-btn-sm adm-btn-gold" onClick={() => salin(it)} data-testid="t360-step-wa">📋 Salin pesan WA</button>
+              {it.fix === "Kelola Leg" ? <button className="adm-btn adm-btn-sm" onClick={onEditLegs}>Kelola Leg</button> : null}
+              {it.fix === "Dokumen" ? <button className="adm-btn adm-btn-sm" onClick={() => onGo("dokumen")}>Ke Dokumen</button> : null}
+            </div>
+          ))}
+        </div>
+      )}
+      {lastCp && (
+        <div style={{ marginTop: 8, fontSize: 12.5 }}>
+          <span style={{ fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", opacity: 0.6 }}>Posisi terakhir </span>
+          {fmtT(lastCp.ts || lastCp.timestamp || lastCp.created_at)}{lastCp.catatan ? ` · ${lastCp.catatan}` : lastCp.status ? ` · ${lastCp.status}` : ""}
+          {lastCp.lat != null && lastCp.lng != null ? <> · <a href={`https://www.google.com/maps?q=${lastCp.lat},${lastCp.lng}`} target="_blank" rel="noreferrer">📍 Peta</a></> : null}
+        </div>
+      )}
+      {recent.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", opacity: 0.6 }}>Aktivitas terakhir</div>
+          {recent.map((e, i) => <div key={i} style={{ fontSize: 12.5, padding: "2px 0" }}>{e.ic} {e.text} <span style={{ opacity: 0.6 }}>· {fmtT(e.ts)}</span></div>)}
+          <button className="adm-btn adm-btn-sm" style={{ marginTop: 4 }} onClick={() => onGo("aktivitas")}>Lihat semua aktivitas</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Trip360Modal({ order, headers, onClose, onEditLegs, onPrintSuratJalan, onOpenInvoice }) {
   const [detail, setDetail] = useState(null);
   const [phase, setPhase] = useState("loading"); // loading | ready | error
@@ -7278,6 +7374,7 @@ function Trip360Modal({ order, headers, onClose, onEditLegs, onPrintSuratJalan, 
   const [toast, setToast] = useState("");
   const [busy, setBusy] = useState(false);
   const [finance, setFinance] = useState(null); // ringkasan keuangan trip (Sprint Finance 1)
+  const [stepOpen, setStepOpen] = useState(null);   // langkah progres yang lagi dibuka (klik titik Baru…Dokumen)
   const cpInputRef = useRef(null);
   const docInputRef = useRef(null);
 
@@ -7432,14 +7529,22 @@ function Trip360Modal({ order, headers, onClose, onEditLegs, onPrintSuratJalan, 
                 const isDone = progDone[s.key] && order.status !== "CANCELLED";
                 const isActive = i === currentIdx && order.status !== "CANCELLED" && order.status !== "DELIVERED";
                 return (
-                  <div key={s.key} className={`t360-pstep ${isDone ? "done" : ""} ${isActive ? "active" : ""}`}>
-                    <div className="t360-pdot">{isDone ? "✓" : ""}</div>
-                    <div className="t360-plbl">{s.label}</div>
+                  <div key={s.key} className={`t360-pstep ${isDone ? "done" : ""} ${isActive ? "active" : ""}`}
+                    role="button" tabIndex={0} style={{ cursor: "pointer" }} data-testid={`t360-step-${s.key}`}
+                    onClick={() => setStepOpen((k) => (k === s.key ? null : s.key))}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setStepOpen((k) => (k === s.key ? null : s.key)); } }}>
+                    <div className="t360-pdot" style={stepOpen === s.key ? { outline: "2px solid #60A5FA", outlineOffset: 2 } : undefined}>{isDone ? "✓" : ""}</div>
+                    <div className="t360-plbl" style={stepOpen === s.key ? { color: "#60A5FA", fontWeight: 800 } : undefined}>{s.label}</div>
                   </div>
                 );
               })}
             </div>
           </div>
+          {stepOpen && (
+            <T360StepDetail stepKey={stepOpen} order={order} legs={legs} checkpoints={checkpoints} detail={detail} docReady={docReady}
+              progDone={progDone} holder={holder} activeLeg={activeLeg} flash={flash}
+              onGo={(t) => { setTab(t); setStepOpen(null); }} onEditLegs={onEditLegs} onClose={() => setStepOpen(null)} />
+          )}
         </div>
 
         {/* ── TAB BAR ── */}
