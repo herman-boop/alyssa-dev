@@ -12,6 +12,7 @@ import SelisihPage from "@/SelisihPage";
 import ShipMasterPage from "@/ShipMasterPage";
 import UsersPage from "@/UsersPage";
 import NamaKembarPage from "@/NamaKembarPage";
+import KpiPage from "@/KpiPage";
 import DriverIncentivePage from "@/DriverIncentivePage";
 import KasBankPage from "@/KasBankPage";
 import "@/OrderCardBright.css";
@@ -455,6 +456,7 @@ function Dashboard({ pin, me, onLogout }) {
     supplier:     { title: "Supplier", sub: "Kelola unit titipan & selisih harga supplier" },
     "insentif-driver": { title: "Insentif Driver", sub: "Bonus per foto checkpoint driver borongan: cek foto, lalu bayar atau tolak" },
     "nama-kembar":{ title: "Nama Kembar", sub: "Gabungkan nama pelanggan yang tertulis dobel menjadi satu nama resmi" },
+    kpi:          { title: "Aktivitas & KPI", sub: "Riwayat aktivitas akun, tugas, dan poin pekan ini (dibayar Senin 09:00)" },
     pengguna:     { title: "Pengaturan Pengguna", sub: "Undang, ubah peran, nonaktifkan atau hapus akun" },
     "master-kapal": { title: "Master Kapal", sub: "Panjang, lebar & tipe kapal (tampil di layar Lihat Posisi Kapal)" },
     selisih:      { title: "Selisih Harga", sub: "Bandingkan HPP vs harga deal pelanggan" },
@@ -575,6 +577,10 @@ function Dashboard({ pin, me, onLogout }) {
 
       {activeTab === "nama-kembar" && (
         <NamaKembarPage />
+      )}
+
+      {activeTab === "kpi" && (
+        <KpiPage me={me} />
       )}
 
       {activeTab === "biaya" && (
@@ -922,7 +928,7 @@ const SIDEBAR_ICON = {
   pesanan: "▦", "route-leg": "🧭", drivers: "👤", supplier: "🌿", koordinator: "🧑‍💼",
   kendaraan: "🚙", "master-kapal": "🚢", dokumen: "📄", histori: "🗂️", laporan: "📑", kalkulator: "🧮", selisih: "📊",
   kompensasi: "🔄", "minta-harga": "📩", pengaturan: "⚙️", "pembayaran-vendor": "🏢", "insentif-driver": "🎯", "kas-bank": "🏦",
-  biaya: "🧾", "laba-rugi": "📈", pengguna: "👥", "nama-kembar": "🧬",
+  biaya: "🧾", "laba-rugi": "📈", pengguna: "👥", "nama-kembar": "🧬", kpi: "🏅",
 };
 
 /* ════════════════════════════════════════
@@ -1358,8 +1364,8 @@ let CURRENT_ROLE = null;
 let DOC_DEFAULT_STEMPEL = null;   // gambar TTD+stempel+materai bawaan (dimuat sekali oleh Dashboard)
 const roleCanInvoice = () => !CURRENT_ROLE || CURRENT_ROLE === "pemilik" || CURRENT_ROLE === "keuangan";
 const FINANCE_TABS = ["kas-bank", "laba-rugi", "biaya", "insentif-driver", "selisih", "kompensasi", "rekap-invoice", "rekap-tagih", "pembayaran-vendor", "histori", "dokumen", "laporan"];
-const OPS1_TABS = ["pesanan", "minta-harga", "supplier", "kalkulator", "kontak"];
-const OPS2_TABS = ["pesanan", "route-leg", "drivers", "koordinator", "kendaraan", "master-kapal", "kontak"];
+const OPS1_TABS = ["pesanan", "minta-harga", "supplier", "kalkulator", "kontak", "kpi"];
+const OPS2_TABS = ["pesanan", "route-leg", "drivers", "koordinator", "kendaraan", "master-kapal", "kontak", "kpi"];
 function tabAllowedForRole(role, key) {
   if (!role || role === "pemilik") return true;           // PIN / terbuka / Pemilik: semua
   if (key === "pengguna" || key === "nama-kembar") return false;
@@ -1367,7 +1373,7 @@ function tabAllowedForRole(role, key) {
   if (role === "admin_ops_1" || role === "admin_operasional") return OPS1_TABS.includes(key);
   if (role === "admin_ops_2") return OPS2_TABS.includes(key);
   const fin = FINANCE_TABS.includes(key);
-  if (role === "keuangan") return fin || ["pesanan", "kontak", "route-leg"].includes(key);
+  if (role === "keuangan") return fin || ["pesanan", "kontak", "route-leg", "kpi"].includes(key);
   return !fin;                                             // pembaca
 }
 const SIDEBAR_GROUPS = [
@@ -1399,6 +1405,9 @@ const SIDEBAR_GROUPS = [
   { title: "Keuangan", items: [
     { key: "kas-bank", label: "Kas & Bank" },
     { key: "laba-rugi", label: "Laba Rugi" },
+  ] },
+  { title: "Kerja Saya", items: [
+    { key: "kpi", label: "Aktivitas & KPI" },
   ] },
   { title: "Pengaturan", items: [
     { key: "pengguna", label: "Pengguna" },
@@ -7407,7 +7416,84 @@ function T360StepDetail({ stepKey, order, legs, checkpoints, detail, docReady, p
   );
 }
 
+/* ── Checkpoint harian MANUAL: admin mengunggah foto yang dikirim driver lewat WhatsApp (untuk KPI) ── */
+function CheckpointManualModal({ order, checkpoints, headers, onClose, onDone, flash }) {
+  const wibHariIni = () => new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
+  const [foto, setFoto] = useState(null);
+  const [tanggal, setTanggal] = useState(wibHariIni());
+  const [alamat, setAlamat] = useState("");
+  const [ket, setKet] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const manual = (checkpoints || []).filter((c) => c.manual);
+  const ada = new Set((checkpoints || []).map((c) => c.date));
+  const simpan = async () => {
+    setErr("");
+    if (!foto) { setErr("Pilih foto dulu."); return; }
+    if (ada.has(tanggal)) { setErr(`Checkpoint tanggal ${tanggal} sudah ada.`); return; }
+    const fd = new FormData();
+    fd.append("foto", foto); fd.append("tanggal", tanggal); fd.append("alamat", alamat); fd.append("keterangan", ket);
+    setBusy(true);
+    try {
+      await axios.post(`${API}/admin/trips/${order.trip_id}/checkpoint-manual`, fd, { headers: { ...headers, "Content-Type": "multipart/form-data" } });
+      flash(`Checkpoint ${tanggal} tersimpan (manual)`);
+      onDone();
+      onClose();
+    } catch (e) { setErr(e.response?.data?.detail || "Gagal menyimpan"); }
+    setBusy(false);
+  };
+  const hapus = async (c) => {
+    if (!window.confirm(`Hapus checkpoint manual tanggal ${c.date}?`)) return;
+    try {
+      await axios.delete(`${API}/admin/trips/${order.trip_id}/checkpoint-manual/${c.id}`, { headers });
+      flash("Checkpoint manual dihapus");
+      onDone();
+    } catch (e) { setErr(e.response?.data?.detail || "Gagal menghapus"); }
+  };
+  const inp = { width: "100%", boxSizing: "border-box", padding: "9px 10px", borderRadius: 8, border: "1px solid var(--border, #30363d)", background: "var(--panel, #0d1117)", color: "inherit", fontSize: 13 };
+  return createPortal((
+    <div className="adm-vars"><div className="adm-modal-bg" onClick={onClose} data-testid="adm-cpm-modal">
+      <div className="adm-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
+        <div className="adm-modal-head">
+          <div>
+            <div className="adm-modal-title">📍 Checkpoint Manual</div>
+            <div className="adm-modal-sub">Foto dari driver (WhatsApp) diunggah atas nama driver. Ditandai "manual" dan bisa ditinjau Pemilik.</div>
+          </div>
+          <button className="adm-modal-close" onClick={onClose} aria-label="Tutup">✕</button>
+        </div>
+        <div className="adm-modal-body">
+          {err ? <div style={{ color: "#f85149", fontSize: 13, marginBottom: 10 }}>{err}</div> : null}
+          <label style={{ fontSize: 11.5, fontWeight: 700, opacity: 0.7 }}>FOTO CHECKPOINT</label>
+          <input type="file" accept="image/*" onChange={(e) => setFoto(e.target.files && e.target.files[0])} style={{ ...inp, marginBottom: 10 }} data-testid="cpm-foto" />
+          <label style={{ fontSize: 11.5, fontWeight: 700, opacity: 0.7 }}>TANGGAL FOTO (sesuai tulisan Timemark)</label>
+          <input type="date" value={tanggal} max={wibHariIni()} onChange={(e) => setTanggal(e.target.value)} style={{ ...inp, marginBottom: 10 }} data-testid="cpm-tanggal" />
+          <label style={{ fontSize: 11.5, fontWeight: 700, opacity: 0.7 }}>LOKASI (opsional)</label>
+          <input value={alamat} onChange={(e) => setAlamat(e.target.value)} placeholder="mis. Tol Cipali KM 100" style={{ ...inp, marginBottom: 10 }} />
+          <label style={{ fontSize: 11.5, fontWeight: 700, opacity: 0.7 }}>CATATAN (opsional)</label>
+          <input value={ket} onChange={(e) => setKet(e.target.value)} placeholder="mis. istirahat malam di Semarang" style={{ ...inp, marginBottom: 12 }} />
+          {manual.length > 0 && (
+            <div style={{ borderTop: "1px solid var(--border, #30363d)", paddingTop: 10, marginTop: 4 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 800, opacity: 0.7, marginBottom: 6 }}>CHECKPOINT MANUAL YANG SUDAH ADA</div>
+              {manual.map((c) => (
+                <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, padding: "3px 0" }}>
+                  <span style={{ flex: 1 }}>{c.date}{c.alamat ? ` · ${c.alamat}` : ""}</span>
+                  <button className="adm-btn adm-btn-sm" onClick={() => hapus(c)}>Hapus</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="adm-modal-foot">
+          <button className="adm-btn adm-btn-ghost" onClick={onClose}>Batal</button>
+          <button className="adm-btn adm-btn-gold" disabled={busy} onClick={simpan} data-testid="cpm-simpan">{busy ? "Menyimpan…" : "Simpan checkpoint"}</button>
+        </div>
+      </div>
+    </div></div>
+  ), document.body);
+}
+
 function Trip360Modal({ order, headers, onClose, onEditLegs, onPrintSuratJalan, onOpenInvoice }) {
+  const [cpManual, setCpManual] = useState(false);   // modal checkpoint manual
   const [detail, setDetail] = useState(null);
   const [phase, setPhase] = useState("loading"); // loading | ready | error
   const [tab, setTab] = useState("overview");
@@ -7570,6 +7656,9 @@ function Trip360Modal({ order, headers, onClose, onEditLegs, onPrintSuratJalan, 
             <button className="t360-qabtn gold" onClick={qaTagih} data-testid="t360-qa-tagih">{T360_ICONS.bill}Tagih Customer</button>
             <button className="t360-qabtn green" onClick={qaBayarVendor} data-testid="t360-qa-bayar">{T360_ICONS.wallet}Bayar Vendor</button>
             <button className="t360-qabtn" disabled={busy || waBusy} onClick={qaIngatkan} data-testid="t360-qa-ingatkan" title="Kirim WhatsApp pengingat yang lembut ke driver">📨 {waBusy ? "Mengirim…" : "Ingatkan Driver"}</button>
+            {(!CURRENT_ROLE || CURRENT_ROLE === "pemilik" || CURRENT_ROLE === "admin_ops_2") && order.trip_id ? (
+              <button className="t360-qabtn" onClick={() => setCpManual(true)} data-testid="t360-qa-cp-manual" title="Unggah foto checkpoint harian yang dikirim driver">📍 Checkpoint Manual</button>
+            ) : null}
             <input ref={cpInputRef} type="file" accept="image/*" multiple hidden onChange={(e) => { runUpload(t360StageForLeg(activeLeg), e.target.files, "checkpoint"); e.target.value = ""; }} />
             <input ref={docInputRef} type="file" accept="image/*" multiple hidden onChange={(e) => { runUpload("dokumen", e.target.files, "dokumen"); e.target.value = ""; }} />
           </div>
@@ -7632,6 +7721,11 @@ function Trip360Modal({ order, headers, onClose, onEditLegs, onPrintSuratJalan, 
           )}
         </div>
       </div>
+
+      {cpManual && (
+        <CheckpointManualModal order={order} checkpoints={checkpoints} headers={headers} flash={flash}
+          onClose={() => setCpManual(false)} onDone={fetchDetail} />
+      )}
 
       {toast && <div className="t360-toast" data-testid="t360-toast">{toast}</div>}
 
