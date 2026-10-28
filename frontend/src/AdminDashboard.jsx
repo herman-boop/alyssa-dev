@@ -6011,13 +6011,17 @@ async function printInvoiceDoc(lines, withTax, extra) {
     .inv-total-bar { display:flex; justify-content:space-between; align-items:center; background:${DOC_BRAND.navyDeep}; color:#fff; padding:10px 16px; border-radius:6px; margin-bottom:18px; }
     .inv-total-bar span:first-child { font-size:10.5px; font-weight:700; letter-spacing:.6px; text-transform:uppercase; opacity:.85; }
     .inv-total-bar span:last-child { font-size:19px; font-weight:900; }
-    table.inv-items { width:100%; border-collapse:collapse; margin-bottom:14px; }
+    table.inv-items { width:100%; border-collapse:collapse; margin-bottom:14px; table-layout:fixed; }   /* kolom angka lebar tetap → Keterangan dapat sisa; tabel tidak melebar keluar halaman */
     table.inv-items thead { display:table-header-group; }
     table.inv-items tr { break-inside:avoid; page-break-inside:avoid; }
     table.inv-items th { text-align:left; font-size:10px; text-transform:uppercase; letter-spacing:.4px; color:${DOC_BRAND.muted}; font-weight:700; padding:7px 8px; border-bottom:1.5px solid ${DOC_BRAND.navy}; }
     table.inv-items td { padding:${lines.length >= 8 ? 6 : 10}px 8px; font-size:10px; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; background:${DOC_BRAND.paperMist}; }
     table.inv-items .num { text-align:right; }
-    table.inv-items td.ket1 { white-space:nowrap; font-size:${lines.length >= 8 ? 9.5 : 10}px; }   /* unit + rute + rangka = 1 baris */
+    /* unit + rute + rangka = 1 baris kalau muat. Kalau terlalu panjang, baris boleh patah di antara
+       unit/rute dan "Rangka" (angka rangka tidak pernah terpotong) — tabel TIDAK boleh melebar keluar halaman. */
+    table.inv-items td.ket1 { font-size:${lines.length >= 8 ? 9.5 : 10}px; }
+    table.inv-items td.ket1 .rk { white-space:nowrap; }
+    table.inv-items td.ket1 { overflow-wrap:anywhere; }
     .inv-summary { display:flex; justify-content:space-between; gap:24px; margin-bottom:18px; }
     .inv-note { flex:1; font-size:10px; color:${DOC_BRAND.muted}; line-height:1.7; }
     .inv-note b { color:${DOC_BRAND.ink}; }
@@ -6071,13 +6075,13 @@ async function printInvoiceDoc(lines, withTax, extra) {
       const col2 = withPO === lines.length ? "No. PO" : withPO === 0 ? "Nama Barang" : "Referensi";
       const cell2 = (l) => poOf(l) || (l.nama || "Jasa Pengiriman");
       return `<table class="inv-items">
-      <thead><tr><th style="width:26px">No</th><th>${col2}</th><th>Keterangan</th><th>Qty</th><th>Harga Satuan (Rp)</th>${perRowIns ? "<th>Premi Asuransi (Rp)</th>" : ""}<th>Jumlah (Rp)</th></tr></thead>
+      <thead><tr><th style="width:26px">No</th><th style="width:78px">${col2}</th><th>Keterangan</th><th style="width:34px">Qty</th><th style="width:96px">Harga Satuan (Rp)</th>${perRowIns ? '<th style="width:100px">Premi Asuransi (Rp)</th>' : ""}<th style="width:96px">Jumlah (Rp)</th></tr></thead>
       <tbody>
         ${lines.map((l, i) => `
         <tr>
           <td class="num">${i + 1}</td>
           <td>${cell2(l)}</td>
-          <td class="${/ · Rangka: /.test(ketSatuBaris(l.ket)) ? "ket1" : ""}">${ketSatuBaris(l.ket) || "&nbsp;"}</td>
+          <td class="${/ · Rangka: /.test(ketSatuBaris(l.ket)) ? "ket1" : ""}">${(ketSatuBaris(l.ket) || "&nbsp;").replace(/( · Rangka: [^<]*)/, '<span class="rk">$1</span>')}</td>
           <td class="num">${l.qty || 1}</td>
           <td class="num">${fRp(l.harga)}</td>
           ${perRowIns ? `<td class="num">${premiOf(l) > 0 ? `${fRp(premiOf(l))}<div style="font-size:8.5px;opacity:.7">Nilai Rp ${fRp(Number(l.ins_nilai) || 0)}</div>` : "-"}</td>` : ""}
