@@ -37,6 +37,35 @@ function getHeaders() {
   return h;
 }
 const errTxt = (e, d) => e?.response?.data?.detail || d;
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "";
+const fotoUrl = (u) => {
+  if (!u) return "";
+  if (/^https?:\/\//.test(u)) return u.includes("/storage/v1/object/public/") ? `${API}/media?u=${encodeURIComponent(u)}` : u;
+  return `${BACKEND_URL}${u}`;
+};
+
+/* Deretan gambar kecil; klik membuka ukuran penuh. PDF tampil sebagai kotak "PDF". */
+function Galeri({ judul, items, kosong }) {
+  return (
+    <div style={{ margin: "8px 0" }}>
+      <div style={{ fontSize: 11, color: "#8b949e", fontWeight: 700, marginBottom: 4 }}>{judul} ({items.length})</div>
+      {items.length === 0 ? <div style={{ fontSize: 12, color: "#f85149" }}>{kosong}</div> : (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {items.map((f, i) => {
+            const u = fotoUrl(f.url);
+            const pdf = /\.pdf(\?|$)/i.test(f.url || "");
+            return (
+              <a key={f.id || i} href={u} target="_blank" rel="noreferrer" title={f.cap || ""} style={{ position: "relative", width: 76, height: 76, borderRadius: 8, overflow: "hidden", background: "#1c2128", border: f.manual ? "2px solid #e3b341" : "1px solid #30363d", display: "flex", alignItems: "center", justifyContent: "center", color: "#8b949e", fontSize: 11, textDecoration: "none" }}>
+                {pdf ? "PDF" : <img src={u} alt="" loading="lazy" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+                {f.cap ? <span style={{ position: "absolute", left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,.65)", color: "#fff", fontSize: 9.5, textAlign: "center", padding: "1px 0" }}>{f.cap}</span> : null}
+              </a>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /* ── Grafik: batang bertumpuk per hari (Min–Sab) + total per warna ── */
 function Grafik({ data }) {
@@ -86,17 +115,19 @@ function Grafik({ data }) {
 function TinjauPanel({ row, onSaved, setMsg }) {
   const f = row.flags || {};
   const [bj, setBj] = useState(!!f.bastk_tidak_jelas);
+  const [asalNo, setAsalNo] = useState(!!f.asal_tidak_sah);
   const [klaim, setKlaim] = useState(!!f.klaim);
   const [tolak, setTolak] = useState(!!f.ditolak);
   const [cat, setCat] = useState(f.catatan || "");
   const [tolakCp, setTolakCp] = useState(f.tolak_cp || []);
-  const [manual, setManual] = useState(null);
+  const [trip, setTrip] = useState(null);
+  const manual = (trip?.daily_checkpoints || []).filter((c) => c.manual);
   useEffect(() => {
-    axios.get(`${API}/public/trips/${row.trip_id}`).then((r) => setManual((r.data?.daily_checkpoints || []).filter((c) => c.manual))).catch(() => setManual([]));
+    axios.get(`${API}/public/trips/${row.trip_id}`).then((r) => setTrip(r.data || {})).catch(() => setTrip({}));
   }, [row.trip_id]);
   const simpan = async () => {
     try {
-      await axios.post(`${API}/admin/kpi/tinjau/${row.trip_id}`, { bastk_tidak_jelas: bj, klaim, ditolak: tolak, catatan: cat, tolak_cp: tolakCp }, { headers: getHeaders() });
+      await axios.post(`${API}/admin/kpi/tinjau/${row.trip_id}`, { bastk_tidak_jelas: bj, asal_tidak_sah: asalNo, klaim, ditolak: tolak, catatan: cat, tolak_cp: tolakCp }, { headers: getHeaders() });
       setMsg({ t: "✓ Tinjauan disimpan", err: false });
       onSaved();
     } catch (e) { setMsg({ t: errTxt(e, "Gagal menyimpan tinjauan"), err: true }); }
@@ -108,6 +139,14 @@ function TinjauPanel({ row, onSaved, setMsg }) {
   );
   return (
     <div style={{ background: "#0d1117", border: "1px solid #232a36", borderRadius: 10, padding: 12, marginTop: 8 }}>
+      {!trip ? <div style={{ fontSize: 12, color: "#8b949e" }}>Memuat foto…</div> : (
+        <>
+          <Galeri judul="Foto asal" items={(trip.album?.asal || []).map((a) => ({ id: a.id, url: a.url, cap: a.uploaded_by === "admin" ? "admin" : "" }))} kosong="Belum ada foto asal" />
+          <Galeri judul="Checkpoint harian" items={(trip.daily_checkpoints || []).map((c) => ({ id: c.id, url: c.url, cap: (c.date || "").slice(5), manual: !!c.manual }))} kosong="Belum ada checkpoint" />
+          <Galeri judul="BASTK" items={(trip.handover?.bastk || []).map((b) => ({ id: b.id, url: b.url }))} kosong="Belum ada BASTK" />
+        </>
+      )}
+      {cb(asalNo, setAsalNo, "Foto asal tidak sah / bukan foto kendaraan (nilai jadi 0,5)")}
       {cb(bj, setBj, "BASTK belum jelas (nilai jadi 0,5)")}
       {cb(klaim, setKlaim, "Ada klaim (gugur, 0 poin)")}
       {cb(tolak, setTolak, "Tolak trip ini (gugur, 0 poin)")}

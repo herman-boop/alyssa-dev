@@ -125,6 +125,8 @@ def periksa_trip(trip, order=None, flags=None):
 
     if not asal:
         kuning.append("Foto asal kosong")
+    elif flags.get("asal_tidak_sah"):
+        kuning.append("Foto asal tidak sah")
     if flags.get("bastk_tidak_jelas"):
         kuning.append("BASTK belum jelas")
 
@@ -252,7 +254,7 @@ async def tinjau(db, trip_id, body, aktor):
     if await _paid(db, sub.get("user_id"), key):
         raise ValueError("Pekan ini sudah dibayar, tidak bisa diubah")
     flags = dict(sub.get("flags") or {})
-    for k in ("bastk_tidak_jelas", "klaim", "ditolak"):
+    for k in ("bastk_tidak_jelas", "asal_tidak_sah", "klaim", "ditolak"):
         if k in body:
             flags[k] = bool(body[k])
     if "tolak_cp" in body:
