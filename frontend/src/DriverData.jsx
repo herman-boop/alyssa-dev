@@ -101,6 +101,33 @@ const S = {
   pill: (c) => ({ display: "inline-block", padding: "2px 8px", borderRadius: 10, fontSize: 10, fontWeight: 700, background: c === "aktif" ? "#1a4a2a" : "#2d1a1a", color: c === "aktif" ? "#56d364" : "#f85149", border: `1px solid ${c === "aktif" ? "#2ea043" : "#f85149"}` }),
 };
 
+/* ── Pencarian driver: instan di sisi browser ──
+   Cocok per potongan nama ("ag" → Agus, Agustiawan, juga Bagus; yang diawali "ag" tampil duluan),
+   ID driver, nomor HP (≥3 angka), dan 4 angka belakang KTP (ketik angkanya saja). 0 = tidak cocok. */
+export function skorDriver(d, q) {
+  const t = String(q || "").trim().toLowerCase();
+  if (!t) return 1;
+  const nama = String(d.nama || "").toLowerCase();
+  let s = 0;
+  if (nama.startsWith(t)) s = 4;
+  else if (nama.split(/\s+/).some((w) => w.startsWith(t))) s = 3;
+  else if (nama.includes(t)) s = 1;
+  if (String(d.driver_id || "").toLowerCase().includes(t)) s = Math.max(s, 2);
+  const digits = t.replace(/\D/g, "");
+  if (digits) {
+    const ktp = String(d.no_ktp || "").replace(/\D/g, "");
+    const hp = String(d.no_hp || "").replace(/\D/g, "");
+    if (ktp && (digits.length > 4 ? ktp.includes(digits) : ktp.slice(-4).includes(digits))) s = Math.max(s, 2);
+    if (digits.length >= 3 && hp.includes(digits)) s = Math.max(s, 2);
+  }
+  return s;
+}
+function cariDriver(drivers, q, limit) {
+  const r = (drivers || []).map((d) => ({ d, s: skorDriver(d, q) })).filter((x) => x.s > 0)
+    .sort((a, b) => b.s - a.s || String(a.d.nama || "").localeCompare(String(b.d.nama || ""))).map((x) => x.d);
+  return limit ? r.slice(0, limit) : r;
+}
+
 /* ── Cetak Surat: search & pick driver ── */
 function PrintSuratSearch({ drivers, onPrint, headers }) {
   const [q, setQ] = useState("");
@@ -114,14 +141,7 @@ function PrintSuratSearch({ drivers, onPrint, headers }) {
     return () => document.removeEventListener("mousedown", close);
   }, []);
 
-  const qLower = q.trim().toLowerCase();
-  const qDigits = q.replace(/\D/g, ""); // cocokkan 4 digit KTP HANYA kalau query berisi angka
-  const results = q.trim().length >= 2
-    ? drivers.filter(d =>
-        (d.nama || "").toLowerCase().includes(qLower) ||
-        (qDigits.length > 0 && (d.no_ktp || "").slice(-4).includes(qDigits))
-      ).slice(0, 8)
-    : [];
+  const results = q.trim().length >= 2 ? cariDriver(drivers, q, 8) : [];
 
   return (
     <div ref={ref} style={{ position: "relative" }}>
@@ -189,8 +209,7 @@ export default function DriverData({ embedded = false }) {
     setLoading(true);
     try {
       const params = {};
-      if (search.trim()) params.q = search.trim();
-      if (filterStatus) params.status = filterStatus;
+      if (filterStatus) params.status = filterStatus;   // pencarian teks difilter langsung di browser (instan)
       const [rDrivers, rOrders] = await Promise.all([
         axios.get(`${API}/admin/drivers`, { headers, params }),
         axios.get(`${API}/admin/orders`, { headers, params: { limit: 500 } }).catch(() => ({ data: { items: [] } })),
@@ -199,12 +218,12 @@ export default function DriverData({ embedded = false }) {
       setOrders(rOrders.data.items || []);
     } catch { flash("Gagal memuat data"); }
     finally { setLoading(false); }
-  }, [search, filterStatus, pin]);
+  }, [filterStatus, pin]);
 
   useEffect(() => { load(); }, [load]);
 
   const driversWithStats = drivers.map((d) => ({ ...d, _stats: computeDriverStats(d, orders) }));
-  const visibleDrivers = driversWithStats.filter((d) =>
+  const visibleDrivers = cariDriver(driversWithStats, search).filter((d) =>
     (!filterSim || d.tipe_sim === filterSim) && (!filterTier || d._stats.tier === filterTier)
   );
   const tierCounts = driversWithStats.reduce((acc, d) => { acc[d._stats.tier] = (acc[d._stats.tier] || 0) + 1; return acc; }, {});
@@ -362,7 +381,7 @@ export default function DriverData({ embedded = false }) {
       <div className="adm-filterbar-v2" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "0 20px 16px" }}>
         <div style={{ position: "relative", flex: "1 1 220px", minWidth: 200 }}>
           <span style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "#8b949e" }}><IcoSearch /></span>
-          <input style={{ ...S.input, paddingLeft: 30 }} placeholder="Cari nama, ID driver, nomor HP..." value={search} onChange={e => setSearch(e.target.value)} />
+          <input style={{ ...S.input, paddingLeft: 30 }} placeholder="Cari nama (ketik 2 huruf), ID, HP, atau 4 angka belakang KTP..." value={search} onChange={e => setSearch(e.target.value)} />
         </div>
         <select style={{ ...S.input, width: 140 }} value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
           <option value="">Semua Status</option>

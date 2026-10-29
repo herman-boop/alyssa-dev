@@ -6067,11 +6067,14 @@ async def list_drivers(q: Optional[str] = None, status: Optional[str] = None):
     filt: dict = {}
     if status: filt["status"] = status
     if q:
+        eq = re.escape(q.strip()[:60])   # teks biasa, bukan regex (karakter seperti "(" tidak boleh merusak pencarian)
         filt["$or"] = [
-            {"nama": {"$regex": q, "$options": "i"}},
-            {"no_hp": {"$regex": q, "$options": "i"}},
-            {"driver_id": {"$regex": q, "$options": "i"}},
+            {"nama": {"$regex": eq, "$options": "i"}},
+            {"no_hp": {"$regex": eq, "$options": "i"}},
+            {"driver_id": {"$regex": eq, "$options": "i"}},
         ]
+        if eq.isdigit():
+            filt["$or"].append({"no_ktp": {"$regex": eq + "$"}})   # 4 angka belakang KTP
     docs = await db.drivers.find(filt, {"_id": 0}).sort("created_at", -1).to_list(500)
     return {"items": docs, "total": len(docs)}
 
