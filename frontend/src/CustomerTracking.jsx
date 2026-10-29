@@ -176,29 +176,62 @@ function shareWaText(text) {
   window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener");
 }
 
+/* Pemberitahuan kecil (tanpa library) — dipakai saat berbagi foto gagal/terbatas. */
+function bagikanToast(msg) {
+  try {
+    const el = document.createElement("div");
+    el.textContent = msg;
+    el.style.cssText = "position:fixed;left:12px;right:12px;bottom:24px;z-index:99999;background:#111827;color:#fff;padding:12px 14px;border-radius:10px;font:600 13.5px/1.4 system-ui,sans-serif;box-shadow:0 6px 24px rgba(0,0,0,.4);text-align:center";
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 5200);
+  } catch (e) { /* abaikan */ }
+}
+
+/* Ambil file foto. Coba langsung dulu (sering sudah ada di cache browser karena gambarnya sedang tampil);
+   kalau diblokir CORS / mime salah, ulangi lewat proxy backend. Hasil disimpan supaya tekan ulang langsung jalan. */
+const _fotoCache = new Map();
+async function ambilFile(it) {
+  if (_fotoCache.has(it.url)) return _fotoCache.get(it.url);
+  const viaProxy = it.url.includes("/storage/v1/object/public/") ? `${API}/media?u=${encodeURIComponent(it.url)}` : null;
+  let blob = null;
+  for (const u of [it.url, viaProxy].filter(Boolean)) {
+    try {
+      const r = await fetch(u, { mode: "cors" });
+      if (!r.ok) continue;
+      const bl = await r.blob();
+      if (bl && bl.size > 0) { blob = bl; break; }
+    } catch (e) { /* coba jalur berikutnya */ }
+  }
+  if (!blob) throw new Error("fetch");
+  const tipe = /^image\/|^application\/pdf$/.test(blob.type) ? blob.type : (/\.pdf(\?|$)/i.test(it.url) ? "application/pdf" : "image/jpeg");
+  const ext = tipe === "application/pdf" ? "pdf" : (tipe.split("/")[1] || "jpg").replace("jpeg", "jpg");
+  const safe = (it.label || "foto").replace(/[^\w]+/g, "_");
+  const file = new File([blob], `${safe}.${ext}`, { type: tipe });
+  _fotoCache.set(it.url, file);
+  return file;
+}
+
 /* Bagikan FOTO ASLI ke WhatsApp via Web Share API (share sheet → pilih WhatsApp),
    sehingga gambar langsung tampil di chat, bukan sekadar link.
-   items: [{ url, label }]. Fallback ke link teks bila perangkat tak mendukung. */
+   items: [{ url, label }]. Kalau perangkat tak mendukung / gagal, beri tahu alasannya lalu
+   kirim link teks sebagai cadangan. */
 async function shareWaPhotos(items) {
+  const fallbackLink = (alasan) => {
+    bagikanToast(alasan);
+    setTimeout(() => shareWaText(items.map((it) => `${it.label ? it.label + "\n" : ""}${it.url}`).join("\n\n")), 1200);
+  };
   try {
-    const files = [];
-    for (const it of items) {
-      const resp = await fetch(it.url, { mode: "cors" });
-      if (!resp.ok) throw new Error(`fetch ${resp.status}`);
-      const blob = await resp.blob();
-      const ext = (blob.type.split("/")[1] || "jpg").replace("jpeg", "jpg");
-      const safe = (it.label || "foto").replace(/[^\w]+/g, "_");
-      files.push(new File([blob], `${safe}.${ext}`, { type: blob.type || "image/jpeg" }));
-    }
-    if (navigator.canShare && navigator.canShare({ files })) {
-      await navigator.share({ files });
-      return;
-    }
-    throw new Error("file share unsupported");
+    const bisaShare = typeof navigator.share === "function" && typeof navigator.canShare === "function"
+      && navigator.canShare({ files: [new File(["x"], "a.jpg", { type: "image/jpeg" })] });
+    if (!bisaShare) return fallbackLink("Browser ini belum bisa mengirim foto langsung. Buka halaman ini di Chrome agar fotonya terkirim sebagai gambar. Sementara dikirim sebagai link.");
+    if (items.length > 1) bagikanToast(`Menyiapkan ${items.length} foto…`);
+    const files = await Promise.all(items.map(ambilFile));
+    if (!navigator.canShare({ files })) return fallbackLink("Jumlah/ukuran foto terlalu besar untuk sekali kirim. Coba kirim satu per satu lewat tombol hijau di tiap foto.");
+    await navigator.share({ files });
   } catch (err) {
-    if (err && err.name === "AbortError") return; // user membatalkan share
-    // Fallback (desktop / browser lama): kirim link teks
-    shareWaText(items.map((it) => `${it.label ? it.label + "\n" : ""}${it.url}`).join("\n\n"));
+    if (err && err.name === "AbortError") return;           // pengguna membatalkan
+    if (err && err.name === "NotAllowedError") { bagikanToast("Foto sudah siap. Tekan tombol bagikan sekali lagi."); return; }   // izin klik kedaluwarsa; berkas sudah tersimpan
+    fallbackLink("Foto gagal diambil untuk dikirim langsung. Dikirim sebagai link.");
   }
 }
 
