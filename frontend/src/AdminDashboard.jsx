@@ -5429,6 +5429,22 @@ function HistoriDokumen({ headers }) {
   const [showDup, setShowDup] = useState(false);      // modal nomor faktur dobel
   const [showPPP, setShowPPP] = useState(false);      // laporan penjualan per pelanggan
 
+  // Unduh Excel unit PO pelanggan yang belum masuk invoice di Histori Dokumen.
+  const belumDitagihExcel = async () => {
+    const nama = window.prompt("Nama pelanggan (boleh sebagian):", "BRI MULTIFINANCE INDONESIA");
+    if (!nama || !nama.trim()) return;
+    try {
+      const r = await axios.get(`${API}/admin/belum-ditagih.xlsx`, { headers, params: { customer: nama.trim() }, responseType: "blob" });
+      const [belum, sudah, inv] = String(r.headers["x-ringkas"] || "0/0/0").split("/");
+      const url = URL.createObjectURL(r.data);
+      const a = document.createElement("a");
+      a.href = url; a.download = `belum-ditagih-${nama.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-")}.xlsx`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      window.alert(`Excel diunduh.\nBelum ditagih: ${belum} unit\nSudah ada di ${inv} invoice: ${sudah} unit`);
+    } catch (e) { window.alert("Gagal: " + (e?.response?.status === 400 ? "nama pelanggan kosong" : "server error")); }
+  };
+
   const isPrice = filter === "__pricelist";
   // Nomor faktur yang tersimpan lebih dari sekali (untuk lencana & banner; tampilan saja).
   const dupCount = useMemo(() => {
@@ -5607,6 +5623,7 @@ function HistoriDokumen({ headers }) {
               <button style={btnS} onClick={quickBulan} data-testid="dochist-bulan">Bulan ini</button>
               <button style={btnS} onClick={quickTahun} data-testid="dochist-tahun">Tahun ini</button>
               <button style={{ ...btnS, borderColor: "#3fb950", color: "#3fb950" }} onClick={() => setShowPPP(true)} data-testid="dochist-ppp">📊 Laporan Penjualan per Pelanggan</button>
+              <button style={{ ...btnS, borderColor: "#58a6ff", color: "#58a6ff" }} onClick={belumDitagihExcel} data-testid="dochist-belum-tagih">⬇ PO Belum Ditagih (Excel)</button>
               <div style={{ flex: 1 }} />
               <button style={{ ...btnS, borderColor: "#1f6feb", color: "#58a6ff" }} onClick={load} data-testid="dochist-apply">Terapkan Filter</button>
               <button style={btnS} onClick={resetFilter} data-testid="dochist-reset">Reset Filter</button>
