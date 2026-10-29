@@ -20,6 +20,7 @@ import customer_name  # nama pelanggan tunggal (kunci & tulisan resmi)
 import app_users  # akun pengguna (Pemilik, undangan, login) — Tahap 1
 import kpi  # KPI & poin Admin Operasional 2 (pekan Minggu 09:00 WIB)
 import aktivitas  # Riwayat Aktivitas akun
+import belum_tagih  # Excel unit PO belum ditagih
 import leg_supplier  # supplier per leg + pembayaran supplier
 import driver_incentive  # insentif per checkpoint driver borongan (antrean bayar)
 import driver_notif  # notif WhatsApp ke driver saat insentif dibayar
@@ -1335,6 +1336,23 @@ async def set_doc_stempel_default(body: StempelBody):
     v = _valid_stempel(body.stempel)
     await db.app_settings.update_one({"key": "doc_stempel_default"}, {"$set": {"key": "doc_stempel_default", "value": v}}, upsert=True)
     return {"ok": True, "ada": bool(v)}
+
+
+@api_router.get("/admin/belum-ditagih.xlsx", dependencies=[Depends(require_admin_pin)])
+async def belum_ditagih_xlsx(customer: str):
+    """Excel: unit PO pelanggan yang belum tercantum di invoice Histori Dokumen."""
+    from fastapi.responses import Response
+    if not belum_tagih.norm_nama(customer):
+        raise HTTPException(400, "Nama pelanggan wajib diisi")
+    orders = [o async for o in db.orders.find({}, {"_id": 0}).limit(20000) if belum_tagih.cocok_nama(o.get("customer_nama"), customer)]
+    invoices = [d async for d in db.doc_history.find({"jenis": "invoice"}, {"_id": 0, "customer": 1, "order_ids": 1, "lines": 1, "jenis": 1, "meta.customer_nama": 1}).allow_disk_use(True)]
+    baris, ring = belum_tagih.hitung(orders, invoices, customer)
+    tgl = (datetime.now(timezone.utc) + timedelta(hours=7)).strftime("%d-%m-%Y")
+    xl = belum_tagih.ke_xlsx(baris, f"PO {customer.upper()} belum ditagih (per {tgl}) - {len(baris)} unit")
+    fn = "belum-ditagih-" + re.sub(r"[^a-z0-9]+", "-", customer.lower()).strip("-") + ".xlsx"
+    return Response(xl, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{fn}"', "X-Ringkas": f"{ring['unit_belum_ditagih']}/{ring['unit_sudah_ditagih']}/{ring['invoice']}",
+                             "Access-Control-Expose-Headers": "X-Ringkas"})
 
 
 @api_router.patch("/admin/doc-history/{doc_id}/stempel", dependencies=[Depends(require_admin_pin)])
