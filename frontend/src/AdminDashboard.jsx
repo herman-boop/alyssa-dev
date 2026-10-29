@@ -5431,7 +5431,7 @@ function HistoriDokumen({ headers }) {
 
   // Unduh Excel unit PO pelanggan yang belum masuk invoice di Histori Dokumen.
   const belumDitagihExcel = async () => {
-    const nama = window.prompt("Nama pelanggan (boleh sebagian):", "BRI MULTIFINANCE INDONESIA");
+    const nama = window.prompt("Kata kunci nama pelanggan (pendek saja, mis. BRI):", "BRI");
     if (!nama || !nama.trim()) return;
     try {
       const r = await axios.get(`${API}/admin/belum-ditagih.xlsx`, { headers, params: { customer: nama.trim() }, responseType: "blob" });
