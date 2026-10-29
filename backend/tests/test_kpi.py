@@ -137,6 +137,13 @@ def test_foto_asal_kosong_kuning_setengah():
     assert ev["warna"] == "kuning" and ev["poin"] == 0.5 and ev["alasan"] == ["Foto asal kosong"]
 
 
+def test_foto_asal_tidak_sah_kuning():
+    ev = kpi.periksa_trip(trip4(), DELIV, {"asal_tidak_sah": True})
+    assert ev["warna"] == "kuning" and ev["poin"] == 0.5 and ev["alasan"] == ["Foto asal tidak sah"]
+    ev = kpi.periksa_trip(trip4(asal=False), DELIV, {"asal_tidak_sah": True})   # kosong tetap dilaporkan "kosong", tidak ganda
+    assert ev["alasan"] == ["Foto asal kosong"]
+
+
 def test_foto_asal_menentukan_hari_berangkat():
     # foto asal 12 Okt tapi checkpoint pertama baru 13 Okt → hari 12 kosong → merah
     ev = kpi.periksa_trip(trip4(dates=("2026-10-13", "2026-10-14", "2026-10-15")), DELIV)
