@@ -347,7 +347,7 @@ OPS1_WRITE = ("/admin/orders", "/admin/permintaan-harga", "/admin/permintaan-tem
               "/admin/suppliers", "/admin/pelanggan", "/admin/deal-prices", "/vehicle-types")
 OPS2_WRITE = ("/admin/trips", "/admin/drivers", "/admin/koordinators", "/admin/leg-tasks",
               "/admin/ship-master", "/admin/kapal-master", "/admin/petugas", "/admin/driver-wa",
-              "/admin/ais", "/admin/migrate-heic")
+              "/admin/ais", "/admin/migrate-heic", "/admin/kpi/submit")
 _SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
 _OWNER_ONLY_DELETE = re.compile(r"^/admin/(pelanggan|suppliers)/[^/]+$")
 

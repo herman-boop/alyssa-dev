@@ -18,6 +18,8 @@ import doc_duplikat  # nomor faktur dobel di Histori Dokumen
 import nama_kembar  # gabung nama pelanggan kembar (Langkah 2)
 import customer_name  # nama pelanggan tunggal (kunci & tulisan resmi)
 import app_users  # akun pengguna (Pemilik, undangan, login) — Tahap 1
+import kpi  # KPI & poin Admin Operasional 2 (pekan Minggu 09:00 WIB)
+import aktivitas  # Riwayat Aktivitas akun
 import leg_supplier  # supplier per leg + pembayaran supplier
 import driver_incentive  # insentif per checkpoint driver borongan (antrean bayar)
 import driver_notif  # notif WhatsApp ke driver saat insentif dibayar
@@ -180,6 +182,32 @@ async def _ensure_indexes():
         await db.doc_history.create_index([("created_at", -1)])
     except Exception as e:
         logger.warning(f"[startup] gagal bikin index doc_history.created_at: {e}")
+
+
+@app.on_event("startup")
+async def _ensure_aktivitas_index():
+    try:
+        await db[aktivitas.COLL].create_index([("ts", -1)])
+        await db[aktivitas.COLL].create_index([("user_id", 1), ("ts", -1)])
+        await db[kpi.SUBS].create_index([("trip_id", 1)], unique=True)
+    except Exception as e:
+        logger.warning(f"[startup] gagal bikin index aktivitas/kpi: {e}")
+
+
+@app.middleware("http")
+async def _jejak_aktivitas(request: Request, call_next):
+    """Catat siapa mengubah apa (hanya yang membawa token akun dan berhasil). Tidak pernah menggagalkan request."""
+    response = await call_next(request)
+    try:
+        if request.method in ("POST", "PUT", "PATCH", "DELETE") and response.status_code < 400:
+            auth = request.headers.get("authorization") or ""
+            if auth.lower().startswith("bearer "):
+                u = await app_users.verify_token(db, auth[7:].strip())
+                if u:
+                    await aktivitas.catat(db, u, request.method, request.url.path, response.status_code)
+    except Exception as e:
+        logger.warning(f"[aktivitas] gagal mencatat: {e}")
+    return response
 
 
 @app.on_event("startup")
@@ -2813,7 +2841,10 @@ class OrderConvertBody(BaseModel):
 
 
 @api_router.post("/orders/{order_id}/convert")
-async def convert_order_to_trip(order_id: str, payload: OrderConvertBody):
+async def convert_order_to_trip(
+    order_id: str, payload: OrderConvertBody,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
     """Bridge order → trip. Idempotent: if order.trip_id already set, return existing trip.
     Creates a trip with route/vehicle pre-filled from order; sets order.trip_id + status=DISPATCHED."""
     order = await db.orders.find_one({"order_id": order_id})
@@ -2892,6 +2923,11 @@ async def convert_order_to_trip(order_id: str, payload: OrderConvertBody):
         "created_at": now,
         "updated_at": now,
     }
+    # KPI: trip dicatat milik akun yang mengonversinya (poin hanya dihitung untuk Admin Operasional 2)
+    if authorization and authorization.lower().startswith("bearer "):
+        actor = await app_users.verify_token(db, authorization[7:].strip())
+        if actor:
+            trip_doc["kpi_owner"] = {"user_id": actor.get("user_id"), "nama": actor.get("nama") or actor.get("email") or "", "role": actor.get("role")}
     await db.trips.insert_one(trip_doc)
     # Update order — include driver_id if provided in convert payload
     order_upd: dict = {"trip_id": trip_id, "status": "DISPATCHED", "updated_at": now}
@@ -9247,6 +9283,206 @@ async def admin_users_delete(user_id: str, _by: str = Depends(require_users_admi
         return await app_users.delete_user(db, user_id)
     except (LookupError, ValueError) as e:
         raise _uerr(e)
+
+
+
+# ══════════════════════════════════════════════════════
+# KPI & POIN ADMIN OPERASIONAL 2 · RIWAYAT AKTIVITAS · CHECKPOINT MANUAL
+# ══════════════════════════════════════════════════════
+async def _kpi_caller(request: Request, x_admin_pin, authorization):
+    r = await _resolve_admin(request, x_admin_pin, authorization)
+    return r.get("user")
+
+
+def _kpi_week(minggu: Optional[str]):
+    if minggu:
+        try:
+            return kpi.week_from_key(minggu)
+        except Exception:
+            raise HTTPException(400, "Format minggu salah (YYYY-MM-DD)")
+    return kpi.week_start(datetime.now(timezone.utc))
+
+
+@api_router.get("/admin/aktivitas")
+async def get_aktivitas(
+    request: Request, user_id: Optional[str] = Query(None), limit: int = Query(100), sebelum: Optional[str] = Query(None),
+    x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    """Riwayat aktivitas. Akun biasa hanya melihat miliknya; Pemilik/PIN melihat semua (atau filter user_id)."""
+    u = await _kpi_caller(request, x_admin_pin, authorization)
+    uid = u.get("user_id") if (u and u.get("role") != "pemilik") else (user_id or None)
+    return {"items": await aktivitas.daftar(db, uid, limit, sebelum)}
+
+
+@api_router.get("/admin/tugas-saya")
+async def get_tugas_saya(
+    request: Request, user_id: Optional[str] = Query(None),
+    x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    u = await _kpi_caller(request, x_admin_pin, authorization)
+    target = u if (u and u.get("role") != "pemilik") else None
+    if target is None:
+        if not user_id:
+            raise HTTPException(400, "user_id wajib untuk Pemilik/PIN")
+        target = await db.app_users.find_one({"user_id": user_id}, {"_id": 0})
+        if not target:
+            raise HTTPException(404, "Akun tidak ditemukan")
+    return {"items": await kpi.tugas_saya(db, target, today_wib())}
+
+
+@api_router.get("/admin/kpi/saya")
+async def get_kpi_saya(
+    request: Request, minggu: Optional[str] = Query(None), user_id: Optional[str] = Query(None),
+    x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    u = await _kpi_caller(request, x_admin_pin, authorization)
+    uid = u.get("user_id") if (u and u.get("role") != "pemilik") else user_id
+    if not uid:
+        raise HTTPException(400, "user_id wajib untuk Pemilik/PIN")
+    return await kpi.minggu(db, uid, _kpi_week(minggu))
+
+
+@api_router.get("/admin/kpi/ringkasan")
+async def get_kpi_ringkasan(
+    request: Request, minggu: Optional[str] = Query(None),
+    x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    u = await _kpi_caller(request, x_admin_pin, authorization)
+    if u and u.get("role") != "pemilik":
+        raise HTTPException(403, "Hanya Pemilik")
+    start = _kpi_week(minggu)
+    return {"minggu": kpi.week_info(start), "akun": await kpi.ringkasan(db, start), "poin_rupiah": kpi.RUPIAH_PER_POIN}
+
+
+@api_router.post("/admin/kpi/submit/{trip_id}")
+async def post_kpi_submit(
+    trip_id: str, request: Request,
+    x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    u = await _kpi_caller(request, x_admin_pin, authorization)
+    if not u:
+        raise HTTPException(400, "Masuk dengan akun untuk submit trip")
+    try:
+        return await kpi.submit(db, trip_id, u)
+    except LookupError as e:
+        raise HTTPException(404, str(e))
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@api_router.post("/admin/kpi/tinjau/{trip_id}")
+async def post_kpi_tinjau(
+    trip_id: str, request: Request, body: dict = Body(...),
+    x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    u = await _kpi_caller(request, x_admin_pin, authorization)
+    try:
+        return await kpi.tinjau(db, trip_id, body, u)
+    except LookupError as e:
+        raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@api_router.post("/admin/kpi/bayar")
+async def post_kpi_bayar(
+    request: Request, body: dict = Body(...),
+    x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    u = await _kpi_caller(request, x_admin_pin, authorization)
+    uid, key = str(body.get("user_id") or ""), str(body.get("minggu") or "")
+    if not uid or not key:
+        raise HTTPException(400, "user_id dan minggu wajib")
+    try:
+        return await kpi.bayar(db, uid, key, u)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@api_router.post("/admin/kpi/pemilik/{trip_id}")
+async def post_kpi_pemilik(
+    trip_id: str, request: Request, body: dict = Body(...),
+    x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    """Pemilik: tetapkan trip (mis. yang dikonversi sebelum fitur ini ada, atau lewat PIN) ke satu akun KPI."""
+    await _kpi_caller(request, x_admin_pin, authorization)
+    acc = await db.app_users.find_one({"user_id": str(body.get("user_id") or "")}, {"_id": 0})
+    if not acc:
+        raise HTTPException(404, "Akun tidak ditemukan")
+    res = await db.trips.update_one({"trip_id": trip_id}, {"$set": {"kpi_owner": {"user_id": acc.get("user_id"), "nama": acc.get("nama") or acc.get("email") or "", "role": acc.get("role")}}})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Trip tidak ditemukan")
+    return {"ok": True}
+
+
+@api_router.post("/admin/trips/{trip_id}/checkpoint-manual")
+async def post_checkpoint_manual(
+    trip_id: str, request: Request,
+    foto: UploadFile = File(...), tanggal: str = Form(...), alamat: Optional[str] = Form(None), keterangan: Optional[str] = Form(None),
+    x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    """Checkpoint harian yang diinput admin atas nama driver (foto dikirim driver lewat WhatsApp).
+    Sah untuk hitungan KPI, ditandai manual, dan bisa ditolak Pemilik saat tinjauan. Tidak memicu insentif driver."""
+    u = await _kpi_caller(request, x_admin_pin, authorization)
+    trip = await db.trips.find_one({"trip_id": trip_id})
+    if not trip:
+        raise HTTPException(404, "Trip not found")
+    try:
+        d = datetime.strptime((tanggal or "").strip(), "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(400, "Tanggal harus YYYY-MM-DD")
+    today = datetime.now(WIB).date()
+    if d > today:
+        raise HTTPException(400, "Tanggal tidak boleh di masa depan")
+    if (today - d).days > 45:
+        raise HTTPException(400, "Tanggal terlalu lama (maks 45 hari ke belakang)")
+    tgl = d.strftime("%Y-%m-%d")
+    if any(cp.get("date") == tgl for cp in (trip.get("daily_checkpoints") or [])):
+        raise HTTPException(409, f"Checkpoint tanggal {tgl} sudah ada")
+    url = _save_upload(trip_id, "daily", foto, ALLOWED_IMG)
+    now = datetime.now(timezone.utc)
+    ts = now if d == today else datetime(d.year, d.month, d.day, 12, 0, tzinfo=WIB).astimezone(timezone.utc)
+    entry = {"id": str(uuid.uuid4()), "date": tgl, "url": url, "ts": ts.isoformat(), "manual": True,
+             "diinput_pada": now.isoformat(), "oleh_id": (u or {}).get("user_id") or "pin"}
+    if alamat and alamat.strip():
+        entry["alamat"] = alamat.strip()[:200]
+    if keterangan and keterangan.strip():
+        entry["keterangan"] = keterangan.strip()[:300]
+    await db.trips.update_one({"trip_id": trip_id}, {"$push": {"daily_checkpoints": entry}, "$set": {"updated_at": now.isoformat()}})
+    return {"ok": True, "checkpoint": entry}
+
+
+@api_router.delete("/admin/trips/{trip_id}/checkpoint-manual/{cp_id}")
+async def delete_checkpoint_manual(
+    trip_id: str, cp_id: str, request: Request,
+    x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    """Hapus checkpoint MANUAL (yang dikirim driver sendiri tidak bisa dihapus dari sini). Setelah trip di-submit hanya Pemilik."""
+    u = await _kpi_caller(request, x_admin_pin, authorization)
+    trip = await db.trips.find_one({"trip_id": trip_id})
+    if not trip:
+        raise HTTPException(404, "Trip not found")
+    cp = next((c for c in (trip.get("daily_checkpoints") or []) if c.get("id") == cp_id), None)
+    if not cp:
+        raise HTTPException(404, "Checkpoint tidak ditemukan")
+    if not cp.get("manual"):
+        raise HTTPException(400, "Hanya checkpoint manual yang bisa dihapus")
+    if (u and u.get("role") != "pemilik") and await db[kpi.SUBS].find_one({"trip_id": trip_id}):
+        raise HTTPException(403, "Trip sudah di-submit; hubungi Pemilik")
+    await db.trips.update_one({"trip_id": trip_id}, {"$pull": {"daily_checkpoints": {"id": cp_id}}})
+    return {"ok": True}
 
 
 # ---------- Static file serving for uploads ----------
