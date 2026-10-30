@@ -2737,6 +2737,29 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
       alert(e?.response?.data?.detail || "Gagal kirim ulang WhatsApp");
     } finally { setWaBusy(false); }
   };
+  // Kirim manual: buka WhatsApp admin sendiri (bukan Fonnte) dengan pesan + link tracking sudah terisi.
+  const kirimWaManual = () => {
+    const awal = String(order.customer_hp || "").replace(/\D/g, "");
+    const ask = window.prompt("Nomor WhatsApp pelanggan (boleh diubah):", awal);
+    if (ask === null) return;
+    let no = ask.replace(/\D/g, "");
+    if (no.startsWith("0")) no = "62" + no.slice(1);
+    else if (no.startsWith("8")) no = "62" + no;
+    if (no.length < 10) { window.alert("Nomor WhatsApp tidak valid."); return; }
+    const link = order.wa_tracking_url || `${window.location.origin}/?track=${order.order_id}`;
+    const u0 = (order.units && order.units[0]) || {};
+    const tipe = [order.vehicle_type || u0.vehicle_type, u0.tipe_model].filter(Boolean).join(" ");
+    const nopol = order.nopol || u0.nopol || "";
+    const teks = `Halo Bapak/Ibu ${order.customer_nama || "Pelanggan"},\n\n`
+      + "Terima kasih telah mempercayakan pengiriman kendaraan Anda kepada PT Alyssa Auto Logistik.\n\n"
+      + `Nomor Resi / Trip ID:\n${order.order_id}\n\n`
+      + (tipe ? `Tipe Kendaraan:\n${tipe}\n\n` : "")
+      + (nopol ? `No. Polisi:\n${nopol}\n\n` : "")
+      + `Lacak status pengiriman melalui tautan berikut:\n${link}\n\n`
+      + "Simpan pesan ini agar nomor resi dan link tracking mudah ditemukan kembali.\n\n"
+      + "PT Alyssa Auto Logistik\nSpesialis Pengiriman Kendaraan Seluruh Indonesia";
+    window.open(`https://wa.me/${no}?text=${encodeURIComponent(teks)}`, "_blank", "noopener");
+  };
   // Format ISO datetime-local ("2026-07-29T14:30") / tanggal ("2026-07-29") jadi "29/07/2026 14:30"
   const fmtDT = (s) => {
     if (!s) return "";
@@ -3025,6 +3048,9 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
               </span>
               <button className="adm-btn adm-btn-ghost adm-btn-xs" onClick={resendWa} disabled={waBusy} data-testid={`adm-wa-resend-${order.order_id}`}>
                 {waBusy ? "Mengirim…" : "🔁 Kirim Ulang"}
+              </button>
+              <button className="adm-btn adm-btn-ghost adm-btn-xs" onClick={kirimWaManual} data-testid={`adm-wa-manual-${order.order_id}`} title="Buka WhatsApp kamu sendiri dengan pesan dan link tracking sudah terisi">
+                📲 Kirim Manual
               </button>
             </span>
             {waStatus === "gagal" && waErr && (
