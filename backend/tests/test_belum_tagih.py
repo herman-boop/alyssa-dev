@@ -19,3 +19,12 @@ def test_hitung():
     assert s["unit_sudah_ditagih"] == 2 and s["invoice"] == 1
     x = b.ke_xlsx(rows, "t")
     assert x[:2] == b"PK"
+
+
+def test_detail():
+    orders = [po("O1", "MHKA1234567890", cust="BRI"), po("O2", "MHKB9999999999", cust="PT BRI Multifinance")]
+    inv = [{"jenis": "invoice", "customer": "BRI", "no_dokumen": "INV0001", "order_ids": [], "lines": [{"ket": "No. Rangka: MHKA1234567890"}]}]
+    rows, s = b.hitung(orders, inv, "BRI")
+    assert [r["order_id"] for r in rows] == ["O2"]
+    assert s["sudah"][0]["invoice"] == "INV0001" and len(s["nama"]) == 2
+    assert b.ke_xlsx(rows, "t", s)[:2] == b"PK"

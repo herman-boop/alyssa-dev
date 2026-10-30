@@ -1348,7 +1348,7 @@ async def belum_ditagih_xlsx(customer: str):
     invoices = [d async for d in db.doc_history.find({"jenis": "invoice"}, {"_id": 0, "customer": 1, "order_ids": 1, "lines": 1, "jenis": 1, "meta.customer_nama": 1}).allow_disk_use(True)]
     baris, ring = belum_tagih.hitung(orders, invoices, customer)
     tgl = (datetime.now(timezone.utc) + timedelta(hours=7)).strftime("%d-%m-%Y")
-    xl = belum_tagih.ke_xlsx(baris, f"PO {customer.upper()} belum ditagih (per {tgl}) - {len(baris)} unit")
+    xl = belum_tagih.ke_xlsx(baris, f"PO {customer.upper()} belum ditagih (per {tgl}) - {len(baris)} unit", ring)
     fn = "belum-ditagih-" + re.sub(r"[^a-z0-9]+", "-", customer.lower()).strip("-") + ".xlsx"
     return Response(xl, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": f'attachment; filename="{fn}"', "X-Ringkas": f"{ring['unit_belum_ditagih']}/{ring['unit_sudah_ditagih']}/{ring['invoice']}",
