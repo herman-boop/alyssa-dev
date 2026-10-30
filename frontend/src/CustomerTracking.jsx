@@ -189,9 +189,15 @@ function bagikanToast(msg) {
 
 /* Ambil file foto. Coba langsung dulu (sering sudah ada di cache browser karena gambarnya sedang tampil);
    kalau diblokir CORS / mime salah, ulangi lewat proxy backend. Hasil disimpan supaya tekan ulang langsung jalan. */
-const _fotoCache = new Map();
+const _fotoCache = new Map();   // url -> Blob
+function _jadiFile(blob, it) {
+  const tipe = /^image\/|^application\/pdf$/.test(blob.type) ? blob.type : (/\.pdf(\?|$)/i.test(it.url) ? "application/pdf" : "image/jpeg");
+  const ext = tipe === "application/pdf" ? "pdf" : (tipe.split("/")[1] || "jpg").replace("jpeg", "jpg");
+  const safe = (it.label || "foto").replace(/[^\w]+/g, "_");
+  return new File([blob], `${safe}.${ext}`, { type: tipe });
+}
 async function ambilFile(it) {
-  if (_fotoCache.has(it.url)) return _fotoCache.get(it.url);
+  if (_fotoCache.has(it.url)) return _jadiFile(_fotoCache.get(it.url), it);
   const viaProxy = it.url.includes("/storage/v1/object/public/") ? `${API}/media?u=${encodeURIComponent(it.url)}` : null;
   let blob = null;
   for (const u of [it.url, viaProxy].filter(Boolean)) {
@@ -203,12 +209,23 @@ async function ambilFile(it) {
     } catch (e) { /* coba jalur berikutnya */ }
   }
   if (!blob) throw new Error("fetch");
-  const tipe = /^image\/|^application\/pdf$/.test(blob.type) ? blob.type : (/\.pdf(\?|$)/i.test(it.url) ? "application/pdf" : "image/jpeg");
-  const ext = tipe === "application/pdf" ? "pdf" : (tipe.split("/")[1] || "jpg").replace("jpeg", "jpg");
-  const safe = (it.label || "foto").replace(/[^\w]+/g, "_");
-  const file = new File([blob], `${safe}.${ext}`, { type: tipe });
-  _fotoCache.set(it.url, file);
-  return file;
+  _fotoCache.set(it.url, blob);
+  return _jadiFile(blob, it);
+}
+
+/* Unduh semua foto di latar belakang begitu halaman terbuka, supaya tombol "Bagikan Semua" langsung
+   membuka menu bagikan (izin klik di HP hanya berlaku beberapa detik; mengunduh 16 foto dulu bisa melewatinya). */
+let _prefetchJalan = false;
+async function prefetchFoto(data) {
+  if (_prefetchJalan || (navigator.connection && navigator.connection.saveData)) return;
+  _prefetchJalan = true;
+  try {
+    const urls = Array.from(new Set((JSON.stringify(data || {}).match(/"https?:\/\/[^"]+\/storage\/v1\/object\/public\/[^"]+"/g) || []).map((x) => x.slice(1, -1))))
+      .filter((u) => !_fotoCache.has(u) && !/maps\.|goo\.gl/i.test(u));
+    let i = 0;
+    const kerja = async () => { while (i < urls.length) { const u = urls[i++]; try { await ambilFile({ url: u }); } catch (e) { /* lewati */ } } };
+    await Promise.all([kerja(), kerja(), kerja()]);
+  } finally { _prefetchJalan = false; }
 }
 
 /* Bagikan FOTO ASLI ke WhatsApp via Web Share API (share sheet → pilih WhatsApp),
@@ -216,6 +233,7 @@ async function ambilFile(it) {
    items: [{ url, label }]. Kalau perangkat tak mendukung / gagal, beri tahu alasannya lalu
    kirim link teks sebagai cadangan. */
 async function shareWaPhotos(items) {
+  let wasHangat = false;
   const fallbackLink = (alasan) => {
     bagikanToast(alasan);
     setTimeout(() => shareWaText(items.map((it) => `${it.label ? it.label + "\n" : ""}${it.url}`).join("\n\n")), 1200);
@@ -224,13 +242,22 @@ async function shareWaPhotos(items) {
     const bisaShare = typeof navigator.share === "function" && typeof navigator.canShare === "function"
       && navigator.canShare({ files: [new File(["x"], "a.jpg", { type: "image/jpeg" })] });
     if (!bisaShare) return fallbackLink("Browser ini belum bisa mengirim foto langsung. Buka halaman ini di Chrome agar fotonya terkirim sebagai gambar. Sementara dikirim sebagai link.");
-    if (items.length > 1) bagikanToast(`Menyiapkan ${items.length} foto…`);
-    const files = await Promise.all(items.map(ambilFile));
+    const hangat = items.every((it) => _fotoCache.has(it.url));
+    if (!hangat && items.length > 1) bagikanToast(`Menyiapkan ${items.length} foto…`);
+    // Semua sudah di cache → tidak ada await sebelum share, jadi izin klik masih berlaku.
+    const files = hangat ? items.map((it) => _jadiFile(_fotoCache.get(it.url), it)) : await Promise.all(items.map(ambilFile));
+    wasHangat = hangat;
     if (!navigator.canShare({ files })) return fallbackLink("Jumlah/ukuran foto terlalu besar untuk sekali kirim. Coba kirim satu per satu lewat tombol hijau di tiap foto.");
     await navigator.share({ files });
   } catch (err) {
     if (err && err.name === "AbortError") return;           // pengguna membatalkan
-    if (err && err.name === "NotAllowedError") { bagikanToast("Foto sudah siap. Tekan tombol bagikan sekali lagi."); return; }   // izin klik kedaluwarsa; berkas sudah tersimpan
+    if (err && err.name === "NotAllowedError") {
+      // Foto sudah di cache tapi tetap ditolak → bukan soal waktu klik, kemungkinan terlalu banyak/besar untuk sekali kirim.
+      bagikanToast(wasHangat && items.length > 1
+        ? "Menu bagikan menolak karena fotonya terlalu banyak. Kirim per foto dengan tombol hijau di tiap foto."
+        : "Foto sudah siap. Tekan tombol bagikan sekali lagi.");
+      return;
+    }
     fallbackLink("Foto gagal diambil untuk dikirim langsung. Dikirim sebagai link.");
   }
 }
@@ -649,6 +676,7 @@ export default function CustomerTracking() {
       const r = await axios.get(`${API}/public/trips/${tripId}`);
       setData(r.data);
       setLastUpdate(new Date());
+      prefetchFoto(r.data);
     } catch {
       setError("not_found");
     } finally {
