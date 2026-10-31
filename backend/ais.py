@@ -178,13 +178,49 @@ def _vf_ts(s):
     return parsed.isoformat() if parsed else None
 
 
+# Kuota bulanan VesselAPI habis (HTTP 429): hentikan SEMUA panggilan selama jeda ini, jangan terus mencoba
+# (tiap percobaan yang ditolak tetap memakan waktu & log, dan kuota baru yang pulih langsung habis lagi).
+KUOTA_JEDA_MENIT = int(os.environ.get("VESSELAPI_QUOTA_PAUSE_MIN") or "360")
+_kuota_blok_sampai = 0.0      # waktu time.monotonic() sampai kapan panggilan dihentikan
+
+
+class _KuotaHabis:
+    """Pengganti respons saat panggilan ditahan (tidak menyentuh jaringan)."""
+    status_code = 429
+    headers = {}
+    text = "API monthly quota exceeded (ditahan oleh aplikasi)"
+
+    def json(self):
+        return {"error": {"type": "rate_limit_error", "message": "API monthly quota exceeded", "code": "rate_limit_exceeded"}}
+
+
+def kuota_sisa_menit():
+    """Berapa menit lagi panggilan VesselAPI ditahan karena kuota habis (0 = jalan normal)."""
+    import time as _t
+    return max(0, int((_kuota_blok_sampai - _t.monotonic()) / 60) + (1 if _kuota_blok_sampai > _t.monotonic() else 0))
+
+
 def _vesselapi_get(path, params, timeout=15):
     """HTTP GET ke VesselAPI (blocking; dipanggil via asyncio.to_thread).
     timeout: (connect, read) — query satelit bisa lambat, jadi proses latar
-    belakang (warm) boleh kasih read timeout lebih panjang."""
+    belakang (warm) boleh kasih read timeout lebih panjang.
+    Kalau kuota bulanan habis (429), panggilan berikutnya ditahan KUOTA_JEDA_MENIT menit."""
+    global _kuota_blok_sampai
+    import time as _t
     import requests
+    if _kuota_blok_sampai > _t.monotonic():
+        return _KuotaHabis()
     headers = {"Authorization": f"Bearer {vesselapi_key()}"}
-    return requests.get(f"{VESSELAPI_URL}{path}", params=params, headers=headers, timeout=timeout)
+    r = requests.get(f"{VESSELAPI_URL}{path}", params=params, headers=headers, timeout=timeout)
+    if r.status_code == 429:
+        try:
+            msg = str(r.json())
+        except Exception:
+            msg = r.text or ""
+        if "quota" in msg.lower():
+            _kuota_blok_sampai = _t.monotonic() + KUOTA_JEDA_MENIT * 60
+            logger.warning("[ais] VesselAPI: kuota bulanan habis — panggilan ditahan %s menit.", KUOTA_JEDA_MENIT)
+    return r
 
 
 def _pluck(js, need_key):
@@ -915,6 +951,7 @@ async def diag(db):
         "worker_running": worker_running(),
         "vesselapi_configured": vesselapi_enabled(),   # VesselAPI: yes/no saja
         "vesselapi_sat": _vesselapi_use_sat(),
+        "vesselapi_kuota_habis_menit": kuota_sisa_menit(),   # >0 = kuota bulanan habis, panggilan ditahan sekian menit lagi
         "vesselapi_sat_lookback_min": VESSELAPI_SAT_LOOKBACK,   # jendela umur posisi satelit (menit)
         "auto_refresh_running": auto_refresh_running(),
         "vesselfinder_configured": vesselfinder_enabled(),   # VesselFinder: yes/no saja
