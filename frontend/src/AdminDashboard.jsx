@@ -328,7 +328,8 @@ function Dashboard({ pin, me, onLogout }) {
     setLoading(true); setError("");
     try {
       const params = {};
-      if (statusFilter) params.status = statusFilter;
+      if (statusFilter.startsWith("tagih:")) params.tagih = statusFilter.slice(6);
+      else if (statusFilter) params.status = statusFilter;
       if (search.trim()) params.q = search.trim();
       if (dateFrom) params.date_from = dateFrom;
       if (dateTo)   params.date_to   = dateTo;
@@ -696,6 +697,8 @@ function Dashboard({ pin, me, onLogout }) {
         >
           <option value="">Semua Status</option>
           {STATUS_LIST.map((s) => <option key={s} value={s}>{STATUS_LABEL[s].txt}</option>)}
+          <option value="tagih:belum_tagih">💸 Belum Tagih</option>
+          <option value="tagih:selesai">✅ Selesai (sudah ditagih)</option>
         </select>
         <div className="adm-date-range">
           <input type="date" className="adm-date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} max={dateTo || undefined} data-testid="adm-date-from" title="Dari tanggal" />
@@ -791,7 +794,7 @@ function Dashboard({ pin, me, onLogout }) {
             <div style={{ fontWeight:700, fontSize:15, marginBottom:6, color:"var(--text-2)" }}>
               Tidak ada pesanan
             </div>
-            <div>{statusFilter ? `dengan status "${STATUS_LABEL[statusFilter]?.txt}"` : "yang cocok dengan filter saat ini."}</div>
+            <div>{statusFilter ? `dengan status "${STATUS_LABEL[statusFilter]?.txt || (statusFilter === "tagih:belum_tagih" ? "Belum Tagih" : "Selesai")}"` : "yang cocok dengan filter saat ini."}</div>
           </div>
         )}
         {visibleOrders.map((o, idx) => (
@@ -2790,6 +2793,8 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span className="adm-mono" style={{ fontSize: 12.5, fontWeight: 800, color: "var(--text)" }}>{order.order_id}</span>
             <span className={`adm-chip ${lbl.cls}`} data-testid={`adm-status-${order.order_id}`}>{lbl.txt}</span>
+            {order.tagih_status === "belum_tagih" && <span className="adm-chip" style={{ background: "#3a2a0a", color: "#f0a742", border: "1px solid #f0a742" }} data-testid={`adm-tagih-${order.order_id}`}>BELUM TAGIH</span>}
+            {order.tagih_status === "selesai" && <span className="adm-chip" style={{ background: "#0f2a17", color: "#3fb950", border: "1px solid #3fb950" }} data-testid={`adm-tagih-${order.order_id}`}>SELESAI</span>}
           </div>
           <div style={{ fontSize: 11, color: "var(--text-mute)", marginTop: 4 }}>{order.customer_nama || "—"}</div>
           <div style={{ fontSize: 10.5, color: "var(--text-dim)", marginTop: 1 }}>{order.customer_hp || "—"}</div>

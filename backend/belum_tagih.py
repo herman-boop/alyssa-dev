@@ -130,3 +130,31 @@ def ke_xlsx(baris, judul, ring=None):
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+def peta_status(orders, invoices):
+    """Status tagih per PO (semua pelanggan): {order_id: "selesai" | "belum_tagih"}.
+    "selesai" = SEMUA unit PO sudah tercantum di invoice Histori Dokumen (patokan sama dengan `hitung`);
+    "belum_tagih" = masih ada unit yang belum. PO Cancelled tidak diberi status."""
+    teks, oid_inv = [], set()
+    for d in invoices:
+        if d.get("jenis") not in (None, "invoice"):
+            continue
+        for o in d.get("order_ids") or []:
+            oid_inv.add(str(o))
+        for l in d.get("lines") or []:
+            teks.append(_rangka_key(re.sub(r"<[^>]+>", " ", str(l.get("ket") or ""))))
+    gabung = " ".join(teks)
+    out = {}
+    for o in orders:
+        if (o.get("status") or "").upper() == "CANCELLED" or not o.get("order_id"):
+            continue
+        semua = True
+        for u in (o.get("units") or [{}]):
+            rk = _rangka_key(u.get("no_rangka") or o.get("no_rangka"))
+            ok = (len(rk) >= 6 and rk in gabung) if rk else str(o["order_id"]) in oid_inv
+            if not ok:
+                semua = False
+                break
+        out[o["order_id"]] = "selesai" if semua else "belum_tagih"
+    return out
