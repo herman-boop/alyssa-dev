@@ -2234,14 +2234,16 @@ async def admin_ais_diag():
 @api_router.get("/admin/ais/probe", dependencies=[Depends(require_admin_pin)])
 async def admin_ais_probe(mmsi: Optional[str] = None, imo: Optional[str] = None):
     """Diagnostik: panggil VesselAPI /position mentah (status + bentuk respons),
-    TANPA menampilkan API key. Tanpa param → uji SEMUA kapal yang dipantau."""
+    TANPA menampilkan API key. Tanpa param → uji 1 kapal pertama yang dipantau (hemat kuota).
+    Tes manual membuka tahanan kuota dulu, supaya setelah paket dinaikkan hasilnya langsung terlihat."""
+    ais.kuota_reset()
     if mmsi or imo:
         return await ais.probe_vesselapi(mmsi, imo)
     watched = await ais.active_mmsis(db)
     if not watched:
         return {"error": "tidak ada kapal ber-MMSI untuk diuji"}
     out = {}
-    for m in watched[:6]:
+    for m in watched[:1]:
         out[m] = await ais.probe_vesselapi(m, None)
     return {"probed": out}
 
@@ -2249,7 +2251,10 @@ async def admin_ais_probe(mmsi: Optional[str] = None, imo: Optional[str] = None)
 @api_router.get("/admin/ais/trace", dependencies=[Depends(require_admin_pin)])
 async def admin_ais_trace(probe: int = 1):
     """TRACE per kapal (Route Leg → watchlist → cache → provider). Read-only,
-    tidak menampilkan API key, tidak mengubah data. probe=0 untuk skip tes VesselAPI."""
+    tidak menampilkan API key, tidak mengubah data. probe=0 untuk skip tes VesselAPI.
+    Membuka tahanan kuota dulu; kalau panggilan pertama masih ditolak karena kuota, sisanya otomatis ditahan."""
+    if probe:
+        ais.kuota_reset()
     return await ais.trace(db, probe_missing=bool(probe))
 
 

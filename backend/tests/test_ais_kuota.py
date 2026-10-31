@@ -40,3 +40,10 @@ def teardown_module(module):
     else:
         sys.modules.pop("requests", None)
     ais._kuota_blok_sampai = 0.0
+
+
+def test_kuota_reset_membuka_tahanan():
+    ais._kuota_blok_sampai = 10 ** 12
+    assert ais.kuota_sisa_menit() > 0
+    ais.kuota_reset()
+    assert ais.kuota_sisa_menit() == 0
