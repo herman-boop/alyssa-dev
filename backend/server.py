@@ -3522,8 +3522,10 @@ async def admin_list_orders(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     entity_id: Optional[str] = None,
+    tagih: Optional[str] = None,
 ):
     """Search + filter list for admin dashboard.
+    - tagih: "belum_tagih" (masih ada unit yang belum masuk invoice Histori Dokumen) atau "selesai" (semua unit sudah ditagih).
     - status: filter by single status (or empty = all)
     - q: case-insensitive search in customer_nama, customer_hp, asal_kota, tujuan_kota, nopol, order_id
     - date_from / date_to: YYYY-MM-DD (inclusive), filter on created_at
@@ -3536,13 +3538,29 @@ async def admin_list_orders(
             filt["entity_id"] = {"$in": [None, ""]}
         elif e in DOC_ENTITIES_VALID:
             filt["entity_id"] = e
-    cur = db.orders.find(filt).sort("created_at", -1).limit(max(1, min(500, limit)))
-    items = []
+    tagih = (tagih or "").strip().lower()
+    if tagih not in ("belum_tagih", "selesai"):
+        tagih = ""
+    n = max(1, min(500, limit))
+    invoices = [d async for d in db.doc_history.find({"jenis": "invoice"}, {"_id": 0, "jenis": 1, "order_ids": 1, "lines": 1}).allow_disk_use(True)]
+    cur = db.orders.find(filt).sort("created_at", -1)
+    if not tagih:
+        cur = cur.limit(n)
+    rows = []
     async for d in cur:
         d.pop("_id", None)
+        rows.append(d)
+    peta = belum_tagih.peta_status(rows, invoices)
+    items = []
+    for d in rows:
+        d["tagih_status"] = peta.get(d.get("order_id"), "")
+        if tagih and d["tagih_status"] != tagih:
+            continue
         d = await _ensure_order_units(d)
         d["unit_summary"] = _order_unit_summary(d)
         items.append(d)
+        if len(items) >= n:
+            break
     return {"count": len(items), "items": items}
 
 

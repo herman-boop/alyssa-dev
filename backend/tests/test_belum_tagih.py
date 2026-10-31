@@ -28,3 +28,10 @@ def test_detail():
     assert [r["order_id"] for r in rows] == ["O2"]
     assert s["sudah"][0]["invoice"] == "INV0001" and len(s["nama"]) == 2
     assert b.ke_xlsx(rows, "t", s)[:2] == b"PK"
+
+
+def test_peta_status():
+    orders = [po("O1", "MHKA1234567890"), po("O2", "MHKB9999999999"), po("O3", "MHKC1111111111", st="CANCELLED"), po("O4", "")]
+    inv = [{"jenis": "invoice", "order_ids": ["O4"], "lines": [{"ket": "No. Rangka: MHKA1234567890"}]}]
+    m = b.peta_status(orders, inv)
+    assert m == {"O1": "selesai", "O2": "belum_tagih", "O4": "selesai"}, m
