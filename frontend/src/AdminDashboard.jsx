@@ -1954,7 +1954,7 @@ function PengaturanPage({ dark, onToggleTheme, onLogout, fixHeicPhotos, fixingHe
                       {s.provider && s.provider.length ? (
                         <div>Provider: {s.provider.map((p, j) => (
                           <span key={j} style={{ marginRight: 8, color: p.has_position ? "#3fb950" : "#f0a742" }}>
-                            {p.error ? `${p.mode ? p.mode + " · " : ""}error` : `${p.mode ? p.mode + " · " : ""}${p.idtype} → HTTP ${p.status}${p.has_position ? " (ada posisi)" : " (kosong)"}`}
+                            {p.error ? `${p.mode ? p.mode + " · " : ""}error` : `${p.mode ? p.mode + " · " : ""}${p.idtype} → HTTP ${p.status}${p.has_position ? " (ada posisi)" : " (kosong)"}${p.ditahan ? " · ditahan aplikasi (kuota habis)" : ""}`}
                           </span>
                         ))}{s.provider_shared ? <span style={{ color: "#6b7681" }}> · (kapal sama dgn baris di atas — dites sekali)</span> : null}</div>
                       ) : (s.cache_has_position ? null : <div style={{ color: "#6b7681" }}>Provider: (tidak di-tes)</div>)}

@@ -194,6 +194,12 @@ class _KuotaHabis:
         return {"error": {"type": "rate_limit_error", "message": "API monthly quota exceeded", "code": "rate_limit_exceeded"}}
 
 
+def kuota_reset():
+    """Buka tahanan kuota (dipakai tes manual admin supaya benar-benar menyentuh VesselAPI, mis. setelah paket dinaikkan)."""
+    global _kuota_blok_sampai
+    _kuota_blok_sampai = 0.0
+
+
 def kuota_sisa_menit():
     """Berapa menit lagi panggilan VesselAPI ditahan karena kuota habis (0 = jalan normal)."""
     import time as _t
@@ -1024,6 +1030,7 @@ async def probe_vesselapi(mmsi, imo=None, sat=False, primary_only=False):
                 "status": r.status_code,
                 "ratelimit_remaining": r.headers.get("X-RateLimit-Remaining"),
                 "x_data_source": r.headers.get("X-Data-Source"),
+                "ditahan": isinstance(r, _KuotaHabis),   # True = tidak dikirim ke VesselAPI (kuota habis ditahan aplikasi)
                 "body": body,
             }
             if r.status_code == 200:
@@ -1054,6 +1061,7 @@ def _summarize_probe(pr):
             "idtype": label, "id": d.get("id"), "mode": d.get("mode"), "status": d.get("status"),
             "has_position": has_pos, "source": d.get("x_data_source"),
             "ratelimit_remaining": d.get("ratelimit_remaining"),
+            "ditahan": bool(d.get("ditahan")),
             "error": d.get("error"),
         })
     if pr.get("error") and not out:
