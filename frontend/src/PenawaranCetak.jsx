@@ -83,6 +83,14 @@ export async function printPenawaran(rows, meta) {
   // ── Kolom TEMPLATE LAMA (menyamping): No | Rute | Moda | Tipe Kendaraan | [Unit] | [Premi] | Harga | [Jumlah] ──
   const showQty = hasQty && !isDraft;
   const ncols = 5 + (showQty ? 2 : 0) + (perRow ? 1 : 0);
+  // Lebar halaman PDF mengikuti jumlah kolom: kolom sedikit → halaman sempit → huruf besar di HP;
+  // kolom banyak (Unit + Premi + Jumlah) → halaman lebih lebar supaya Rute & Moda tidak terlalu turun baris.
+  const pageMm = ncols <= 5 ? 160 : ncols <= 6 ? 185 : ncols <= 7 ? 200 : 210;
+  const padat = ncols >= 8;                 // kasus terpadat (Unit + Premi + Jumlah): font 13px, kolom angka lebih ramping
+  const fs = padat ? 13 : 14;
+  // Lebar kolom (px, table-layout fixed): Rute = sisa. Kolom angka cukup lebar supaya "Rp 20.000.000" tidak meluber.
+  const colW = [34, null, padat ? 96 : 112, padat ? 92 : 116].concat(showQty ? [44] : [], perRow ? [padat ? 96 : 110] : [], [padat ? 120 : 132], showQty ? [padat ? 122 : 134] : []);
+  const colgroup = `<colgroup>${colW.map((w) => (w ? `<col style="width:${w}px">` : "<col>")).join("")}</colgroup>`;
   // Tiap rute = 1 <tbody> supaya 1 rute tidak pecah antar-halaman & tetap 1 item.
   const body = (rows || []).map((e, i) => {
     const opts = routeOptions(e);
@@ -128,7 +136,7 @@ export async function printPenawaran(rows, meta) {
     html, body, .pdf-container, .pdf-container * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: geometricPrecision; }
     body { font-family: 'Inter', 'SF Pro Text', -apple-system, Helvetica, Arial, sans-serif; font-size: 13px; color: #212121; background: #ffffff; }
     /* Kartu mobile: lebar maksimal 650px supaya padat & besar saat dilihat di HP. */
-    .pdf-container { width: 100%; max-width: 650px; margin: 0 auto; padding: 20px; background: #ffffff; }
+    .pdf-container { width: 100%; max-width: ${Math.round((pageMm - 10) * 3.78)}px; margin: 0 auto; padding: 20px; background: #ffffff; }
     .ph-head { display:flex; align-items:center; gap:12px; padding-bottom:14px; border-bottom:3px solid #C5A059; margin-bottom:14px; }
     .ph-head img { width:44px; height:44px; object-fit:contain; flex-shrink:0; }
     .ph-pt { font-size:19px; font-weight:700; color:#212121; line-height:1.2; }
@@ -136,47 +144,49 @@ export async function printPenawaran(rows, meta) {
     .ph-card { background:#E8F5E9; border-radius:12px; padding:14px 16px; margin-bottom:14px; }
     .ph-title { font-size:15px; font-weight:800; color:#006644; letter-spacing:.4px; margin-bottom:8px; }
     .ph-line { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; padding:5px 0; }
-    .ph-line .k { font-size:13px; font-weight:500; color:#4A4A4A; flex-shrink:0; }
-    .ph-line .v { font-size:13px; font-weight:700; color:#212121; text-align:right; }
+    .ph-line .k { font-size:14px; font-weight:500; color:#4A4A4A; flex-shrink:0; }
+    .ph-line .v { font-size:14px; font-weight:700; color:#212121; text-align:right; }
     .ph-line.total { border-top:1px solid #b9dcbf; margin-top:6px; padding-top:10px; }
     .ph-line.total .k { font-weight:700; color:#006644; }
     .ph-line.total .v { font-size:18px; font-weight:800; color:#006644; }
     .ph-sec { font-size:13px; font-weight:700; color:#006644; text-transform:uppercase; letter-spacing:.4px; margin:16px 0 8px; }
-    table.ph { width:100%; border-collapse:collapse; }
+    table.ph { width:100%; border-collapse:collapse; table-layout:fixed; }
     table.ph thead { display:table-header-group; }        /* header diulang tiap halaman */
-    table.ph th, table.ph td { padding:12px 8px; border-bottom:1px solid #E0E0E0; text-align:left; vertical-align:top; }
+    table.ph th, table.ph td { padding:12px 8px; border-bottom:1px solid #E0E0E0; text-align:left; vertical-align:top; overflow-wrap:anywhere; }
+    table.ph th { vertical-align:middle; overflow-wrap:normal; }
     table.ph th { background:#E8F5E9; color:#006644; font-weight:700; font-size:13px; border-bottom:2px solid #C5A059; }
-    table.ph td { font-size:14px; font-weight:500; color:#212121; line-height:1.35; }
+    table.ph td { font-size:${fs}px; font-weight:600; color:#212121; line-height:1.35; }
+    table.ph th.c, table.ph td.c { padding-left:4px; padding-right:4px; white-space:nowrap; }
     table.ph td b { font-weight:700; }
     table.ph th.r, table.ph td.r { text-align:right; } table.ph th.c, table.ph td.c { text-align:center; }
-    table.ph td.r { white-space:nowrap; }
+    table.ph td.r { white-space:nowrap; overflow-wrap:normal; }
     table.ph .ph-note { font-size:12.5px; color:#4A4A4A; font-style:italic; margin-top:2px; font-weight:500; }
     table.ph tbody.ph-route { break-inside:avoid; page-break-inside:avoid; }
     table.ph tbody tr { break-inside:avoid; page-break-inside:avoid; }
     table.ph tr.ph-main td { border-bottom:none; padding-bottom:4px; }
     table.ph tr.ph-sub td { border-bottom:none; padding-top:2px; padding-bottom:2px; }
     table.ph tbody.ph-route tr:last-child td { border-bottom:1px solid #E0E0E0; padding-bottom:12px; }
-    table.ph .ph-sub-k { padding-left:16px !important; font-size:14px; color:#212121; font-weight:500; }
+    table.ph .ph-sub-k { padding-left:16px !important; font-size:${fs}px; color:#212121; font-weight:500; }
     table.ph .ph-sub-note { font-style:italic; color:#4A4A4A; }
-    table.ph .ph-sub-v { font-size:14px; font-weight:700; white-space:nowrap; }
+    table.ph .ph-sub-v { font-size:${fs}px; font-weight:700; white-space:nowrap; }
     table.ph .ph-opt-hint { font-size:12px; font-style:italic; color:#4A4A4A; font-weight:500; }
     .ph-draft-note { font-size:13px; color:#212121; line-height:1.6; background:#E8F5E9; border-left:4px solid #006644; border-radius:8px; padding:12px 14px; margin:12px 0 2px; }
     .ph-bar { display:flex; justify-content:space-between; align-items:center; padding:12px 10px 0; }
-    .ph-bar .lbl { font-weight:700; font-size:13px; color:#006644; text-transform:uppercase; }
-    .ph-bar .val { font-weight:800; font-size:15px; color:#212121; }
+    .ph-bar .lbl { font-weight:700; font-size:14px; color:#006644; text-transform:uppercase; }
+    .ph-bar .val { font-weight:800; font-size:16px; color:#212121; }
     .ph-sum { margin:10px 0 0; break-inside:avoid; page-break-inside:avoid; }
-    .ph-sum .row { display:flex; justify-content:space-between; gap:12px; padding:10px; font-size:13px; border-bottom:1px solid #E0E0E0; }
-    .ph-sum .row .k { color:#4A4A4A; font-weight:500; }
-    .ph-sum .row .v { font-weight:700; color:#212121; white-space:nowrap; }
+    .ph-sum .row { display:flex; justify-content:space-between; gap:12px; padding:11px 10px; font-size:14px; border-bottom:1px solid #E0E0E0; }
+    .ph-sum .row .k { color:#212121; font-weight:600; font-size:14px; }
+    .ph-sum .row .v { font-weight:700; color:#212121; white-space:nowrap; font-size:14px; }
     .ph-sum .row.minus .v { color:#b45309; }
     .ph-grand { margin-top:10px; background:#006644; border-radius:12px; padding:14px 16px; display:flex; justify-content:space-between; align-items:center; gap:12px; }
-    .ph-grand .k { font-size:13px; font-weight:700; color:#E8F5E9; text-transform:uppercase; }
-    .ph-grand .v { font-size:19px; font-weight:800; color:#ffffff; white-space:nowrap; }
+    .ph-grand .k { font-size:14px; font-weight:700; color:#E8F5E9; text-transform:uppercase; }
+    .ph-grand .v { font-size:21px; font-weight:800; color:#ffffff; white-space:nowrap; }
     .ph-pay-box { display:flex; align-items:center; gap:14px; padding:14px 16px; background:#F5F5F5; border-radius:12px; margin:16px 0; break-inside:avoid; }
     .ph-pay-badge { min-width:48px; height:44px; padding:0 10px; border-radius:10px; background:#006644; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:13px; flex-shrink:0; }
     .ph-pay-num { font-size:17px; font-weight:800; letter-spacing:.5px; color:#212121; }
     .ph-pay-name { font-size:13px; font-weight:500; color:#4A4A4A; margin-top:2px; }
-    .ph-valid { font-size:13px; font-weight:500; color:#4A4A4A; line-height:1.6; margin-bottom:8px; }
+    .ph-valid { font-size:14px; font-weight:500; color:#4A4A4A; line-height:1.6; margin-bottom:8px; }
     .ph-valid b { color:#212121; font-weight:700; }
     .ph-sign-row { display:flex; justify-content:flex-end; margin-top:22px; break-inside:avoid; page-break-inside:avoid; }
     .ph-sign-cell { width:260px; text-align:center; }
@@ -188,8 +198,8 @@ export async function printPenawaran(rows, meta) {
     .ph-sign-name { margin-top:2px; }
     .ph-sign-jab { font-size:13px; font-weight:500; color:#4A4A4A; margin-top:2px; }
     .ph-foot { display:flex; justify-content:space-between; gap:8px; padding-top:12px; margin-top:18px; border-top:1px solid #E0E0E0; font-size:12px; font-weight:500; color:#4A4A4A; }
-    /* Halaman PDF dibuat sempit (sama lebar dgn kartu) → saat dibuka/di-screenshot di HP teksnya besar, bukan mengecil ke lebar A4. */
-    @page { size: 180mm 320mm; margin: 5mm; }
+    /* Halaman PDF dibuat sempit (lebar mengikuti jumlah kolom) → saat dibuka/di-screenshot di HP teksnya besar, bukan mengecil ke lebar A4. */
+    @page { size: ${pageMm}mm 320mm; margin: 5mm; }
     @media print { .pdf-container { padding: 0; max-width: none; } }
   </style></head><body>
   <div class="pdf-container">
@@ -209,8 +219,9 @@ export async function printPenawaran(rows, meta) {
     </div>
     <div class="ph-sec">${isDraft ? "Opsi Harga — Pilih Salah Satu Metode" : "Rincian Penawaran"}</div>
     <table class="ph">
+      ${colgroup}
       <thead><tr>
-        <th class="c" style="width:30px">No</th><th>Rute</th><th style="width:78px">Moda</th><th style="width:104px">Tipe Kendaraan</th>${showQty ? `<th class="c" style="width:40px">Unit</th>` : ""}${perRow ? `<th class="r" style="width:96px">Premi Asuransi</th>` : ""}<th class="r" style="width:${showQty ? 98 : 112}px">${showQty ? "Harga / Unit" : "Harga"}</th>${showQty ? `<th class="r" style="width:104px">Jumlah</th>` : ""}
+        <th class="c">No</th><th>Rute</th><th>Moda</th><th>Tipe Kendaraan</th>${showQty ? `<th class="c">Unit</th>` : ""}${perRow ? `<th class="r">Premi Asuransi</th>` : ""}<th class="r">${showQty ? "Harga / Unit" : "Harga"}</th>${showQty ? `<th class="r">Jumlah</th>` : ""}
       </tr></thead>
       ${body}
     </table>
