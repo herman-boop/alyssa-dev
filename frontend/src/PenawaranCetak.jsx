@@ -126,10 +126,10 @@ export async function printPenawaran(rows, meta) {
     body { font-family: 'Inter', 'SF Pro Text', -apple-system, Helvetica, Arial, sans-serif; font-size: 13px; color: #212121; background: #ffffff; }
     /* Kartu mobile: lebar maksimal 650px supaya padat & besar saat dilihat di HP. */
     .pdf-container { width: 100%; max-width: 650px; margin: 0 auto; padding: 20px; background: #ffffff; }
-    .ph-head { display:flex; align-items:center; gap:12px; padding-bottom:14px; border-bottom:2px solid #006644; margin-bottom:14px; }
+    .ph-head { display:flex; align-items:center; gap:12px; padding-bottom:14px; border-bottom:3px solid #C5A059; margin-bottom:14px; }
     .ph-head img { width:44px; height:44px; object-fit:contain; flex-shrink:0; }
     .ph-pt { font-size:19px; font-weight:700; color:#212121; line-height:1.2; }
-    .ph-tag { font-size:13px; font-weight:500; color:#4A4A4A; margin-top:2px; }
+    .ph-tag { font-size:13px; font-weight:700; color:#C5A059; letter-spacing:.3px; margin-top:3px; }
     .ph-card { background:#E8F5E9; border-radius:12px; padding:14px 16px; margin-bottom:14px; }
     .ph-title { font-size:15px; font-weight:800; color:#006644; letter-spacing:.4px; margin-bottom:8px; }
     .ph-line { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; padding:5px 0; }
