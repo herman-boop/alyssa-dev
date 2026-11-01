@@ -98,3 +98,28 @@ def leg_selesai(legs, task):
     """True kalau admin sudah memilih status leg = Selesai -> semua link tugas leg itu ditutup."""
     l = leg_for(legs, task)
     return bool(l) and str(l.get("status") or "").strip().lower() == "selesai"
+
+
+def pilih_sebelumnya(kandidat, route_leg_id, leg_index):
+    """Dari daftar tugas lama (terbaru dulu) di trip + peran yang sama: ambil yang untuk leg ini
+    dan sudah punya isi (foto / checkpoint / dokumen). None kalau tidak ada."""
+    for t in kandidat or []:
+        cocok = (route_leg_id and t.get("route_leg_id") == route_leg_id) or (not t.get("route_leg_id") and t.get("leg_index") == leg_index)
+        if cocok and (t.get("photos") or t.get("checkpoints") or t.get("documents")):
+            return t
+    return None
+
+
+def warisi_riwayat(doc, prev):
+    """Link tugas BARU untuk leg yang sama (mis. link lama hilang / dibuat ulang) tidak boleh mulai dari nol:
+    foto, checkpoint, dokumen, dan input tambahan dari tugas sebelumnya ikut dibawa, supaya driver
+    yang sedang di jalan tinggal melanjutkan (tidak diminta foto asal lagi). Mengembalikan doc baru."""
+    if not prev:
+        return doc
+    out = dict(doc)
+    for k in ("photos", "documents", "checkpoints"):
+        out[k] = list(prev.get(k) or [])
+    out["extra_inputs"] = dict(prev.get("extra_inputs") or {})
+    out["status"] = "dikerjakan"
+    out["diwarisi_dari"] = prev.get("token")
+    return out
