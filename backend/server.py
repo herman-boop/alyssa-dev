@@ -2292,6 +2292,12 @@ async def admin_ais_trace(probe: int = 1):
     return await ais.trace(db, probe_missing=bool(probe))
 
 
+@api_router.post("/admin/ais/refresh-sekarang", dependencies=[Depends(require_admin_pin)])
+async def admin_ais_refresh_now():
+    """Ambil posisi terbaru SEKARANG untuk semua kapal leg 'Berlangsung' (tanpa menunggu jadwal jam). Memakai kuota VesselAPI."""
+    return await ais.refresh_aktif_sekarang(db)
+
+
 @api_router.get("/admin/trips/{trip_id}/ais", dependencies=[Depends(require_admin_pin)])
 async def admin_trip_ais(trip_id: str):
     """Cek per-trip: identitas kapal tiap leg (MMSI tersimpan atau belum) + ship_ais."""

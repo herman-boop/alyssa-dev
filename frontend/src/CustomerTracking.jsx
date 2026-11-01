@@ -531,7 +531,8 @@ function shipMarkerState(info) {
 function createShipIcon(freshness, info, shipName) {
   const S = 26;                                  // kotak ikon (px)
   const dot = freshnessDot(freshness);
-  const st = shipMarkerState(info);
+  // Posisi basi (> 6 jam): arah/kecepatan lama bisa menyesatkan (mis. dari pelayaran sebelumnya) → tanpa panah.
+  const st = freshness === "stale" ? { kind: "diam", rot: null } : shipMarkerState(info);
   const shadow = "filter:drop-shadow(0 1px 2px rgba(0,0,0,.4));";
   let glyph;
   if (st.kind === "jalan" && st.rot != null) {
