@@ -253,11 +253,11 @@ export default function TaskPage() {
   };
 
   /* ── SIMPAN input (info kapal / penerima) + tandai selesai ── */
-  const saveExtra = async (selesai) => {
+  const saveExtra = async (selesai, bukaLagi = false) => {
     setBusy(true);
     try {
-      const r = await axios.post(`${API}/public/task/${token}/submit`, { extra_inputs: extra, selesai });
-      setTask(r.data); flash(selesai ? "✓ Tugas ditandai selesai" : "✓ Tersimpan");
+      const r = await axios.post(`${API}/public/task/${token}/submit`, { extra_inputs: extra, selesai, buka_lagi: bukaLagi });
+      setTask(r.data); flash(bukaLagi ? "✓ Tugas dibuka kembali" : selesai ? "✓ Tugas ditandai selesai" : "✓ Tersimpan");
     } catch (e) { flash(e?.response?.data?.detail || "Gagal simpan"); }
     setBusy(false);
   };
@@ -564,6 +564,12 @@ export default function TaskPage() {
           style={{ width: "100%", padding: 19, borderRadius: 18, border: "none", background: task.status === "selesai" ? C.green : "#16a34a", color: "#fff", fontWeight: 900, fontSize: 16, cursor: "pointer", minHeight: 56 }}>
           {task.status === "selesai" ? "✅ Tugas Selesai" : "✅ Tandai Tugas Selesai"}
         </button>
+        {task.status === "selesai" && (
+          <button onClick={() => { if (window.confirm("Buka kembali tugas ini?\n\nPakai kalau Anda belum sampai tujuan atau salah menekan Tandai Tugas Selesai.")) saveExtra(false, true); }} disabled={busy}
+            style={{ width: "100%", padding: 14, borderRadius: 14, border: `1px solid ${C.line}`, background: "none", color: C.ink, fontWeight: 700, fontSize: 14, cursor: "pointer", minHeight: 48 }} data-testid="task-buka-lagi">
+            ↩️ Belum sampai? Buka kembali tugas
+          </button>
+        )}
         <div style={{ textAlign: "center", fontSize: 11, color: C.mute, padding: "4px 0 20px" }}>PT Alyssa Auto Logistik · Logbook Operasional</div>
       </div>
 
