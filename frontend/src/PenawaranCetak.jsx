@@ -4,7 +4,7 @@
 // (CostCalculator). Bisa centang rute (pisahin per wilayah, mis. Kalimantan),
 // isi nama + jabatan + stempel. Output A4 gaya invoice, huruf besar.
 import { useState } from "react";
-import { DOC_BRAND, DOC_BASE_CSS, docHeader, docFooter, nextDocNo } from "./docTheme";
+import { DOC_BRAND, nextDocNo } from "./docTheme";
 
 function fRp(n) {
   if (!n && n !== 0) return "-";
@@ -80,22 +80,24 @@ export async function printPenawaran(rows, meta) {
     : (insBase > 0 ? Math.round(insBase * (rate / 100)) : 0);
   const grandTotal = shipTotal + premi;
   const hasBreakdown = ppnOn || pph > 0 || premi > 0;
+  // ── Layout "kartu mobile" (terbaca tajam di HP): kolom dirapatkan → Rute + (Tipe · Metode) jadi satu sel. ──
+  const showQty = hasQty && !isDraft;
+  const ncols = 3 + (showQty ? 2 : 0) + (perRow ? 1 : 0);   // No | Rute | [Unit] | [Premi] | Harga | [Jumlah]
   // Tiap rute = 1 <tbody> supaya 1 rute tidak pecah antar-halaman & tetap 1 item.
   const body = (rows || []).map((e, i) => {
     const opts = routeOptions(e);
     const catatanHtml = e.catatan ? `<div class="ph-note">${esc(e.catatan)}</div>` : "";
+    const tipe = esc(e.tipe_kendaraan || "-");
     // DRAFT + punya opsi → listing alternatif (○), TANPA Total Rute (customer pilih 1).
     if (isDraft && opts.length) {
       const main = `<tr class="ph-main">
         <td class="c">${i + 1}</td>
-        <td><b>${esc(e.rute || "-")}</b>${routeQty(e) > 1 ? `<div class="ph-note">Jumlah ${routeQty(e)} unit (harga per unit)</div>` : ""}${catatanHtml}</td>
-        <td>${opts.length > 1 ? "Opsi Pengiriman" : esc(opts[0].metode || "-")}</td>
-        <td>${esc(e.tipe_kendaraan || "-")}</td>
-        <td class="r ph-opt-hint">pilih salah satu</td>
+        <td><div class="ph-rt">${esc(e.rute || "-")}</div><div class="ph-sb">${tipe}${opts.length > 1 ? " &middot; Opsi Pengiriman" : ` &middot; ${esc(opts[0].metode || "-")}`}</div>${routeQty(e) > 1 ? `<div class="ph-note">Jumlah ${routeQty(e)} unit (harga per unit)</div>` : ""}${catatanHtml}</td>
+        <td class="r ph-opt-hint" colspan="${ncols - 2}">pilih salah satu</td>
       </tr>`;
       const subs = opts.map((o) => `<tr class="ph-sub">
         <td></td>
-        <td colspan="3" class="ph-sub-k">○ ${esc(o.metode || "-")}${o.catatan ? ` <span class="ph-sub-note">(${esc(o.catatan)})</span>` : ""}</td>
+        <td colspan="${ncols - 2}" class="ph-sub-k">○ ${esc(o.metode || "-")}${o.catatan ? ` <span class="ph-sub-note">(${esc(o.catatan)})</span>` : ""}</td>
         <td class="r ph-sub-v">${fRp(o.harga || 0)}</td>
       </tr>`).join("");
       return `<tbody class="ph-route">${main}${subs}</tbody>`;
@@ -105,102 +107,108 @@ export async function printPenawaran(rows, meta) {
     const metode = isDraft ? (e.moda || "-") : routeFinalMetode(e);
     const main = `<tr class="ph-main-single">
       <td class="c">${i + 1}</td>
-      <td><b>${esc(e.rute || "-")}</b>${catatanHtml}</td>
-      <td>${esc(metode)}</td>
-      <td>${esc(e.tipe_kendaraan || "-")}</td>
-      ${hasQty && !isDraft ? `<td class="c">${routeQty(e)}</td>` : ""}
+      <td><div class="ph-rt">${esc(e.rute || "-")}</div><div class="ph-sb">${tipe} &middot; ${esc(metode)}</div>${catatanHtml}</td>
+      ${showQty ? `<td class="c">${routeQty(e)}</td>` : ""}
       ${perRow ? `<td class="r">${rowPremi(e) > 0 ? `${fRp(rowPremi(e))}<div class="ph-note">Nilai ${fRp(rowNilai(e))}${routeQty(e) > 1 ? " / unit" : ""}</div>` : "-"}</td>` : ""}
-      <td class="r">${fRp(harga)}</td>
-      ${hasQty && !isDraft ? `<td class="r"><b>${fRp(harga * routeQty(e))}</b></td>` : ""}
+      <td class="r"><b>${fRp(harga)}</b></td>
+      ${showQty ? `<td class="r"><b>${fRp(harga * routeQty(e))}</b></td>` : ""}
     </tr>`;
     return `<tbody class="ph-route">${main}</tbody>`;
   }).join("");
 
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${noDoc}</title>
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${noDoc}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800&display=swap" rel="stylesheet">
   <style>
-    ${DOC_BASE_CSS}
-    /* Visual language disamain dgn Ringkasan Selisih Harga: navy divider, section
-       gold-bar, table header mist+teks gelap, row rapat, summary navy box. */
-    body { font-size: 11px; }
-    .doc-sheet { padding: 0; max-width: 210mm; }
-    .ph-meta-row { display:flex; justify-content:space-between; gap:24px; margin-bottom:14px; }
-    .ph-billto .lbl { font-size:10px; font-weight:700; text-transform:uppercase; color:${DOC_BRAND.muted}; letter-spacing:.5px; margin-bottom:4px; }
-    .ph-billto .val { font-size:15px; font-weight:800; color:${DOC_BRAND.ink}; }
-    .ph-meta-table { border-collapse:collapse; font-size:11px; }
-    .ph-meta-table td { padding:3px 0; }
-    .ph-meta-table td:first-child { color:${DOC_BRAND.muted}; padding-right:18px; white-space:nowrap; }
-    .ph-meta-table td:last-child { font-weight:700; text-align:right; }
-    .ph-sec { display:flex; align-items:center; gap:7px; margin:16px 0 6px; }
-    .ph-sec .bar { width:3px; height:13px; background:${DOC_BRAND.gold}; border-radius:2px; }
-    .ph-sec .txt { font-size:10.5px; font-weight:800; color:${DOC_BRAND.ink}; letter-spacing:.5px; text-transform:uppercase; }
-    table.ph { width:100%; border-collapse:collapse; margin-bottom:2px; }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    html { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    html, body, .pdf-container, .pdf-container * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: geometricPrecision; }
+    body { font-family: 'Inter', 'SF Pro Text', -apple-system, Helvetica, Arial, sans-serif; font-size: 13px; color: #212121; background: #ffffff; }
+    /* Kartu mobile: lebar maksimal 650px supaya padat & besar saat dilihat di HP. */
+    .pdf-container { width: 100%; max-width: 650px; margin: 0 auto; padding: 20px; background: #ffffff; }
+    .ph-head { display:flex; align-items:center; gap:12px; padding-bottom:14px; border-bottom:2px solid #006644; margin-bottom:14px; }
+    .ph-head img { width:44px; height:44px; object-fit:contain; flex-shrink:0; }
+    .ph-pt { font-size:19px; font-weight:700; color:#212121; line-height:1.2; }
+    .ph-tag { font-size:13px; font-weight:500; color:#4A4A4A; margin-top:2px; }
+    .ph-card { background:#E8F5E9; border-radius:12px; padding:14px 16px; margin-bottom:14px; }
+    .ph-title { font-size:15px; font-weight:800; color:#006644; letter-spacing:.4px; margin-bottom:8px; }
+    .ph-line { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; padding:5px 0; }
+    .ph-line .k { font-size:13px; font-weight:500; color:#4A4A4A; flex-shrink:0; }
+    .ph-line .v { font-size:13px; font-weight:700; color:#212121; text-align:right; }
+    .ph-line.total { border-top:1px solid #b9dcbf; margin-top:6px; padding-top:10px; }
+    .ph-line.total .k { font-weight:700; color:#006644; }
+    .ph-line.total .v { font-size:18px; font-weight:800; color:#006644; }
+    .ph-sec { font-size:13px; font-weight:700; color:#006644; text-transform:uppercase; letter-spacing:.4px; margin:16px 0 8px; }
+    table.ph { width:100%; border-collapse:collapse; }
     table.ph thead { display:table-header-group; }        /* header diulang tiap halaman */
-    table.ph tbody tr { break-inside:avoid; page-break-inside:avoid; }  /* baris tidak pecah 2 halaman */
-    table.ph th { text-align:left; font-size:8px; text-transform:uppercase; letter-spacing:.3px; color:#334155; background:${DOC_BRAND.paperMist}; font-weight:700; padding:4px 7px; white-space:nowrap; border-bottom:1.5px solid #cbd5e1; }
-    table.ph th.r { text-align:right; } table.ph th.c { text-align:center; }
-    table.ph td { padding:3.5px 7px; font-size:9.5px; line-height:1.2; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; }
-    table.ph td.c { text-align:center; } table.ph td.r { text-align:right; white-space:nowrap; }
-    table.ph .ph-note { font-size:8px; color:${DOC_BRAND.muted}; font-style:italic; margin-top:1px; font-weight:400; }
-    /* 1 rute = 1 tbody: main row + sub-row komponen; jangan pecah antar halaman. */
+    table.ph th, table.ph td { padding:12px 10px; border-bottom:1px solid #E0E0E0; text-align:left; vertical-align:top; }
+    table.ph th { background:#E8F5E9; color:#006644; font-weight:700; font-size:13px; }
+    table.ph td { font-size:13px; color:#212121; line-height:1.4; }
+    table.ph th.r, table.ph td.r { text-align:right; } table.ph th.c, table.ph td.c { text-align:center; }
+    table.ph td.r { white-space:nowrap; }
+    table.ph .ph-rt { font-weight:700; color:#212121; }
+    table.ph .ph-sb { font-weight:500; color:#4A4A4A; margin-top:2px; }
+    table.ph .ph-note { font-size:12px; color:#4A4A4A; font-style:italic; margin-top:2px; font-weight:500; }
     table.ph tbody.ph-route { break-inside:avoid; page-break-inside:avoid; }
-    table.ph tr.ph-main td { border-bottom:none; }
-    table.ph tr.ph-sub td { border-bottom:none; padding-top:1px; padding-bottom:1px; }
-    table.ph .ph-sub-k { padding-left:20px !important; font-size:8.5px; color:${DOC_BRAND.muted}; }
-    table.ph .ph-sub-note { font-style:italic; }
-    table.ph .ph-sub-v { font-size:8.5px; color:${DOC_BRAND.muted}; white-space:nowrap; }
-    table.ph tr.ph-subtotal td { border-bottom:1px solid ${DOC_BRAND.line}; padding-top:2px; padding-bottom:4px; }
-    table.ph .ph-subtotal-k { text-align:right; font-size:8.5px; font-weight:700; color:${DOC_BRAND.ink}; letter-spacing:.2px; text-transform:uppercase; }
-    table.ph .ph-subtotal-v { font-weight:800; font-size:9.5px; color:${DOC_BRAND.ink}; white-space:nowrap; }
-    table.ph .ph-opt-hint { font-size:8px; font-style:italic; color:${DOC_BRAND.muted}; font-weight:400; }
-    .ph-draft-note { font-size:9.5px; color:${DOC_BRAND.muted}; line-height:1.6; background:${DOC_BRAND.paperMist}; border:1px solid ${DOC_BRAND.line}; border-left:3px solid ${DOC_BRAND.gold}; border-radius:6px; padding:8px 12px; margin:8px 0 2px; }
-    .ph-draft-note b { color:${DOC_BRAND.ink}; }
-    .ph-bar { display:flex; justify-content:space-between; align-items:center; border-top:2px solid ${DOC_BRAND.navy}; padding:6px 4px 0; margin-top:2px; }
-    .ph-bar .lbl { font-weight:900; font-size:10.5px; color:${DOC_BRAND.navy}; text-transform:uppercase; letter-spacing:.3px; }
-    .ph-bar .val { font-weight:900; font-size:11.5px; color:${DOC_BRAND.ink}; }
-    .ph-sum { width:62%; max-width:340px; margin:8px 0 0 auto; break-inside:avoid; page-break-inside:avoid; }
-    .ph-sum .row { display:flex; justify-content:space-between; padding:4px 2px; font-size:10px; border-bottom:1px solid ${DOC_BRAND.line}; }
-    .ph-sum .row .k { color:#333; text-transform:uppercase; letter-spacing:.3px; font-weight:600; font-size:9px; }
-    .ph-sum .row .v { font-weight:700; color:${DOC_BRAND.ink}; white-space:nowrap; }
+    table.ph tbody tr { break-inside:avoid; page-break-inside:avoid; }
+    table.ph tr.ph-main td { border-bottom:none; padding-bottom:4px; }
+    table.ph tr.ph-sub td { border-bottom:none; padding-top:2px; padding-bottom:2px; }
+    table.ph tbody.ph-route tr:last-child td { border-bottom:1px solid #E0E0E0; padding-bottom:12px; }
+    table.ph .ph-sub-k { padding-left:22px !important; font-size:13px; color:#212121; font-weight:500; }
+    table.ph .ph-sub-note { font-style:italic; color:#4A4A4A; }
+    table.ph .ph-sub-v { font-size:13px; font-weight:700; white-space:nowrap; }
+    table.ph .ph-opt-hint { font-size:12px; font-style:italic; color:#4A4A4A; font-weight:500; }
+    .ph-draft-note { font-size:13px; color:#212121; line-height:1.6; background:#E8F5E9; border-left:4px solid #006644; border-radius:8px; padding:12px 14px; margin:12px 0 2px; }
+    .ph-bar { display:flex; justify-content:space-between; align-items:center; padding:12px 10px 0; }
+    .ph-bar .lbl { font-weight:700; font-size:13px; color:#006644; text-transform:uppercase; }
+    .ph-bar .val { font-weight:800; font-size:15px; color:#212121; }
+    .ph-sum { margin:10px 0 0; break-inside:avoid; page-break-inside:avoid; }
+    .ph-sum .row { display:flex; justify-content:space-between; gap:12px; padding:10px; font-size:13px; border-bottom:1px solid #E0E0E0; }
+    .ph-sum .row .k { color:#4A4A4A; font-weight:500; }
+    .ph-sum .row .v { font-weight:700; color:#212121; white-space:nowrap; }
     .ph-sum .row.minus .v { color:#b45309; }
-    .ph-grand { margin-top:7px; background:${DOC_BRAND.navy}; border-radius:8px; padding:10px 14px; display:flex; justify-content:space-between; align-items:center; }
-    .ph-grand .k { font-size:9px; font-weight:700; letter-spacing:.6px; color:#e8c98a; text-transform:uppercase; }
-    .ph-grand .v { font-size:17px; font-weight:900; color:#fff; white-space:nowrap; }
-    .ph-pay-box { display:flex; align-items:center; gap:14px; padding:12px 16px; background:${DOC_BRAND.paperMist}; border:1px solid ${DOC_BRAND.line}; border-radius:8px; margin:14px 0; break-inside:avoid; }
-    .ph-pay-badge { width:44px; height:44px; border-radius:8px; background:${DOC_BRAND.navy}; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:900; font-size:12px; flex-shrink:0; }
-    .ph-pay-num { font-size:16px; font-weight:900; letter-spacing:1px; color:${DOC_BRAND.ink}; }
-    .ph-pay-name { font-size:10.5px; color:${DOC_BRAND.muted}; margin-top:2px; }
-    .ph-valid { font-size:9.5px; color:${DOC_BRAND.muted}; line-height:1.6; margin-bottom:8px; }
-    .ph-valid b { color:${DOC_BRAND.ink}; }
-    .ph-sign-row { display:flex; justify-content:flex-end; margin-top:26px; break-inside:avoid; page-break-inside:avoid; }
-    .ph-sign-cell { width:280px; text-align:center; }
-    .ph-sign-lbl { font-size:11px; color:${DOC_BRAND.muted}; margin-bottom:6px; }
+    .ph-grand { margin-top:10px; background:#006644; border-radius:12px; padding:14px 16px; display:flex; justify-content:space-between; align-items:center; gap:12px; }
+    .ph-grand .k { font-size:13px; font-weight:700; color:#E8F5E9; text-transform:uppercase; }
+    .ph-grand .v { font-size:19px; font-weight:800; color:#ffffff; white-space:nowrap; }
+    .ph-pay-box { display:flex; align-items:center; gap:14px; padding:14px 16px; background:#F5F5F5; border-radius:12px; margin:16px 0; break-inside:avoid; }
+    .ph-pay-badge { min-width:48px; height:44px; padding:0 10px; border-radius:10px; background:#006644; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:13px; flex-shrink:0; }
+    .ph-pay-num { font-size:17px; font-weight:800; letter-spacing:.5px; color:#212121; }
+    .ph-pay-name { font-size:13px; font-weight:500; color:#4A4A4A; margin-top:2px; }
+    .ph-valid { font-size:13px; font-weight:500; color:#4A4A4A; line-height:1.6; margin-bottom:8px; }
+    .ph-valid b { color:#212121; font-weight:700; }
+    .ph-sign-row { display:flex; justify-content:flex-end; margin-top:22px; break-inside:avoid; page-break-inside:avoid; }
+    .ph-sign-cell { width:260px; text-align:center; }
+    .ph-sign-lbl { font-size:13px; font-weight:500; color:#4A4A4A; margin-bottom:6px; }
     .ph-sign-stamp { height:86px; display:flex; align-items:center; justify-content:center; margin-bottom:2px; }
     .ph-sign-stamp img { max-height:86px; max-width:220px; object-fit:contain; }
-    .ph-sign-stamp.empty { height:60px; }
-    .ph-sign-pt { font-size:12.5px; font-weight:800; color:${DOC_BRAND.ink}; }
-    .ph-sign-name { font-size:12.5px; font-weight:800; color:${DOC_BRAND.ink}; margin-top:2px; }
-    .ph-sign-jab { font-size:10.5px; color:${DOC_BRAND.muted}; margin-top:2px; }
-    @page { size: A4 portrait; margin: 8mm; }
-    @media print { @page { size: A4 portrait; margin: 8mm; } thead{display:table-header-group;} tbody tr{break-inside:avoid;} .avoid-break{break-inside:avoid;page-break-inside:avoid;} }
+    .ph-sign-stamp.empty { height:56px; }
+    .ph-sign-pt, .ph-sign-name { font-size:13px; font-weight:700; color:#212121; }
+    .ph-sign-name { margin-top:2px; }
+    .ph-sign-jab { font-size:13px; font-weight:500; color:#4A4A4A; margin-top:2px; }
+    .ph-foot { display:flex; justify-content:space-between; gap:8px; padding-top:12px; margin-top:18px; border-top:1px solid #E0E0E0; font-size:12px; font-weight:500; color:#4A4A4A; }
+    /* Halaman PDF dibuat sempit (sama lebar dgn kartu) → saat dibuka/di-screenshot di HP teksnya besar, bukan mengecil ke lebar A4. */
+    @page { size: 180mm 320mm; margin: 5mm; }
+    @media print { .pdf-container { padding: 0; max-width: none; } }
   </style></head><body>
-  <div class="doc-sheet">
-    ${docHeader({ docTitle: isDraft ? "PENAWARAN HARGA (OPSI)" : "PENAWARAN HARGA" })}
-    <div class="ph-meta-row">
-      <div class="ph-billto">
-        <div class="lbl">Kepada Yth.</div>
-        <div class="val">${esc(nama_pt || "&nbsp;")}</div>
+  <div class="pdf-container">
+    <div class="ph-head">
+      <img src="/logo.png" alt="Logo">
+      <div>
+        <div class="ph-pt">${DOC_BRAND.name}</div>
+        <div class="ph-tag">${DOC_BRAND.tagline}</div>
       </div>
-      <table class="ph-meta-table">
-        <tr><td>No. Penawaran</td><td>${noDoc}</td></tr>
-        <tr><td>Tanggal</td><td>${fmtTgl(tglPakai)}</td></tr>
-        <tr><td>Berlaku</td><td>7 hari sejak tanggal</td></tr>
-      </table>
     </div>
-    <div class="ph-sec"><span class="bar"></span><span class="txt">${isDraft ? "Opsi Harga — Pilih Salah Satu Metode" : "Rincian Penawaran"}</span></div>
+    <div class="ph-card">
+      <div class="ph-title">${isDraft ? "PENAWARAN HARGA (OPSI)" : "PENAWARAN HARGA"}</div>
+      <div class="ph-line"><span class="k">Kepada Yth.</span><span class="v">${esc(nama_pt || "-")}</span></div>
+      <div class="ph-line"><span class="k">Periode Penawaran</span><span class="v">${fmtTgl(tglPakai)} (Berlaku 7 Hari)</span></div>
+      <div class="ph-line"><span class="k">No. Penawaran</span><span class="v">${noDoc}</span></div>
+      ${isDraft ? "" : `<div class="ph-line total"><span class="k">Total Nilai Penawaran</span><span class="v">${fRp(grandTotal)}</span></div>`}
+    </div>
+    <div class="ph-sec">${isDraft ? "Opsi Harga — Pilih Salah Satu Metode" : "Rincian Penawaran"}</div>
     <table class="ph">
       <thead><tr>
-        <th class="c" style="width:24px">No</th><th>Rute</th>
-        <th style="width:100px">Metode</th><th style="width:96px">Tipe Kendaraan</th>${hasQty && !isDraft ? `<th class="c" style="width:34px">Unit</th>` : ""}${perRow ? `<th class="r" style="width:104px">Premi Asuransi</th>` : ""}<th class="r" style="width:${hasQty && !isDraft ? 96 : (perRow ? 112 : 132)}px">${hasQty && !isDraft ? "Harga / Unit" : "Harga"}</th>${hasQty && !isDraft ? `<th class="r" style="width:104px">Jumlah</th>` : ""}
+        <th class="c" style="width:32px">No</th><th>Rute / Kendaraan</th>${showQty ? `<th class="c" style="width:48px">Unit</th>` : ""}${perRow ? `<th class="r" style="width:104px">Premi Asuransi</th>` : ""}<th class="r" style="width:${showQty ? 104 : 124}px">${showQty ? "Harga / Unit" : "Harga"}</th>${showQty ? `<th class="r" style="width:112px">Jumlah</th>` : ""}
       </tr></thead>
       ${body}
     </table>
@@ -209,7 +217,7 @@ export async function printPenawaran(rows, meta) {
     ` : `
     <div class="ph-bar"><span class="lbl">${hasBreakdown ? "Subtotal Pengiriman" : "Total"}</span><span class="val">${fRp(subtotal)}</span></div>
     ${hasBreakdown ? `
-    <div class="ph-sec"><span class="bar"></span><span class="txt">Ringkasan Biaya</span></div>
+    <div class="ph-sec">Ringkasan Biaya</div>
     <div class="ph-sum">
       <div class="row"><span class="k">${ppnOn && incl ? "DPP (Dasar Pengenaan Pajak)" : "Subtotal Pengiriman"}</span><span class="v">${fRp(ppnOn && incl ? dpp : subtotal)}</span></div>
       ${ppnOn ? `<div class="row"><span class="k">PPN 1,1%${incl ? " (sudah termasuk)" : ""}</span><span class="v">${fRp(ppn)}</span></div>` : ""}
@@ -225,7 +233,7 @@ export async function printPenawaran(rows, meta) {
         <div class="ph-pay-name">Cabang ${DOC_BRAND.bank.cabang} &middot; a.n. ${DOC_BRAND.bank.an}</div>
       </div>
     </div>
-    ${catatan && String(catatan).trim() ? `<div class="ph-valid" style="margin-bottom:6px"><b>Keterangan:</b> ${esc(String(catatan).trim()).replace(/\n/g, "<br>")}</div>` : ""}
+    ${catatan && String(catatan).trim() ? `<div class="ph-valid"><b>Keterangan:</b> ${esc(String(catatan).trim()).replace(/\n/g, "<br>")}</div>` : ""}
     <div class="ph-valid">
       <b>Catatan:</b> Harga di atas berlaku 7 (tujuh) hari sejak tanggal penawaran &amp; dapat berubah sewaktu-waktu mengikuti kondisi operasional. Untuk konfirmasi hubungi <b>0818 631 135</b>.
     </div>
@@ -238,9 +246,12 @@ export async function printPenawaran(rows, meta) {
         ${ttdJabatan ? `<div class="ph-sign-jab">${esc(ttdJabatan)}</div>` : ""}
       </div>
     </div>
-    ${docFooter({ docNo: `Penawaran ${noDoc}` })}
+    <div class="ph-foot"><span>Penawaran ${noDoc}</span><span>${DOC_BRAND.tagline}</span></div>
   </div>
-  <script>window.onload=()=>window.print()<\/script>
+  <script>
+    // Tunggu font Inter siap (maks 1,5 dtk) supaya hasil cetak memakai font yang tajam, lalu buka dialog cetak.
+    Promise.race([ (document.fonts && document.fonts.ready) || Promise.resolve(), new Promise(function(r){ setTimeout(r, 1500); }) ]).then(function(){ window.print(); });
+  <\/script>
   </body></html>`;
   if (w) { w.document.write(html); w.document.close(); }
 }
