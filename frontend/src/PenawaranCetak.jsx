@@ -41,8 +41,8 @@ function routeFinalMetode(e) {
   return sel ? (sel.metode || "-") : (e.moda || "-");
 }
 
-export async function printPenawaran(rows, meta) {
-  const w = window.open("", "_blank"); // buka dulu (dalam gesture klik) biar nggak keblok popup
+// Membangun HTML penawaran. forImage=true → tanpa dialog cetak & lebar kontainer tetap (dirender jadi gambar).
+async function buildPenawaran(rows, meta, forImage) {
   const { nama_pt, ttdNama, ttdJabatan, stempel, tanggal, insVal, insRate, withPpn, taxIncl, withPph, catatan } = meta || {};
   const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const fmtTgl = (iso) => (iso ? new Date(iso).toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" }) : "-");
@@ -86,6 +86,7 @@ export async function printPenawaran(rows, meta) {
   // Lebar halaman PDF mengikuti jumlah kolom: kolom sedikit → halaman sempit → huruf besar di HP;
   // kolom banyak (Unit + Premi + Jumlah) → halaman lebih lebar supaya Rute & Moda tidak terlalu turun baris.
   const pageMm = ncols <= 5 ? 160 : ncols <= 6 ? 185 : ncols <= 7 ? 200 : 210;
+  const contW = Math.round((pageMm - 10) * 3.78) + 40;   // lebar kontainer saat dirender jadi gambar (isi = lebar halaman PDF)
   const padat = ncols >= 8;                 // kasus terpadat (Unit + Premi + Jumlah): font 13px, kolom angka lebih ramping
   const fs = padat ? 13 : 14;
   // Lebar kolom (px, table-layout fixed): Rute = sisa. Kolom angka cukup lebar supaya "Rp 20.000.000" tidak meluber.
@@ -201,6 +202,7 @@ export async function printPenawaran(rows, meta) {
     /* Halaman PDF dibuat sempit (lebar mengikuti jumlah kolom) → saat dibuka/di-screenshot di HP teksnya besar, bukan mengecil ke lebar A4. */
     @page { size: ${pageMm}mm 320mm; margin: 5mm; }
     @media print { .pdf-container { padding: 0; max-width: none; } }
+    ${forImage ? `body { width: ${contW}px; } .pdf-container { width: ${contW}px; max-width: none; margin: 0; padding: 20px; }` : ""}
   </style></head><body>
   <div class="pdf-container">
     <div class="ph-head">
@@ -261,12 +263,59 @@ export async function printPenawaran(rows, meta) {
     </div>
     <div class="ph-foot"><span>Penawaran ${noDoc}</span><span>${DOC_BRAND.tagline}</span></div>
   </div>
-  <script>
+  ${forImage ? "" : `  <script>
     // Tunggu font Inter siap (maks 1,5 dtk) supaya hasil cetak memakai font yang tajam, lalu buka dialog cetak.
     Promise.race([ (document.fonts && document.fonts.ready) || Promise.resolve(), new Promise(function(r){ setTimeout(r, 1500); }) ]).then(function(){ window.print(); });
-  <\/script>
+  <\/script>`}
   </body></html>`;
+  return { html, noDoc, contW };
+}
+
+export async function printPenawaran(rows, meta) {
+  const w = window.open("", "_blank"); // buka dulu (dalam gesture klik) biar nggak keblok popup
+  const { html } = await buildPenawaran(rows, meta, false);
   if (w) { w.document.write(html); w.document.close(); }
+}
+
+// Render HTML ke PNG tajam (scale hingga 3x) lewat iframe tersembunyi — untuk dikirim lewat WhatsApp.
+async function htmlKePng(html, lebar) {
+  const { default: html2canvas } = await import("html2canvas");
+  const fr = document.createElement("iframe");
+  fr.setAttribute("aria-hidden", "true");
+  fr.style.cssText = `position:fixed;left:-99999px;top:0;width:${lebar}px;height:900px;border:0`;
+  document.body.appendChild(fr);
+  try {
+    await new Promise((res) => { fr.onload = res; fr.srcdoc = html; });
+    const d = fr.contentDocument;
+    try { await Promise.race([d.fonts.ready, new Promise((r) => setTimeout(r, 2500))]); } catch (e) { /* lanjut dengan font bawaan */ }
+    await Promise.all(Array.from(d.images).map((im) => (im.complete ? null : new Promise((r) => { im.onload = im.onerror = r; }))));
+    const el = d.querySelector(".pdf-container");
+    const h = el.scrollHeight;
+    fr.style.height = h + "px";
+    // batas aman ukuran kanvas browser HP (±16 juta piksel)
+    const scale = Math.max(1.5, Math.min(3, Math.sqrt(15000000 / (lebar * h))));
+    const canvas = await html2canvas(el, { scale, backgroundColor: "#ffffff", useCORS: true, logging: false, width: lebar, windowWidth: lebar });
+    return await new Promise((res) => canvas.toBlob(res, "image/png"));
+  } finally { fr.remove(); }
+}
+
+// Simpan penawaran sebagai gambar PNG (dibagikan langsung ke WhatsApp bila perangkat mendukung, kalau tidak diunduh).
+export async function simpanPenawaranGambar(rows, meta) {
+  const { html, noDoc, contW } = await buildPenawaran(rows, meta, true);
+  const blob = await htmlKePng(html, contW);
+  if (!blob) throw new Error("gambar kosong");
+  const nama = String(noDoc).replace(/[^\w.-]+/g, "_");
+  const file = new File([blob], `${nama}.png`, { type: "image/png" });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: `Penawaran ${noDoc}` }); return "dibagikan"; }
+    catch (e) { if (e && e.name === "AbortError") return "batal"; /* gagal bagikan → unduh saja */ }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `${nama}.png`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  return "diunduh";
 }
 
 // Tombol + modal. `rows` = daftar entri harga (rute, moda, tipe_kendaraan,
@@ -282,6 +331,7 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
     return d.toISOString().slice(0, 10); // hari ini (lokal), yyyy-mm-dd
   });
   const [selIdx, setSelIdx] = useState(() => new Set());
+  const [gambarBusy, setGambarBusy] = useState(false);
   const [cari, setCari] = useState("");
   // Rincian biaya & pajak (opsional) — mirip invoice
   const [qtyMap, setQtyMap] = useState({});       // jumlah unit PER RUTE (key = index, value = digit; kosong = 1)
@@ -562,6 +612,24 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
               <button onClick={() => setOpen(false)}
                 style={{ padding: "9px 16px", borderRadius: 8, border: `1px solid ${border}`, background: "#fff", color: gray, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Batal</button>
+              <button disabled={gambarBusy} onClick={async () => {
+                const sel = list.map((e, i) => ({ e, i })).filter(({ i }) => selIdx.has(i)).map(({ e, i }) => {
+                  const options = optOf(i)
+                    .map((k) => ({ metode: (k.metode || "Lainnya"), harga: pNum(k.harga), catatan: (k.catatan || "").trim() }))
+                    .filter((k) => k.harga > 0 || k.metode);
+                  return { ...e, options, selected: options.length ? selOf(i) : -1, insNilai: mode === "final" ? rowIns(i) : 0, qty: qtyOf(i, e) };
+                });
+                if (!sel.length) { alert("Centang minimal 1 rute dulu bro."); return; }
+                setGambarBusy(true);
+                try {
+                  const r = await simpanPenawaranGambar(sel, { nama_pt: namaPt, ttdNama, ttdJabatan, stempel, tanggal: tglPenawaran, insRate, withPpn, taxIncl, withPph, mode, catatan: catatanUmum });
+                  if (r !== "batal") setOpen(false);
+                } catch (e) { alert("Gagal membuat gambar. Coba lagi."); }
+                setGambarBusy(false);
+              }}
+                title="Simpan penawaran sebagai gambar PNG tajam untuk dikirim lewat WhatsApp"
+                data-testid="penawaran-simpan-gambar"
+                style={{ padding: "9px 14px", borderRadius: 8, border: "1px solid #16a34a", background: "#f0fdf4", color: "#166534", fontSize: 12.5, fontWeight: 800, cursor: gambarBusy ? "default" : "pointer", opacity: gambarBusy ? 0.6 : 1 }}>{gambarBusy ? "Membuat gambar…" : "🖼️ Simpan sebagai Gambar (WhatsApp)"}</button>
               <button onClick={() => {
                 const sel = list.map((e, i) => ({ e, i })).filter(({ i }) => selIdx.has(i)).map(({ e, i }) => {
                   const options = optOf(i)
