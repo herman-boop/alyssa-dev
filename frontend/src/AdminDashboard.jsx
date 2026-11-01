@@ -1828,6 +1828,17 @@ function PengaturanPage({ dark, onToggleTheme, onLogout, fixHeicPhotos, fixingHe
       await loadBiaya();
     } catch (e) { window.alert(e?.response?.data?.detail || "Gagal membatalkan"); }
   };
+  const [aisRefresh, setAisRefresh] = useState(null);
+  const [aisRefreshBusy, setAisRefreshBusy] = useState(false);
+  const runAisRefresh = async () => {
+    if (!window.confirm("Ambil posisi terbaru semua kapal 'Berlangsung' sekarang?\nIni memakai kuota VesselAPI (sekitar 1–3 panggilan per kapal).")) return;
+    setAisRefreshBusy(true); setAisRefresh(null);
+    try {
+      const { data } = await axios.post(`${API}/admin/ais/refresh-sekarang`, {}, { headers });
+      setAisRefresh(data);
+    } catch (e) { setAisRefresh({ error: e?.response?.data?.detail || "Gagal memperbarui posisi" }); }
+    finally { setAisRefreshBusy(false); }
+  };
   const runAisDiag = async () => {
     setAisBusy(true); setAisDiag(null);
     try { const { data } = await axios.get(`${API}/admin/ais/diag`); setAisDiag(data); }
@@ -1887,7 +1898,22 @@ function PengaturanPage({ dark, onToggleTheme, onLogout, fixHeicPhotos, fixingHe
           <button onClick={runAisDiag} disabled={aisBusy} style={{ padding: "9px 16px", borderRadius: 9, border: "1px solid #1f6feb", background: "#0d2340", color: "#58a6ff", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }} data-testid="ais-diag-run">
             {aisBusy ? "⏳ Mengecek..." : "🔍 Jalankan Diagnosa"}
           </button>
+          <button onClick={runAisRefresh} disabled={aisRefreshBusy} style={{ marginLeft: 8, padding: "9px 16px", borderRadius: 9, border: "1px solid #238636", background: "#0f2a17", color: "#3fb950", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }} data-testid="ais-refresh-now">
+            {aisRefreshBusy ? "⏳ Mengambil posisi..." : "🔄 Perbarui Posisi Kapal Sekarang"}
+          </button>
         </div>
+        {aisRefresh && (
+          <div style={{ marginTop: 10, fontSize: 12, lineHeight: 1.7 }} data-testid="ais-refresh-result">
+            {aisRefresh.error ? <div style={{ color: "#f85149" }}>{String(aisRefresh.error)}</div> : (<>
+              <div style={{ color: "#8b949e" }}>{aisRefresh.kapal_aktif} kapal 'Berlangsung' ditemukan{aisRefresh.kuota_habis_menit > 0 ? ` · kuota VesselAPI habis (ditahan ${aisRefresh.kuota_habis_menit} menit)` : ""}</div>
+              {(aisRefresh.hasil || []).map((r, i) => (
+                <div key={i} style={{ color: r.ok ? "#3fb950" : "#f0a742" }}>
+                  {r.ok ? "✅" : "⚠️"} {r.kapal || r.ident} — {r.ok ? `posisi segar (${r.freshness})` : (r.catatan || "tidak berhasil")}
+                </div>
+              ))}
+            </>)}
+          </div>
+        )}
         {aisDiag && (
           <div style={{ marginTop: 12 }}>
             {aisDiag.error ? (

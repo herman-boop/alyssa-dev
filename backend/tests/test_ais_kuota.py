@@ -47,3 +47,40 @@ def test_kuota_reset_membuka_tahanan():
     assert ais.kuota_sisa_menit() > 0
     ais.kuota_reset()
     assert ais.kuota_sisa_menit() == 0
+
+
+def test_refresh_aktif_sekarang():
+    import asyncio
+
+    class _Cur:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def __aiter__(self):
+            self._it = iter(self.rows)
+            return self
+
+        async def __anext__(self):
+            try:
+                return next(self._it)
+            except StopIteration:
+                raise StopAsyncIteration
+
+    class _Trips:
+        def find(self, *a, **k):
+            return _Cur([{"legs": [{"tipe": "Kapal RoRo", "kapal": "KAL ECO", "mmsi": "525015993", "status": "Berlangsung"},
+                                   {"tipe": "Kapal RoRo", "kapal": "SELESAI", "mmsi": "111111111", "status": "Selesai"}]}])
+
+    db = types.SimpleNamespace(trips=_Trips())
+    from datetime import datetime, timezone
+    async def fake(db_, mmsi, imo, timeout=15):
+        return {"latitude": -5.7, "longitude": 107.2, "position_timestamp": datetime.now(timezone.utc).isoformat()}
+    orig, orig_en = ais._vesselapi_refresh, ais.vesselapi_enabled
+    ais._vesselapi_refresh, ais.vesselapi_enabled = fake, (lambda: True)
+    try:
+        ais._kuota_blok_sampai = 10 ** 12          # ditahan → harus dibuka dulu
+        r = asyncio.run(ais.refresh_aktif_sekarang(db))
+    finally:
+        ais._vesselapi_refresh, ais.vesselapi_enabled = orig, orig_en
+        ais._kuota_blok_sampai = 0.0
+    assert r["kapal_aktif"] == 1 and r["hasil"][0]["ok"] and r["hasil"][0]["kapal"] == "KAL ECO"

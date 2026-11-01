@@ -1173,6 +1173,51 @@ _AUTO_BACKOFF = (3600, 7200, 14400, 21600)
 _auto_task = None
 
 
+async def refresh_aktif_sekarang(db, max_ships=10):
+    """Admin: ambil posisi SEKARANG untuk kapal pada leg 'Berlangsung' (tanpa menunggu jadwal jam).
+    Membuka tahanan kuota dan jeda per-kapal lebih dulu. Kalau panggilan pertama masih ditolak karena kuota
+    habis, sisanya ditahan lagi (tidak memboroskan). Return daftar hasil per kapal."""
+    kuota_reset()
+    ships, names = {}, {}
+    try:
+        async for t in db.trips.find({"legs": {"$exists": True}}, {"_id": 0, "legs": 1}):
+            for lg in (t.get("legs") or []):
+                if not _leg_is_ship(lg) or _leg_status_kind(lg) != "active":
+                    continue
+                mmsi, imo = _leg_ship_id(lg)
+                ident = mmsi or imo
+                if ident and ident not in ships:
+                    ships[ident] = (mmsi, imo)
+                    names[ident] = str(lg.get("kapal") or "").strip()
+    except Exception as e:
+        return {"error": f"gagal membaca leg: {e}", "hasil": []}
+    hasil = []
+    for ident, (mmsi, imo) in list(ships.items())[:max_ships]:
+        row = {"ident": ident, "kapal": names.get(ident, ""), "ok": False, "freshness": None, "age_seconds": None, "catatan": ""}
+        if kuota_sisa_menit() > 0:
+            row["catatan"] = "ditahan (kuota VesselAPI habis)"
+            hasil.append(row)
+            continue
+        _last_pos_fetch.pop(ident, None)
+        fresh = None
+        try:
+            if vesselapi_enabled():
+                fresh = await _vesselapi_refresh(db, mmsi, imo, timeout=(5, 30))
+            if not fresh and vesselfinder_enabled():
+                fresh = await _vesselfinder_refresh(db, mmsi, imo)
+        except Exception as e:
+            row["catatan"] = f"error: {e}"
+        if fresh and fresh.get("latitude") is not None:
+            st = staleness(fresh.get("position_timestamp") or fresh.get("updated_at"))
+            row.update({"ok": st["freshness"] != "stale", "freshness": st["freshness"], "age_seconds": st["age_seconds"]})
+            if not row["ok"]:
+                row["catatan"] = "posisi dari provider masih lama"
+        elif not row["catatan"]:
+            row["catatan"] = "provider belum punya posisi kapal ini" if kuota_sisa_menit() == 0 else "ditolak (kuota VesselAPI habis)"
+        hasil.append(row)
+    return {"hasil": hasil, "kapal_aktif": len(ships), "kuota_habis_menit": kuota_sisa_menit()}
+
+
 def _auto_backoff_seconds(fails):
     """Jeda sebelum cek ulang setelah `fails` kali gagal berturut-turut."""
     n = max(int(fails or 1), 1)
