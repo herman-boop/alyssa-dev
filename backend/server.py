@@ -4341,6 +4341,11 @@ async def create_leg_task_link(trip_id: str, leg_index: int, body: LegTaskBody):
         "status": "belum_dibuka", "disabled": False, "photos": [], "documents": [], "checkpoints": [], "extra_inputs": {},
         "created_at": now, "opened_at": None, "completed_at": None,
     }
+    try:   # link baru untuk leg + peran yang sama: bawa riwayat tugas sebelumnya (driver lanjut, bukan mulai dari nol)
+        lama = [x async for x in db.leg_tasks.find({"trip_id": trip_id, "tipe_tugas": tipe_tugas}).sort("created_at", -1).limit(10)]
+        doc = TR.warisi_riwayat(doc, TR.pilih_sebelumnya(lama, route_leg_id, leg_index))
+    except Exception as e:
+        logger.warning(f"[task] gagal mewarisi riwayat tugas lama: {e}")
     await db.leg_tasks.insert_one(doc)
     # simpan token + petugas ref ke leg (backward-compatible, cuma nambah field)
     legs[leg_index]["route_leg_id"] = route_leg_id
