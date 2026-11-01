@@ -1252,6 +1252,40 @@ async def add_custom_vehicle_type(body: VehicleTypeBody):
     return {"nama": nama}
 
 
+class VehicleTypeRenameBody(BaseModel):
+    dari: str
+    ke: str
+
+
+class VehicleTypeDeleteBody(BaseModel):
+    nama: str
+
+
+@api_router.post("/vehicle-types/rename", dependencies=[Depends(require_admin_pin)])
+async def rename_custom_vehicle_type(body: VehicleTypeRenameBody):
+    """Ubah nama tipe kendaraan CUSTOM (bukan bawaan). Order lama tidak ikut berubah (tersimpan sebagai teks)."""
+    dari, ke = body.dari.strip(), body.ke.strip()
+    if not ke:
+        raise HTTPException(400, "Nama tipe kendaraan tidak boleh kosong")
+    cur = await db.custom_vehicle_types.find_one({"nama": dari}, {"_id": 0, "id": 1})
+    if not cur:
+        raise HTTPException(404, "Tipe custom tidak ditemukan (tipe bawaan tidak bisa diubah)")
+    if ke.lower() != dari.lower():
+        if ke.lower() in {t.lower() for t in await _all_valid_vehicle_types()}:
+            raise HTTPException(409, f"Tipe kendaraan '{ke}' sudah ada")
+    await db.custom_vehicle_types.update_one({"nama": dari}, {"$set": {"nama": ke}})
+    return {"nama": ke}
+
+
+@api_router.post("/vehicle-types/hapus", dependencies=[Depends(require_admin_pin)])
+async def delete_custom_vehicle_type(body: VehicleTypeDeleteBody):
+    """Hapus tipe kendaraan CUSTOM dari daftar pilihan (tipe bawaan tidak bisa dihapus)."""
+    res = await db.custom_vehicle_types.delete_one({"nama": body.nama.strip()})
+    if not res.deleted_count:
+        raise HTTPException(404, "Tipe custom tidak ditemukan (tipe bawaan tidak bisa dihapus)")
+    return {"ok": True}
+
+
 # ── Histori Dokumen ─────────────────────────────────────────────────────────
 # Arsip tiap dokumen yang dicetak admin (Invoice, Jadwal per-PO, Jadwal
 # Gabungan). Menyimpan snapshot lengkap (meta + units/lines) supaya bisa

@@ -530,7 +530,32 @@ export function useVehicleTypes() {
     }
   }, [types]);
 
-  return { types, addType, reload };
+  // Ubah nama tipe custom. Return { ok, reason }.
+  const renameType = useCallback(async (dari, ke, headers) => {
+    ke = (ke || "").trim();
+    if (!ke) return { ok: false, reason: "empty" };
+    try {
+      await axios.post(`${VT_API}/vehicle-types/rename`, { dari, ke }, { headers });
+      setCustom((c) => c.map((x) => (x === dari ? ke : x)));
+      return { ok: true, nama: ke };
+    } catch (e) {
+      if (e?.response?.status === 409) return { ok: false, reason: "duplicate" };
+      return { ok: false, reason: "error" };
+    }
+  }, []);
+
+  // Hapus tipe custom dari daftar pilihan. Return { ok }.
+  const deleteType = useCallback(async (nama, headers) => {
+    try {
+      await axios.post(`${VT_API}/vehicle-types/hapus`, { nama }, { headers });
+      setCustom((c) => c.filter((x) => x !== nama));
+      return { ok: true };
+    } catch (e) {
+      return { ok: false };
+    }
+  }, []);
+
+  return { types, customTypes: custom, addType, renameType, deleteType, reload };
 }
 
 const TYPE_TO_FILENAME = {
@@ -668,7 +693,7 @@ const SKETCH_KEYWORDS = [
   [["tronton"], "Tronton"],
   [["tangki", "tanki"], "Truck Tangki"],
   [["wing box", "wingbox", "box besar"], "Box Besar"],
-  [["pemadam", "damkar", "fire"], "Canter Pemadam"],
+  [["pemadam", "damkar", "fire"], "Fire Truck"],
   // Pickup / Double Cabin — termasuk Hilux Rangga & sejenisnya
   [["hilux", "rangga", "triton", "navara", "ranger", "d-max", "dmax", "d max",
     "strada", "colorado", "bt-50", "bt50", "terra", "tunland", "double cab",
@@ -696,6 +721,16 @@ export function guessSketchType(name) {
 /* Resolusi tipe → tipe-yang-punya-sketsa: langsung, atau ditebak dari kata kunci. */
 function resolveSketchType(type) {
   if (TYPE_TO_FILENAME[type] || VEHICLE_SKETCH_MAP[type]) return type;
+  // Tipe custom berakhiran " - <karoseri>" (mis. "Canter FE 74 D6 L - Damkar") → ikut foto karoseri yang sama
+  // dengan tipe bawaan (chassis boleh apa saja; foto ditentukan karoserinya).
+  const m = String(type || "").match(/\s-\s*([A-Za-z ]+?)\s*$/);
+  if (m) {
+    const kar = m[1].toLowerCase().replace(/\s+/g, "");
+    const v = KAROSERI_VARIANTS.find((x) => x.label.toLowerCase() === kar)
+      || (kar === "pemadam" ? KAROSERI_VARIANTS.find((x) => x.label === "Damkar") : null)
+      || (kar === "dump" ? KAROSERI_VARIANTS.find((x) => x.label === "Dumptruck") : null);
+    if (v) return `${CHASSIS_6_RODA[0]} - ${v.label}`;
+  }
   return guessSketchType(type) || type;
 }
 

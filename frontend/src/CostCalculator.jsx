@@ -94,7 +94,7 @@ function marginColor(m) {
 }
 
 export default function CostCalculator() {
-  const { types: tipeOptsDynamic, addType: addVehicleType } = useVehicleTypes();
+  const { types: tipeOptsDynamic, customTypes, addType: addVehicleType, renameType: renameVehicleType, deleteType: deleteVehicleType } = useVehicleTypes();
   const [showNewTipe, setShowNewTipe] = useState(false);
   const [newTipeName, setNewTipeName] = useState("");
   const [savingTipe, setSavingTipe] = useState(false);
@@ -147,6 +147,21 @@ export default function CostCalculator() {
     } else {
       alert("Gagal simpan tipe kendaraan baru, coba lagi.");
     }
+  };
+
+  // Edit / hapus tipe kendaraan CUSTOM yang sedang dipilih (tipe bawaan tidak bisa).
+  const ubahNamaTipe = async () => {
+    const baru = window.prompt("Ubah nama tipe kendaraan:", tipe);
+    if (baru === null || !baru.trim() || baru.trim() === tipe) return;
+    const r = await renameVehicleType(tipe, baru.trim(), { "x-admin-pin": adminPin });
+    if (r.ok) setTipe(r.nama);
+    else alert(r.reason === "duplicate" ? `Tipe "${baru.trim()}" sudah ada.` : "Gagal mengubah nama tipe, coba lagi.");
+  };
+  const hapusTipe = async () => {
+    if (!window.confirm(`Hapus tipe "${tipe}" dari daftar pilihan?\nPesanan lama yang sudah memakai tipe ini tidak berubah.`)) return;
+    const r = await deleteVehicleType(tipe, { "x-admin-pin": adminPin });
+    if (r.ok) setTipe(tipeOptsDynamic.find((t) => t !== tipe) || "");
+    else alert("Gagal menghapus tipe, coba lagi.");
   };
 
   useEffect(() => {
@@ -713,6 +728,12 @@ export default function CostCalculator() {
                   style={{ padding: "0 10px", borderRadius: 8, border: "1px solid #30363d", background: "none", color: "#EF9F27", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
                   + Baru
                 </button>
+                {customTypes.includes(tipe) && (<>
+                  <button type="button" onClick={ubahNamaTipe} title="Ubah nama tipe ini" data-testid="calc-tipe-edit"
+                    style={{ padding: "0 10px", borderRadius: 8, border: "1px solid #30363d", background: "none", color: "#58a6ff", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>✏️</button>
+                  <button type="button" onClick={hapusTipe} title="Hapus tipe ini dari daftar" data-testid="calc-tipe-delete"
+                    style={{ padding: "0 10px", borderRadius: 8, border: "1px solid #30363d", background: "none", color: "#f85149", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>🗑</button>
+                </>)}
               </div>
             ) : (
               <div style={{ display: "flex", gap: 6 }}>
