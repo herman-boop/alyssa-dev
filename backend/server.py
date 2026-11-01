@@ -4788,6 +4788,7 @@ async def public_task_document(
 class TaskSubmitBody(BaseModel):
     extra_inputs: Optional[Dict[str, Any]] = None
     selesai: bool = False
+    buka_lagi: bool = False      # driver salah tekan "Tandai Tugas Selesai" / belum sampai → buka kembali
 
 
 @api_router.post("/public/task/{token}/submit")
@@ -4801,6 +4802,9 @@ async def public_task_submit(token: str, body: TaskSubmitBody):
         upd["extra_inputs"] = merged
     if body.selesai:
         upd["status"] = "selesai"; upd["completed_at"] = now
+    elif body.buka_lagi:
+        if t.get("status") == "selesai":
+            upd["status"] = "dikerjakan"; upd["completed_at"] = None
     else:
         if t.get("status") in ("belum_dibuka", "sudah_dibuka"):
             upd["status"] = "dikerjakan"
