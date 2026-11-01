@@ -80,24 +80,25 @@ export async function printPenawaran(rows, meta) {
     : (insBase > 0 ? Math.round(insBase * (rate / 100)) : 0);
   const grandTotal = shipTotal + premi;
   const hasBreakdown = ppnOn || pph > 0 || premi > 0;
-  // ── Layout "kartu mobile" (terbaca tajam di HP): kolom dirapatkan → Rute + (Tipe · Metode) jadi satu sel. ──
+  // ── Kolom TEMPLATE LAMA (menyamping): No | Rute | Moda | Tipe Kendaraan | [Unit] | [Premi] | Harga | [Jumlah] ──
   const showQty = hasQty && !isDraft;
-  const ncols = 3 + (showQty ? 2 : 0) + (perRow ? 1 : 0);   // No | Rute | [Unit] | [Premi] | Harga | [Jumlah]
+  const ncols = 5 + (showQty ? 2 : 0) + (perRow ? 1 : 0);
   // Tiap rute = 1 <tbody> supaya 1 rute tidak pecah antar-halaman & tetap 1 item.
   const body = (rows || []).map((e, i) => {
     const opts = routeOptions(e);
     const catatanHtml = e.catatan ? `<div class="ph-note">${esc(e.catatan)}</div>` : "";
-    const tipe = esc(e.tipe_kendaraan || "-");
     // DRAFT + punya opsi → listing alternatif (○), TANPA Total Rute (customer pilih 1).
     if (isDraft && opts.length) {
       const main = `<tr class="ph-main">
         <td class="c">${i + 1}</td>
-        <td><div class="ph-rt">${esc(e.rute || "-")}</div><div class="ph-sb">${tipe}${opts.length > 1 ? " &middot; Opsi Pengiriman" : ` &middot; ${esc(opts[0].metode || "-")}`}</div>${routeQty(e) > 1 ? `<div class="ph-note">Jumlah ${routeQty(e)} unit (harga per unit)</div>` : ""}${catatanHtml}</td>
-        <td class="r ph-opt-hint" colspan="${ncols - 2}">pilih salah satu</td>
+        <td><b>${esc(e.rute || "-")}</b>${routeQty(e) > 1 ? `<div class="ph-note">Jumlah ${routeQty(e)} unit (harga per unit)</div>` : ""}${catatanHtml}</td>
+        <td>${opts.length > 1 ? "Opsi Pengiriman" : esc(opts[0].metode || "-")}</td>
+        <td>${esc(e.tipe_kendaraan || "-")}</td>
+        <td class="r ph-opt-hint">pilih salah satu</td>
       </tr>`;
       const subs = opts.map((o) => `<tr class="ph-sub">
         <td></td>
-        <td colspan="${ncols - 2}" class="ph-sub-k">○ ${esc(o.metode || "-")}${o.catatan ? ` <span class="ph-sub-note">(${esc(o.catatan)})</span>` : ""}</td>
+        <td colspan="3" class="ph-sub-k">○ ${esc(o.metode || "-")}${o.catatan ? ` <span class="ph-sub-note">(${esc(o.catatan)})</span>` : ""}</td>
         <td class="r ph-sub-v">${fRp(o.harga || 0)}</td>
       </tr>`).join("");
       return `<tbody class="ph-route">${main}${subs}</tbody>`;
@@ -107,7 +108,9 @@ export async function printPenawaran(rows, meta) {
     const metode = isDraft ? (e.moda || "-") : routeFinalMetode(e);
     const main = `<tr class="ph-main-single">
       <td class="c">${i + 1}</td>
-      <td><div class="ph-rt">${esc(e.rute || "-")}</div><div class="ph-sb">${tipe} &middot; ${esc(metode)}</div>${catatanHtml}</td>
+      <td><b>${esc(e.rute || "-")}</b>${catatanHtml}</td>
+      <td>${esc(metode)}</td>
+      <td>${esc(e.tipe_kendaraan || "-")}</td>
       ${showQty ? `<td class="c">${routeQty(e)}</td>` : ""}
       ${perRow ? `<td class="r">${rowPremi(e) > 0 ? `${fRp(rowPremi(e))}<div class="ph-note">Nilai ${fRp(rowNilai(e))}${routeQty(e) > 1 ? " / unit" : ""}</div>` : "-"}</td>` : ""}
       <td class="r"><b>${fRp(harga)}</b></td>
@@ -141,22 +144,21 @@ export async function printPenawaran(rows, meta) {
     .ph-sec { font-size:13px; font-weight:700; color:#006644; text-transform:uppercase; letter-spacing:.4px; margin:16px 0 8px; }
     table.ph { width:100%; border-collapse:collapse; }
     table.ph thead { display:table-header-group; }        /* header diulang tiap halaman */
-    table.ph th, table.ph td { padding:12px 10px; border-bottom:1px solid #E0E0E0; text-align:left; vertical-align:top; }
-    table.ph th { background:#E8F5E9; color:#006644; font-weight:700; font-size:13px; }
-    table.ph td { font-size:13px; color:#212121; line-height:1.4; }
+    table.ph th, table.ph td { padding:12px 8px; border-bottom:1px solid #E0E0E0; text-align:left; vertical-align:top; }
+    table.ph th { background:#E8F5E9; color:#006644; font-weight:700; font-size:13px; border-bottom:2px solid #C5A059; }
+    table.ph td { font-size:14px; font-weight:500; color:#212121; line-height:1.35; }
+    table.ph td b { font-weight:700; }
     table.ph th.r, table.ph td.r { text-align:right; } table.ph th.c, table.ph td.c { text-align:center; }
     table.ph td.r { white-space:nowrap; }
-    table.ph .ph-rt { font-weight:700; color:#212121; }
-    table.ph .ph-sb { font-weight:500; color:#4A4A4A; margin-top:2px; }
-    table.ph .ph-note { font-size:12px; color:#4A4A4A; font-style:italic; margin-top:2px; font-weight:500; }
+    table.ph .ph-note { font-size:12.5px; color:#4A4A4A; font-style:italic; margin-top:2px; font-weight:500; }
     table.ph tbody.ph-route { break-inside:avoid; page-break-inside:avoid; }
     table.ph tbody tr { break-inside:avoid; page-break-inside:avoid; }
     table.ph tr.ph-main td { border-bottom:none; padding-bottom:4px; }
     table.ph tr.ph-sub td { border-bottom:none; padding-top:2px; padding-bottom:2px; }
     table.ph tbody.ph-route tr:last-child td { border-bottom:1px solid #E0E0E0; padding-bottom:12px; }
-    table.ph .ph-sub-k { padding-left:22px !important; font-size:13px; color:#212121; font-weight:500; }
+    table.ph .ph-sub-k { padding-left:16px !important; font-size:14px; color:#212121; font-weight:500; }
     table.ph .ph-sub-note { font-style:italic; color:#4A4A4A; }
-    table.ph .ph-sub-v { font-size:13px; font-weight:700; white-space:nowrap; }
+    table.ph .ph-sub-v { font-size:14px; font-weight:700; white-space:nowrap; }
     table.ph .ph-opt-hint { font-size:12px; font-style:italic; color:#4A4A4A; font-weight:500; }
     .ph-draft-note { font-size:13px; color:#212121; line-height:1.6; background:#E8F5E9; border-left:4px solid #006644; border-radius:8px; padding:12px 14px; margin:12px 0 2px; }
     .ph-bar { display:flex; justify-content:space-between; align-items:center; padding:12px 10px 0; }
@@ -208,7 +210,7 @@ export async function printPenawaran(rows, meta) {
     <div class="ph-sec">${isDraft ? "Opsi Harga — Pilih Salah Satu Metode" : "Rincian Penawaran"}</div>
     <table class="ph">
       <thead><tr>
-        <th class="c" style="width:32px">No</th><th>Rute / Kendaraan</th>${showQty ? `<th class="c" style="width:48px">Unit</th>` : ""}${perRow ? `<th class="r" style="width:104px">Premi Asuransi</th>` : ""}<th class="r" style="width:${showQty ? 104 : 124}px">${showQty ? "Harga / Unit" : "Harga"}</th>${showQty ? `<th class="r" style="width:112px">Jumlah</th>` : ""}
+        <th class="c" style="width:30px">No</th><th>Rute</th><th style="width:78px">Moda</th><th style="width:104px">Tipe Kendaraan</th>${showQty ? `<th class="c" style="width:40px">Unit</th>` : ""}${perRow ? `<th class="r" style="width:96px">Premi Asuransi</th>` : ""}<th class="r" style="width:${showQty ? 98 : 112}px">${showQty ? "Harga / Unit" : "Harga"}</th>${showQty ? `<th class="r" style="width:104px">Jumlah</th>` : ""}
       </tr></thead>
       ${body}
     </table>
