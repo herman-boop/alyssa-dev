@@ -315,9 +315,14 @@ export default function TaskPage() {
     saveExtra(true);
   };
   // Driver Tujuan: kalau hari ini belum checkpoint dan sedang jam buka, itu yang diutamakan
+  // Perjalanan berhari-hari: setelah semua langkah tercentang pun, driver tetap harus bisa menambah checkpoint
+  // sampai ia sendiri menandai tugas selesai (checklist 100% bukan berarti sudah tiba).
+  const bisaTambahCp = !simple && !selesai && baseTabs.includes("checkpoint") && !disabledTabs.includes("checkpoint");
+  // Aturan: minimal 1 checkpoint tiap hari perjalanan. Kalau hari ini sudah terkirim, tombol utama istirahat sampai besok.
+  const sudahCpHariIni = cpsAll.some((c) => c.ts && new Date(c.ts).toDateString() === nowD.toDateString());
   const nextStep = (simple && sudahTerima && !sudahHariIni && dalamJam && !selesai)
     ? { key: "harian", tab: "checkpoint", label: "Checkpoint hari ini" }
-    : steps.find((x) => !stepDone(x));
+    : (steps.find((x) => !stepDone(x)) || (bisaTambahCp ? { key: "tambah-cp", tab: "checkpoint", label: "Tambah checkpoint", hariIni: sudahCpHariIni } : undefined));
   const unit0 = (task.units || [])[0] || {};
   const bigBtn = { width: "100%", padding: "19px", borderRadius: 18, border: "none", background: C.blue, color: "#fff", fontWeight: 800, fontSize: 16, cursor: "pointer", minHeight: 56, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: "0 10px 26px rgba(37,99,235,0.4)" };
   const hour = new Date().getHours();
@@ -393,12 +398,25 @@ export default function TaskPage() {
                 Tugas sudah ditandai selesai, tapi belum ada {kurang.map((x) => x.label.toLowerCase()).join(" dan ")} yang terkirim. Kirim sekarang supaya tampil di tracking.
               </div>
             )}
-            <button onClick={() => nextStep && setTab(nextStep.tab || nextStep.key)} disabled={!nextStep}
-              style={{ width: "100%", marginTop: 16, padding: 19, borderRadius: 18, border: "none", background: !nextStep ? "#166534" : C.blue, color: "#fff", fontSize: 16, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: !nextStep ? "default" : "pointer", boxShadow: !nextStep ? "none" : "0 10px 26px rgba(37,99,235,0.4)" }}
-              data-testid="task-btn-lanjut">
-              {!nextStep ? "Semua Tugas Selesai ✓" : `Lanjutkan: ${nextStep.label}`}
-              {nextStep && <ChevronRight size={20} />}
-            </button>
+            {nextStep && nextStep.key === "tambah-cp" && (
+              <div style={{ fontSize: 12.5, color: C.mute, fontWeight: 600, marginTop: 14, lineHeight: 1.5, textAlign: "center" }} data-testid="task-hint-cp">
+                {nextStep.hariIni
+                  ? "Checkpoint hari ini sudah terkirim. Besok tambah lagi (1x per hari) sampai tiba, lalu tekan \"Tandai Tugas Selesai\"."
+                  : "Perjalanan belum selesai. Kirim 1 checkpoint hari ini, dan ulangi tiap hari sampai tiba, lalu tekan \"Tandai Tugas Selesai\"."}
+              </div>
+            )}
+            {(() => {
+              const istirahat = !!nextStep && nextStep.key === "tambah-cp" && nextStep.hariIni;
+              const mati = !nextStep || istirahat;
+              return (
+                <button onClick={() => !mati && setTab(nextStep.tab || nextStep.key)} disabled={mati}
+                  style={{ width: "100%", marginTop: 16, padding: 19, borderRadius: 18, border: "none", background: !nextStep ? "#166534" : istirahat ? C.gray : C.blue, color: istirahat ? C.mute : "#fff", fontSize: 16, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: mati ? "default" : "pointer", boxShadow: mati ? "none" : "0 10px 26px rgba(37,99,235,0.4)" }}
+                  data-testid="task-btn-lanjut">
+                  {!nextStep ? "Semua Tugas Selesai ✓" : istirahat ? "✓ Checkpoint hari ini sudah terkirim" : nextStep.key === "tambah-cp" ? "📍 Tambah Checkpoint" : `Lanjutkan: ${nextStep.label}`}
+                  {nextStep && !istirahat && <ChevronRight size={20} />}
+                </button>
+              );
+            })()}
           </>
         )}
       </div>
