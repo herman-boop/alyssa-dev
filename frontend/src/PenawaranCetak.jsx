@@ -92,12 +92,12 @@ async function buildPenawaran(rows, meta, forImage) {
   const ncols = 5 + (showQty ? 2 : 0) + (perRow ? 1 : 0);
   // Lebar halaman PDF mengikuti jumlah kolom: kolom sedikit → halaman sempit → huruf besar di HP;
   // kolom banyak (Unit + Premi + Jumlah) → halaman lebih lebar supaya Rute & Moda tidak terlalu turun baris.
-  const pageMm = ncols <= 5 ? 160 : ncols <= 6 ? 185 : ncols <= 7 ? 200 : 210;
-  const contW = Math.round((pageMm - 10) * 3.78) + 40;   // lebar kontainer saat dirender jadi gambar (isi = lebar halaman PDF)
+  const pageMm = 210;   // A4 portrait (sesuai desain navy-gold)
+  const contW = Math.round((pageMm - 10) * 3.78) + 48;   // lebar kontainer saat dirender jadi gambar (isi = lebar halaman PDF)
   const padat = ncols >= 8;                 // kasus terpadat (Unit + Premi + Jumlah): font 13px, kolom angka lebih ramping
   const fs = padat ? 13 : 14;
   // Lebar kolom (px, table-layout fixed): Rute = sisa. Kolom angka cukup lebar supaya "Rp 20.000.000" tidak meluber.
-  const colW = [34, null, padat ? 96 : 112, padat ? 92 : 116].concat(showQty ? [44] : [], [padat ? 120 : 132], perRow ? [padat ? 96 : 110] : [], showQty ? [padat ? 122 : 134] : []);
+  const colW = [34, null, padat ? 88 : 112, padat ? 84 : 116].concat(showQty ? [40] : [], [padat ? 108 : 132], perRow ? [padat ? 132 : 170] : [], showQty ? [padat ? 112 : 134] : []);
   const colgroup = `<colgroup>${colW.map((w) => (w ? `<col style="width:${w}px">` : "<col>")).join("")}</colgroup>`;
   // Tiap rute = 1 <tbody> supaya 1 rute tidak pecah antar-halaman & tetap 1 item.
   const body = (rows || []).map((e, i) => {
@@ -129,7 +129,7 @@ async function buildPenawaran(rows, meta, forImage) {
       <td>${esc(e.tipe_kendaraan || "-")}</td>
       ${showQty ? `<td class="c">${routeQty(e)}</td>` : ""}
       <td class="r"><b>${fRp(harga)}</b></td>
-      ${perRow ? `<td class="r">${rowPremi(e) > 0 ? `${fRp(rowPremi(e))}<div class="ph-note">Nilai ${fRp(rowNilai(e))}${routeQty(e) > 1 ? " / unit" : ""}</div>` : "-"}</td>` : ""}
+      ${perRow ? `<td class="r">${rowPremi(e) > 0 ? `${fRp(rowPremi(e))}<div class="ph-note">Nilai Pertanggungan ${fRp(rowNilai(e))}${routeQty(e) > 1 ? " / unit" : ""}</div>` : "-"}</td>` : ""}
       ${showQty ? `<td class="r"><b>${fRp(harga * routeQty(e))}</b></td>` : ""}
     </tr>`;
     return `<tbody class="ph-route">${main}</tbody>`;
@@ -144,88 +144,91 @@ async function buildPenawaran(rows, meta, forImage) {
     html, body, .pdf-container, .pdf-container * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: geometricPrecision; }
     body { font-family: 'Inter', 'SF Pro Text', -apple-system, Helvetica, Arial, sans-serif; font-size: 13px; color: #212121; background: #ffffff; }
     /* Kartu mobile: lebar maksimal 650px supaya padat & besar saat dilihat di HP. */
-    .pdf-container { width: 100%; max-width: ${Math.round((pageMm - 10) * 3.78)}px; margin: 0 auto; padding: 20px; background: #ffffff; }
-    .ph-head { display:flex; align-items:center; gap:12px; padding-bottom:14px; border-bottom:3px solid #C5A059; margin-bottom:14px; }
-    .ph-head img { width:44px; height:44px; object-fit:contain; flex-shrink:0; }
-    .ph-pt { font-size:19px; font-weight:700; color:#212121; line-height:1.2; }
-    .ph-tag { font-size:13px; font-weight:700; color:#C5A059; letter-spacing:.3px; margin-top:3px; }
-    .ph-card { background:#E3F2FD; border-radius:12px; padding:14px 16px; margin-bottom:14px; }
-    .ph-title { font-size:15px; font-weight:800; color:#0A7EA4; letter-spacing:.4px; margin-bottom:8px; }
-    .ph-line { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; padding:5px 0; }
-    .ph-line .k { font-size:14px; font-weight:500; color:#4A4A4A; flex-shrink:0; }
-    .ph-line .v { font-size:14px; font-weight:700; color:#212121; text-align:right; }
-    .ph-line.total { border-top:1px solid #BBDEFB; margin-top:6px; padding-top:10px; }
-    .ph-line.total .k { font-weight:700; color:#0A7EA4; }
-    .ph-line.total .v { font-size:18px; font-weight:800; color:#0A7EA4; }
-    .ph-sec { font-size:13px; font-weight:700; color:#0A7EA4; text-transform:uppercase; letter-spacing:.4px; margin:16px 0 8px; }
-    table.ph { width:100%; border-collapse:collapse; table-layout:fixed; }
+    .pdf-container { width: 100%; max-width: ${Math.round((pageMm - 10) * 3.78)}px; margin: 0 auto; padding: 24px; background: #ffffff; }
+    :root { --navy:#0F2A5C; --gold:#C9973A; --lb:#E3F0FA; --ink:#1B2433; --mut:#4A5568; --ln:#DCE6F2; }
+    .ph-head { display:flex; align-items:center; gap:16px; padding-bottom:16px; border-bottom:2px solid var(--gold); margin-bottom:16px; }
+    .ph-head img { width:66px; height:66px; object-fit:contain; flex-shrink:0; }
+    .ph-head .sep { width:2px; align-self:stretch; background:var(--gold); margin:4px 0; }
+    .ph-pt { font-size:26px; font-weight:800; color:var(--navy); line-height:1.15; letter-spacing:.2px; }
+    .ph-tag { font-size:16px; font-weight:700; color:var(--gold); margin-top:4px; }
+    .ph-title { font-size:30px; font-weight:800; color:var(--navy); letter-spacing:.3px; margin:0 0 8px; }
+    .ph-info { margin-bottom:16px; }
+    .ph-line { display:grid; grid-template-columns:200px 22px 1fr; align-items:start; padding:5px 4px; font-size:15px; color:var(--ink); }
+    .ph-line .c { font-weight:500; }
+    .ph-line .v { font-weight:700; text-align:right; }
+    .ph-total { display:flex; justify-content:space-between; align-items:center; border-radius:12px; padding:0 0 0 20px; margin:6px 0 20px; min-height:62px; overflow:hidden;
+      background:linear-gradient(105deg, var(--lb) 0%, var(--lb) 63%, #F1DFA6 63.2%, #D4A94B 100%); }
+    .ph-total .lbl { font-size:18px; font-weight:800; color:var(--navy); }
+    .ph-total .val { font-size:28px; font-weight:800; color:var(--ink); padding:12px 22px 12px 60px; white-space:nowrap; }
+    .ph-sec { font-size:18px; font-weight:800; color:var(--navy); text-transform:uppercase; margin:16px 0 8px; padding-left:12px; border-left:5px solid var(--gold); line-height:1.1; }
+    table.ph { width:100%; border-collapse:separate; border-spacing:0; table-layout:fixed; border:1px solid var(--ln); border-radius:10px; overflow:hidden; }
     table.ph thead { display:table-header-group; }        /* header diulang tiap halaman */
-    table.ph th, table.ph td { padding:12px 8px; border-bottom:1px solid #E0E0E0; text-align:left; vertical-align:top; overflow-wrap:anywhere; }
-    table.ph th { vertical-align:middle; overflow-wrap:normal; }
-    table.ph th { background:#E3F2FD; color:#0A7EA4; font-weight:700; font-size:13px; border-bottom:2px solid #C5A059; }
-    table.ph td { font-size:${fs}px; font-weight:600; color:#212121; line-height:1.35; }
+    table.ph th, table.ph td { padding:12px 8px; border-bottom:1px solid var(--ln); border-right:1px solid var(--ln); text-align:left; vertical-align:top; overflow-wrap:anywhere; }
+    table.ph th:last-child, table.ph td:last-child { border-right:none; }
+    table.ph th { vertical-align:middle; overflow-wrap:normal; background:var(--lb); color:var(--navy); font-weight:800; font-size:14px; border-bottom:1px solid var(--ln); border-right:none; }
+    table.ph td { font-size:${fs}px; font-weight:500; color:var(--ink); line-height:1.35; }
     table.ph th.c, table.ph td.c { padding-left:4px; padding-right:4px; white-space:nowrap; }
     table.ph td b { font-weight:700; }
     table.ph th.r, table.ph td.r { text-align:right; } table.ph th.c, table.ph td.c { text-align:center; }
     table.ph td.r { white-space:nowrap; overflow-wrap:normal; }
-    table.ph .ph-note { font-size:12.5px; color:#4A4A4A; font-style:italic; margin-top:2px; font-weight:500; }
+    table.ph .ph-note { font-size:12px; color:var(--mut); font-style:italic; margin-top:2px; font-weight:400; white-space:normal; overflow-wrap:break-word; line-height:1.3; }
     table.ph tbody.ph-route { break-inside:avoid; page-break-inside:avoid; }
     table.ph tbody tr { break-inside:avoid; page-break-inside:avoid; }
+    table.ph tbody:last-of-type tr:last-child td { border-bottom:none; }
     table.ph tr.ph-main td { border-bottom:none; padding-bottom:4px; }
     table.ph tr.ph-sub td { border-bottom:none; padding-top:2px; padding-bottom:2px; }
-    table.ph tbody.ph-route tr:last-child td { border-bottom:1px solid #E0E0E0; padding-bottom:12px; }
-    table.ph .ph-sub-k { padding-left:16px !important; font-size:${fs}px; color:#212121; font-weight:500; }
-    table.ph .ph-sub-note { font-style:italic; color:#4A4A4A; }
+    table.ph .ph-sub-k { padding-left:16px !important; font-size:${fs}px; color:var(--ink); font-weight:500; }
+    table.ph .ph-sub-note { font-style:italic; color:var(--mut); }
     table.ph .ph-sub-v { font-size:${fs}px; font-weight:700; white-space:nowrap; }
-    table.ph .ph-opt-hint { font-size:12px; font-style:italic; color:#4A4A4A; font-weight:500; }
-    .ph-draft-note { font-size:13px; color:#212121; line-height:1.6; background:#E3F2FD; border-left:4px solid #2CB3DB; border-radius:8px; padding:12px 14px; margin:12px 0 2px; }
-    .ph-bar { display:flex; justify-content:space-between; align-items:center; padding:12px 10px 0; }
-    .ph-bar .lbl { font-weight:700; font-size:14px; color:#0A7EA4; text-transform:uppercase; }
-    .ph-bar .val { font-weight:800; font-size:16px; color:#212121; }
-    .ph-sum { margin:10px 0 0; break-inside:avoid; page-break-inside:avoid; }
-    .ph-sum .row { display:flex; justify-content:space-between; gap:12px; padding:11px 10px; font-size:14px; border-bottom:1px solid #E0E0E0; }
-    .ph-sum .row .k { color:#212121; font-weight:600; font-size:14px; }
-    .ph-sum .row .v { font-weight:700; color:#212121; white-space:nowrap; font-size:14px; }
+    table.ph .ph-opt-hint { font-size:12px; font-style:italic; color:var(--mut); font-weight:500; }
+    .ph-draft-note { font-size:13px; color:var(--ink); line-height:1.6; background:var(--lb); border-left:4px solid var(--gold); border-radius:8px; padding:12px 14px; margin:12px 0 2px; }
+    .ph-sum { margin:0; break-inside:avoid; page-break-inside:avoid; }
+    .ph-sum .row { display:flex; justify-content:space-between; gap:12px; padding:9px 8px; font-size:15px; border-bottom:1px solid var(--ln); }
+    .ph-sum .row .k { color:var(--ink); font-weight:500; }
+    .ph-sum .row .v { font-weight:700; color:var(--ink); white-space:nowrap; }
     .ph-sum .row.minus .v { color:#b45309; }
-    .ph-grand { margin-top:10px; background:#1793BE; border-radius:12px; padding:14px 16px; display:flex; justify-content:space-between; align-items:center; gap:12px; }
-    .ph-grand .k { font-size:14px; font-weight:700; color:#ffffff; text-transform:uppercase; }
-    .ph-grand .v { font-size:21px; font-weight:800; color:#ffffff; white-space:nowrap; }
-    .ph-pay-box { display:flex; align-items:center; gap:14px; padding:14px 16px; background:#F5F5F5; border-radius:12px; margin:16px 0; break-inside:avoid; }
-    .ph-pay-badge { min-width:48px; height:44px; padding:0 10px; border-radius:10px; background:#2CB3DB; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:13px; flex-shrink:0; }
-    .ph-pay-num { font-size:17px; font-weight:800; letter-spacing:.5px; color:#212121; }
-    .ph-pay-name { font-size:13px; font-weight:500; color:#4A4A4A; margin-top:2px; }
-    .ph-valid { font-size:14px; font-weight:500; color:#4A4A4A; line-height:1.6; margin-bottom:8px; }
-    .ph-valid b { color:#212121; font-weight:700; }
-    .ph-sign-row { display:flex; justify-content:flex-end; margin-top:22px; break-inside:avoid; page-break-inside:avoid; }
+    .ph-grand { margin-top:14px; border-radius:12px; padding:0 0 0 22px; min-height:62px; display:flex; justify-content:space-between; align-items:center; gap:12px; overflow:hidden;
+      background:linear-gradient(105deg, var(--navy) 0%, var(--navy) 63%, #F1DFA6 63.2%, #D4A94B 100%); }
+    .ph-grand .k { font-size:20px; font-weight:800; color:#ffffff; text-transform:uppercase; }
+    .ph-grand .v { font-size:28px; font-weight:800; color:var(--ink); white-space:nowrap; padding:12px 22px 12px 60px; }
+    .ph-pay-box { display:flex; align-items:center; gap:16px; padding:14px 18px; background:var(--lb); border-radius:12px; margin:16px 0 10px; break-inside:avoid; }
+    .ph-pay-badge { font-weight:900; font-style:italic; font-size:26px; color:#1565C0; padding-right:16px; border-right:2px solid var(--gold); line-height:1.1; flex-shrink:0; }
+    .ph-pay-num { font-size:22px; font-weight:800; letter-spacing:.5px; color:var(--ink); }
+    .ph-pay-name { font-size:14px; font-weight:500; color:var(--ink); margin-top:2px; }
+    .ph-valid { font-size:14px; font-weight:500; color:var(--ink); line-height:1.6; margin-bottom:8px; }
+    .ph-valid b { font-weight:700; }
+    .ph-valid b.cat { color:var(--gold); }
+    .ph-sign-row { display:flex; justify-content:flex-end; margin-top:10px; break-inside:avoid; page-break-inside:avoid; }
     .ph-sign-cell { width:260px; text-align:center; }
-    .ph-sign-lbl { font-size:13px; font-weight:500; color:#4A4A4A; margin-bottom:6px; }
-    .ph-sign-stamp { height:86px; display:flex; align-items:center; justify-content:center; margin-bottom:2px; }
+    .ph-sign-lbl { font-size:14px; font-weight:500; color:var(--ink); margin-bottom:6px; }
+    .ph-sign-stamp { height:70px; display:flex; align-items:center; justify-content:center; margin-bottom:2px; }
     .ph-sign-stamp img { max-height:86px; max-width:220px; object-fit:contain; }
     .ph-sign-stamp.empty { height:56px; }
-    .ph-sign-pt, .ph-sign-name { font-size:13px; font-weight:700; color:#212121; }
-    .ph-sign-name { margin-top:2px; }
-    .ph-sign-jab { font-size:13px; font-weight:500; color:#4A4A4A; margin-top:2px; }
-    .ph-foot { display:flex; justify-content:space-between; gap:8px; padding-top:12px; margin-top:18px; border-top:1px solid #E0E0E0; font-size:12px; font-weight:500; color:#4A4A4A; }
+    .ph-sign-pt, .ph-sign-name { font-size:14px; font-weight:700; color:var(--ink); }
+    .ph-sign-name { margin-top:2px; font-weight:500; }
+    .ph-sign-jab { font-size:13px; font-weight:500; color:var(--mut); margin-top:2px; }
+    .ph-foot { display:flex; justify-content:space-between; gap:8px; padding-top:8px; margin-top:12px; border-top:2px solid var(--gold); font-size:12px; font-weight:500; color:var(--mut); }
     /* Halaman PDF dibuat sempit (lebar mengikuti jumlah kolom) → saat dibuka/di-screenshot di HP teksnya besar, bukan mengecil ke lebar A4. */
-    @page { size: ${pageMm}mm 320mm; margin: 5mm; }
+    @page { size: A4 portrait; margin: 8mm; }
     @media print { .pdf-container { padding: 0; max-width: none; } }
-    ${forImage ? `body { width: ${contW}px; } .pdf-container { width: ${contW}px; max-width: none; margin: 0; padding: 20px; }` : ""}
+    ${forImage ? `body { width: ${contW}px; } .pdf-container { width: ${contW}px; max-width: none; margin: 0; padding: 24px; }` : ""}
   </style></head><body>
   <div class="pdf-container">
     <div class="ph-head">
       <img src="/logo.png" alt="Logo">
+      <div class="sep"></div>
       <div>
         <div class="ph-pt">${DOC_BRAND.name}</div>
         <div class="ph-tag">${DOC_BRAND.tagline}</div>
       </div>
     </div>
-    <div class="ph-card">
-      <div class="ph-title">${isDraft ? "PENAWARAN HARGA (OPSI)" : "PENAWARAN HARGA"}</div>
-      <div class="ph-line"><span class="k">Kepada Yth.</span><span class="v">${esc(nama_pt || "-")}</span></div>
-      <div class="ph-line"><span class="k">Periode Penawaran</span><span class="v">${fmtTgl(tglPakai)} (Berlaku 7 Hari)</span></div>
-      <div class="ph-line"><span class="k">No. Penawaran</span><span class="v">${noDoc}</span></div>
-      ${isDraft ? "" : `<div class="ph-line total"><span class="k">Total Nilai Penawaran</span><span class="v">${fRp(grandTotal)}</span></div>`}
+    <div class="ph-title">${isDraft ? "PENAWARAN HARGA (OPSI)" : "PENAWARAN HARGA"}</div>
+    <div class="ph-info">
+      <div class="ph-line"><span>Kepada Yth.</span><span class="c">:</span><span class="v">${esc(nama_pt || "-")}</span></div>
+      <div class="ph-line"><span>Periode Penawaran</span><span class="c">:</span><span class="v">${fmtTgl(tglPakai)} (Berlaku 7 Hari)</span></div>
+      <div class="ph-line"><span>No. Penawaran</span><span class="c">:</span><span class="v">${noDoc}</span></div>
     </div>
+    ${isDraft ? "" : `<div class="ph-total"><span class="lbl">Total Nilai Penawaran</span><span class="val">${fRp(grandTotal)}</span></div>`}
     <div class="ph-sec">${isDraft ? "Opsi Harga — Pilih Salah Satu Metode" : "Rincian Penawaran"}</div>
     <table class="ph">
       ${colgroup}
@@ -237,16 +240,14 @@ async function buildPenawaran(rows, meta, forImage) {
     ${isDraft ? `
     <div class="ph-draft-note">Ini penawaran <b>opsi harga</b>. Setiap rute menampilkan beberapa alternatif metode — silakan pilih <b>salah satu</b> per rute. Total &amp; pajak dihitung pada penawaran resmi setelah metode dipilih.</div>
     ` : `
-    <div class="ph-bar"><span class="lbl">${hasBreakdown ? "Subtotal Pengiriman" : "Total"}</span><span class="val">${fRp(subtotal)}</span></div>
-    ${hasBreakdown ? `
     <div class="ph-sec">Ringkasan Biaya</div>
     <div class="ph-sum">
       <div class="row"><span class="k">${ppnOn && incl ? "DPP (Dasar Pengenaan Pajak)" : "Subtotal Pengiriman"}</span><span class="v">${fRp(ppnOn && incl ? dpp : subtotal)}</span></div>
       ${ppnOn ? `<div class="row"><span class="k">PPN 1,1%${incl ? " (sudah termasuk)" : ""}</span><span class="v">${fRp(ppn)}</span></div>` : ""}
       ${pph ? `<div class="row minus"><span class="k">Potongan PPh 23 (2%)</span><span class="v">- ${fRp(pph)}</span></div>` : ""}
       ${premi ? `<div class="row"><span class="k">${perRow ? "Total Premi Asuransi" : "Premi Asuransi"} (${fRp(insBase)} &times; ${fRate(rate)}%)</span><span class="v">${fRp(premi)}</span></div>` : ""}
-      <div class="ph-grand"><span class="k">Grand Total</span><span class="v">${fRp(grandTotal)}</span></div>
-    </div>` : ""}
+    </div>
+    <div class="ph-grand"><span class="k">Grand Total</span><span class="v">${fRp(grandTotal)}</span></div>
     `}
     <div class="ph-pay-box">
       <div class="ph-pay-badge">${DOC_BRAND.bank.name}</div>
@@ -257,7 +258,7 @@ async function buildPenawaran(rows, meta, forImage) {
     </div>
     ${catatan && String(catatan).trim() ? `<div class="ph-valid"><b>Keterangan:</b> ${esc(String(catatan).trim()).replace(/\n/g, "<br>")}</div>` : ""}
     <div class="ph-valid">
-      <b>Catatan:</b> Harga di atas berlaku 7 (tujuh) hari sejak tanggal penawaran &amp; dapat berubah sewaktu-waktu mengikuti kondisi operasional. Untuk konfirmasi hubungi <b>0818 631 135</b>.
+      <b class="cat">Catatan:</b> Harga di atas berlaku 7 (tujuh) hari sejak tanggal penawaran &amp; dapat berubah sewaktu-waktu mengikuti kondisi operasional. Untuk konfirmasi hubungi <b>0818 631 135</b>.
     </div>
     <div class="ph-sign-row">
       <div class="ph-sign-cell">
