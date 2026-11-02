@@ -15,6 +15,7 @@ const INS_RATE_OPTIONS = [
 export const PENAWARAN_TEMPLATES = [
   { value: "standar", label: "Standar (navy · gold · light blue)" },
   { value: "corporate", label: "Corporate Signature (minimalis, abu-abu muda)" },
+  { value: "classic", label: "Corporate Classic (judul besar, tanpa kotak total)" },
 ];
 const TPL_LS_KEY = "aal_penawaran_tpl_v1";
 function loadTpl() { try { const v = localStorage.getItem(TPL_LS_KEY); return PENAWARAN_TEMPLATES.some((t) => t.value === v) ? v : "standar"; } catch { return "standar"; } }
@@ -59,7 +60,8 @@ function routeFinalMetode(e) {
 // Membangun HTML penawaran. forImage=true → tanpa dialog cetak & lebar kontainer tetap (dirender jadi gambar).
 async function buildPenawaran(rows, meta, forImage) {
   const { nama_pt, ttdNama, ttdJabatan, stempel, tanggal, insVal, insRate, withPpn, taxIncl, withPph, catatan } = meta || {};
-  const corp = (meta && meta.template) === "corporate";   // template Corporate Signature
+  const classic = (meta && meta.template) === "classic";   // template Corporate Classic
+  const corp = classic || (meta && meta.template) === "corporate";   // keluarga Corporate (Signature & Classic)
   const preview = !!(meta && meta.preview);               // tampilkan dulu, cetak lewat tombol
   const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const fmtTgl = (iso) => (iso ? new Date(iso).toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" }) : "-");
@@ -218,6 +220,12 @@ async function buildPenawaran(rows, meta, forImage) {
     .ph-sign-name { margin-top:2px; font-weight:500; }
     .ph-sign-jab { font-size:13px; font-weight:500; color:var(--mut); margin-top:2px; }
     .ph-foot { display:flex; justify-content:space-between; gap:8px; padding-top:8px; margin-top:12px; border-top:2px solid var(--gold); font-size:12px; font-weight:500; color:var(--mut); }
+    /* ── Corporate Classic: judul besar, tanpa kotak Total Nilai, kotak BCA tanpa latar, gold lebih hangat ── */
+    body.tpl-classic { --gold:#E0A526; }
+    body.tpl-classic .ph-title { margin:6px 0 10px; }
+    body.tpl-classic .ph-info { margin-top:6px; margin-bottom:34px; }
+    body.tpl-corp.tpl-classic .ph-pay-box { background:transparent; padding:10px 4px; margin:20px 0 12px; }
+    body.tpl-classic .ph-pay-badge { font-size:30px; }
     .pv-bar { position:sticky; top:0; z-index:5; display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 14px; background:#0F2A5C; color:#fff; font-size:13px; font-weight:600; }
     .pv-bar button { font:inherit; font-weight:800; padding:7px 14px; border:none; border-radius:8px; background:#fff; color:#0F2A5C; cursor:pointer; }
     @media print { .pv-bar { display:none; } }
@@ -237,7 +245,7 @@ async function buildPenawaran(rows, meta, forImage) {
     @page { size: A4 portrait; margin: 8mm; }
     @media print { .pdf-container { padding: 0; max-width: none; } }
     ${forImage ? `body { width: ${contW}px; } .pdf-container { width: ${contW}px; max-width: none; margin: 0; padding: 24px; }` : ""}
-  </style></head><body class="${corp ? "tpl-corp" : "tpl-std"}">
+  </style></head><body class="${corp ? "tpl-corp" : "tpl-std"}${classic ? " tpl-classic" : ""}">
   ${preview ? `<div class="pv-bar"><span>Preview — ${noDoc}</span><button onclick="window.print()">🖨️ Cetak / Simpan PDF</button></div>` : ""}
   <div class="pdf-container">
     <div class="ph-head">
@@ -248,13 +256,13 @@ async function buildPenawaran(rows, meta, forImage) {
         <div class="ph-tag">${DOC_BRAND.tagline}</div>
       </div>
     </div>
-    ${corp && !isDraft ? "" : `<div class="ph-title">${isDraft ? "PENAWARAN HARGA (OPSI)" : "PENAWARAN HARGA"}</div>`}
+    ${corp && !classic && !isDraft ? "" : `<div class="ph-title">${isDraft ? "PENAWARAN HARGA (OPSI)" : "PENAWARAN HARGA"}</div>`}
     <div class="ph-info">
       <div class="ph-line"><span>Kepada Yth.</span><span class="c">:</span><span class="v">${esc(nama_pt || "-")}</span></div>
       <div class="ph-line"><span>Periode Penawaran</span><span class="c">:</span><span class="v">${fmtTgl(tglPakai)} (Berlaku 7 Hari)</span></div>
       <div class="ph-line"><span>No. Penawaran</span><span class="c">:</span><span class="v">${noDoc}</span></div>
     </div>
-    ${isDraft ? "" : `<div class="ph-total"><span class="lbl">Total Nilai Penawaran</span><span class="val">${fRp(grandTotal)}</span></div>`}
+    ${isDraft || classic ? "" : `<div class="ph-total"><span class="lbl">Total Nilai Penawaran</span><span class="val">${fRp(grandTotal)}</span></div>`}
     ${corp && !isDraft ? "" : `<div class="ph-sec">${isDraft ? "Opsi Harga — Pilih Salah Satu Metode" : "Rincian Penawaran"}</div>`}
     <table class="ph">
       ${colgroup}
