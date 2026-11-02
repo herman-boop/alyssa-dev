@@ -180,7 +180,7 @@ async function buildPenawaran(rows, meta, forImage) {
     .ph-sum .row .k { color:#212121; font-weight:600; font-size:14px; }
     .ph-sum .row .v { font-weight:700; color:#212121; white-space:nowrap; font-size:14px; }
     .ph-sum .row.minus .v { color:#b45309; }
-    .ph-grand { margin-top:10px; background:#2CB3DB; border-radius:12px; padding:14px 16px; display:flex; justify-content:space-between; align-items:center; gap:12px; }
+    .ph-grand { margin-top:10px; background:#1793BE; border-radius:12px; padding:14px 16px; display:flex; justify-content:space-between; align-items:center; gap:12px; }
     .ph-grand .k { font-size:14px; font-weight:700; color:#ffffff; text-transform:uppercase; }
     .ph-grand .v { font-size:21px; font-weight:800; color:#ffffff; white-space:nowrap; }
     .ph-pay-box { display:flex; align-items:center; gap:14px; padding:14px 16px; background:#F5F5F5; border-radius:12px; margin:16px 0; break-inside:avoid; }
