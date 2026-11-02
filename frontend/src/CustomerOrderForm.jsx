@@ -1,7 +1,7 @@
 import { useMemo, useState, useCallback, useEffect } from "react";
 import axios from "axios";
 import "./Order.css";
-import { VEHICLE_TYPE_LIST, VehicleSketch, useVehicleTypes } from "./VehicleSketches";
+import { VEHICLE_TYPE_LIST, VehicleSketch, useVehicleTypes, shortVehicleLabel } from "./VehicleSketches";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -323,12 +323,16 @@ export default function CustomerOrderForm() {
                           <div className="of-unit-body">
                             <div className="of-grid">
                               <Field label="Tipe Kendaraan" required full>
-                                <select className="of-inp" value={u.vehicle_type}
-                                  onChange={(e) => setUnit(i, "vehicle_type", e.target.value)}
-                                  data-testid={`ord-vehicle-type-${i}`}>
-                                  <option value="">— Pilih tipe kendaraan —</option>
-                                  {vehicleTypes.map((v) => <option key={v} value={v}>{v}</option>)}
-                                </select>
+                                <div className="of-radio-list" role="radiogroup" data-testid={`ord-vehicle-type-${i}`}>
+                                  {vehicleTypes.map((v) => (
+                                    <label key={v} className={`of-radio-item${u.vehicle_type === v ? " of-radio-item--on" : ""}`}>
+                                      <input type="radio" name={`vt-${i}`} value={v} checked={u.vehicle_type === v}
+                                        onChange={() => setUnit(i, "vehicle_type", v)}
+                                        data-testid={`ord-vehicle-type-${i}-opt`} />
+                                      <span>{shortVehicleLabel(v)}</span>
+                                    </label>
+                                  ))}
+                                </div>
                               </Field>
                               {u.vehicle_type && (
                                 <div className="of-field--full" style={{ marginTop: 4 }}>

@@ -487,6 +487,18 @@ export const VEHICLE_TYPE_LIST = [
   "Dump Crawler",
 ];
 
+// Label ringkas untuk daftar pilihan di HP, mis.
+// "Canter FE 71 D4 LONG - Dumptruck" -> "Canter FE71 D4 LNG (Dump)".
+// Hanya tampilan; nilai yang disimpan tetap nama aslinya.
+export function shortVehicleLabel(name) {
+  let s = String(name || "");
+  const m = s.match(/^(.*?)\s+-\s+(Bak|Box|Dumptruck|Tangki|Damkar)$/i);
+  let kar = "";
+  if (m) { s = m[1]; kar = /^dumptruck$/i.test(m[2]) ? "Dump" : m[2]; }
+  s = s.replace(/\b([A-Za-z]{2}) (\d)/g, "$1$2").replace(/\bLONG\b/g, "LNG");
+  return kar ? `${s} (${kar})` : s;
+}
+
 // Tipe kendaraan custom yang ditambahkan admin manual (di luar daftar bawaan
 // VEHICLE_TYPE_LIST di atas), disimpan permanen di backend lewat
 // GET/POST /api/vehicle-types. Dipakai bareng VEHICLE_TYPE_LIST supaya tipe
