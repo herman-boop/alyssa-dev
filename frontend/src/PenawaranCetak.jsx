@@ -327,7 +327,7 @@ export async function previewPenawaran(rows, meta) {
 }
 
 // Render HTML ke PNG tajam (scale hingga 3x) lewat iframe tersembunyi — untuk dikirim lewat WhatsApp.
-async function htmlKePng(html, lebar) {
+export async function htmlKePng(html, lebar, selector = ".pdf-container") {
   const { default: html2canvas } = await import("html2canvas");
   const fr = document.createElement("iframe");
   fr.setAttribute("aria-hidden", "true");
@@ -338,12 +338,12 @@ async function htmlKePng(html, lebar) {
     const d = fr.contentDocument;
     try { await Promise.race([d.fonts.ready, new Promise((r) => setTimeout(r, 2500))]); } catch (e) { /* lanjut dengan font bawaan */ }
     await Promise.all(Array.from(d.images).map((im) => (im.complete ? null : new Promise((r) => { im.onload = im.onerror = r; }))));
-    const el = d.querySelector(".pdf-container");
+    const el = d.querySelector(selector);
     const h = el.scrollHeight;
     fr.style.height = h + "px";
     // batas aman ukuran kanvas browser HP (±16 juta piksel)
     const scale = Math.max(1.5, Math.min(3, Math.sqrt(15000000 / (lebar * h))));
-    const canvas = await html2canvas(el, { scale, backgroundColor: "#ffffff", useCORS: true, logging: false, width: lebar, windowWidth: lebar });
+    const canvas = await html2canvas(el, { scale, backgroundColor: "#ffffff", useCORS: true, logging: false, width: el.offsetWidth, windowWidth: lebar });
     return await new Promise((res) => canvas.toBlob(res, "image/png"));
   } finally { fr.remove(); }
 }
@@ -353,10 +353,15 @@ export async function simpanPenawaranGambar(rows, meta) {
   const { html, noDoc, contW } = await buildPenawaran(rows, meta, true);
   const blob = await htmlKePng(html, contW);
   if (!blob) throw new Error("gambar kosong");
+  return await bagikanPng(blob, noDoc, `Penawaran ${noDoc}`);
+}
+
+// Bagikan PNG lewat Web Share (WhatsApp, dsb) bila didukung; kalau tidak, diunduh. → "dibagikan" | "batal" | "diunduh"
+export async function bagikanPng(blob, noDoc, judul) {
   const nama = String(noDoc).replace(/[^\w.-]+/g, "_");
   const file = new File([blob], `${nama}.png`, { type: "image/png" });
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
-    try { await navigator.share({ files: [file], title: `Penawaran ${noDoc}` }); return "dibagikan"; }
+    try { await navigator.share({ files: [file], title: judul }); return "dibagikan"; }
     catch (e) { if (e && e.name === "AbortError") return "batal"; /* gagal bagikan → unduh saja */ }
   }
   const url = URL.createObjectURL(blob);
