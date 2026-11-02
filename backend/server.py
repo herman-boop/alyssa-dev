@@ -1768,6 +1768,7 @@ class ContactBody(BaseModel):
     pic: Optional[str] = ""           # kontak PIC supplier (opsional, additive)
     bank: Optional[str] = ""
     no_rekening: Optional[str] = ""
+    npwp: Optional[str] = ""          # NPWP pelanggan/supplier (opsional, tampil di faktur dot matrix)
 
 
 def _contact_doc(body: ContactBody) -> dict:
@@ -1783,6 +1784,7 @@ def _contact_doc(body: ContactBody) -> dict:
         "pic": (body.pic or "").strip()[:120],
         "bank": (body.bank or "").strip()[:80],
         "no_rekening": (body.no_rekening or "").strip()[:40],
+        "npwp": (body.npwp or "").strip()[:40],
     }
 
 
@@ -1819,7 +1821,7 @@ async def update_contact(contact_id: str, body: ContactBody):
         raise HTTPException(400, "nama wajib diisi")
     upd = _contact_doc(body)
     sent = getattr(body, "model_fields_set", None) or getattr(body, "__fields_set__", set())
-    for f in ("pic", "bank", "no_rekening"):     # form lama tidak mengirim field ini → jangan dikosongkan
+    for f in ("pic", "bank", "no_rekening", "npwp"):     # form lama tidak mengirim field ini → jangan dikosongkan
         if f not in sent:
             upd.pop(f, None)
     res = await db.contacts.update_one({"id": contact_id}, {"$set": upd})

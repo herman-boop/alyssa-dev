@@ -4055,7 +4055,7 @@ function similarName(a, b) {
   }
   return false;
 }
-const KONTAK_EMPTY = { nama: "", perusahaan: "", no_hp: "", email: "", alamat: "", catatan: "" };
+const KONTAK_EMPTY = { nama: "", perusahaan: "", no_hp: "", email: "", alamat: "", npwp: "", catatan: "" };
 
 function KontakBox({ headers }) {
   const [all, setAll] = useState([]);
@@ -4140,7 +4140,7 @@ function KontakBox({ headers }) {
         }
       }
     }
-    const payload = { nama, jenis: jns, perusahaan: edit.perusahaan || "", no_hp: edit.no_hp || "", email: edit.email || "", alamat: edit.alamat || "", catatan: edit.catatan || "" };
+    const payload = { nama, jenis: jns, perusahaan: edit.perusahaan || "", no_hp: edit.no_hp || "", email: edit.email || "", alamat: edit.alamat || "", npwp: edit.npwp || "", catatan: edit.catatan || "" };
     if (jns === "supplier") { payload.pic = edit.pic || ""; payload.bank = edit.bank || ""; payload.no_rekening = edit.no_rekening || ""; }
     if (serverMode) {
       try {
@@ -4325,7 +4325,7 @@ function KontakBox({ headers }) {
                   </div>
                 );
               })()}
-              {[["nama", "Nama *", "PT Transkon Jaya, TBK"], ["perusahaan", "Nama Perusahaan", "opsional"], ["no_hp", "No. Handphone", "0812…"], ["email", "Email", "opsional"], ["alamat", "Alamat", "opsional"], ...((edit.jenis || jenis) === "supplier" ? [["pic", "PIC", "opsional"], ["bank", "Bank", "mis. BCA"], ["no_rekening", "No. Rekening", "opsional"]] : []), ["catatan", "Catatan", "opsional"]].map(([k, lbl, ph]) => (
+              {[["nama", "Nama *", "PT Transkon Jaya, TBK"], ["perusahaan", "Nama Perusahaan", "opsional"], ["no_hp", "No. Handphone", "0812…"], ["email", "Email", "opsional"], ["alamat", "Alamat", "opsional"], ["npwp", "NPWP", "cth: 21.448.309.1-041.000 (opsional)"], ...((edit.jenis || jenis) === "supplier" ? [["pic", "PIC", "opsional"], ["bank", "Bank", "mis. BCA"], ["no_rekening", "No. Rekening", "opsional"]] : []), ["catatan", "Catatan", "opsional"]].map(([k, lbl, ph]) => (
                 <label key={k}>
                   <span style={{ display: "block", fontSize: 12, color: "var(--text-3)", fontWeight: 700, marginBottom: 4 }}>{lbl}</span>
                   {k === "alamat" || k === "catatan"
@@ -5592,7 +5592,18 @@ function HistoriDokumen({ headers }) {
     let rec = rec0;
     try { const resp = await axios.get(`${API}/admin/doc-history/${rec0.id}`, { headers }); if (resp.data) rec = resp.data; } catch {}
     if (rec.jenis === "invoice" && opts && opts.dotmatrix) {
-      printInvoiceDotMatrix(rec);
+      // Tarik alamat/NPWP pelanggan dari buku Kontak (server, fallback lokal). Gagal → tetap cetak tanpa alamat.
+      let kontak = null;
+      try {
+        const nm = rec.customer || rec.meta?.customer_nama || "";
+        let list = [];
+        try { const rc = await axios.get(`${API}/admin/contacts`, { headers, params: { jenis: "pelanggan" } }); list = rc.data?.items || []; } catch { list = loadContacts(); }
+        list = list.filter((c) => (c.jenis || "pelanggan") === "pelanggan");
+        const names = (c) => [c.nama, c.perusahaan].filter(Boolean);
+        kontak = list.find((c) => names(c).some((n) => normName(n) === normName(nm)))
+          || list.find((c) => names(c).some((n) => similarName(n, nm))) || null;
+      } catch {}
+      printInvoiceDotMatrix(rec, kontak);
     } else if (rec.jenis === "invoice") {
       printInvoiceDoc(rec.lines, rec.meta?.withTax, { ...(rec.meta || {}), payments: rec.payments || [], tanpaStempel: !!(opts && opts.polos) });
     } else if (rec.jenis === "supplier") {
@@ -6243,7 +6254,7 @@ async function printInvoiceDoc(lines, withTax, extra) {
 /* ── Faktur format DOT MATRIX (mengikuti tampilan "Lihat dot matrix" Jurnal Mekari) ──
    Hanya teks polos hitam, font serif, tanpa warna/logo — untuk printer dot matrix.
    Dibuat dari record Histori Dokumen (rec.lines + rec.meta). Tidak mengubah data. */
-function printInvoiceDotMatrix(rec) {
+function printInvoiceDotMatrix(rec, kontak) {
   const lines = (rec.lines || []).filter((l) => (Number(l.harga) || 0) > 0);
   if (!lines.length) { alert("Faktur ini tidak punya baris bernilai."); return; }
   const m = rec.meta || {};
@@ -6299,7 +6310,10 @@ function printInvoiceDotMatrix(rec) {
       <div class="kv"><b>Tgl.Faktur</b><span>${fTgl(m.tanggalInvoice || (rec.created_at || "").slice(0, 10))}</span></div>
       <div class="kv"><b>Jatuh Tempo</b><span>${fTgl(m.jatuhTempo)}</span></div>
       <div class="kv"><b>Cara Bayar</b><span>${esc(m.metode || "")}</span></div></div>
-    <div class="c3"><div>KEPADA YTH.</div><div>${esc(rec.customer || m.customer_nama || "")}</div></div>
+    <div class="c3"><div>KEPADA YTH.</div><div>${esc(rec.customer || m.customer_nama || "")}</div>
+      ${kontak && kontak.alamat ? `<div>${esc(kontak.alamat)}</div>` : ""}
+      ${kontak && kontak.no_hp ? `<div>Telp: ${esc(kontak.no_hp)}</div>` : ""}
+      ${kontak && kontak.npwp ? `<div>NPWP ${esc(kontak.npwp)}</div>` : ""}</div>
   </div>
   <table class="it"><thead><tr><th>Nama Barang</th><th>Kemasan</th><th class="r">Qty</th><th class="r">Harga Satuan</th><th class="r">Disk%</th><th class="r">Nilai Disc</th><th class="r">Jumlah</th></tr></thead><tbody>${rows}</tbody></table>
   <div class="sum">
