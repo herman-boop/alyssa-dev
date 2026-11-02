@@ -5591,7 +5591,9 @@ function HistoriDokumen({ headers }) {
     // Ambil record lengkap (termasuk stempel yang di-exclude dari daftar).
     let rec = rec0;
     try { const resp = await axios.get(`${API}/admin/doc-history/${rec0.id}`, { headers }); if (resp.data) rec = resp.data; } catch {}
-    if (rec.jenis === "invoice") {
+    if (rec.jenis === "invoice" && opts && opts.dotmatrix) {
+      printInvoiceDotMatrix(rec);
+    } else if (rec.jenis === "invoice") {
       printInvoiceDoc(rec.lines, rec.meta?.withTax, { ...(rec.meta || {}), payments: rec.payments || [], tanpaStempel: !!(opts && opts.polos) });
     } else if (rec.jenis === "supplier") {
       printSupplierA4({ nama: rec.meta?.supplier_nama || rec.customer || "-", jobs: rec.units || [] }, null, rec.meta?.no_dokumen || rec.no_dokumen, rec.meta?.tanggal);
@@ -5794,6 +5796,9 @@ function HistoriDokumen({ headers }) {
                     <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={async () => { let full = rec; try { const r = await axios.get(`${API}/admin/doc-history/${rec.id}`, { headers }); if (r.data) full = r.data; } catch {} setEditRec(full); }} title="Edit / Tambah Unit" data-testid="dochist-edit">✏️ Edit</button>
                   )}
                   <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={() => reprint(rec)} title="Cetak ulang (dengan TTD/stempel kalau terpasang)" data-testid="dochist-print">🖨️ Cetak</button>
+                  {rec.jenis === "invoice" && (
+                    <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={() => reprint(rec, { dotmatrix: true })} title="Lihat / cetak format dot matrix (seperti Jurnal Mekari)" data-testid="dochist-dotmatrix">🔲 Dot Matrix</button>
+                  )}
                   {rec.jenis === "invoice" && (
                     <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={() => reprint(rec, { polos: true })} title="Cetak polos tanpa TTD/stempel (untuk stempel basah)" data-testid="dochist-print-polos">📄 Polos</button>
                   )}
@@ -6232,6 +6237,95 @@ async function printInvoiceDoc(lines, withTax, extra) {
   </body></html>`;
   if (w) { w.document.write(html); w.document.close(); }
   return noInvoice;
+}
+
+
+/* ── Faktur format DOT MATRIX (mengikuti tampilan "Lihat dot matrix" Jurnal Mekari) ──
+   Hanya teks polos hitam, font serif, tanpa warna/logo — untuk printer dot matrix.
+   Dibuat dari record Histori Dokumen (rec.lines + rec.meta). Tidak mengubah data. */
+function printInvoiceDotMatrix(rec) {
+  const lines = (rec.lines || []).filter((l) => (Number(l.harga) || 0) > 0);
+  if (!lines.length) { alert("Faktur ini tidak punya baris bernilai."); return; }
+  const m = rec.meta || {};
+  const ent = getEntity(m.entity_id || getActiveEntityId());
+  const esc = (x) => String(x == null ? "" : x).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const fRp = (n) => (Number(n) || 0).toLocaleString("id-ID", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fTgl = (iso) => { if (!iso || !/^\d{4}-\d{2}-\d{2}/.test(iso)) return ""; const [y, mo, d] = iso.slice(0, 10).split("-"); return `${d}/${mo}/${y}`; };
+  const t = invTotalFromRec(rec);
+  const taxIncl = !!m.taxInclusive, withTax = !!m.withTax;
+  const subtotal = lines.reduce((a, l) => a + (Number(l.harga) || 0) * (Number(l.qty) || 1), 0);
+  const dpp = withTax && taxIncl ? Math.round(subtotal / 1.011) : subtotal;
+  const noInv = m.no_invoice || rec.no_dokumen || "";
+  const po = lines.map((l) => (l.customer_po_number ?? l.po ?? "").toString().trim()).filter(Boolean);
+  const poTxt = [...new Set(po)].join(", ");
+  const nama = (l) => esc(String(ketSatuBaris(l.ket) || l.nama || "Jasa Pengiriman").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim());
+  const alamat = String(ent.address || "").split(/,\s*/);
+  const rows = lines.map((l) => {
+    const q = Number(l.qty) || 1, h = Number(l.harga) || 0;
+    return `<tr><td class="nm">${nama(l)}</td><td>UNIT</td><td class="r">${q}</td><td class="r">${fRp(h)}</td><td class="r">0.0%</td><td class="r">0,00</td><td class="r">${fRp(h * q)}</td></tr>`;
+  }).join("");
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(noInv)}</title>
+  <style>
+    @page { size: A4 portrait; margin: 10mm; }
+    body { font-family: "Times New Roman", Times, serif; font-size: 12.5px; color:#000; margin:0; padding:0 6px; }
+    .bar { padding:8px; background:#eee; text-align:right; } .bar button { font-size:14px; padding:6px 14px; }
+    @media print { .bar { display:none; } }
+    .top { display:flex; gap:14px; align-items:flex-start; }
+    .c1 { width:36%; } .c2 { width:30%; } .c3 { width:34%; }
+    .co { font-weight:700; font-size:13px; border-bottom:1px solid #000; padding-bottom:3px; margin-bottom:4px; }
+    .ttl { text-align:center; font-weight:700; font-size:20px; border-bottom:1px solid #000; padding-bottom:2px; margin-bottom:4px; }
+    .kv { display:flex; } .kv b { width:42%; font-weight:400; } .kv span { flex:1; }
+    .kv.no b, .kv.no span { font-weight:700; }
+    table.it { width:100%; border-collapse:collapse; margin-top:8px; border-top:1px solid #000; border-bottom:1px solid #000; }
+    table.it th { text-align:left; font-weight:700; padding:3px 4px; border-bottom:1px solid #000; }
+    table.it td { padding:3px 4px; vertical-align:top; }
+    table.it th.r, table.it td.r { text-align:right; white-space:nowrap; }
+    .sum { display:flex; gap:10px; margin-top:8px; align-items:flex-start; }
+    .box { border:1px solid #000; padding:5px 8px; }
+    .terb { width:62%; } .tot { flex:1; }
+    .tot .kv b { width:auto; flex:1; text-align:right; padding-right:10px; font-weight:700; } .tot .kv span { width:42%; text-align:right; }
+    .ft { display:flex; gap:10px; margin-top:12px; }
+    .sg { width:24%; text-align:center; } .ph { flex:1; }
+    .sp { height:70px; }
+  </style></head><body>
+  <div class="bar"><button onclick="window.print()">🖨️ Cetak</button></div>
+  <div class="top">
+    <div class="c1"><div class="co">${esc(ent.name)}</div>
+      ${alamat.map((a) => `<div>${esc(a)}</div>`).join("")}
+      <div>Telp: ${esc(ent.phone || "")}</div><div>Fax:</div></div>
+    <div class="c2"><div class="ttl">FAKTUR</div>
+      <div class="kv no"><b>NO.</b><span>${esc(noInv)}</span></div>
+      <div class="kv"><b>PO No</b><span>${esc(poTxt)}</span></div>
+      <div class="kv"><b>Tgl.Faktur</b><span>${fTgl(m.tanggalInvoice || (rec.created_at || "").slice(0, 10))}</span></div>
+      <div class="kv"><b>Jatuh Tempo</b><span>${fTgl(m.jatuhTempo)}</span></div>
+      <div class="kv"><b>Cara Bayar</b><span>${esc(m.metode || "")}</span></div></div>
+    <div class="c3"><div>KEPADA YTH.</div><div>${esc(rec.customer || m.customer_nama || "")}</div></div>
+  </div>
+  <table class="it"><thead><tr><th>Nama Barang</th><th>Kemasan</th><th class="r">Qty</th><th class="r">Harga Satuan</th><th class="r">Disk%</th><th class="r">Nilai Disc</th><th class="r">Jumlah</th></tr></thead><tbody>${rows}</tbody></table>
+  <div class="sum">
+    <div class="box terb"><div>TERBILANG</div><div>${esc(String(terbilangRupiah(t.total)).toUpperCase())}</div></div>
+    <div class="tot">
+      <div class="kv"><b>Total</b><span>${fRp(withTax && taxIncl ? dpp : subtotal)}</span></div>
+      <div class="kv"><b>Diskon</b><span>0,00</span></div>
+      ${withTax ? `<div class="kv"><b>${taxIncl ? "termasuk " : ""}PPn 1.1 1.1%</b><span>${fRp(t.ppn)}</span></div>` : ""}
+      ${t.pph > 0 ? `<div class="kv"><b>PPh 23 (2%)</b><span>-${fRp(t.pph)}</span></div>` : ""}
+      ${t.premi > 0 ? `<div class="kv"><b>Premi Asuransi</b><span>${fRp(t.premi)}</span></div>` : ""}
+      <div class="kv"><b>Netto</b><span>${fRp(t.total)}</span></div>
+    </div>
+  </div>
+  <div class="ft">
+    <div class="sg">Penerima,<br>Tanda Tangan / Cap<div class="sp"></div>(................................)</div>
+    <div class="box ph">PERHATIAN<br>KETENTUAN PENGIRIMAN:<br><br>
+      - HARGA BELUM TERMASUK ASURANSI (OPSIONAL).<br>
+      - BIAYA TAMBAHAN DI PELABUHAN (JIKA ADA) DITANGGUNG PENGIRIM/PENERIMA.<br>
+      - ESTIMASI PENGIRIMAN DIHITUNG SEJAK KAPAL BERANGKAT DARI PELABUHAN ASAL.<br>
+      - JADWAL KAPAL DAPAT BERUBAH SEWAKTU-WAKTU MENGIKUTI KONDISI OPERASIONAL.<br>
+      - PEMBAYARAN WAJIB DISELESAIKAN SEBELUM KAPAL TIBA DI PELABUHAN TUJUAN.</div>
+    <div class="sg">Hormat kami,<div class="sp"></div>(${esc(ent.name)})</div>
+  </div>
+  </body></html>`;
+  const w = window.open("", "aal_dotmatrix");
+  if (w) { w.document.write(html); w.document.close(); }
 }
 
 /* ── Kwitansi / Tanda Terima Pembayaran customer (1 kwitansi per pembayaran) ──
