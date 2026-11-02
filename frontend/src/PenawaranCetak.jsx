@@ -11,6 +11,14 @@ const INS_RATE_OPTIONS = [
   { value: "0.15", label: "0,15% — Standar (default)" },
   { value: "0.135", label: "0,135% — Diskon / Khusus" },
 ];
+// Template tampilan penawaran. "standar" = desain navy-gold yang sudah berjalan (tidak diubah).
+export const PENAWARAN_TEMPLATES = [
+  { value: "standar", label: "Standar (navy · gold · light blue)" },
+  { value: "corporate", label: "Corporate Signature (minimalis, abu-abu muda)" },
+];
+const TPL_LS_KEY = "aal_penawaran_tpl_v1";
+function loadTpl() { try { const v = localStorage.getItem(TPL_LS_KEY); return PENAWARAN_TEMPLATES.some((t) => t.value === v) ? v : "standar"; } catch { return "standar"; } }
+function saveTpl(v) { try { localStorage.setItem(TPL_LS_KEY, v); } catch {} }
 const fRate = (r) => String(r).replace(".", ",");   // tampil gaya Indonesia (0,135)
 
 function fRp(n) {
@@ -51,6 +59,8 @@ function routeFinalMetode(e) {
 // Membangun HTML penawaran. forImage=true → tanpa dialog cetak & lebar kontainer tetap (dirender jadi gambar).
 async function buildPenawaran(rows, meta, forImage) {
   const { nama_pt, ttdNama, ttdJabatan, stempel, tanggal, insVal, insRate, withPpn, taxIncl, withPph, catatan } = meta || {};
+  const corp = (meta && meta.template) === "corporate";   // template Corporate Signature
+  const preview = !!(meta && meta.preview);               // tampilkan dulu, cetak lewat tombol
   const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const fmtTgl = (iso) => (iso ? new Date(iso).toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" }) : "-");
   const now = new Date();
@@ -208,11 +218,27 @@ async function buildPenawaran(rows, meta, forImage) {
     .ph-sign-name { margin-top:2px; font-weight:500; }
     .ph-sign-jab { font-size:13px; font-weight:500; color:var(--mut); margin-top:2px; }
     .ph-foot { display:flex; justify-content:space-between; gap:8px; padding-top:8px; margin-top:12px; border-top:2px solid var(--gold); font-size:12px; font-weight:500; color:var(--mut); }
+    .pv-bar { position:sticky; top:0; z-index:5; display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 14px; background:#0F2A5C; color:#fff; font-size:13px; font-weight:600; }
+    .pv-bar button { font:inherit; font-weight:800; padding:7px 14px; border:none; border-radius:8px; background:#fff; color:#0F2A5C; cursor:pointer; }
+    @media print { .pv-bar { display:none; } }
+    /* ── Template Corporate Signature: putih, navy, abu-abu sangat muda; gold hanya garis tipis & tagline. Tanpa gradasi. ── */
+    body.tpl-corp { --lb:#F3F5F8; --ln:#E3E7ED; }
+    body.tpl-corp .ph-head img { filter:none; }
+    body.tpl-corp .ph-info { margin-top:22px; margin-bottom:12px; }
+    body.tpl-corp .ph-total { background:var(--lb); padding-left:20px; margin:8px 0 22px; }
+    body.tpl-corp .ph-total .val { color:var(--navy); padding:12px 22px; }
+    body.tpl-corp table.ph { border-color:var(--ln); }
+    body.tpl-corp table.ph th { background:var(--lb); }
+    body.tpl-corp .ph-sum { margin-top:18px; }
+    body.tpl-corp .ph-grand { background:var(--navy); padding-right:22px; }
+    body.tpl-corp .ph-grand .v { color:#fff; padding:0 0 0 16px; border-left:3px solid var(--gold); line-height:1.4; }
+    body.tpl-corp .ph-pay-box { background:var(--lb); }
     /* Halaman PDF dibuat sempit (lebar mengikuti jumlah kolom) → saat dibuka/di-screenshot di HP teksnya besar, bukan mengecil ke lebar A4. */
     @page { size: A4 portrait; margin: 8mm; }
     @media print { .pdf-container { padding: 0; max-width: none; } }
     ${forImage ? `body { width: ${contW}px; } .pdf-container { width: ${contW}px; max-width: none; margin: 0; padding: 24px; }` : ""}
-  </style></head><body>
+  </style></head><body class="${corp ? "tpl-corp" : "tpl-std"}">
+  ${preview ? `<div class="pv-bar"><span>Preview — ${noDoc}</span><button onclick="window.print()">🖨️ Cetak / Simpan PDF</button></div>` : ""}
   <div class="pdf-container">
     <div class="ph-head">
       <img src="/logo.png" alt="Logo">
@@ -222,14 +248,14 @@ async function buildPenawaran(rows, meta, forImage) {
         <div class="ph-tag">${DOC_BRAND.tagline}</div>
       </div>
     </div>
-    <div class="ph-title">${isDraft ? "PENAWARAN HARGA (OPSI)" : "PENAWARAN HARGA"}</div>
+    ${corp && !isDraft ? "" : `<div class="ph-title">${isDraft ? "PENAWARAN HARGA (OPSI)" : "PENAWARAN HARGA"}</div>`}
     <div class="ph-info">
       <div class="ph-line"><span>Kepada Yth.</span><span class="c">:</span><span class="v">${esc(nama_pt || "-")}</span></div>
       <div class="ph-line"><span>Periode Penawaran</span><span class="c">:</span><span class="v">${fmtTgl(tglPakai)} (Berlaku 7 Hari)</span></div>
       <div class="ph-line"><span>No. Penawaran</span><span class="c">:</span><span class="v">${noDoc}</span></div>
     </div>
     ${isDraft ? "" : `<div class="ph-total"><span class="lbl">Total Nilai Penawaran</span><span class="val">${fRp(grandTotal)}</span></div>`}
-    <div class="ph-sec">${isDraft ? "Opsi Harga — Pilih Salah Satu Metode" : "Rincian Penawaran"}</div>
+    ${corp && !isDraft ? "" : `<div class="ph-sec">${isDraft ? "Opsi Harga — Pilih Salah Satu Metode" : "Rincian Penawaran"}</div>`}
     <table class="ph">
       ${colgroup}
       <thead><tr>
@@ -240,7 +266,7 @@ async function buildPenawaran(rows, meta, forImage) {
     ${isDraft ? `
     <div class="ph-draft-note">Ini penawaran <b>opsi harga</b>. Setiap rute menampilkan beberapa alternatif metode — silakan pilih <b>salah satu</b> per rute. Total &amp; pajak dihitung pada penawaran resmi setelah metode dipilih.</div>
     ` : `
-    <div class="ph-sec">Ringkasan Biaya</div>
+    ${corp ? "" : `<div class="ph-sec">Ringkasan Biaya</div>`}
     <div class="ph-sum">
       <div class="row"><span class="k">${ppnOn && incl ? "DPP (Dasar Pengenaan Pajak)" : "Subtotal Pengiriman"}</span><span class="v">${fRp(ppnOn && incl ? dpp : subtotal)}</span></div>
       ${ppnOn ? `<div class="row"><span class="k">PPN 1,1%${incl ? " (sudah termasuk)" : ""}</span><span class="v">${fRp(ppn)}</span></div>` : ""}
@@ -271,7 +297,7 @@ async function buildPenawaran(rows, meta, forImage) {
     </div>
     <div class="ph-foot"><span>Penawaran ${noDoc}</span><span>${DOC_BRAND.tagline}</span></div>
   </div>
-  ${forImage ? "" : `  <script>
+  ${forImage || preview ? "" : `  <script>
     // Tunggu font Inter siap (maks 1,5 dtk) supaya hasil cetak memakai font yang tajam, lalu buka dialog cetak.
     Promise.race([ (document.fonts && document.fonts.ready) || Promise.resolve(), new Promise(function(r){ setTimeout(r, 1500); }) ]).then(function(){ window.print(); });
   <\/script>`}
@@ -282,6 +308,13 @@ async function buildPenawaran(rows, meta, forImage) {
 export async function printPenawaran(rows, meta) {
   const w = window.open("", "_blank"); // buka dulu (dalam gesture klik) biar nggak keblok popup
   const { html } = await buildPenawaran(rows, meta, false);
+  if (w) { w.document.write(html); w.document.close(); }
+}
+
+// Preview: buka dokumen tanpa dialog cetak; ada tombol Cetak / Simpan PDF di bagian atas.
+export async function previewPenawaran(rows, meta) {
+  const w = window.open("", "_blank");
+  const { html } = await buildPenawaran(rows, { ...(meta || {}), preview: true }, false);
   if (w) { w.document.write(html); w.document.close(); }
 }
 
@@ -344,6 +377,8 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
   // Rincian biaya & pajak (opsional) — mirip invoice
   const [qtyMap, setQtyMap] = useState({});       // jumlah unit PER RUTE (key = index, value = digit; kosong = 1)
   const [insMap, setInsMap] = useState({});       // nilai pertanggungan asuransi PER RUTE/UNIT (key = index, value = digit)
+  const [tpl, setTplState] = useState(loadTpl);   // template tampilan (diingat di browser ini)
+  const setTpl = (v) => { setTplState(v); saveTpl(v); };
   const [insRate, setInsRate] = useState("0.15");  // rate asuransi (%) — sama untuk semua baris
   const [withPpn, setWithPpn] = useState(false);   // kenakan PPN 1,1%
   const [taxIncl, setTaxIncl] = useState(false);   // harga sudah termasuk PPN
@@ -547,6 +582,12 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
             <input type="date" value={tglPenawaran} onChange={(e) => setTglPenawaran(e.target.value)} data-testid="penawaran-tanggal"
               style={{ width: "100%", boxSizing: "border-box", padding: "9px 12px", borderRadius: 8, border: `1px solid ${border}`, fontSize: 13, marginBottom: 12 }} />
 
+            <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: gray, marginBottom: 4 }}>TEMPLATE TAMPILAN</label>
+            <select value={tpl} onChange={(e) => setTpl(e.target.value)} data-testid="penawaran-template"
+              style={{ width: "100%", boxSizing: "border-box", padding: "9px 12px", borderRadius: 8, border: `1px solid ${border}`, fontSize: 13, marginBottom: 12, background: "#fff" }}>
+              {PENAWARAN_TEMPLATES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+
             {/* ── RINCIAN BIAYA & PAJAK — hanya mode FINAL (draft = opsi, tanpa total) ── */}
             {mode === "final" && (
             <div style={{ border: `1px solid ${border}`, borderRadius: 10, padding: 12, marginBottom: 12, background: "#fafbfc" }}>
@@ -631,7 +672,7 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
                 if (!sel.length) { alert("Centang minimal 1 rute dulu bro."); return; }
                 setGambarBusy(true);
                 try {
-                  const r = await simpanPenawaranGambar(sel, { nama_pt: namaPt, ttdNama, ttdJabatan, stempel, tanggal: tglPenawaran, insRate, withPpn, taxIncl, withPph, mode, catatan: catatanUmum });
+                  const r = await simpanPenawaranGambar(sel, { nama_pt: namaPt, ttdNama, ttdJabatan, stempel, tanggal: tglPenawaran, insRate, withPpn, taxIncl, withPph, mode, catatan: catatanUmum, template: tpl });
                   if (r !== "batal") setOpen(false);
                 } catch (e) { alert("Gagal membuat gambar. Coba lagi."); }
                 setGambarBusy(false);
@@ -644,11 +685,23 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
                   const options = optOf(i)
                     .map((k) => ({ metode: (k.metode || "Lainnya"), harga: pNum(k.harga), catatan: (k.catatan || "").trim() }))
                     .filter((k) => k.harga > 0 || k.metode);
+                  return { ...e, options, selected: options.length ? selOf(i) : -1, insNilai: mode === "final" ? rowIns(i) : 0, qty: qtyOf(i, e) };
+                });
+                if (!sel.length) { alert("Centang minimal 1 rute dulu bro."); return; }
+                previewPenawaran(sel, { nama_pt: namaPt, ttdNama, ttdJabatan, stempel, tanggal: tglPenawaran, insRate, withPpn, taxIncl, withPph, mode, catatan: catatanUmum, template: tpl });
+              }}
+                data-testid="penawaran-preview"
+                style={{ padding: "9px 14px", borderRadius: 8, border: `1px solid ${navy}`, background: "#eff6ff", color: navy, fontSize: 12.5, fontWeight: 800, cursor: "pointer" }}>👁️ Preview</button>
+              <button onClick={() => {
+                const sel = list.map((e, i) => ({ e, i })).filter(({ i }) => selIdx.has(i)).map(({ e, i }) => {
+                  const options = optOf(i)
+                    .map((k) => ({ metode: (k.metode || "Lainnya"), harga: pNum(k.harga), catatan: (k.catatan || "").trim() }))
+                    .filter((k) => k.harga > 0 || k.metode);
                   // options = ALTERNATIF (tidak dijumlah). `selected` = index opsi terpilih (mode final).
                   return { ...e, options, selected: options.length ? selOf(i) : -1, insNilai: mode === "final" ? rowIns(i) : 0, qty: qtyOf(i, e) };
                 });
                 if (!sel.length) { alert("Centang minimal 1 rute dulu bro."); return; }
-                printPenawaran(sel, { nama_pt: namaPt, ttdNama, ttdJabatan, stempel, tanggal: tglPenawaran, insRate, withPpn, taxIncl, withPph, mode, catatan: catatanUmum });
+                printPenawaran(sel, { nama_pt: namaPt, ttdNama, ttdJabatan, stempel, tanggal: tglPenawaran, insRate, withPpn, taxIncl, withPph, mode, catatan: catatanUmum, template: tpl });
                 setOpen(false);
               }}
                 style={{ padding: "9px 18px", borderRadius: 8, border: "none", background: gold, color: "#fff", fontSize: 12.5, fontWeight: 800, cursor: "pointer" }}>🖨️ {mode === "draft" ? "Cetak Opsi Harga" : "Cetak Resmi"} ({selIdx.size})</button>
