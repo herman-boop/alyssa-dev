@@ -24,6 +24,7 @@ import LabaRugiPage from "@/LabaRugiPage";
 import KompensasiPage from "@/KompensasiPage";
 import MobileVendorPayment from "@/MobileVendorPayment";
 import PermintaanHargaPage from "@/PermintaanHargaPage";
+import { htmlKePng, bagikanPng } from "./PenawaranCetak";
 import { DOC_BRAND, DOC_BASE_CSS, docHeader, docFooter, terbilangRupiah, nextDocNo, DOC_ENTITIES, DEFAULT_ENTITY_ID, getActiveEntityId, setActiveEntityId, getEntity } from "@/docTheme";
 import { printReport, saveReportPNG } from "@/reportDoc";
 import "@/App.css";
@@ -1158,6 +1159,8 @@ function InvoiceAsuransiModal({ headers, customerNames, onClose, onDone }) {
   const [noInvoiceManual, setNoInvoiceManual] = useState("");
   const [rows, setRows] = useState([{ ket: "", qty: "1", harga: "" }]);
   const [saving, setSaving] = useState(false);
+  const [tplF, setTplF] = useFakturTpl();
+  const [imgBusy, setImgBusy] = useState(false);
   const [showBulk, setShowBulk] = useState(false);
   const [bulkPrefix, setBulkPrefix] = useState("");
   const [bulkList, setBulkList] = useState("");
@@ -1192,7 +1195,7 @@ function InvoiceAsuransiModal({ headers, customerNames, onClose, onDone }) {
       qty: hargaNum(r.qty) || 1, harga: hargaNum(r.harga),
     }));
     const extra = { tipe: "asuransi", po_customer: poCust.trim(), jatuhTempo, tanggalInvoice, metode, pesan,
-      ttdNama, ttdJabatan, customer_nama: billTo.trim(), no_invoice: noInvoiceManual.trim() || undefined };
+      ttdNama, ttdJabatan, customer_nama: billTo.trim(), no_invoice: noInvoiceManual.trim() || undefined, template: tplF };
     return { lines, extra };
   };
   const check = () => {
@@ -1213,6 +1216,21 @@ function InvoiceAsuransiModal({ headers, customerNames, onClose, onDone }) {
     const { lines, extra } = build();
     const noInv = await printInvoiceDoc(lines, withTax, extra);
     persist(lines, extra, noInv);
+  };
+  const doPreview = () => {
+    if (!check()) return;
+    const { lines, extra } = build();
+    previewInvoiceDoc(lines, withTax, extra);
+  };
+  const doImage = async () => {
+    if (!check()) return;
+    const { lines, extra } = build();
+    setImgBusy(true);
+    try {
+      const r = await imageInvoiceDoc(lines, withTax, extra);
+      if (r.hasil !== "batal") persist(lines, extra, r.noInvoice);
+    } catch (e) { alert("Gagal membuat gambar. Coba lagi."); }
+    setImgBusy(false);
   };
   const doSave = async () => {
     if (!check()) return;
@@ -1317,6 +1335,7 @@ function InvoiceAsuransiModal({ headers, customerNames, onClose, onDone }) {
             <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4, fontSize: 15 }}><span>Total Tagihan</span><b>{fRp(total)}</b></div>
           </div>
         </div>
+        <FakturTplBar tpl={tplF} setTpl={setTplF} onPreview={doPreview} onImage={doImage} busy={imgBusy} />
         <div className="adm-modal-foot">
           <button className="adm-btn adm-btn-ghost" onClick={onClose}>Batal</button>
           <button className="adm-btn adm-btn-green" disabled={saving} onClick={doSave} data-testid="adm-invasr-save">💾 Simpan</button>
@@ -3424,6 +3443,18 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
               }, headers);
               setShowInvoice(false);
             }}
+            onImage={async (lines, withTax, extra) => {
+              const r = await imageInvoiceDoc(lines, withTax, { ...(extra || {}), customer_nama: order.customer_nama, order_id: order.order_id });
+              if (r.hasil === "batal") return false;
+              saveDocHistory({
+                jenis: "invoice", no_dokumen: r.noInvoice, customer: order.customer_nama || "",
+                judul: `${order.customer_nama || "-"} · ${(lines || []).length} baris`,
+                meta: { ...(extra || {}), customer_nama: order.customer_nama, order_id: order.order_id, asal_kota: order.asal_kota, tujuan_kota: order.tujuan_kota, withTax: !!withTax, no_invoice: r.noInvoice },
+                lines, order_ids: [order.order_id],
+              }, headers);
+              setShowInvoice(false);
+              return true;
+            }}
             onSave={async (lines, withTax, extra) => {
               // Simpan ke Tagihan Hari Ini tanpa cetak (nomor invoice tetap dibuat).
               const noInv = (extra && extra.no_invoice) || await nextDocNo("invoice", "INV");
@@ -3620,7 +3651,9 @@ function BonusModal({ tripId, order, headers, onClose, onSave }) {
 /* ════════════════════════════════════════
    INVOICE MODAL
 ════════════════════════════════════════ */
-function InvoiceModal({ order, headers, onClose, onPrint, onSave }) {
+function InvoiceModal({ order, headers, onClose, onPrint, onSave, onImage }) {
+  const [tplF, setTplF] = useFakturTpl();
+  const [imgBusy, setImgBusy] = useState(false);
   const todayIso = new Date().toISOString().slice(0, 10);
   // Cargo (barang/kargo umum) vs kendaraan. Cargo dikenali dari isi_kiriman terisi
   // atau shipment_type/jenis_kiriman = cargo → invoice pakai deskripsi cargo, bukan nopol/rangka.
@@ -3703,7 +3736,7 @@ function InvoiceModal({ order, headers, onClose, onPrint, onSave }) {
     .filter(({ r }) => r.checked && hargaNum(r.harga) > 0)
     .map(({ r, u }) => ({ nama: isCargo ? "Jasa Pengiriman Cargo" : "Jasa Pengiriman", ket: unitKet(u), qty: 1, harga: hargaNum(r.harga), customer_po_number: (r.po || "").trim() || null,
       ...(hargaNum(r.ins) > 0 ? { ins_nilai: hargaNum(r.ins) } : {}) }));
-  const buildExtra = () => ({ jatuhTempo, tanggalInvoice, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23, insRate: rateNum, no_invoice: noInvoiceManual.trim() || undefined });
+  const buildExtra = () => ({ jatuhTempo, tanggalInvoice, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23, insRate: rateNum, no_invoice: noInvoiceManual.trim() || undefined, template: tplF });
   const markInvoiced = () => {
     const ids = rows.filter((r) => r.checked && hargaNum(r.harga) > 0 && r.unit_id !== "legacy" && r.unit_id !== "cargo").map((r) => r.unit_id);
     if (ids.length && headers) axios.post(`${API}/admin/orders/${order.order_id}/units/mark-invoiced`, { unit_ids: ids }, { headers }).catch(() => {});
@@ -3717,6 +3750,19 @@ function InvoiceModal({ order, headers, onClose, onPrint, onSave }) {
     markInvoiced();
   };
 
+  const doPreview = () => {
+    const lines = buildLines();
+    if (!lines.length) return;
+    previewInvoiceDoc(lines, withTax, { ...buildExtra(), customer_nama: order.customer_nama, order_id: order.order_id });
+  };
+  const doImage = async () => {
+    const lines = buildLines();
+    if (!lines.length) return;
+    setImgBusy(true);
+    try { const ok = await onImage(lines, withTax, buildExtra()); if (ok) markInvoiced(); }
+    catch (e) { alert("Gagal membuat gambar. Coba lagi."); }
+    setImgBusy(false);
+  };
   const [saving, setSaving] = useState(false);
   const saveOnly = async () => {
     const lines = buildLines();
@@ -3875,6 +3921,7 @@ function InvoiceModal({ order, headers, onClose, onPrint, onSave }) {
             </div>
           )}
         </div>
+        <FakturTplBar tpl={tplF} setTpl={setTplF} onPreview={doPreview} onImage={doImage} busy={imgBusy} disabled={checkedCount === 0} />
         <div className="adm-modal-foot">
           <button className="adm-btn adm-btn-ghost" onClick={onClose}>Batal</button>
           <button className="adm-btn adm-btn-green" onClick={saveOnly} disabled={checkedCount === 0 || saving} data-testid="adm-invoice-save">
@@ -6052,13 +6099,66 @@ function ketSatuBaris(ket) {
     return t ? ` · Rangka: ${t}` : "";
   });
 }
-async function printInvoiceDoc(lines, withTax, extra) {
-  extra = extra || {};
+// Pilihan template faktur: "original" (desain lama, tidak diubah) | "corporate" (Corporate Signature).
+// Disimpan di meta faktur (extra.template) → cetak ulang dari Histori memakai template yang sama.
+const FAKTUR_TPL_KEY = "aal_faktur_tpl_v1";
+const FAKTUR_TEMPLATES = [
+  { value: "original", label: "Original" },
+  { value: "corporate", label: "Corporate Signature" },
+];
+function useFakturTpl() {
+  const [t, setT] = useState(() => { try { return localStorage.getItem(FAKTUR_TPL_KEY) === "corporate" ? "corporate" : "original"; } catch { return "original"; } });
+  const set = (v) => { setT(v); try { localStorage.setItem(FAKTUR_TPL_KEY, v); } catch {} };
+  return [t, set];
+}
+function FakturTplBar({ tpl, setTpl, onPreview, onImage, busy, disabled }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "10px 16px", borderTop: "1px solid var(--border, #30363d)" }} data-testid="faktur-tplbar">
+      <label style={{ fontSize: 12, fontWeight: 700, color: "var(--text-3)" }}>Template Faktur</label>
+      <select className="adm-input" style={{ width: "auto", minWidth: 170 }} value={tpl} onChange={(e) => setTpl(e.target.value)} data-testid="faktur-template">
+        {FAKTUR_TEMPLATES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+      </select>
+      <button type="button" className="adm-btn adm-btn-sm adm-btn-ghost" disabled={disabled} onClick={onPreview} data-testid="faktur-preview">👁️ Preview</button>
+      <button type="button" className="adm-btn adm-btn-sm adm-btn-ghost" disabled={disabled || busy} onClick={onImage} data-testid="faktur-gambar">{busy ? "Membuat gambar…" : "🖼️ Simpan Gambar (WhatsApp)"}</button>
+    </div>
+  );
+}
+function normInvoiceLines(lines) {
   // Back-compat: kalau dipanggil dengan angka tunggal, bungkus jadi 1 baris.
   if (typeof lines === "number") lines = [{ nama: "Jasa Pengiriman", ket: "", qty: 1, harga: lines }];
-  lines = (lines || []).filter((l) => (l.harga || 0) > 0);
+  return (lines || []).filter((l) => (l.harga || 0) > 0);
+}
+// Cetak langsung (dialog cetak otomatis). Return nomor faktur.
+async function printInvoiceDoc(lines, withTax, extra) {
+  lines = normInvoiceLines(lines);
   if (!lines.length) return "";
   const w = window.open("", "aal_print"); // buka dulu (gesture) biar nggak keblok popup
+  const r = await buildInvoiceHtml(lines, withTax, extra, {});
+  if (w) { w.document.write(r.html); w.document.close(); }
+  return r.noInvoice;
+}
+// Preview: tampil tanpa dialog cetak & TANPA mengambil nomor faktur (nomor diberikan saat dicetak/disimpan).
+async function previewInvoiceDoc(lines, withTax, extra) {
+  lines = normInvoiceLines(lines);
+  if (!lines.length) return;
+  const w = window.open("", "_blank");
+  const r = await buildInvoiceHtml(lines, withTax, extra, { preview: true });
+  if (w) { w.document.write(r.html); w.document.close(); }
+}
+// Simpan sebagai gambar PNG resolusi tinggi (dirender langsung ≥2–3×, bukan screenshot diperbesar).
+// Return { noInvoice, hasil } — hasil: "dibagikan" | "diunduh" | "batal".
+async function imageInvoiceDoc(lines, withTax, extra) {
+  lines = normInvoiceLines(lines);
+  const r = await buildInvoiceHtml(lines, withTax, extra, { forImage: true });
+  const blob = await htmlKePng(r.html, r.contW, ".doc-sheet");
+  if (!blob) throw new Error("gambar kosong");
+  const hasil = await bagikanPng(blob, r.noInvoice, `Faktur ${r.noInvoice}`);
+  return { noInvoice: r.noInvoice, hasil };
+}
+async function buildInvoiceHtml(lines, withTax, extra, opt) {
+  opt = opt || {};
+  extra = extra || {};
+  lines = normInvoiceLines(lines);
   const { jatuhTempo, metode, pesan, ttdNama, ttdJabatan, taxInclusive, withPph23 } = extra;
   const stempel = extra.tanpaStempel ? null : (extra.stempel || DOC_DEFAULT_STEMPEL);   // per-faktur, kalau tidak ada pakai bawaan; "tanpaStempel" = cetak polos (untuk stempel basah)
   const subtotal = lines.reduce((s, l) => s + (l.harga || 0) * (l.qty || 1), 0);
@@ -6086,9 +6186,140 @@ async function printInvoiceDoc(lines, withTax, extra) {
   const fmtTgl = (iso) => { if (!iso) return "—"; const [y, m, d] = iso.split("-"); return `${d}-${m}-${y}`; };
   const todayIso = new Date().toISOString().slice(0, 10);
   const tgl = fmtTgl(extra.tanggalInvoice || todayIso); // pakai tanggal input (biar bisa samain dgn tgl pajak), fallback hari ini
-  const noInvoice = extra.no_invoice || await nextDocNo("invoice", "INV"); // nomor auto-increment
+  const noInvoice = extra.no_invoice || (opt.preview ? "(otomatis saat dicetak)" : await nextDocNo("invoice", "INV")); // nomor auto-increment (preview tidak mengambil nomor)
 
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${noInvoice}</title>
+  // ── Template "Corporate Signature": header lama (logo, nama PT, FAKTUR / INVOICE, alamat, telp, NPWP, garis) + bagian bawah gaya baru ──
+  const tplCorp = extra.template === "corporate";
+  const pvCss = `.pv-bar { position:sticky; top:0; z-index:5; display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 14px; background:#0F2A5C; color:#fff; font:600 13px Arial,sans-serif; }
+    .pv-bar button { font:inherit; font-weight:800; padding:7px 14px; border:none; border-radius:8px; background:#fff; color:#0F2A5C; cursor:pointer; }
+    @media print { .pv-bar { display:none; } }`;
+  const pvBar = opt.preview ? `<div class="pv-bar"><span>Preview — ${tplCorp ? "Corporate Signature" : "Original"} · nomor faktur diberikan saat dicetak</span><button onclick="window.print()">🖨️ Cetak / Simpan PDF</button></div>` : "";
+  const corpHtml = tplCorp ? (() => {
+    const poOfL = (l) => (l.customer_po_number ?? l.po ?? "").toString().trim();
+    const poList = [...new Set(lines.map(poOfL).filter(Boolean))];
+    const poTxt = extra.tipe === "asuransi" ? (extra.po_customer || "") : poList.join(", ");
+    const withPOc = lines.filter((l) => poOfL(l)).length;
+    const col2 = withPOc === lines.length ? "No. PO" : withPOc === 0 ? "Nama Barang" : "Referensi";
+    const cell2 = (l) => poOfL(l) || (l.nama || "Jasa Pengiriman");
+    const thS = (w, c, t) => `<th class="${c}"${w ? ` style="width:${w}px"` : ""}>${t}</th>`;
+    const rowsHtml = lines.map((l, i) => `<tr>
+      <td class="c">${i + 1}</td>
+      <td class="b">${cell2(l)}</td>
+      <td>${(ketSatuBaris(l.ket) || "&nbsp;").replace(/( · Rangka: [^<]*)/, '<span class="rk">$1</span>')}</td>
+      <td class="c">${l.qty || 1}</td>
+      <td class="r">${fRp(l.harga)}</td>
+      ${perRowIns ? `<td class="r">${premiOf(l) > 0 ? `${fRp(premiOf(l))}<div class="sm">Nilai Pertanggungan Rp ${fRp(Number(l.ins_nilai) || 0)}</div>` : "-"}</td>` : ""}
+      <td class="r b">${fRp((l.harga || 0) * (l.qty || 1))}</td>
+    </tr>`).join("");
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${noInvoice}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800&display=swap" rel="stylesheet">
+  <style>
+    ${DOC_BASE_CSS}
+    @page { size: A4 portrait; margin: 12mm; }
+    html { text-rendering: geometricPrecision; }
+    body { font-family:'Inter', Arial, 'Helvetica Neue', Helvetica, sans-serif; font-size:13px; color:#1B2433; background:#fff; }
+    .doc-sheet { padding:0; max-width:186mm; margin:0 auto; }
+    .doc-title, .doc-brand-name { color:#000 !important; }
+    .cs-meta { display:flex; justify-content:space-between; align-items:flex-start; gap:24px; margin:4px 0 22px; }
+    .cs-bill .lbl { font-size:11px; font-weight:800; letter-spacing:.4px; text-transform:uppercase; color:#0F2A5C; margin-bottom:5px; }
+    .cs-bill .val { font-size:18px; font-weight:800; color:#0F2A5C; }
+    table.cs-mt { border-collapse:collapse; font-size:12.5px; }
+    table.cs-mt td { padding:2.5px 0; }
+    table.cs-mt td:first-child { color:#4A5568; padding-right:22px; white-space:nowrap; }
+    table.cs-mt td:last-child { font-weight:700; text-align:right; }
+    table.cs-it { width:100%; border-collapse:separate; border-spacing:0; table-layout:fixed; border:1px solid #E3E7ED; border-radius:10px; overflow:hidden; margin-bottom:20px; }
+    table.cs-it thead { display:table-header-group; }
+    table.cs-it tr { break-inside:avoid; page-break-inside:avoid; }
+    table.cs-it th { background:#F3F5F8; color:#0F2A5C; font-weight:800; font-size:12.5px; text-align:left; padding:11px 8px; vertical-align:middle; }
+    table.cs-it td { padding:${lines.length >= 8 ? 7 : 12}px 8px; font-size:${lines.length >= 8 ? 11.5 : 12.5}px; border-top:1px solid #E3E7ED; vertical-align:top; overflow-wrap:anywhere; line-height:1.4; }
+    table.cs-it .c { text-align:center; padding-left:4px; padding-right:4px; } table.cs-it .r { text-align:right; } table.cs-it td.r { white-space:nowrap; overflow-wrap:normal; }
+    table.cs-it .b { font-weight:700; }
+    table.cs-it .sm { font-size:10.5px; font-style:italic; color:#4A5568; margin-top:2px; white-space:normal; font-weight:400; }
+    table.cs-it td .rk { white-space:nowrap; }
+    .cs-sum { display:flex; justify-content:space-between; gap:28px; margin-bottom:22px; break-inside:avoid; page-break-inside:avoid; }
+    .cs-note { flex:1; font-size:12.5px; line-height:1.7; }
+    .cs-note b { font-weight:800; } .cs-note i { font-style:italic; }
+    .cs-tot { width:310px; flex-shrink:0; }
+    .cs-tot .row { display:flex; justify-content:space-between; gap:12px; padding:6px 0; font-size:13px; }
+    .cs-tot .row span:last-child { font-weight:700; white-space:nowrap; }
+    .cs-tot .grand { border-top:1.5px solid #8A94A6; margin-top:6px; padding-top:12px; font-size:18px; font-weight:800; color:#0F2A5C; white-space:nowrap; }
+    .cs-tot .grand span:last-child { font-weight:800; }
+    .cs-tot .sisa { color:#0F2A5C; font-weight:800; border-top:1px solid #CBD2DC; margin-top:4px; padding-top:8px; font-size:15px; }
+    .cs-paytitle { font-size:12px; font-weight:800; color:#0F2A5C; margin:0 0 6px; text-transform:uppercase; letter-spacing:.4px; }
+    .cs-pay { display:flex; align-items:center; gap:16px; padding:15px 18px; background:#F3F5F8; border-radius:10px; margin:6px 0 24px; break-inside:avoid; }
+    .cs-pay .bank { font-weight:900; font-style:italic; font-size:28px; color:#1565C0; padding-right:16px; border-right:2px solid #C9973A; line-height:1.1; }
+    .cs-pay .no { font-size:21px; font-weight:800; letter-spacing:.5px; color:#1B2433; }
+    .cs-pay .an { font-size:13px; color:#1B2433; margin-top:2px; }
+    .cs-sign { display:flex; justify-content:flex-end; margin-top:12px; break-inside:avoid; page-break-inside:avoid; }
+    .cs-sign .cell { width:270px; text-align:center; }
+    .cs-sign .lbl { font-size:13.5px; margin-bottom:6px; }
+    .cs-sign .stamp { min-height:70px; display:flex; align-items:center; justify-content:center; margin-bottom:2px; }
+    .cs-sign .stamp img { max-height:110px; max-width:240px; object-fit:contain; }
+    .cs-sign .stamp.empty { height:60px; }
+    .cs-sign .pt { font-size:14px; font-weight:800; } .cs-sign .nm { font-size:14px; font-weight:700; margin-top:2px; } .cs-sign .jb { font-size:12.5px; color:#4A5568; margin-top:2px; }
+    .cs-foot { display:flex; justify-content:space-between; gap:8px; padding-top:10px; margin-top:26px; border-top:2px solid #C9973A; font-size:11.5px; color:#1B2433; }
+    ${pvCss}
+    ${opt.forImage ? ".doc-sheet { max-width:none; width:751px; padding:24px; }" : ""}
+  </style></head><body>
+  ${pvBar}
+  <div class="doc-sheet">
+    ${docHeader({ docTitle: "FAKTUR / INVOICE", logoUrl: "/logo.png" })}
+    <div class="cs-meta">
+      <div class="cs-bill"><div class="lbl">Ditagihkan Kepada</div><div class="val">${extra.customer_nama || "&nbsp;"}</div></div>
+      <table class="cs-mt">
+        <tr><td>Faktur #</td><td>${noInvoice}</td></tr>
+        <tr><td>Tanggal</td><td>${tgl}</td></tr>
+        <tr><td>Jatuh Tempo</td><td>${fmtTgl(jatuhTempo)}</td></tr>
+        <tr><td>No. PO Customer</td><td>${escH(poTxt) || "—"}</td></tr>
+      </table>
+    </div>
+    <table class="cs-it">
+      <thead><tr>${thS(30, "c", "No")}${thS(col2 === "Nama Barang" ? 108 : 96, "", col2)}${thS(0, "", "Keterangan")}${thS(40, "c", "Qty")}${thS(112, "r", "Harga Satuan (Rp)")}${perRowIns ? thS(128, "r", "Premi Asuransi (Rp)") : ""}${thS(112, "r", "Jumlah (Rp)")}</tr></thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>
+    <div class="cs-sum">
+      <div class="cs-note">
+        ${pesan ? `<div><b>Pesan:</b> ${pesan}</div>` : ""}
+        ${extra.tipe === "asuransi" ? `<div><b>Jenis:</b> Reimburse asuransi${withTax ? "" : ", tidak dikenakan PPN"}.</div>` : `<div><b>Jumlah Unit:</b> ${lines.length}</div>`}
+        ${premi > 0 ? `<div><b>Asuransi:</b> premi ${insRate}% dari nilai pertanggungan Rp ${fRp(insBase)}, tidak dikenakan PPN.</div>` : ""}
+        <div><b>Terbilang${hasPay ? " (Sisa)" : ""}:</b> <i>${terbilangRupiah(hasPay ? Math.abs(sisa) : total)}</i></div>
+      </div>
+      <div class="cs-tot">
+        <div class="row"><span>${withTax && taxInclusive ? "DPP (Dasar Pengenaan Pajak)" : premi > 0 ? "Ongkos Pengiriman" : "Subtotal"}</span><span>Rp ${fRp(withTax && taxInclusive ? dpp : subtotal)}</span></div>
+        <div class="row"><span>PPN Logistik (1,1%)${withTax && taxInclusive ? " — termasuk" : ""}</span><span>${withTax ? "Rp " + fRp(ppn) : "—"}</span></div>
+        ${withPph23 ? `<div class="row"><span>Potongan PPh 23 (2%)</span><span>- Rp ${fRp(pph23)}</span></div>` : ""}
+        ${premi > 0 ? `<div class="row"><span>Premi Asuransi (${insRate}%)</span><span>Rp ${fRp(premi)}</span></div>` : ""}
+        <div class="row grand"><span>Total Tagihan</span><span>Rp ${fRp(total)}</span></div>
+        ${hasPay ? `<div class="row"><span>Pembayaran Diterima</span><span>- Rp ${fRp(diterima)}</span></div>
+        <div class="row sisa"><span>${sisa < 0 ? "Kelebihan Bayar" : "Sisa Tagihan"}</span><span>Rp ${fRp(Math.abs(sisa))}</span></div>` : ""}
+      </div>
+    </div>
+    ${hasPay ? `<div class="cs-paytitle">Rincian Pembayaran Diterima</div>
+    <table class="cs-it">
+      <thead><tr>${thS(30, "c", "No")}${thS(0, "", "Tanggal")}${thS(0, "", "Metode")}${thS(0, "", "Keterangan")}${thS(0, "r", "Jumlah (Rp)")}</tr></thead>
+      <tbody>${pays.map((p, i) => `<tr><td class="c">${i + 1}</td><td>${fmtTgl(p.tanggal)}</td><td>${escH(p.metode) || "&nbsp;"}</td><td>${escH(p.catatan) || "&nbsp;"}</td><td class="r">${fRp(Number(p.amount) || 0)}</td></tr>`).join("")}
+      <tr><td></td><td colspan="3" class="b">Total Diterima</td><td class="r b">${fRp(diterima)}</td></tr></tbody>
+    </table>` : ""}
+    <div class="cs-pay">
+      <div class="bank">${DOC_BRAND.bank.name}</div>
+      <div><div class="no">${DOC_BRAND.bank.norek}</div><div class="an">Cabang ${DOC_BRAND.bank.cabang} &middot; a.n. ${DOC_BRAND.bank.an}</div></div>
+    </div>
+    <div class="cs-sign"><div class="cell">
+      <div class="lbl">Hormat Kami,</div>
+      <div class="stamp ${stempel ? "" : "empty"}">${stempel ? `<img src="${stempel}" alt="stempel">` : ""}</div>
+      <div class="pt">PT. Alyssa Auto Logistik</div>
+      ${ttdNama ? `<div class="nm">( ${ttdNama} )</div>` : ""}
+      ${ttdJabatan ? `<div class="jb">${ttdJabatan}</div>` : ""}
+    </div></div>
+    <div class="cs-foot"><span>${noInvoice}</span><span>${DOC_BRAND.tagline}</span><span>PT Alyssa Auto Logistik</span></div>
+  </div>
+  ${opt.forImage || opt.preview ? "" : `<script>
+    Promise.race([ (document.fonts && document.fonts.ready) || Promise.resolve(), new Promise(function(r){ setTimeout(r, 1500); }) ]).then(function(){ window.print(); });
+  <\/script>`}
+  </body></html>`;
+  })() : "";
+  const origHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${noInvoice}</title>
   <style>
     ${DOC_BASE_CSS}
     /* ── Kualitas cetak A4 (setara invoice Mekari Jurnal / BCA Bisnis) ──
@@ -6148,7 +6379,10 @@ async function printInvoiceDoc(lines, withTax, extra) {
     .inv-sign-pt { font-size:11px; font-weight:800; color:${DOC_BRAND.ink}; }
     .inv-sign-name { font-size:11px; font-weight:800; color:${DOC_BRAND.ink}; margin-top:2px; }
     .inv-sign-jab { font-size:9.5px; color:${DOC_BRAND.muted}; margin-top:2px; }
+    ${pvCss}
+    ${opt.forImage ? ".doc-sheet { max-width:none; width:751px; padding:24px; }" : ""}
   </style></head><body>
+  ${pvBar}
   <div class="doc-sheet">
     ${docHeader({ docTitle: "FAKTUR / INVOICE", logoUrl: "/logo.png" })}
     <div class="inv-meta-row">
@@ -6244,10 +6478,10 @@ async function printInvoiceDoc(lines, withTax, extra) {
     </div>
     ${docFooter({ docNo: `Faktur ${noInvoice}` })}
   </div>
-  <script>window.onload=()=>window.print()<\/script>
+  ${opt.forImage || opt.preview ? "" : `<script>window.onload=()=>window.print()<\/script>`}
   </body></html>`;
-  if (w) { w.document.write(html); w.document.close(); }
-  return noInvoice;
+  const html = tplCorp ? corpHtml : origHtml;
+  return { html, noInvoice, contW: 751 };
 }
 
 
@@ -6896,6 +7130,8 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
   const fRp = (n) => "Rp " + n.toLocaleString("id-ID");
 
   const [saving, setSaving] = useState(false);
+  const [tplF, setTplF] = useFakturTpl();
+  const [imgBusy, setImgBusy] = useState(false);
   // Simpan arsip + tandai unit diinvoice + tutup. Dipakai baik saat Cetak maupun Simpan.
   const persistInvoice = (lines, extra, orderIds, cust, noInv) => {
     saveDocHistory({
@@ -6917,7 +7153,7 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
         ...(hargaNum(r.ins) > 0 ? { ins_nilai: hargaNum(r.ins) } : {}) }));
     const orderIds = Array.from(new Set(rows.map((r) => r.order_id).filter(Boolean)));
     const cust = billTo.trim() || (customers.length === 1 ? customers[0] : `${customers.length} customer`);
-    const extra = { jatuhTempo, tanggalInvoice, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23, insRate: rateNum, customer_nama: cust, order_id: orderIds.join(", "), no_invoice: noInvoiceManual.trim() || undefined };
+    const extra = { jatuhTempo, tanggalInvoice, metode, pesan, ttdNama, ttdJabatan, stempel, taxInclusive, withPph23, insRate: rateNum, customer_nama: cust, order_id: orderIds.join(", "), no_invoice: noInvoiceManual.trim() || undefined, template: tplF };
     return { lines, orderIds, cust, extra };
   };
   const doPrint = async () => {
@@ -6925,6 +7161,21 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
     if (!lines.length) { alert("Isi harga minimal 1 unit dulu."); return; }
     const noInv = await printInvoiceDoc(lines, withTax, extra); // nomor auto-increment dari server
     persistInvoice(lines, extra, orderIds, cust, noInv);
+  };
+  const doPreview = () => {
+    const { lines, extra } = buildGab();
+    if (!lines.length) { alert("Isi harga minimal 1 unit dulu."); return; }
+    previewInvoiceDoc(lines, withTax, extra);
+  };
+  const doImage = async () => {
+    const { lines, orderIds, cust, extra } = buildGab();
+    if (!lines.length) { alert("Isi harga minimal 1 unit dulu."); return; }
+    setImgBusy(true);
+    try {
+      const r = await imageInvoiceDoc(lines, withTax, extra);
+      if (r.hasil !== "batal") persistInvoice(lines, extra, orderIds, cust, r.noInvoice);
+    } catch (e) { alert("Gagal membuat gambar. Coba lagi."); }
+    setImgBusy(false);
   };
   const doSave = async () => {
     const { lines, orderIds, cust, extra } = buildGab();
@@ -7064,6 +7315,7 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
             </div>
           )}
         </div>
+        <FakturTplBar tpl={tplF} setTpl={setTplF} onPreview={doPreview} onImage={doImage} busy={imgBusy} disabled={okCount === 0} />
         <div className="adm-modal-foot">
           <button className="adm-btn adm-btn-ghost" onClick={onClose}>Batal</button>
           <button className="adm-btn adm-btn-green" onClick={doSave} disabled={okCount === 0 || saving} data-testid="adm-invgab-save">{saving ? "Menyimpan…" : "💾 Simpan"}</button>
