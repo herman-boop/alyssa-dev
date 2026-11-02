@@ -90,7 +90,7 @@ async function buildPenawaran(rows, meta, forImage) {
   const padat = ncols >= 8;                 // kasus terpadat (Unit + Premi + Jumlah): font 13px, kolom angka lebih ramping
   const fs = padat ? 13 : 14;
   // Lebar kolom (px, table-layout fixed): Rute = sisa. Kolom angka cukup lebar supaya "Rp 20.000.000" tidak meluber.
-  const colW = [34, null, padat ? 96 : 112, padat ? 92 : 116].concat(showQty ? [44] : [], perRow ? [padat ? 96 : 110] : [], [padat ? 120 : 132], showQty ? [padat ? 122 : 134] : []);
+  const colW = [34, null, padat ? 96 : 112, padat ? 92 : 116].concat(showQty ? [44] : [], [padat ? 120 : 132], perRow ? [padat ? 96 : 110] : [], showQty ? [padat ? 122 : 134] : []);
   const colgroup = `<colgroup>${colW.map((w) => (w ? `<col style="width:${w}px">` : "<col>")).join("")}</colgroup>`;
   // Tiap rute = 1 <tbody> supaya 1 rute tidak pecah antar-halaman & tetap 1 item.
   const body = (rows || []).map((e, i) => {
@@ -121,8 +121,8 @@ async function buildPenawaran(rows, meta, forImage) {
       <td>${esc(metode)}</td>
       <td>${esc(e.tipe_kendaraan || "-")}</td>
       ${showQty ? `<td class="c">${routeQty(e)}</td>` : ""}
-      ${perRow ? `<td class="r">${rowPremi(e) > 0 ? `${fRp(rowPremi(e))}<div class="ph-note">Nilai ${fRp(rowNilai(e))}${routeQty(e) > 1 ? " / unit" : ""}</div>` : "-"}</td>` : ""}
       <td class="r"><b>${fRp(harga)}</b></td>
+      ${perRow ? `<td class="r">${rowPremi(e) > 0 ? `${fRp(rowPremi(e))}<div class="ph-note">Nilai ${fRp(rowNilai(e))}${routeQty(e) > 1 ? " / unit" : ""}</div>` : "-"}</td>` : ""}
       ${showQty ? `<td class="r"><b>${fRp(harga * routeQty(e))}</b></td>` : ""}
     </tr>`;
     return `<tbody class="ph-route">${main}</tbody>`;
@@ -223,7 +223,7 @@ async function buildPenawaran(rows, meta, forImage) {
     <table class="ph">
       ${colgroup}
       <thead><tr>
-        <th class="c">No</th><th>Rute</th><th>Moda</th><th>Tipe Kendaraan</th>${showQty ? `<th class="c">Unit</th>` : ""}${perRow ? `<th class="r">Premi Asuransi</th>` : ""}<th class="r">${showQty ? "Harga / Unit" : "Harga"}</th>${showQty ? `<th class="r">Jumlah</th>` : ""}
+        <th class="c">No</th><th>Rute</th><th>Moda</th><th>Tipe Kendaraan</th>${showQty ? `<th class="c">Unit</th>` : ""}<th class="r">${showQty ? "Harga / Unit" : "Harga"}</th>${perRow ? `<th class="r">Premi Asuransi</th>` : ""}${showQty ? `<th class="r">Jumlah</th>` : ""}
       </tr></thead>
       ${body}
     </table>
