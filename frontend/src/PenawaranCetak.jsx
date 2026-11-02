@@ -142,20 +142,20 @@ async function buildPenawaran(rows, meta, forImage) {
     .ph-head img { width:44px; height:44px; object-fit:contain; flex-shrink:0; }
     .ph-pt { font-size:19px; font-weight:700; color:#212121; line-height:1.2; }
     .ph-tag { font-size:13px; font-weight:700; color:#C5A059; letter-spacing:.3px; margin-top:3px; }
-    .ph-card { background:#E8F5E9; border-radius:12px; padding:14px 16px; margin-bottom:14px; }
-    .ph-title { font-size:15px; font-weight:800; color:#006644; letter-spacing:.4px; margin-bottom:8px; }
+    .ph-card { background:#E3F2FD; border-radius:12px; padding:14px 16px; margin-bottom:14px; }
+    .ph-title { font-size:15px; font-weight:800; color:#0A7EA4; letter-spacing:.4px; margin-bottom:8px; }
     .ph-line { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; padding:5px 0; }
     .ph-line .k { font-size:14px; font-weight:500; color:#4A4A4A; flex-shrink:0; }
     .ph-line .v { font-size:14px; font-weight:700; color:#212121; text-align:right; }
-    .ph-line.total { border-top:1px solid #b9dcbf; margin-top:6px; padding-top:10px; }
-    .ph-line.total .k { font-weight:700; color:#006644; }
-    .ph-line.total .v { font-size:18px; font-weight:800; color:#006644; }
-    .ph-sec { font-size:13px; font-weight:700; color:#006644; text-transform:uppercase; letter-spacing:.4px; margin:16px 0 8px; }
+    .ph-line.total { border-top:1px solid #BBDEFB; margin-top:6px; padding-top:10px; }
+    .ph-line.total .k { font-weight:700; color:#0A7EA4; }
+    .ph-line.total .v { font-size:18px; font-weight:800; color:#0A7EA4; }
+    .ph-sec { font-size:13px; font-weight:700; color:#0A7EA4; text-transform:uppercase; letter-spacing:.4px; margin:16px 0 8px; }
     table.ph { width:100%; border-collapse:collapse; table-layout:fixed; }
     table.ph thead { display:table-header-group; }        /* header diulang tiap halaman */
     table.ph th, table.ph td { padding:12px 8px; border-bottom:1px solid #E0E0E0; text-align:left; vertical-align:top; overflow-wrap:anywhere; }
     table.ph th { vertical-align:middle; overflow-wrap:normal; }
-    table.ph th { background:#E8F5E9; color:#006644; font-weight:700; font-size:13px; border-bottom:2px solid #C5A059; }
+    table.ph th { background:#E3F2FD; color:#0A7EA4; font-weight:700; font-size:13px; border-bottom:2px solid #C5A059; }
     table.ph td { font-size:${fs}px; font-weight:600; color:#212121; line-height:1.35; }
     table.ph th.c, table.ph td.c { padding-left:4px; padding-right:4px; white-space:nowrap; }
     table.ph td b { font-weight:700; }
@@ -171,20 +171,20 @@ async function buildPenawaran(rows, meta, forImage) {
     table.ph .ph-sub-note { font-style:italic; color:#4A4A4A; }
     table.ph .ph-sub-v { font-size:${fs}px; font-weight:700; white-space:nowrap; }
     table.ph .ph-opt-hint { font-size:12px; font-style:italic; color:#4A4A4A; font-weight:500; }
-    .ph-draft-note { font-size:13px; color:#212121; line-height:1.6; background:#E8F5E9; border-left:4px solid #006644; border-radius:8px; padding:12px 14px; margin:12px 0 2px; }
+    .ph-draft-note { font-size:13px; color:#212121; line-height:1.6; background:#E3F2FD; border-left:4px solid #2CB3DB; border-radius:8px; padding:12px 14px; margin:12px 0 2px; }
     .ph-bar { display:flex; justify-content:space-between; align-items:center; padding:12px 10px 0; }
-    .ph-bar .lbl { font-weight:700; font-size:14px; color:#006644; text-transform:uppercase; }
+    .ph-bar .lbl { font-weight:700; font-size:14px; color:#0A7EA4; text-transform:uppercase; }
     .ph-bar .val { font-weight:800; font-size:16px; color:#212121; }
     .ph-sum { margin:10px 0 0; break-inside:avoid; page-break-inside:avoid; }
     .ph-sum .row { display:flex; justify-content:space-between; gap:12px; padding:11px 10px; font-size:14px; border-bottom:1px solid #E0E0E0; }
     .ph-sum .row .k { color:#212121; font-weight:600; font-size:14px; }
     .ph-sum .row .v { font-weight:700; color:#212121; white-space:nowrap; font-size:14px; }
     .ph-sum .row.minus .v { color:#b45309; }
-    .ph-grand { margin-top:10px; background:#006644; border-radius:12px; padding:14px 16px; display:flex; justify-content:space-between; align-items:center; gap:12px; }
-    .ph-grand .k { font-size:14px; font-weight:700; color:#E8F5E9; text-transform:uppercase; }
+    .ph-grand { margin-top:10px; background:#2CB3DB; border-radius:12px; padding:14px 16px; display:flex; justify-content:space-between; align-items:center; gap:12px; }
+    .ph-grand .k { font-size:14px; font-weight:700; color:#ffffff; text-transform:uppercase; }
     .ph-grand .v { font-size:21px; font-weight:800; color:#ffffff; white-space:nowrap; }
     .ph-pay-box { display:flex; align-items:center; gap:14px; padding:14px 16px; background:#F5F5F5; border-radius:12px; margin:16px 0; break-inside:avoid; }
-    .ph-pay-badge { min-width:48px; height:44px; padding:0 10px; border-radius:10px; background:#006644; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:13px; flex-shrink:0; }
+    .ph-pay-badge { min-width:48px; height:44px; padding:0 10px; border-radius:10px; background:#2CB3DB; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:13px; flex-shrink:0; }
     .ph-pay-num { font-size:17px; font-weight:800; letter-spacing:.5px; color:#212121; }
     .ph-pay-name { font-size:13px; font-weight:500; color:#4A4A4A; margin-top:2px; }
     .ph-valid { font-size:14px; font-weight:500; color:#4A4A4A; line-height:1.6; margin-bottom:8px; }
