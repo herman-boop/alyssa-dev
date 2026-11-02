@@ -6,6 +6,13 @@
 import { useState } from "react";
 import { DOC_BRAND, nextDocNo } from "./docTheme";
 
+// Pilihan rate premi asuransi (% dari nilai pertanggungan) — default 0,15%.
+const INS_RATE_OPTIONS = [
+  { value: "0.15", label: "0,15% — Standar (default)" },
+  { value: "0.135", label: "0,135% — Diskon / Khusus" },
+];
+const fRate = (r) => String(r).replace(".", ",");   // tampil gaya Indonesia (0,135)
+
 function fRp(n) {
   if (!n && n !== 0) return "-";
   return "Rp " + Math.round(n).toLocaleString("id-ID");
@@ -237,7 +244,7 @@ async function buildPenawaran(rows, meta, forImage) {
       <div class="row"><span class="k">${ppnOn && incl ? "DPP (Dasar Pengenaan Pajak)" : "Subtotal Pengiriman"}</span><span class="v">${fRp(ppnOn && incl ? dpp : subtotal)}</span></div>
       ${ppnOn ? `<div class="row"><span class="k">PPN 1,1%${incl ? " (sudah termasuk)" : ""}</span><span class="v">${fRp(ppn)}</span></div>` : ""}
       ${pph ? `<div class="row minus"><span class="k">Potongan PPh 23 (2%)</span><span class="v">- ${fRp(pph)}</span></div>` : ""}
-      ${premi ? `<div class="row"><span class="k">${perRow ? "Total Premi Asuransi" : "Premi Asuransi"} (${fRp(insBase)} &times; ${rate}%)</span><span class="v">${fRp(premi)}</span></div>` : ""}
+      ${premi ? `<div class="row"><span class="k">${perRow ? "Total Premi Asuransi" : "Premi Asuransi"} (${fRp(insBase)} &times; ${fRate(rate)}%)</span><span class="v">${fRp(premi)}</span></div>` : ""}
       <div class="ph-grand"><span class="k">Grand Total</span><span class="v">${fRp(grandTotal)}</span></div>
     </div>` : ""}
     `}
@@ -545,10 +552,11 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
               <div style={{ fontSize: 11, fontWeight: 800, color: navy, marginBottom: 8, letterSpacing: 0.3 }}>RINCIAN BIAYA & PAJAK (opsional)</div>
 
               <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: gray, marginBottom: 4 }}>Asuransi — Rate (sama untuk semua baris)</label>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, maxWidth: 150 }}>
-                <input inputMode="decimal" value={insRate} onChange={(e) => setInsRate(e.target.value.replace(/[^0-9.]/g, ""))} data-testid="penawaran-ins-rate"
-                  style={{ width: "100%", boxSizing: "border-box", padding: "9px 8px", borderRadius: 8, border: `1px solid ${border}`, fontSize: 13, textAlign: "right" }} />
-                <span style={{ fontSize: 12, color: gray, fontWeight: 700 }}>%</span>
+              <div style={{ marginBottom: 6, maxWidth: 260 }}>
+                <select value={String(insRate)} onChange={(e) => setInsRate(e.target.value)} data-testid="penawaran-ins-rate"
+                  style={{ width: "100%", boxSizing: "border-box", padding: "9px 8px", borderRadius: 8, border: `1px solid ${border}`, fontSize: 13, background: "#fff" }}>
+                  {INS_RATE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
               </div>
               <div style={{ fontSize: 10.5, color: gray, marginBottom: 10 }}>Nilai pertanggungan diisi <b>per unit</b> di daftar rute di atas (kolom 🛡️ Asuransi). Premi tiap baris = nilai × rate × jumlah unit, total premi = jumlah semua baris yang dicentang{pvPremi > 0 ? ` = ${fRp(pvPremi)} (nilai total ${fRp(pvInsBase)})` : ""}. Baris tanpa nilai = tanpa asuransi. Asuransi TIDAK kena pajak.</div>
 
