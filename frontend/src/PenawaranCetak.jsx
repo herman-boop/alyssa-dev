@@ -147,7 +147,7 @@ async function buildPenawaran(rows, meta, forImage) {
     .pdf-container { width: 100%; max-width: ${Math.round((pageMm - 10) * 3.78)}px; margin: 0 auto; padding: 24px; background: #ffffff; }
     :root { --navy:#0F2A5C; --gold:#C9973A; --lb:#E3F0FA; --ink:#1B2433; --mut:#4A5568; --ln:#DCE6F2; }
     .ph-head { display:flex; align-items:center; gap:16px; padding-bottom:16px; border-bottom:2px solid var(--gold); margin-bottom:16px; }
-    .ph-head img { width:66px; height:66px; object-fit:contain; flex-shrink:0; }
+    .ph-head img { width:66px; height:66px; object-fit:contain; flex-shrink:0; filter:drop-shadow(0 2px 2.5px rgba(15,42,92,.38)) drop-shadow(0 0 .5px rgba(15,42,92,.3)); }   /* logo asli, sedikit timbul */
     .ph-head .sep { width:2px; align-self:stretch; background:var(--gold); margin:4px 0; }
     .ph-pt { font-size:26px; font-weight:800; color:var(--navy); line-height:1.15; letter-spacing:.2px; }
     .ph-tag { font-size:16px; font-weight:700; color:var(--gold); margin-top:4px; }
