@@ -5530,6 +5530,7 @@ function HistoriDokumen({ headers }) {
   const [fQ, setFQ] = useState("");                  // no dokumen / customer / PO
   const [fCust, setFCust] = useState("");            // kunci nama pelanggan (alfanumerik saja)
   const [page, setPage] = useState(1);
+  const [fakturWaBusy, setFakturWaBusy] = useState("");   // id faktur yang sedang dibuat gambarnya untuk WhatsApp
   const [payRec, setPayRec] = useState(null);        // faktur yang lagi dibuka modal pembayarannya
   const [editRec, setEditRec] = useState(null);      // faktur yang lagi dibuka modal Edit / Tambah Unit
   const [stempelRec, setStempelRec] = useState(null); // faktur yang lagi dibuka modal TTD / Stempel / Materai
@@ -5633,6 +5634,21 @@ function HistoriDokumen({ headers }) {
   const quickBulan = () => { const d = new Date(); setFDari(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`); setFSampai(isoToday()); };
   const quickTahun = () => { const d = new Date(); setFDari(`${d.getFullYear()}-01-01`); setFSampai(isoToday()); };
   const resetFilter = () => { setFEntity("all"); setFCust(""); setFDari(""); setFSampai(""); setFQ(""); setFilter(""); setPage(1); };
+
+  // Kirim faktur lewat WhatsApp sebagai gambar tajam (Web Share → pilih WhatsApp/kontak; fallback unduh).
+  // polos=true → tanpa TTD/stempel (untuk stempel basah); polos=false → dengan TTD/stempel terpasang.
+  // Nomor faktur sudah ada → tidak mengambil nomor baru & tidak membuat faktur baru di Histori.
+  const kirimWaFaktur = async (rec0, polos) => {
+    setFakturWaBusy(rec0.id + (polos ? ":p" : ":s"));
+    try {
+      let rec = rec0;
+      try { const resp = await axios.get(`${API}/admin/doc-history/${rec0.id}`, { headers }); if (resp.data) rec = resp.data; } catch {}
+      const meta = rec.meta || {};
+      const r = await imageInvoiceDoc(rec.lines, meta.withTax, { ...meta, no_invoice: rec.no_dokumen || meta.no_invoice, payments: rec.payments || [], tanpaStempel: !!polos });
+      if (r.hasil === "diunduh") alert("Gambar faktur diunduh. Buka WhatsApp lalu kirim dari galeri/unduhan.");
+    } catch (e) { alert("Gagal membuat gambar faktur. Coba lagi."); }
+    setFakturWaBusy("");
+  };
 
   const reprint = async (rec0, opts) => {
     // Ambil record lengkap (termasuk stempel yang di-exclude dari daftar).
@@ -5859,6 +5875,12 @@ function HistoriDokumen({ headers }) {
                   )}
                   {rec.jenis === "invoice" && (
                     <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={() => reprint(rec, { polos: true })} title="Cetak polos tanpa TTD/stempel (untuk stempel basah)" data-testid="dochist-print-polos">📄 Polos</button>
+                  )}
+                  {rec.jenis === "invoice" && (
+                    <button className="adm-btn adm-btn-ghost adm-dochist-btn" disabled={!!fakturWaBusy} onClick={() => kirimWaFaktur(rec, false)} title="Kirim lewat WhatsApp — faktur dengan TTD/stempel" data-testid="dochist-wa-stempel">{fakturWaBusy === rec.id + ":s" ? "Membuat…" : "📲 WA + Stempel"}</button>
+                  )}
+                  {rec.jenis === "invoice" && (
+                    <button className="adm-btn adm-btn-ghost adm-dochist-btn" disabled={!!fakturWaBusy} onClick={() => kirimWaFaktur(rec, true)} title="Kirim lewat WhatsApp — faktur polos tanpa TTD/stempel" data-testid="dochist-wa-polos">{fakturWaBusy === rec.id + ":p" ? "Membuat…" : "📲 WA Polos"}</button>
                   )}
                   <button className="adm-btn adm-dochist-btn adm-dochist-del" onClick={() => del(rec)} title="Hapus" data-testid="dochist-del">🗑️</button>
                 </div>
