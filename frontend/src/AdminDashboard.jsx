@@ -7,7 +7,7 @@ import axios from "axios";
 import { VEHICLE_TYPE_LIST } from "@/VehicleSketches";
 import CostCalculator from "@/CostCalculator";
 import DriverData from "@/DriverData";
-import SupplierPage, { printSupplierA4 } from "@/SupplierPage";
+import SupplierPage, { printSupplierA4, imageSupplierA4 } from "@/SupplierPage";
 import SelisihPage from "@/SelisihPage";
 import ShipMasterPage from "@/ShipMasterPage";
 import UsersPage from "@/UsersPage";
@@ -5678,6 +5678,18 @@ function HistoriDokumen({ headers }) {
     setFakturWaBusy("");
   };
 
+  // Kirim rekap supplier dari Histori sebagai gambar tajam lewat WhatsApp.
+  const kirimWaSupplier = async (rec0) => {
+    setFakturWaBusy(rec0.id + ":sup");
+    try {
+      let rec = rec0;
+      try { const resp = await axios.get(`${API}/admin/doc-history/${rec0.id}`, { headers }); if (resp.data) rec = resp.data; } catch {}
+      const hasil = await imageSupplierA4({ nama: rec.meta?.supplier_nama || rec.customer || "-", jobs: rec.units || [] }, null, rec.meta?.no_dokumen || rec.no_dokumen, rec.meta?.tanggal);
+      if (hasil === "diunduh") alert("Gambar rekap diunduh. Buka WhatsApp lalu kirim dari galeri/unduhan.");
+    } catch (e) { alert("Gagal membuat gambar rekap. Coba lagi."); }
+    setFakturWaBusy("");
+  };
+
   const reprint = async (rec0, opts) => {
     // Ambil record lengkap (termasuk stempel yang di-exclude dari daftar).
     let rec = rec0;
@@ -5903,6 +5915,9 @@ function HistoriDokumen({ headers }) {
                   )}
                   {rec.jenis === "invoice" && (
                     <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={() => reprint(rec, { polos: true })} title="Cetak polos tanpa TTD/stempel (untuk stempel basah)" data-testid="dochist-print-polos">📄 Polos</button>
+                  )}
+                  {rec.jenis === "supplier" && (
+                    <button className="adm-btn adm-btn-ghost adm-dochist-btn" disabled={!!fakturWaBusy} onClick={() => kirimWaSupplier(rec)} title="Kirim rekap supplier lewat WhatsApp (gambar tajam)" data-testid="dochist-wa-supplier">{fakturWaBusy === rec.id + ":sup" ? "Membuat…" : "📲 WhatsApp"}</button>
                   )}
                   {rec.jenis === "invoice" && (
                     <button className="adm-btn adm-btn-ghost adm-dochist-btn" disabled={!!fakturWaBusy} onClick={() => kirimWaFaktur(rec, false)} title="Kirim lewat WhatsApp — faktur dengan TTD/stempel" data-testid="dochist-wa-stempel">{fakturWaBusy === rec.id + ":s" ? "Membuat…" : "📲 WA + Stempel"}</button>
