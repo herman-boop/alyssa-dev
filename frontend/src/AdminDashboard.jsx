@@ -2710,6 +2710,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
   const [editArrival, setEditArrival] = useState(false);
   const [arrivalDraft, setArrivalDraft] = useState(order.pickup_arrival || "");
   const [editCust, setEditCust] = useState(false);
+  const [alamatSalin, setAlamatSalin] = useState("");   // "asal" | "tujuan" sesaat setelah disalin
   const [custNamaDraft, setCustNamaDraft] = useState(order.customer_nama || "");
   const [custHpDraft, setCustHpDraft] = useState(order.customer_hp || "");
   const [kordDraft, setKordDraft] = useState(order.koordinator_id || "");
@@ -2955,6 +2956,33 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
             )}
           </div>
         </div>
+        {/* ── Alamat pengambilan & tujuan langsung terlihat (tidak perlu buka BASTK / konversi dulu) ── */}
+        {[
+          { key: "asal", ico: "📍", lbl: "Alamat Pengambilan", kota: order.asal_kota, alamat: order.asal_alamat, pic: order.pickup_pic, hp: order.pickup_hp },
+          { key: "tujuan", ico: "🏁", lbl: "Alamat Tujuan", kota: order.tujuan_kota, alamat: order.tujuan_alamat, pic: order.delivery_pic, hp: order.delivery_hp },
+        ].map((a) => {
+          const teks = [a.kota, a.alamat].filter(Boolean).join(" — ") + (a.pic || a.hp ? `\nPIC: ${[a.pic, a.hp].filter(Boolean).join(" · ")}` : "");
+          const salin = async () => {
+            try { await navigator.clipboard.writeText(teks); }
+            catch { const t = document.createElement("textarea"); t.value = teks; document.body.appendChild(t); t.select(); try { document.execCommand("copy"); } catch {} t.remove(); }
+            setAlamatSalin(a.key); setTimeout(() => setAlamatSalin(""), 1800);
+          };
+          return (
+            <div className="adm-field-row adm-full" key={a.key} data-testid={`adm-alamat-${a.key}-${order.order_id}`}>
+              <div className="adm-field-key">{a.ico} {a.lbl}</div>
+              <div className="adm-field-val" style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
+                <span style={{ fontWeight: 700 }}>{a.kota || "—"}</span>
+                <span style={{ whiteSpace: "normal", overflowWrap: "anywhere", lineHeight: 1.4 }}>{a.alamat || <i className="adm-mute">alamat detail belum diisi</i>}</span>
+                {(a.pic || a.hp) && (
+                  <span style={{ fontSize: 12.5 }}>
+                    {a.pic || "—"}{a.hp ? <> · <a href={`tel:${String(a.hp).replace(/[^0-9+]/g, "")}`} style={{ color: "inherit", textDecoration: "underline" }}>{a.hp}</a></> : null}
+                  </span>
+                )}
+                <button type="button" className="adm-btn adm-btn-ghost adm-btn-xs" onClick={salin} data-testid={`adm-alamat-salin-${a.key}-${order.order_id}`}>{alamatSalin === a.key ? "✓ Tersalin" : "📋 Salin"}</button>
+              </div>
+            </div>
+          );
+        })}
         <div className="adm-field-row">
           <div className="adm-field-key">Kendaraan</div>
           <div className="adm-field-val">
