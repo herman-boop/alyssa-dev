@@ -104,7 +104,12 @@ function buildSupplierA4(sup, jobsOverride, noDocOverride, tglOverride, opt) {
     const nopol = j.nopol || j.no_rangka || "-";
     const rute = `${j.asal_kota || "-"} → ${j.tujuan_kota || "-"}`;
     const jl = sisaOf(j) <= 0;
-    return `<tr>
+    // Biaya tambahan (TOL, dll.) per unit: sudah termasuk di Total Harga; tampilkan rinciannya di bawah baris unit.
+    const tbh = (j.tambahan || []).filter((t) => (t.amount || 0) > 0 || (t.label || "").trim());
+    const tbhTotal = tbh.reduce((a, t) => a + (t.amount || 0), 0);
+    const base = (j.harga_deal != null) ? j.harga_deal : ((j.total_harga || 0) - tbhTotal);
+    const tbhRow = tbh.length ? `<tr class="tb"><td></td><td colspan="6">&#8627; <b>Rincian:</b> Harga deal ${rp(base)}${tbh.map((t) => ` &nbsp;+&nbsp; ${esc((t.label || "Biaya tambahan").trim())} ${rp(t.amount)}`).join("")} &nbsp;=&nbsp; <b>${rp(j.total_harga)}</b></td></tr>` : "";
+    return `<tr${tbh.length ? ' class="has-tb"' : ""}>
       <td class="c">${idx}</td>
       <td><b>${esc(nopol)}</b><div class="rp-note">${esc(j.vehicle_type || "Unit")}</div></td>
       <td>${esc(rute)}</td>
@@ -112,7 +117,7 @@ function buildSupplierA4(sup, jobsOverride, noDocOverride, tglOverride, opt) {
       <td class="r">${rp(j.total_terbayar || 0)}</td>
       <td class="r"><b>${rp(sisaOf(j))}</b></td>
       <td class="c"><span class="rp-st ${jl ? "y" : "n"}">${jl ? "Lunas" : "Sisa"}</span></td>
-    </tr>`;
+    </tr>` + tbhRow;
   };
   const body = groups.map((g) => {
     const gj = g.jobs;
@@ -165,6 +170,9 @@ function buildSupplierA4(sup, jobsOverride, noDocOverride, tglOverride, opt) {
     table.rps .rp-st { font-size:11px; font-weight:800; }
     table.rps .rp-st.y { color:#0b6b43; } table.rps .rp-st.n { color:#a64b00; }
     .pill-ok { display:inline-block; font-size:11px; font-weight:800; color:#0b6b43; background:#e3f5ec; border:1px solid #a8dcc0; border-radius:20px; padding:2px 10px; }
+    table.rps tr.has-tb td { border-bottom:none; }
+    table.rps tr.tb td { border-top:none; padding:0 8px 9px; font-size:11.5px; font-weight:700; color:#7a5a12; background:#fff; line-height:1.4; }
+    table.rps tr.tb td b { font-weight:800; color:var(--ink); }
     table.rps tr.grp td { padding:9px 8px 7px; background:#fff; border-top:1px solid var(--ln); border-left:5px solid var(--gold); }
     table.rps tr.grp { break-after:avoid; page-break-after:avoid; }
     table.rps tr.grp .grp-in { display:flex; justify-content:space-between; align-items:baseline; gap:12px; }
