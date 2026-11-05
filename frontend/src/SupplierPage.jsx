@@ -801,20 +801,25 @@ export default function SupplierPage() {
   const [invRows, setInvRows] = useState(null); // null = belum dibaca
   const [invMeta, setInvMeta] = useState({});
   const [invSaving, setInvSaving] = useState(false);
+  const [invErr, setInvErr] = useState("");
   const openInv = () => {
     if (!selected) { flash("Pilih supplier dulu"); return; }
     setInvRows(null); setInvMeta({}); resetProjPicker(); setInvOpen(true);
   };
   const readInvoiceFile = async (file) => {
     if (!file || !selected) return;
-    setInvBusy(true); setInvRows(null);
+    setInvBusy(true); setInvRows(null); setInvErr("");
     try {
       const fd = new FormData(); fd.append("file", file);
       const r = await axios.post(`${API}/admin/suppliers/${selected.id}/parse-invoice`, fd, { headers, timeout: 150000 });
       const rows = (r.data?.rows || []).map((x, i) => ({ ...x, _k: i, pilih: !x.duplikat, total_harga: String(x.total_harga || "") }));
       setInvRows(rows); setInvMeta({ no_invoice: r.data?.no_invoice, tanggal_invoice: r.data?.tanggal_invoice, total_invoice: r.data?.total_invoice });
       if (!rows.length) flash("Tidak ada unit terbaca di invoice ini");
-    } catch (e) { flash(e?.response?.data?.detail || "Gagal membaca invoice"); }
+    } catch (e) {
+      const d = e?.response?.data?.detail;
+      const msg = (typeof d === "string" ? d : "") || (e?.code === "ECONNABORTED" ? "Waktu habis. Coba lagi atau pakai file lebih kecil." : (e?.message || "Gagal membaca invoice"));
+      setInvErr(`${msg}${e?.response?.status ? ` (kode ${e.response.status})` : ""}`); flash("Gagal membaca invoice");
+    }
     finally { setInvBusy(false); }
   };
   const updInv = (k, patch) => setInvRows((rs) => rs.map((x) => (x._k === k ? { ...x, ...patch } : x)));
@@ -1925,6 +1930,8 @@ export default function SupplierPage() {
               <input type="file" accept="application/pdf,image/*" style={{ display: "none" }} disabled={invBusy}
                 onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; readInvoiceFile(f); }} data-testid="sup-inv-file" />
             </label>
+            {invErr && <div style={{ fontSize: 13, color: C.red, border: `1px solid ${C.red}`, borderRadius: 10, padding: 10 }} data-testid="sup-inv-err">⚠ {invErr}</div>}
+            {invRows && invRows.length === 0 && !invBusy && <div style={{ fontSize: 13, color: C.gold }}>Tidak ada unit yang terbaca di file ini. Coba file yang lebih jelas, atau foto tabelnya utuh (termasuk kolom Nopol dan Harga).</div>}
             {!invRows && !invBusy && <div style={{ fontSize: 12, color: C.mute }}>Upload invoice dari supplier (PDF atau foto). Unit, rute, dan harga dibaca otomatis, sekaligus dicocokkan dengan PO admin (lewat no. polisi/rangka) untuk melengkapi data yang kosong, lalu Anda cek dulu sebelum masuk ke Tagihan. Belum ada yang tersimpan sampai Anda tekan tombol Masukkan.</div>}
             {invRows && invRows.length > 0 && (<>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
