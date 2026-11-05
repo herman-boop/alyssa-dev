@@ -826,14 +826,15 @@ export default function SupplierPage() {
     let ok = 0;
     try {
       const projectId = await resolveTargetProjectId();
-      const tgl = invMeta.tanggal_invoice || todayStr();
-      const tag = jobTag.trim() || (invMeta.no_invoice ? `Invoice ${invMeta.no_invoice}` : "");
+      const noInv = (invMeta.no_invoice || "").trim();
+      const tglInv = /^\d{4}-\d{2}-\d{2}$/.test(invMeta.tanggal_invoice || "") ? invMeta.tanggal_invoice : "";
+      const tag = jobTag.trim() || (noInv ? `Invoice ${noInv}` : "");
       for (const x of invPicked) {
         await axios.post(`${API}/admin/suppliers/${selected.id}/jobs`, {
           vehicle_type: (x.vehicle_type || "").trim(), nopol: (x.nopol || "").trim(), no_rangka: (x.no_rangka || "").trim(),
           asal_kota: (x.asal_kota || "").trim(), tujuan_kota: (x.tujuan_kota || "").trim(),
-          total_harga: pNum(x.total_harga), catatan: (x.catatan || "").trim(), tanggal: x.tanggal || tgl,
-          project_id: projectId, tag,
+          total_harga: pNum(x.total_harga), catatan: (x.catatan || "").trim(), tanggal: tglInv || x.tanggal || todayStr(),
+          project_id: projectId, tag, no_invoice_supplier: noInv,
         }, { headers });
         ok += 1;
       }
@@ -1378,6 +1379,7 @@ export default function SupplierPage() {
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <div style={{ fontWeight: 700, fontSize: 14 }}>{j.nopol || j.no_rangka || "(tanpa nopol)"} <span style={{ color: C.mute, fontWeight: 400 }}>· {j.vehicle_type || "Unit"}</span></div>
                               <div style={{ fontSize: 12, color: C.mute }}>{j.asal_kota || "-"} → {j.tujuan_kota || "-"}</div>
+                              {j.no_invoice_supplier && <div style={{ fontSize: 11, color: C.gold, fontWeight: 700 }}>Inv. supplier: {j.no_invoice_supplier}</div>}
                             </div>
                             <div style={{ textAlign: "right", flexShrink: 0 }}>
                               <div style={{ fontSize: 15, fontWeight: 900, color: C.red }}>{fRp(j.sisa)}</div>
@@ -1924,6 +1926,10 @@ export default function SupplierPage() {
             </label>
             {!invRows && !invBusy && <div style={{ fontSize: 12, color: C.mute }}>Upload invoice dari supplier (PDF atau foto). Unit, rute, dan harga dibaca otomatis, lalu Anda cek dulu sebelum masuk ke Tagihan. Belum ada yang tersimpan sampai Anda tekan tombol Masukkan.</div>}
             {invRows && invRows.length > 0 && (<>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <div><div style={{ ...L }}>No. Invoice Supplier</div><input style={I} value={invMeta.no_invoice || ""} onChange={(e) => setInvMeta((m) => ({ ...m, no_invoice: e.target.value }))} placeholder="mis. INV/2026/001" data-testid="sup-inv-no" /></div>
+                <div><div style={{ ...L }}>Tgl Invoice Supplier</div><input type="date" style={I} value={invMeta.tanggal_invoice || ""} onChange={(e) => setInvMeta((m) => ({ ...m, tanggal_invoice: e.target.value }))} data-testid="sup-inv-tgl" /></div>
+              </div>
               {(invMeta.no_invoice || invMeta.total_invoice > 0) && (
                 <div style={{ fontSize: 12, color: C.mute }}>
                   {invMeta.no_invoice ? <>No. invoice: <b style={{ color: C.ink }}>{invMeta.no_invoice}</b> · </> : null}
@@ -1989,6 +1995,8 @@ export default function SupplierPage() {
       {detailJob && detailJobLive && (
         <Modal title={`${detailJobLive.nopol || detailJobLive.no_rangka || "Unit"} · ${detailJobLive.vehicle_type || ""}`} onClose={() => setDetailJob(null)}
           foot={<button style={{ ...BTN_GHOST, color: C.red, borderColor: C.red }} onClick={() => deleteJob(detailJobLive.id)}>🗑️ Hapus Unit</button>}>
+          {detailJobLive.no_invoice_supplier && <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: C.mute }}>No. Invoice Supplier</span><b>{detailJobLive.no_invoice_supplier}</b></div>}
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: C.mute }}>Tgl Invoice / Tagihan</span><b>{fDate(detailJobLive.tanggal)}</b></div>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: C.mute }}>Total</span><b>{fRp(detailJobLive.total_harga)}</b></div>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: C.mute }}>Terbayar</span><b style={{ color: C.green }}>{fRp(detailJobLive.total_terbayar)}</b></div>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}><span style={{ color: C.mute }}>Sisa</span><b style={{ color: detailJobLive.sisa > 0 ? C.red : C.green }}>{fRp(detailJobLive.sisa)}</b></div>

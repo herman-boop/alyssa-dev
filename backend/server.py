@@ -6950,6 +6950,7 @@ class SupplierJobBody(BaseModel):
     project_id: Optional[str] = None
     tanggal: Optional[str] = None   # manual date (YYYY-MM-DD); kosong = hari ini
     tag: str = ""                   # Tag/Judul Kelompok laporan (pembatas visual PDF; TIDAK ikut hitungan)
+    no_invoice_supplier: str = ""   # Nomor invoice dari supplier (referensi saja; TIDAK ikut hitungan)
     entity_id: Optional[str] = None # PT/CV pembukuan (pt-alyssa/cv-alyssa-trans) — additive, HPP per entitas
     selisih_deal: Optional[int] = None    # Harga Deal (buat laporan Selisih format Supplier)
     selisih_invoice: Optional[int] = None # Harga Invoice; Selisih = Invoice - Deal (rumus existing)
@@ -7213,6 +7214,7 @@ async def add_supplier_job(supplier_id: str, body: SupplierJobBody):
         "catatan": body.catatan.strip(),
         "tanggal": tgl,
         "tag": (body.tag or "").strip()[:60],
+        "no_invoice_supplier": (body.no_invoice_supplier or "").strip()[:60],
         "entity_id": _norm_doc_entity(body.entity_id),   # PT/CV (HPP per entitas); "" kalau belum diisi
         "selisih_deal": body.selisih_deal if (body.selisih_deal or 0) > 0 else None,
         "selisih_invoice": body.selisih_invoice if (body.selisih_invoice or 0) > 0 else None,
