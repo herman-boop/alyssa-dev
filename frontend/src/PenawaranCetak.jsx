@@ -68,7 +68,7 @@ async function buildPenawaran(rows, meta, forImage) {
   const now = new Date();
   // Tanggal penawaran: pakai input manual kalau ada (yyyy-mm-dd), fallback hari ini.
   const tglPakai = tanggal ? `${tanggal}T00:00:00` : now.toISOString();
-  const noDoc = await nextDocNo("penawaran", "PH"); // nomor auto-increment
+  const noDoc = (meta && meta.noDoc) || await nextDocNo("penawaran", "PH"); // nomor auto-increment (cetak ulang dari histori memakai nomor yang sama)
   // Mode: "draft" = Opsi Harga (alternatif per rute, TANPA total gabungan) ·
   //       "final" = Resmi (1 opsi terpilih per rute → baru total dihitung).
   const isDraft = (meta && meta.mode) === "draft";
@@ -257,7 +257,7 @@ async function buildPenawaran(rows, meta, forImage) {
     @media print { .pdf-container { padding: 0; max-width: none; } }
     ${forImage ? `body { width: ${contW}px; } .pdf-container { width: ${contW}px; max-width: none; margin: 0; padding: 24px; }` : ""}
   </style></head><body class="${corp ? "tpl-corp" : "tpl-std"}${classic ? " tpl-classic" : ""}">
-  ${preview ? `<div class="pv-bar"><span>Preview — ${noDoc}</span><button onclick="window.print()">🖨️ Cetak / Simpan PDF</button></div>` : ""}
+  ${preview ? `<div class="pv-bar"><span>Preview — ${noDoc}</span><button onclick="try{window.opener&&window.opener.__aalPnwArsip&&window.opener.__aalPnwArsip('${noDoc}')}catch(e){};window.print()">🖨️ Cetak / Simpan PDF</button></div>` : ""}
   <div class="pdf-container">
     <div class="ph-head">
       <img src="/logo.png" alt="Logo">
@@ -321,19 +321,43 @@ async function buildPenawaran(rows, meta, forImage) {
     Promise.race([ (document.fonts && document.fonts.ready) || Promise.resolve(), new Promise(function(r){ setTimeout(r, 1500); }) ]).then(function(){ window.print(); });
   <\/script>`}
   </body></html>`;
-  return { html, noDoc, contW };
+  return { html, noDoc, contW, grandTotal: isDraft ? 0 : grandTotal };
 }
 
-export async function printPenawaran(rows, meta) {
+// ── Arsip ke Histori Dokumen (hanya dari sisi admin: butuh PIN). Gagal arsip tidak boleh mengganggu cetak. ──
+const ARSIP_API = (process.env.REACT_APP_BACKEND_URL || "") + "/api";
+function arsipPenawaran(rows, meta, noDoc, grandTotal, adminPin) {
+  if (!adminPin) return;
+  try {
+    const { noDoc: _n, preview: _p, ...m } = meta || {};
+    const n = (rows || []).length;
+    const body = {
+      jenis: "penawaran", no_dokumen: noDoc, customer: m.nama_pt || "",
+      judul: `${m.nama_pt || "-"} · ${n} rute · ${m.mode === "draft" ? "Opsi Harga" : "Resmi"}${grandTotal ? ` · ${fRp(grandTotal)}` : ""}`,
+      meta: { ...m, jumlah_rute: n, grand_total: grandTotal || 0 }, units: rows || [],
+    };
+    fetch(`${ARSIP_API}/admin/doc-history`, { method: "POST", headers: { "Content-Type": "application/json", "x-admin-pin": adminPin }, body: JSON.stringify(body) }).catch(() => {});
+  } catch (e) { /* abaikan */ }
+}
+
+export async function printPenawaran(rows, meta, opts) {
   const w = window.open("", "_blank"); // buka dulu (dalam gesture klik) biar nggak keblok popup
-  const { html } = await buildPenawaran(rows, meta, false);
+  const { html, noDoc, grandTotal } = await buildPenawaran(rows, meta, false);
   if (w) { w.document.write(html); w.document.close(); }
+  arsipPenawaran(rows, meta, noDoc, grandTotal, opts && opts.adminPin);
 }
 
 // Preview: buka dokumen tanpa dialog cetak; ada tombol Cetak / Simpan PDF di bagian atas.
-export async function previewPenawaran(rows, meta) {
+export async function previewPenawaran(rows, meta, opts) {
   const w = window.open("", "_blank");
-  const { html } = await buildPenawaran(rows, { ...(meta || {}), preview: true }, false);
+  const { html, noDoc, grandTotal } = await buildPenawaran(rows, { ...(meta || {}), preview: true }, false);
+  // Diarsipkan hanya kalau tombol Cetak/Simpan PDF di halaman preview ditekan (sekali per nomor).
+  const done = (window.__aalPnwDone = window.__aalPnwDone || {});
+  window.__aalPnwArsip = (no) => {
+    if (no !== noDoc || done[no]) return;
+    done[no] = true;
+    arsipPenawaran(rows, meta, noDoc, grandTotal, opts && opts.adminPin);
+  };
   if (w) { w.document.write(html); w.document.close(); }
 }
 
@@ -360,11 +384,13 @@ export async function htmlKePng(html, lebar, selector = ".pdf-container") {
 }
 
 // Simpan penawaran sebagai gambar PNG (dibagikan langsung ke WhatsApp bila perangkat mendukung, kalau tidak diunduh).
-export async function simpanPenawaranGambar(rows, meta) {
-  const { html, noDoc, contW } = await buildPenawaran(rows, meta, true);
+export async function simpanPenawaranGambar(rows, meta, opts) {
+  const { html, noDoc, contW, grandTotal } = await buildPenawaran(rows, meta, true);
   const blob = await htmlKePng(html, contW);
   if (!blob) throw new Error("gambar kosong");
-  return await bagikanPng(blob, noDoc, `Penawaran ${noDoc}`);
+  const hasil = await bagikanPng(blob, noDoc, `Penawaran ${noDoc}`);
+  if (hasil !== "batal") arsipPenawaran(rows, meta, noDoc, grandTotal, opts && opts.adminPin);
+  return hasil;
 }
 
 // Bagikan PNG lewat Web Share (WhatsApp, dsb) bila didukung; kalau tidak, diunduh. → "dibagikan" | "batal" | "diunduh"
@@ -385,7 +411,7 @@ export async function bagikanPng(blob, noDoc, judul) {
 
 // Tombol + modal. `rows` = daftar entri harga (rute, moda, tipe_kendaraan,
 // harga_deal, asuransi, catatan, tanggal). `namaPt` = nama pelanggan.
-export function PenawaranCetakButton({ rows, namaPt, style }) {
+export function PenawaranCetakButton({ rows, namaPt, style, adminPin }) {
   const [open, setOpen] = useState(false);
   const [ttdNama, setTtdNama] = useState("");
   const [ttdJabatan, setTtdJabatan] = useState("");
@@ -721,7 +747,7 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
                 if (!sel.length) { alert("Centang minimal 1 rute dulu bro."); return; }
                 setGambarBusy(true);
                 try {
-                  const r = await simpanPenawaranGambar(sel, { nama_pt: namaPt, ttdNama, ttdJabatan, stempel, tanggal: tglPenawaran, insRate, withPpn, taxIncl, withPph, mode, catatan: catatanUmum, template: tpl });
+                  const r = await simpanPenawaranGambar(sel, { nama_pt: namaPt, ttdNama, ttdJabatan, stempel, tanggal: tglPenawaran, insRate, withPpn, taxIncl, withPph, mode, catatan: catatanUmum, template: tpl }, { adminPin });
                   if (r !== "batal") setOpen(false);
                 } catch (e) { alert("Gagal membuat gambar. Coba lagi."); }
                 setGambarBusy(false);
@@ -737,7 +763,7 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
                   return { ...e, options, selected: options.length ? selOf(i) : -1, insNilai: rowIns(i), qty: qtyOf(i, e) };
                 });
                 if (!sel.length) { alert("Centang minimal 1 rute dulu bro."); return; }
-                previewPenawaran(sel, { nama_pt: namaPt, ttdNama, ttdJabatan, stempel, tanggal: tglPenawaran, insRate, withPpn, taxIncl, withPph, mode, catatan: catatanUmum, template: tpl });
+                previewPenawaran(sel, { nama_pt: namaPt, ttdNama, ttdJabatan, stempel, tanggal: tglPenawaran, insRate, withPpn, taxIncl, withPph, mode, catatan: catatanUmum, template: tpl }, { adminPin });
               }}
                 data-testid="penawaran-preview"
                 style={{ padding: "9px 14px", borderRadius: 8, border: `1px solid ${navy}`, background: "#eff6ff", color: navy, fontSize: 12.5, fontWeight: 800, cursor: "pointer" }}>👁️ Preview</button>
@@ -750,7 +776,7 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
                   return { ...e, options, selected: options.length ? selOf(i) : -1, insNilai: rowIns(i), qty: qtyOf(i, e) };
                 });
                 if (!sel.length) { alert("Centang minimal 1 rute dulu bro."); return; }
-                printPenawaran(sel, { nama_pt: namaPt, ttdNama, ttdJabatan, stempel, tanggal: tglPenawaran, insRate, withPpn, taxIncl, withPph, mode, catatan: catatanUmum, template: tpl });
+                printPenawaran(sel, { nama_pt: namaPt, ttdNama, ttdJabatan, stempel, tanggal: tglPenawaran, insRate, withPpn, taxIncl, withPph, mode, catatan: catatanUmum, template: tpl }, { adminPin });
                 setOpen(false);
               }}
                 style={{ padding: "9px 18px", borderRadius: 8, border: "none", background: gold, color: "#fff", fontSize: 12.5, fontWeight: 800, cursor: "pointer" }}>🖨️ {mode === "draft" ? "Cetak Opsi Harga" : "Cetak Resmi"} ({selIdx.size})</button>
