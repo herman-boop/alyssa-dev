@@ -6950,6 +6950,7 @@ class SupplierJobBody(BaseModel):
     project_id: Optional[str] = None
     tanggal: Optional[str] = None   # manual date (YYYY-MM-DD); kosong = hari ini
     tag: str = ""                   # Tag/Judul Kelompok laporan (pembatas visual PDF; TIDAK ikut hitungan)
+    no_invoice_supplier: str = ""   # Nomor invoice dari supplier (referensi saja; TIDAK ikut hitungan)
     entity_id: Optional[str] = None # PT/CV pembukuan (pt-alyssa/cv-alyssa-trans) — additive, HPP per entitas
     selisih_deal: Optional[int] = None    # Harga Deal (buat laporan Selisih format Supplier)
     selisih_invoice: Optional[int] = None # Harga Invoice; Selisih = Invoice - Deal (rumus existing)
@@ -6966,6 +6967,131 @@ class SupplierJobBody(BaseModel):
 
 class SupplierProjectBody(BaseModel):
     nama: str = ""
+
+
+# ── Baca invoice supplier (PDF/foto) pakai AI → baris tagihan siap dimasukkan ──
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5-5").strip() or "claude-sonnet-5-5"
+
+_INVOICE_PROMPT = (
+    "Ini invoice/tagihan dari supplier angkutan kendaraan (darat/kapal). Format tiap supplier berbeda-beda "
+    "(kolom bisa bernama TGL, TUJUAN, DESKRIPSI, JENIS UNIT, NOPOL, NOKA/NOPOL, VIN/VRN, DESTINATION, HARGA, PRICE, AMOUNT, JUMLAH, KAPAL). "
+    "Baca SEMUA baris yang berisi unit (satu baris = satu kendaraan/unit); abaikan baris kosong dan baris total. "
+    "Balas HANYA dengan JSON valid, tanpa penjelasan, bentuk:\n"
+    '{"rows":[{"vehicle_type":"","nopol":"","no_rangka":"","asal_kota":"","tujuan_kota":"","total_harga":0,"tanggal":"YYYY-MM-DD atau kosong","catatan":""}],'
+    '"no_invoice":"","tanggal_invoice":"YYYY-MM-DD atau kosong","total_invoice":0}\n'
+    "Aturan:\n"
+    "- no_invoice = nomor invoice/Ref No/Invoice No di kepala dokumen. tanggal_invoice = tanggal invoice di kepala dokumen "
+    "(bulan Indonesia atau Inggris, mis. '5 November 2026', '05-Nov-26', '10 Oktober 2026'), ubah ke YYYY-MM-DD.\n"
+    "- total_harga = harga per unit dalam rupiah, angka bulat tanpa titik/koma. Kalau ada kolom harga satuan dan jumlah, pakai jumlah per baris. "
+    "Biaya tambahan di baris yang sama dijumlahkan dan dirinci di catatan.\n"
+    "- nopol = plat nomor (mis. 'B 9496 BBF', 'G 1054 VE'), huruf besar. Kalau kolomnya gabungan Noka/Nopol: isi nopol bila bentuknya plat; "
+    "bila hanya angka/kode panjang tanpa pola plat (mis. '135666', '11897', VIN/VRN), isi no_rangka dan kosongkan nopol.\n"
+    "- vehicle_type = jenis/merek unit (mis. 'HILUX DC', 'X Pander', 'Bus Medium', 'CD PEMADAM'). Kalau ada kolom jenis dan deskripsi terpisah, pakai jenis dan taruh sisanya di catatan.\n"
+    "- asal_kota dan tujuan_kota: ambil dari baris bila ada pola 'A-B' / 'A - B' (mis. 'Surabaya-Lombok', 'BPP - JKT'). "
+    "Kalau baris hanya punya tujuan, ambil asal dari kepala dokumen (Port of Loading / asal), dan tujuan dari baris atau Port of Discharge. "
+    "Tulis persis seperti tertulis (jangan mengubah atau memperluas singkatan, jangan menebak).\n"
+    "- tanggal = tanggal di baris unit itu bila ada (YYYY-MM-DD), selain itu kosong.\n"
+    "- Info tambahan seperti nama kapal/vessel, voyage, ETD/ETA, atau jenis layanan taruh di catatan, singkat.\n"
+    "- Kosongkan field yang tidak tertulis, JANGAN menebak. "
+    "Kalau harga hanya tertulis sebagai total keseluruhan dan tidak per unit, isi total_harga 0 dan isi total_invoice.\n"
+    "- total_invoice = angka Total Tagihan/Total Pembayaran/Amount Due di dokumen bila ada, selain itu 0."
+)
+
+
+def _parse_invoice_ai(data: bytes, media_type: str) -> dict:
+    import base64 as _b64
+    import json as _json
+    if not ANTHROPIC_API_KEY:
+        raise HTTPException(503, "Fitur baca invoice belum aktif: ANTHROPIC_API_KEY belum diisi di Railway.")
+    b64 = _b64.b64encode(data).decode()
+    block = ({"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": b64}}
+             if media_type == "application/pdf"
+             else {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}})
+    try:
+        r = _requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={"x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+            json={"model": ANTHROPIC_MODEL, "max_tokens": 8000,
+                  "messages": [{"role": "user", "content": [block, {"type": "text", "text": _INVOICE_PROMPT}]}]},
+            timeout=120,
+        )
+    except Exception as e:
+        raise HTTPException(502, f"Gagal menghubungi layanan AI: {e}")
+    if r.status_code != 200:
+        logger.warning("parse-invoice AI error %s: %s", r.status_code, r.text[:300])
+        raise HTTPException(502, f"Layanan AI menolak permintaan (kode {r.status_code}). Cek ANTHROPIC_API_KEY / model.")
+    txt = "".join(c.get("text", "") for c in (r.json().get("content") or []) if c.get("type") == "text").strip()
+    if txt.startswith("```"):
+        txt = txt.strip("`")
+        if txt[:4].lower() == "json":
+            txt = txt[4:]
+    a, b = txt.find("{"), txt.rfind("}")
+    try:
+        return _json.loads(txt[a:b + 1])
+    except Exception:
+        raise HTTPException(422, "Invoice tidak terbaca. Coba foto lebih jelas/terang, atau upload PDF aslinya.")
+
+
+@api_router.post("/admin/suppliers/{supplier_id}/parse-invoice", dependencies=[Depends(require_admin_pin)])
+async def parse_supplier_invoice(supplier_id: str, file: UploadFile = File(...)):
+    """Baca invoice supplier (PDF/foto) → daftar unit untuk DICEK dulu di layar.
+    Endpoint ini TIDAK menyimpan apa pun; penyimpanan lewat endpoint jobs biasa."""
+    sup = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0, "id": 1, "jobs": 1})
+    if not sup:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "File kosong")
+    if len(data) > 20 * 1024 * 1024:
+        raise HTTPException(413, "File terlalu besar (maks 20 MB)")
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    ctype = (file.content_type or "").lower()
+    if data[:4] == b"%PDF" or ext == ".pdf" or ctype == "application/pdf":
+        media = "application/pdf"
+    else:
+        from PIL import Image
+        try:
+            if _is_heic(ext, ctype):
+                data = _convert_heic_bytes(data)
+            img = Image.open(io.BytesIO(data))
+            img = img.convert("RGB")
+            img.thumbnail((2400, 2400))
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=88)
+            data, media = buf.getvalue(), "image/jpeg"
+        except Exception:
+            raise HTTPException(400, "File harus PDF atau foto (JPG/PNG/HEIC)")
+    res = await asyncio.to_thread(_parse_invoice_ai, data, media)
+    existing = {(j.get("nopol") or "").strip().upper() for j in (sup.get("jobs") or []) if (j.get("nopol") or "").strip()}
+    existing |= {(j.get("no_rangka") or "").strip().upper() for j in (sup.get("jobs") or []) if (j.get("no_rangka") or "").strip()}
+
+    def _int(v):
+        try:
+            return max(0, int(float(str(v).replace(".", "").replace(",", ".") if isinstance(v, str) else v)))
+        except Exception:
+            return 0
+    rows = []
+    for r in (res.get("rows") or [])[:300]:
+        if not isinstance(r, dict):
+            continue
+        nopol = str(r.get("nopol") or "").strip().upper()
+        rangka = str(r.get("no_rangka") or "").strip().upper()
+        row = {
+            "vehicle_type": str(r.get("vehicle_type") or "").strip(),
+            "nopol": nopol, "no_rangka": rangka,
+            "asal_kota": str(r.get("asal_kota") or "").strip(),
+            "tujuan_kota": str(r.get("tujuan_kota") or "").strip(),
+            "total_harga": _int(r.get("total_harga")),
+            "tanggal": str(r.get("tanggal") or "").strip()[:10],
+            "catatan": str(r.get("catatan") or "").strip(),
+            "duplikat": bool((nopol and nopol in existing) or (rangka and rangka in existing)),
+        }
+        if row["nopol"] or row["no_rangka"] or row["total_harga"] or row["vehicle_type"]:
+            rows.append(row)
+    return {"rows": rows, "no_invoice": str(res.get("no_invoice") or "").strip(),
+            "tanggal_invoice": str(res.get("tanggal_invoice") or "").strip()[:10],
+            "total_invoice": _int(res.get("total_invoice"))}
 
 
 @api_router.post("/admin/suppliers", dependencies=[Depends(require_admin_pin)])
@@ -7102,6 +7228,7 @@ async def add_supplier_job(supplier_id: str, body: SupplierJobBody):
         "catatan": body.catatan.strip(),
         "tanggal": tgl,
         "tag": (body.tag or "").strip()[:60],
+        "no_invoice_supplier": (body.no_invoice_supplier or "").strip()[:60],
         "entity_id": _norm_doc_entity(body.entity_id),   # PT/CV (HPP per entitas); "" kalau belum diisi
         "selisih_deal": body.selisih_deal if (body.selisih_deal or 0) > 0 else None,
         "selisih_invoice": body.selisih_invoice if (body.selisih_invoice or 0) > 0 else None,
