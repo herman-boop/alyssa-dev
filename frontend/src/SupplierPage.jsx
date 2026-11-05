@@ -1945,7 +1945,7 @@ export default function SupplierPage() {
                   <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
                     <input type="checkbox" checked={!!x.pilih} onChange={(e) => updInv(x._k, { pilih: e.target.checked })} />
                     <span>{x.nopol || x.no_rangka || "(tanpa plat)"}</span>
-                    {x.duplikat && <span style={{ fontSize: 11, color: C.gold, fontWeight: 700 }}>sudah ada di tagihan</span>}
+                    {x.duplikat && <span style={{ fontSize: 11, color: C.gold, fontWeight: 700 }}>sudah ada di tagihan (plat & rute sama)</span>}
                   </label>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                     <input style={I} placeholder="Tipe kendaraan" value={x.vehicle_type} onChange={(e) => updInv(x._k, { vehicle_type: e.target.value })} />

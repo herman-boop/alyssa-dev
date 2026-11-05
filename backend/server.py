@@ -7063,8 +7063,15 @@ async def parse_supplier_invoice(supplier_id: str, file: UploadFile = File(...))
         except Exception:
             raise HTTPException(400, "File harus PDF atau foto (JPG/PNG/HEIC)")
     res = await asyncio.to_thread(_parse_invoice_ai, data, media)
-    existing = {(j.get("nopol") or "").strip().upper() for j in (sup.get("jobs") or []) if (j.get("nopol") or "").strip()}
-    existing |= {(j.get("no_rangka") or "").strip().upper() for j in (sup.get("jobs") or []) if (j.get("no_rangka") or "").strip()}
+    def _kn(v):
+        return re.sub(r"\s+", " ", str(v or "").strip().upper())
+    # Dobel = unit yang SAMA (plat/rangka) di rute yang SAMA. Unit sama dengan rute beda = perjalanan lain, bukan dobel.
+    existing = set()
+    for j in (sup.get("jobs") or []):
+        rute = (_kn(j.get("asal_kota")), _kn(j.get("tujuan_kota")))
+        for ident in (_kn(j.get("nopol")), _kn(j.get("no_rangka"))):
+            if ident:
+                existing.add((ident, rute))
 
     def _int(v):
         try:
@@ -7085,8 +7092,10 @@ async def parse_supplier_invoice(supplier_id: str, file: UploadFile = File(...))
             "total_harga": _int(r.get("total_harga")),
             "tanggal": str(r.get("tanggal") or "").strip()[:10],
             "catatan": str(r.get("catatan") or "").strip(),
-            "duplikat": bool((nopol and nopol in existing) or (rangka and rangka in existing)),
+            "duplikat": False,
         }
+        rute = (_kn(row["asal_kota"]), _kn(row["tujuan_kota"]))
+        row["duplikat"] = bool((_kn(nopol), rute) in existing and nopol) or bool((_kn(rangka), rute) in existing and rangka)
         if row["nopol"] or row["no_rangka"] or row["total_harga"] or row["vehicle_type"]:
             rows.append(row)
     return {"rows": rows, "no_invoice": str(res.get("no_invoice") or "").strip(),
