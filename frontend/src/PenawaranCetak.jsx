@@ -91,6 +91,9 @@ async function buildPenawaran(rows, meta, forImage) {
   // nilai pertanggungan diisi PER UNIT; premi baris = premi 1 unit (dibulatkan) × jumlah unit
   const rowPremi = (e) => { const n = rowNilai(e); return n > 0 ? Math.round(n * (rate / 100)) * routeQty(e) : 0; };
   const perRow = !isDraft && (rows || []).some((e) => rowNilai(e) > 0);
+  // Mode DRAFT (opsi harga): premi tidak jadi kolom/total, tapi tampil sebagai keterangan di tiap rute.
+  const insNote = (e) => (isDraft && rowPremi(e) > 0)
+    ? `<div class="ph-note">🛡️ Asuransi: premi ${fRp(rowPremi(e))} (nilai pertanggungan ${fRp(rowNilai(e))}${routeQty(e) > 1 ? " / unit" : ""} &times; ${fRate(rate)}%)</div>` : "";
   const insBase = perRow
     ? (rows || []).reduce((s, e) => s + rowNilai(e) * routeQty(e), 0)
     : (Number(String(insVal ?? "").replace(/[^0-9]/g, "")) || 0);
@@ -119,7 +122,7 @@ async function buildPenawaran(rows, meta, forImage) {
     if (isDraft && opts.length) {
       const main = `<tr class="ph-main">
         <td class="c">${i + 1}</td>
-        <td><b>${esc(e.rute || "-")}</b>${routeQty(e) > 1 ? `<div class="ph-note">Jumlah ${routeQty(e)} unit (harga per unit)</div>` : ""}${catatanHtml}</td>
+        <td><b>${esc(e.rute || "-")}</b>${routeQty(e) > 1 ? `<div class="ph-note">Jumlah ${routeQty(e)} unit (harga per unit)</div>` : ""}${catatanHtml}${insNote(e)}</td>
         <td>${opts.length > 1 ? "Opsi Pengiriman" : esc(opts[0].metode || "-")}</td>
         <td>${esc(e.tipe_kendaraan || "-")}</td>
         <td class="r ph-opt-hint">pilih salah satu</td>
@@ -136,7 +139,7 @@ async function buildPenawaran(rows, meta, forImage) {
     const metode = isDraft ? (e.moda || "-") : routeFinalMetode(e);
     const main = `<tr class="ph-main-single">
       <td class="c">${i + 1}</td>
-      <td><b>${esc(e.rute || "-")}</b>${catatanHtml}</td>
+      <td><b>${esc(e.rute || "-")}</b>${catatanHtml}${insNote(e)}</td>
       <td>${esc(metode)}</td>
       <td>${esc(e.tipe_kendaraan || "-")}</td>
       ${showQty ? `<td class="c">${routeQty(e)}</td>` : ""}
@@ -534,7 +537,7 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
                         <span style={{ fontSize: 10.5, color: gray }}>unit{qtyOf(i, e) > 1 ? ` · harga dikalikan ${qtyOf(i, e)}` : ""}</span>
                       </div>
                     )}
-                    {on && mode === "final" && (
+                    {on && (
                       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 10px 8px 36px", flexWrap: "wrap" }}>
                         <span style={{ fontSize: 10.5, color: gray, fontWeight: 700, whiteSpace: "nowrap" }}>🛡️ Asuransi — nilai pertanggungan</span>
                         <input inputMode="numeric" value={insMap[i] ? Number(onlyDigits(insMap[i])).toLocaleString("id-ID") : ""}
@@ -600,6 +603,21 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
               style={{ width: "100%", boxSizing: "border-box", padding: "9px 12px", borderRadius: 8, border: `1px solid ${border}`, fontSize: 13, marginBottom: 12, background: "#fff" }}>
               {PENAWARAN_TEMPLATES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
             </select>
+
+            {/* ── ASURANSI untuk mode DRAFT: rate + keterangan (premi tampil per rute, tanpa total & pajak) ── */}
+            {mode === "draft" && (
+            <div style={{ border: `1px solid ${border}`, borderRadius: 10, padding: 12, marginBottom: 12, background: "#fafbfc" }} data-testid="penawaran-draft-asuransi">
+              <div style={{ fontSize: 11, fontWeight: 800, color: navy, marginBottom: 8, letterSpacing: 0.3 }}>ASURANSI (opsional)</div>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: gray, marginBottom: 4 }}>Asuransi — Rate (sama untuk semua baris)</label>
+              <div style={{ marginBottom: 6, maxWidth: 260 }}>
+                <select value={String(insRate)} onChange={(e) => setInsRate(e.target.value)} data-testid="penawaran-ins-rate"
+                  style={{ width: "100%", boxSizing: "border-box", padding: "9px 8px", borderRadius: 8, border: `1px solid ${border}`, fontSize: 13, background: "#fff" }}>
+                  {INS_RATE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </div>
+              <div style={{ fontSize: 10.5, color: gray }}>Isi <b>nilai pertanggungan per unit</b> di daftar rute di atas (kolom 🛡️ Asuransi). Di penawaran opsi, premi tampil sebagai keterangan tiap rute — tanpa total & pajak.</div>
+            </div>
+            )}
 
             {/* ── RINCIAN BIAYA & PAJAK — hanya mode FINAL (draft = opsi, tanpa total) ── */}
             {mode === "final" && (
@@ -680,7 +698,7 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
                   const options = optOf(i)
                     .map((k) => ({ metode: (k.metode || "Lainnya"), harga: pNum(k.harga), catatan: (k.catatan || "").trim() }))
                     .filter((k) => k.harga > 0 || k.metode);
-                  return { ...e, options, selected: options.length ? selOf(i) : -1, insNilai: mode === "final" ? rowIns(i) : 0, qty: qtyOf(i, e) };
+                  return { ...e, options, selected: options.length ? selOf(i) : -1, insNilai: rowIns(i), qty: qtyOf(i, e) };
                 });
                 if (!sel.length) { alert("Centang minimal 1 rute dulu bro."); return; }
                 setGambarBusy(true);
@@ -698,7 +716,7 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
                   const options = optOf(i)
                     .map((k) => ({ metode: (k.metode || "Lainnya"), harga: pNum(k.harga), catatan: (k.catatan || "").trim() }))
                     .filter((k) => k.harga > 0 || k.metode);
-                  return { ...e, options, selected: options.length ? selOf(i) : -1, insNilai: mode === "final" ? rowIns(i) : 0, qty: qtyOf(i, e) };
+                  return { ...e, options, selected: options.length ? selOf(i) : -1, insNilai: rowIns(i), qty: qtyOf(i, e) };
                 });
                 if (!sel.length) { alert("Centang minimal 1 rute dulu bro."); return; }
                 previewPenawaran(sel, { nama_pt: namaPt, ttdNama, ttdJabatan, stempel, tanggal: tglPenawaran, insRate, withPpn, taxIncl, withPph, mode, catatan: catatanUmum, template: tpl });
@@ -711,7 +729,7 @@ export function PenawaranCetakButton({ rows, namaPt, style }) {
                     .map((k) => ({ metode: (k.metode || "Lainnya"), harga: pNum(k.harga), catatan: (k.catatan || "").trim() }))
                     .filter((k) => k.harga > 0 || k.metode);
                   // options = ALTERNATIF (tidak dijumlah). `selected` = index opsi terpilih (mode final).
-                  return { ...e, options, selected: options.length ? selOf(i) : -1, insNilai: mode === "final" ? rowIns(i) : 0, qty: qtyOf(i, e) };
+                  return { ...e, options, selected: options.length ? selOf(i) : -1, insNilai: rowIns(i), qty: qtyOf(i, e) };
                 });
                 if (!sel.length) { alert("Centang minimal 1 rute dulu bro."); return; }
                 printPenawaran(sel, { nama_pt: namaPt, ttdNama, ttdJabatan, stempel, tanggal: tglPenawaran, insRate, withPpn, taxIncl, withPph, mode, catatan: catatanUmum, template: tpl });
