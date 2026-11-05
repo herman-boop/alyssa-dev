@@ -379,7 +379,43 @@ export async function htmlKePng(html, lebar, selector = ".pdf-container") {
     // batas aman ukuran kanvas browser HP (±16 juta piksel)
     const scale = Math.max(1.5, Math.min(3, Math.sqrt(15000000 / (lebar * h))));
     const canvas = await html2canvas(el, { scale, backgroundColor: "#ffffff", useCORS: true, logging: false, width: el.offsetWidth, windowWidth: lebar });
-    return await new Promise((res) => canvas.toBlob(res, "image/png"));
+    const toBlob = (c) => new Promise((res) => c.toBlob(res, "image/png"));
+    // Dokumen pendek → 1 gambar. Dokumen panjang → dipecah per "halaman" setinggi A4 supaya tidak diciutkan
+    // WhatsApp (gambar sangat tinggi jadi buram). Pemotongan di batas baris/blok, bukan di tengah teks.
+    const lebarEl = el.offsetWidth;
+    const pageH = Math.round(lebarEl * 1.4142);
+    if (h <= pageH * 1.18) return await toBlob(canvas);
+    const base = el.getBoundingClientRect().top;
+    const cuts = new Set();
+    el.querySelectorAll("tr").forEach((tr) => cuts.add(Math.round(tr.getBoundingClientRect().bottom - base)));
+    Array.from(el.children).forEach((c) => {
+      const r = c.getBoundingClientRect();
+      if (/\b(rps-sec|ph-sec)\b/.test(c.className || "")) cuts.add(Math.round(r.top - base));   // putus SEBELUM judul seksi
+      else cuts.add(Math.round(r.bottom - base));
+    });
+    const cutList = [...cuts].filter((y) => y > 0 && y < h).sort((a, b) => a - b);
+    const ranges = [];
+    let y0 = 0;
+    while (h - y0 > pageH * 1.08) {
+      const target = y0 + pageH;
+      let cut = 0;
+      for (const y of cutList) { if (y <= target && y > y0 + pageH * 0.55) cut = y; }
+      if (!cut) cut = target;
+      ranges.push([y0, cut]);
+      y0 = cut;
+    }
+    ranges.push([y0, h]);
+    const k = canvas.width / lebarEl;   // piksel kanvas per piksel CSS
+    const blobs = [];
+    for (const [a, b] of ranges) {
+      const pg = document.createElement("canvas");
+      pg.width = canvas.width; pg.height = Math.max(1, Math.round((b - a) * k));
+      const ctx = pg.getContext("2d");
+      ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, pg.width, pg.height);
+      ctx.drawImage(canvas, 0, Math.round(a * k), canvas.width, pg.height, 0, 0, pg.width, pg.height);
+      blobs.push(await toBlob(pg));
+    }
+    return blobs;
   } finally { fr.remove(); }
 }
 
@@ -394,18 +430,23 @@ export async function simpanPenawaranGambar(rows, meta, opts) {
 }
 
 // Bagikan PNG lewat Web Share (WhatsApp, dsb) bila didukung; kalau tidak, diunduh. → "dibagikan" | "batal" | "diunduh"
-export async function bagikanPng(blob, noDoc, judul) {
+export async function bagikanPng(blobs, noDoc, judul) {
+  const arr = Array.isArray(blobs) ? blobs : [blobs];
   const nama = String(noDoc).replace(/[^\w.-]+/g, "_");
-  const file = new File([blob], `${nama}.png`, { type: "image/png" });
-  if (navigator.canShare && navigator.canShare({ files: [file] })) {
-    try { await navigator.share({ files: [file], title: judul }); return "dibagikan"; }
+  const nm = (i) => (arr.length > 1 ? `${nama}_hal${i + 1}.png` : `${nama}.png`);
+  const files = arr.map((b, i) => new File([b], nm(i), { type: "image/png" }));
+  if (navigator.canShare && navigator.canShare({ files })) {
+    try { await navigator.share({ files, title: judul }); return "dibagikan"; }
     catch (e) { if (e && e.name === "AbortError") return "batal"; /* gagal bagikan → unduh saja */ }
   }
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = `${nama}.png`;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  for (let i = 0; i < arr.length; i++) {
+    const url = URL.createObjectURL(arr[i]);
+    const a = document.createElement("a");
+    a.href = url; a.download = nm(i);
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    if (arr.length > 1) await new Promise((r) => setTimeout(r, 350));   // beri jeda antar unduhan
+  }
   return "diunduh";
 }
 
