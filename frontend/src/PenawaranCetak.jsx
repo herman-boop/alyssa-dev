@@ -95,9 +95,10 @@ async function buildPenawaran(rows, meta, forImage) {
   // per baris opsi (per unit, tanpa total & pajak). Rute tanpa opsi memakai nilai pertanggungan rute.
   const optPremi = (o) => { const n = Number(o && o.ins) || 0; return n > 0 ? Math.round(n * (rate / 100)) : 0; };
   const draftIns = isDraft && (rows || []).some((e) => { const op = routeOptions(e); return op.length ? op.some((o) => optPremi(o) > 0) : rowNilai(e) > 0; });
-  const premiCellDraft = (nilai) => nilai > 0
-    ? `<td class="r">${fRp(Math.round(nilai * (rate / 100)))}<div class="ph-note">Nilai Pertanggungan ${fRp(nilai)}</div></td>`
-    : `<td class="r">-</td>`;
+  // Sel "Premi Asuransi" + sel "Total" (harga + premi, per unit). Baris tanpa asuransi: "-" di keduanya.
+  const premiCellDraft = (nilai, harga) => nilai > 0
+    ? `<td class="r">${fRp(Math.round(nilai * (rate / 100)))}<div class="ph-note">Nilai Pertanggungan ${fRp(nilai)}</div></td><td class="r"><b>${fRp((Number(harga) || 0) + Math.round(nilai * (rate / 100)))}</b></td>`
+    : `<td class="r">-</td><td class="r">-</td>`;
   const insBase = perRow
     ? (rows || []).reduce((s, e) => s + rowNilai(e) * routeQty(e), 0)
     : (Number(String(insVal ?? "").replace(/[^0-9]/g, "")) || 0);
@@ -108,7 +109,7 @@ async function buildPenawaran(rows, meta, forImage) {
   const hasBreakdown = ppnOn || pph > 0 || premi > 0;
   // ── Kolom TEMPLATE LAMA (menyamping): No | Rute | Moda | Tipe Kendaraan | [Unit] | [Premi] | Harga | [Jumlah] ──
   const showQty = hasQty && !isDraft;
-  const ncols = 5 + (showQty ? 2 : 0) + ((perRow || draftIns) ? 1 : 0);
+  const ncols = 5 + (showQty ? 2 : 0) + (perRow ? 1 : 0) + (draftIns ? 2 : 0);
   // Lebar halaman PDF mengikuti jumlah kolom: kolom sedikit → halaman sempit → huruf besar di HP;
   // kolom banyak (Unit + Premi + Jumlah) → halaman lebih lebar supaya Rute & Moda tidak terlalu turun baris.
   const pageMm = 210;   // A4 portrait (sesuai desain navy-gold)
@@ -116,7 +117,7 @@ async function buildPenawaran(rows, meta, forImage) {
   const padat = ncols >= 8;                 // kasus terpadat (Unit + Premi + Jumlah): font 13px, kolom angka lebih ramping
   const fs = padat ? 13 : 14;
   // Lebar kolom (px, table-layout fixed): Rute = sisa. Kolom angka cukup lebar supaya "Rp 20.000.000" tidak meluber.
-  const colW = [34, null, padat ? 88 : 112, padat ? 84 : 116].concat(showQty ? [40] : [], [padat ? 108 : 132], (perRow || draftIns) ? [padat ? 132 : 170] : [], showQty ? [padat ? 112 : 134] : []);
+  const colW = draftIns ? [34, null, 92, 98, 108, 124, 112] : [34, null, padat ? 88 : 112, padat ? 84 : 116].concat(showQty ? [40] : [], [padat ? 108 : 132], perRow ? [padat ? 132 : 170] : [], showQty ? [padat ? 112 : 134] : []);
   const colgroup = `<colgroup>${colW.map((w) => (w ? `<col style="width:${w}px">` : "<col>")).join("")}</colgroup>`;
   // Tiap rute = 1 <tbody> supaya 1 rute tidak pecah antar-halaman & tetap 1 item.
   const body = (rows || []).map((e, i) => {
@@ -130,13 +131,13 @@ async function buildPenawaran(rows, meta, forImage) {
         <td>${opts.length > 1 ? "Opsi Pengiriman" : esc(opts[0].metode || "-")}</td>
         <td>${esc(e.tipe_kendaraan || "-")}</td>
         <td class="r ph-opt-hint">pilih salah satu</td>
-        ${draftIns ? "<td></td>" : ""}
+        ${draftIns ? "<td></td><td></td>" : ""}
       </tr>`;
       const subs = opts.map((o) => `<tr class="ph-sub">
         <td></td>
         <td colspan="3" class="ph-sub-k">○ ${esc(o.metode || "-")}${o.catatan ? ` <span class="ph-sub-note">(${esc(o.catatan)})</span>` : ""}</td>
         <td class="r ph-sub-v">${fRp(o.harga || 0)}</td>
-        ${draftIns ? premiCellDraft(Number(o.ins) || 0) : ""}
+        ${draftIns ? premiCellDraft(Number(o.ins) || 0, o.harga) : ""}
       </tr>`).join("");
       return `<tbody class="ph-route">${main}${subs}</tbody>`;
     }
@@ -150,7 +151,7 @@ async function buildPenawaran(rows, meta, forImage) {
       <td>${esc(e.tipe_kendaraan || "-")}</td>
       ${showQty ? `<td class="c">${routeQty(e)}</td>` : ""}
       <td class="r"><b>${fRp(harga)}</b></td>
-      ${(isDraft && draftIns) ? premiCellDraft(rowNilai(e)) : ""}
+      ${(isDraft && draftIns) ? premiCellDraft(rowNilai(e), harga) : ""}
       ${perRow ? `<td class="r">${rowPremi(e) > 0 ? `${fRp(rowPremi(e))}<div class="ph-note">Nilai Pertanggungan ${fRp(rowNilai(e))}${routeQty(e) > 1 ? " / unit" : ""}</div>` : "-"}</td>` : ""}
       ${showQty ? `<td class="r"><b>${fRp(harga * routeQty(e))}</b></td>` : ""}
     </tr>`;
@@ -277,7 +278,7 @@ async function buildPenawaran(rows, meta, forImage) {
     <table class="ph">
       ${colgroup}
       <thead><tr>
-        <th class="c">No</th><th>Rute</th><th>Moda</th><th>Tipe Kendaraan</th>${showQty ? `<th class="c">Unit</th>` : ""}<th class="r">${showQty ? "Harga / Unit" : "Harga"}</th>${(perRow || draftIns) ? `<th class="r">Premi Asuransi</th>` : ""}${showQty ? `<th class="r">Jumlah</th>` : ""}
+        <th class="c">No</th><th>Rute</th><th>Moda</th><th>Tipe Kendaraan</th>${showQty ? `<th class="c">Unit</th>` : ""}<th class="r">${showQty ? "Harga / Unit" : "Harga"}</th>${perRow ? `<th class="r">Premi Asuransi</th>` : ""}${draftIns ? `<th class="r">Premi Asuransi</th><th class="r">Total</th>` : ""}${showQty ? `<th class="r">Jumlah</th>` : ""}
       </tr></thead>
       ${body}
     </table>
