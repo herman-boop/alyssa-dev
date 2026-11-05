@@ -7098,6 +7098,43 @@ async def parse_supplier_invoice(supplier_id: str, file: UploadFile = File(...))
         row["duplikat"] = bool((_kn(nopol), rute) in existing and nopol) or bool((_kn(rangka), rute) in existing and rangka)
         if row["nopol"] or row["no_rangka"] or row["total_harga"] or row["vehicle_type"]:
             rows.append(row)
+    # ── Cocokkan dengan PO/Order admin (db.orders) lewat no. polisi / no. rangka ──
+    def _nk(v):
+        return re.sub(r"[^A-Z0-9]", "", str(v or "").upper())
+    idents = {_nk(x) for r in rows for x in (r["nopol"], r["no_rangka"]) if _nk(x)}
+    po_by_ident = {}
+    if idents:
+        pats = ["".join(re.escape(ch) + r"\s*" for ch in i) for i in idents]
+        rx = re.compile("^\\s*(" + "|".join(pats) + ")\\s*$", re.IGNORECASE)
+        flt = {"$or": [{"units.nopol": rx}, {"units.no_rangka": rx}, {"nopol": rx}, {"no_rangka": rx}]}
+        async for o in db.orders.find(flt, {"_id": 0}).sort("created_at", -1).limit(400):
+            us = o.get("units") if isinstance(o.get("units"), list) and o.get("units") else [o]
+            for u in us:
+                for key in (_nk(u.get("nopol")), _nk(u.get("no_rangka"))):
+                    if key in idents:
+                        po_by_ident.setdefault(key, []).append((o, u))
+    for row in rows:
+        cands = []
+        for key in (_nk(row["nopol"]), _nk(row["no_rangka"])):
+            if key:
+                cands += po_by_ident.get(key, [])
+        if not cands:
+            row["po"] = None
+            continue
+        tuj = _kn(row["tujuan_kota"])
+        pick = next(((o, u) for o, u in cands if tuj and _kn(o.get("tujuan_kota")) == tuj), cands[0])
+        o, u = pick
+        vt = f"{u.get('vehicle_type') or o.get('vehicle_type') or ''} {u.get('tipe_model') or o.get('tipe_model') or ''}".strip()
+        row["po"] = {
+            "order_id": o.get("order_id") or "", "customer": o.get("customer_nama") or "",
+            "vehicle_type": vt, "nopol": str(u.get("nopol") or "").upper(), "no_rangka": str(u.get("no_rangka") or "").upper(),
+            "asal_kota": o.get("asal_kota") or "", "tujuan_kota": o.get("tujuan_kota") or "",
+            "jumlah": len({(x[0].get("order_id")) for x in cands}),
+        }
+        # isi yang kosong dari PO (data invoice tidak ditimpa)
+        for k in ("vehicle_type", "nopol", "no_rangka", "asal_kota", "tujuan_kota"):
+            if not row[k] and row["po"].get(k):
+                row[k] = row["po"][k]
     return {"rows": rows, "no_invoice": str(res.get("no_invoice") or "").strip(),
             "tanggal_invoice": str(res.get("tanggal_invoice") or "").strip()[:10],
             "total_invoice": _int(res.get("total_invoice"))}
