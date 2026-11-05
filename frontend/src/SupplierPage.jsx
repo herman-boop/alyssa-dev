@@ -144,7 +144,7 @@ function buildSupplierA4(sup, jobsOverride, noDocOverride, tglOverride, opt) {
     html { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
     html, body, .doc-sheet, .doc-sheet * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: geometricPrecision; }
     :root { --navy:#0F2A5C; --gold:#C9973A; --lb:#F3F5F8; --ln:#DCE3EC; --ink:#0B1220; --mut:#334155; }
-    body { font-family:'Inter', 'SF Pro Text', -apple-system, Helvetica, Arial, sans-serif; font-size:12.5px; font-weight:500; color:var(--ink); background:#fff; }
+    body { font-family:'Inter', 'SF Pro Text', -apple-system, Helvetica, Arial, sans-serif; font-size:14px; font-weight:500; color:var(--ink); background:#fff; }
     .doc-sheet { max-width:190mm; margin:0 auto; padding:0; }
     /* Header & gaya sama dengan Penawaran Harga: logo + garis pemisah gold + nama PT navy + tagline gold */
     .sp-head { display:flex; align-items:center; gap:16px; padding-bottom:14px; border-bottom:2px solid var(--gold); margin-bottom:16px; }
@@ -154,39 +154,39 @@ function buildSupplierA4(sup, jobsOverride, noDocOverride, tglOverride, opt) {
     .sp-tag { font-size:14px; font-weight:700; color:var(--gold); margin-top:3px; }
     .sp-title { font-size:26px; font-weight:800; color:var(--navy); margin:0 0 8px; letter-spacing:.2px; }
     .sp-info { margin-bottom:14px; }
-    .sp-line { display:grid; grid-template-columns:170px 18px 1fr; padding:4px 2px; font-size:13.5px; color:var(--ink); font-weight:600; }
+    .sp-line { display:grid; grid-template-columns:170px 18px 1fr; padding:4px 2px; font-size:15px; color:var(--ink); font-weight:600; }
     .sp-line .v { text-align:right; font-weight:800; }
     .rps-sec { break-after:avoid; page-break-after:avoid; font-size:15px; font-weight:800; color:var(--navy); text-transform:uppercase; margin:18px 0 8px; padding-left:11px; border-left:5px solid var(--gold); line-height:1.1; letter-spacing:.3px; }
     table.rps { width:100%; border-collapse:separate; border-spacing:0; border:1px solid var(--ln); border-radius:10px; overflow:hidden; margin-bottom:4px; }
     table.rps thead { display:table-header-group; }
     table.rps tbody tr, table.rps tfoot tr { break-inside:avoid; page-break-inside:avoid; }
-    table.rps th { text-align:left; font-size:11.5px; text-transform:uppercase; letter-spacing:.3px; color:var(--navy); background:var(--lb); font-weight:800; padding:10px 8px; white-space:nowrap; }
+    table.rps th { text-align:left; font-size:12.5px; text-transform:uppercase; letter-spacing:.3px; color:var(--navy); background:var(--lb); font-weight:800; padding:10px 8px; white-space:nowrap; }
     table.rps th.r { text-align:right; } table.rps th.c { text-align:center; }
-    table.rps td { padding:9px 8px; font-size:12.5px; font-weight:600; line-height:1.3; border-top:1px solid var(--ln); vertical-align:top; color:var(--ink); }
+    table.rps td { padding:9px 8px; font-size:14px; font-weight:600; line-height:1.3; border-top:1px solid var(--ln); vertical-align:top; color:var(--ink); }
     table.rps td b { font-weight:800; }
     table.rps td.c { text-align:center; } table.rps td.r { text-align:right; white-space:nowrap; }
-    table.rps td.ref { color:var(--ink); font-size:12px; }
-    table.rps .rp-note { font-size:11px; font-weight:600; color:var(--mut); margin-top:2px; }
-    table.rps .rp-st { font-size:11px; font-weight:800; }
+    table.rps td.ref { color:var(--ink); font-size:13px; }
+    table.rps .rp-note { font-size:12px; font-weight:600; color:var(--mut); margin-top:2px; }
+    table.rps .rp-st { font-size:12px; font-weight:800; }
     table.rps .rp-st.y { color:#0b6b43; } table.rps .rp-st.n { color:#a64b00; }
-    .pill-ok { display:inline-block; font-size:11px; font-weight:800; color:#0b6b43; background:#e3f5ec; border:1px solid #a8dcc0; border-radius:20px; padding:2px 10px; }
+    .pill-ok { display:inline-block; font-size:12px; font-weight:800; color:#0b6b43; background:#e3f5ec; border:1px solid #a8dcc0; border-radius:20px; padding:2px 10px; }
     table.rps tr.has-tb td { border-bottom:none; }
-    table.rps tr.tb td { border-top:none; padding:0 8px 9px; font-size:11.5px; font-weight:700; color:#7a5a12; background:#fff; line-height:1.4; }
+    table.rps tr.tb td { border-top:none; padding:0 8px 9px; font-size:12.5px; font-weight:700; color:#7a5a12; background:#fff; line-height:1.4; }
     table.rps tr.tb td b { font-weight:800; color:var(--ink); }
     table.rps tr.grp td { padding:9px 8px 7px; background:#fff; border-top:1px solid var(--ln); border-left:5px solid var(--gold); }
     table.rps tr.grp { break-after:avoid; page-break-after:avoid; }
     table.rps tr.grp .grp-in { display:flex; justify-content:space-between; align-items:baseline; gap:12px; }
-    table.rps tr.grp .gname { font-size:13.5px; font-weight:800; color:var(--navy); text-transform:uppercase; letter-spacing:.3px; }
-    table.rps tr.grp .gunit { font-size:11.5px; font-weight:800; color:var(--mut); white-space:nowrap; }
-    table.rps tr.grpsub td { background:var(--lb); color:var(--ink); font-weight:800; font-size:12px; }
+    table.rps tr.grp .gname { font-size:15px; font-weight:800; color:var(--navy); text-transform:uppercase; letter-spacing:.3px; }
+    table.rps tr.grp .gunit { font-size:12.5px; font-weight:800; color:var(--mut); white-space:nowrap; }
+    table.rps tr.grpsub td { background:var(--lb); color:var(--ink); font-weight:800; font-size:13.5px; }
     table.rps tr.grpsub .lbl { text-align:right; }
-    table.rps tfoot .tot td { background:var(--lb); border-top:1.5px solid var(--navy); padding:10px 8px; font-size:13px; font-weight:800; color:var(--navy); }
+    table.rps tfoot .tot td { background:var(--lb); border-top:1.5px solid var(--navy); padding:10px 8px; font-size:14.5px; font-weight:800; color:var(--navy); }
     table.rps tfoot .tot .lbl { text-align:right; }
     .rps-bar { display:flex; justify-content:space-between; align-items:baseline; padding:9px 4px 0; margin-top:2px; }
     .rps-bar .lbl { font-weight:800; font-size:12px; color:var(--mut); text-transform:uppercase; letter-spacing:.4px; }
     .rps-bar .val { font-weight:800; font-size:15px; color:var(--ink); }
     .rps-sum { margin-top:6px; break-inside:avoid; page-break-inside:avoid; }
-    .rps-sum .row { display:flex; justify-content:space-between; padding:9px 8px; font-size:14px; border-bottom:1px solid var(--ln); font-weight:600; }
+    .rps-sum .row { display:flex; justify-content:space-between; padding:9px 8px; font-size:15px; border-bottom:1px solid var(--ln); font-weight:600; }
     .rps-sum .row .v { font-weight:800; white-space:nowrap; }
     .rps-grand { margin-top:12px; border-radius:12px; padding:0 0 0 20px; min-height:58px; display:flex; justify-content:space-between; align-items:center; background:var(--navy); color:#fff; overflow:hidden; }
     .rps-grand .k { font-size:17px; font-weight:800; text-transform:uppercase; letter-spacing:.3px; }
@@ -198,10 +198,10 @@ function buildSupplierA4(sup, jobsOverride, noDocOverride, tglOverride, opt) {
     .rps-badge { text-align:right; margin-top:8px; }
     .rps-ket { margin-top:12px; border:1px solid var(--ln); border-radius:10px; overflow:hidden; break-inside:avoid; }
     .rps-ket .h { background:var(--navy); color:#fff; font-size:12px; font-weight:800; letter-spacing:.5px; padding:7px 12px; }
-    .rps-ket .b { padding:10px 12px; font-size:12.5px; font-weight:600; line-height:1.55; white-space:pre-wrap; }
-    .rps-note { font-size:11.5px; font-weight:600; color:var(--mut); line-height:1.6; margin-top:14px; }
+    .rps-ket .b { padding:10px 12px; font-size:14px; font-weight:600; line-height:1.55; white-space:pre-wrap; }
+    .rps-note { font-size:12.5px; font-weight:600; color:var(--mut); line-height:1.6; margin-top:14px; }
     .rps-note b { font-weight:800; color:var(--ink); }
-    .sp-foot { display:flex; justify-content:space-between; gap:8px; padding-top:9px; margin-top:18px; border-top:2px solid var(--gold); font-size:11.5px; font-weight:600; color:var(--mut); }
+    .sp-foot { display:flex; justify-content:space-between; gap:8px; padding-top:9px; margin-top:18px; border-top:2px solid var(--gold); font-size:12.5px; font-weight:600; color:var(--mut); }
     @page { size:A4 portrait; margin:10mm; }
     @media print { thead{display:table-header-group;} tbody tr{break-inside:avoid;} .avoid-break{break-inside:avoid;page-break-inside:avoid;} }
     ${opt.forImage ? ".doc-sheet { max-width:none; width:790px; padding:24px; }" : ""}
