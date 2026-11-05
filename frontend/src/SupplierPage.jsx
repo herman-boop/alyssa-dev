@@ -835,6 +835,7 @@ export default function SupplierPage() {
           asal_kota: (x.asal_kota || "").trim(), tujuan_kota: (x.tujuan_kota || "").trim(),
           total_harga: pNum(x.total_harga), catatan: (x.catatan || "").trim(), tanggal: tglInv || x.tanggal || todayStr(),
           project_id: projectId, tag, no_invoice_supplier: noInv,
+          order_id: x.po?.order_id || null, customer_ref: x.po?.customer || "",
         }, { headers });
         ok += 1;
       }
@@ -1924,7 +1925,7 @@ export default function SupplierPage() {
               <input type="file" accept="application/pdf,image/*" style={{ display: "none" }} disabled={invBusy}
                 onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; readInvoiceFile(f); }} data-testid="sup-inv-file" />
             </label>
-            {!invRows && !invBusy && <div style={{ fontSize: 12, color: C.mute }}>Upload invoice dari supplier (PDF atau foto). Unit, rute, dan harga dibaca otomatis, lalu Anda cek dulu sebelum masuk ke Tagihan. Belum ada yang tersimpan sampai Anda tekan tombol Masukkan.</div>}
+            {!invRows && !invBusy && <div style={{ fontSize: 12, color: C.mute }}>Upload invoice dari supplier (PDF atau foto). Unit, rute, dan harga dibaca otomatis, sekaligus dicocokkan dengan PO admin (lewat no. polisi/rangka) untuk melengkapi data yang kosong, lalu Anda cek dulu sebelum masuk ke Tagihan. Belum ada yang tersimpan sampai Anda tekan tombol Masukkan.</div>}
             {invRows && invRows.length > 0 && (<>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                 <div><div style={{ ...L }}>No. Invoice Supplier</div><input style={I} value={invMeta.no_invoice || ""} onChange={(e) => setInvMeta((m) => ({ ...m, no_invoice: e.target.value }))} placeholder="mis. INV/2026/001" data-testid="sup-inv-no" /></div>
@@ -1945,6 +1946,7 @@ export default function SupplierPage() {
                   <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
                     <input type="checkbox" checked={!!x.pilih} onChange={(e) => updInv(x._k, { pilih: e.target.checked })} />
                     <span>{x.nopol || x.no_rangka || "(tanpa plat)"}</span>
+                    {x.po && <span style={{ fontSize: 11, color: C.green, fontWeight: 700 }}>✓ PO{x.po.customer ? `: ${x.po.customer}` : ""}{x.po.order_id ? ` · ${x.po.order_id}` : ""}{x.po.jumlah > 1 ? ` (+${x.po.jumlah - 1} PO lain)` : ""}</span>}
                     {x.duplikat && <span style={{ fontSize: 11, color: C.gold, fontWeight: 700 }}>sudah ada di tagihan (plat & rute sama)</span>}
                   </label>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
