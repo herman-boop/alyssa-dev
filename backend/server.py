@@ -6974,14 +6974,28 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5-5").strip() or "claude-sonnet-5-5"
 
 _INVOICE_PROMPT = (
-    "Ini invoice/tagihan dari supplier angkutan kendaraan. Baca SEMUA baris unit (satu baris = satu kendaraan) "
-    "dan balas HANYA dengan JSON valid, tanpa penjelasan, dengan bentuk:\n"
+    "Ini invoice/tagihan dari supplier angkutan kendaraan (darat/kapal). Format tiap supplier berbeda-beda "
+    "(kolom bisa bernama TGL, TUJUAN, DESKRIPSI, JENIS UNIT, NOPOL, NOKA/NOPOL, VIN/VRN, DESTINATION, HARGA, PRICE, AMOUNT, JUMLAH, KAPAL). "
+    "Baca SEMUA baris yang berisi unit (satu baris = satu kendaraan/unit); abaikan baris kosong dan baris total. "
+    "Balas HANYA dengan JSON valid, tanpa penjelasan, bentuk:\n"
     '{"rows":[{"vehicle_type":"","nopol":"","no_rangka":"","asal_kota":"","tujuan_kota":"","total_harga":0,"tanggal":"YYYY-MM-DD atau kosong","catatan":""}],'
     '"no_invoice":"","tanggal_invoice":"YYYY-MM-DD atau kosong","total_invoice":0}\n'
-    "Aturan: total_harga = harga per unit dalam rupiah, angka bulat tanpa titik/koma (kalau ada biaya tambahan di baris yang sama, jumlahkan dan tulis rinciannya di catatan). "
-    "nopol dan no_rangka huruf besar. Kosongkan field yang tidak tertulis, JANGAN menebak. "
-    "Kalau harga hanya tertulis sebagai total keseluruhan dan tidak per unit, isi total_harga 0 dan isi total_invoice. "
-    "total_invoice = angka total/grand total di invoice kalau ada, selain itu 0."
+    "Aturan:\n"
+    "- no_invoice = nomor invoice/Ref No/Invoice No di kepala dokumen. tanggal_invoice = tanggal invoice di kepala dokumen "
+    "(bulan Indonesia atau Inggris, mis. '5 November 2026', '05-Nov-26', '10 Oktober 2026'), ubah ke YYYY-MM-DD.\n"
+    "- total_harga = harga per unit dalam rupiah, angka bulat tanpa titik/koma. Kalau ada kolom harga satuan dan jumlah, pakai jumlah per baris. "
+    "Biaya tambahan di baris yang sama dijumlahkan dan dirinci di catatan.\n"
+    "- nopol = plat nomor (mis. 'B 9496 BBF', 'G 1054 VE'), huruf besar. Kalau kolomnya gabungan Noka/Nopol: isi nopol bila bentuknya plat; "
+    "bila hanya angka/kode panjang tanpa pola plat (mis. '135666', '11897', VIN/VRN), isi no_rangka dan kosongkan nopol.\n"
+    "- vehicle_type = jenis/merek unit (mis. 'HILUX DC', 'X Pander', 'Bus Medium', 'CD PEMADAM'). Kalau ada kolom jenis dan deskripsi terpisah, pakai jenis dan taruh sisanya di catatan.\n"
+    "- asal_kota dan tujuan_kota: ambil dari baris bila ada pola 'A-B' / 'A - B' (mis. 'Surabaya-Lombok', 'BPP - JKT'). "
+    "Kalau baris hanya punya tujuan, ambil asal dari kepala dokumen (Port of Loading / asal), dan tujuan dari baris atau Port of Discharge. "
+    "Tulis persis seperti tertulis (jangan mengubah atau memperluas singkatan, jangan menebak).\n"
+    "- tanggal = tanggal di baris unit itu bila ada (YYYY-MM-DD), selain itu kosong.\n"
+    "- Info tambahan seperti nama kapal/vessel, voyage, ETD/ETA, atau jenis layanan taruh di catatan, singkat.\n"
+    "- Kosongkan field yang tidak tertulis, JANGAN menebak. "
+    "Kalau harga hanya tertulis sebagai total keseluruhan dan tidak per unit, isi total_harga 0 dan isi total_invoice.\n"
+    "- total_invoice = angka Total Tagihan/Total Pembayaran/Amount Due di dokumen bila ada, selain itu 0."
 )
 
 
