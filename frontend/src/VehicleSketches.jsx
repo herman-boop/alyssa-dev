@@ -403,6 +403,7 @@ export const VEHICLE_SKETCH_MAP = {
   "Truck Tangki": SketchTangki,
   "Fire Truck": SketchCanterPemadam,
   "Tronton": SketchTronton,
+  "Volvo FH16 + SDT 85": SketchTronton,   // fallback SVG kalau foto /vehicles/volvo-fh16-sdt.jpg gagal load
   "Box Besar": SketchBoxBesar,
   "Canter": SketchCanter,
   "Canter Pemadam": SketchCanterPemadam,
@@ -477,6 +478,7 @@ export const VEHICLE_TYPE_LIST = [
   "Pickup / Double Cabin",
   // ── Truk (chassis x karoseri: Bak/Box/Dumptruck/Tangki/Damkar) ──
   ...TRUCK_KAROSERI_COMBOS.map(c => c.name),
+  "Volvo FH16 + SDT 85",
   "Concrete Pump",
   "Motor",
   "Excavator",
@@ -651,6 +653,7 @@ const TYPE_TO_FILENAME = {
   "Vibro Roller":           "vibro",
   "Forklift":               "forklift",
   "Dump Crawler":           "dump-crawler",
+  "Volvo FH16 + SDT 85":    "volvo-fh16-sdt",
 };
 
 /* Rasio lebar:tinggi asli tiap file /vehicles/*.jpg — 1 baris berisi depan,
@@ -675,6 +678,7 @@ const FILENAME_TO_RATIO = {
   "vibro": 5.399,
   "forklift": 4.831,
   "dump-crawler": 5.496,
+  "volvo-fh16-sdt": 4.452,   // 1536x345 (tampak samping + depan)
 };
 /* Batas aman tertinggi (rasio terkecil / box tertinggi) yang masih genuinely
    1 halaman A4 — diverifikasi lewat generate PDF sungguhan (page.pdf() +
@@ -694,6 +698,7 @@ export function getVehicleSketchRatio(type) {
    mencocokkan kata kunci ke salah satu sketsa/bentuk yang SUDAH ADA. Urutan
    penting: yang spesifik dulu, baru yang umum. */
 const SKETCH_KEYWORDS = [
+  [["fh16", "fh 16", "sdt", "side dump", "sidedump", "volvo fh"], "Volvo FH16 + SDT 85"],
   [["dump truck", "dumptruck", "dump hino", "dump tronton"], "Dump Truck"],
   [["dump crawler", "crawler", "dumper"], "Dump Crawler"],
   [["dump"], "Dump Truck"],
