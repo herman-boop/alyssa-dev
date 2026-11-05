@@ -4,7 +4,7 @@ import LegSupplierFields from "./LegSupplierFields";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import axios from "axios";
-import { VEHICLE_TYPE_LIST } from "@/VehicleSketches";
+import { VEHICLE_TYPE_LIST, useVehicleTypes, hasVehicleSketch } from "@/VehicleSketches";
 import CostCalculator from "@/CostCalculator";
 import DriverData from "@/DriverData";
 import SupplierPage, { printSupplierA4, imageSupplierA4 } from "@/SupplierPage";
@@ -1766,6 +1766,87 @@ function LaporanPage({ stats, onExportCsv }) {
 /* ════════════════════════════════════════
    PENGATURAN PAGE
 ════════════════════════════════════════ */
+/* ── Kelola Tipe Kendaraan (pilihan di form pelanggan) ──
+   Tampilkan tipe CUSTOM + penanda "tanpa sketsa"; admin bisa pilih (centang) lalu hapus, atau ubah nama.
+   Tipe bawaan tidak bisa dihapus. Order lama tidak berubah (tipe tersimpan sebagai teks). */
+function KelolaTipeKendaraan({ headers }) {
+  const { types, customTypes, renameType, deleteType } = useVehicleTypes();
+  const [open, setOpen] = useState(false);
+  const [onlyEmpty, setOnlyEmpty] = useState(false);
+  const [q, setQ] = useState("");
+  const [pick, setPick] = useState(() => new Set());
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const note = (m) => { setMsg(m); setTimeout(() => setMsg(""), 3500); };
+  const noSketch = customTypes.filter((t) => !hasVehicleSketch(t));
+  const list = customTypes
+    .filter((t) => (!onlyEmpty || !hasVehicleSketch(t)) && (!q.trim() || t.toLowerCase().includes(q.trim().toLowerCase())))
+    .sort((a, b) => a.localeCompare(b));
+  const toggle = (t) => setPick((s) => { const n = new Set(s); n.has(t) ? n.delete(t) : n.add(t); return n; });
+  const hapusPilihan = async () => {
+    const arr = [...pick].filter((t) => customTypes.includes(t));
+    if (!arr.length) return;
+    if (!window.confirm(`Hapus ${arr.length} tipe dari pilihan form pelanggan?\n\n${arr.slice(0, 12).join("\n")}${arr.length > 12 ? "\n…" : ""}\n\nOrder yang sudah masuk tidak berubah.`)) return;
+    setBusy(true);
+    let ok = 0;
+    for (const t of arr) { const r = await deleteType(t, headers); if (r.ok) ok += 1; }
+    setPick(new Set()); setBusy(false);
+    note(`✓ ${ok} tipe dihapus${ok < arr.length ? `, ${arr.length - ok} gagal` : ""}`);
+  };
+  const ubahNama = async (t) => {
+    const baru = window.prompt(`Ubah nama tipe:\n(sekarang: ${t})`, t);
+    if (baru == null || !baru.trim() || baru.trim() === t) return;
+    const r = await renameType(t, baru.trim(), headers);
+    note(r.ok ? "✓ Nama tipe diubah" : r.reason === "duplicate" ? "Nama itu sudah ada" : "Gagal mengubah nama");
+  };
+  const box = { padding: "16px 18px", borderRadius: 12, background: "#0e1420", border: "1px solid #1a2130", marginBottom: 12 };
+  const btn = { padding: "7px 12px", borderRadius: 8, border: "1px solid #1f2937", background: "#111826", color: "#e6edf3", fontWeight: 700, fontSize: 12, cursor: "pointer" };
+  return (
+    <div style={box} data-testid="adm-kelola-tipe">
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        <div>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: "#e6edf3" }}>Tipe Kendaraan (pilihan di form pelanggan)</div>
+          <div style={{ fontSize: 11.5, color: "#6b7688", marginTop: 3 }}>{types.length} tipe · {customTypes.length} custom · <span style={{ color: noSketch.length ? "#f0a742" : "#6b7688" }}>{noSketch.length} custom tanpa sketsa</span></div>
+        </div>
+        <button style={btn} onClick={() => setOpen((v) => !v)} data-testid="adm-kelola-tipe-toggle">{open ? "Tutup" : "Kelola"}</button>
+      </div>
+      {open && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+            <input className="adm-input" style={{ flex: 1, minWidth: 140 }} placeholder="Cari tipe…" value={q} onChange={(e) => setQ(e.target.value)} />
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "#c9d1d9" }}>
+              <input type="checkbox" checked={onlyEmpty} onChange={(e) => setOnlyEmpty(e.target.checked)} /> Hanya yang tanpa sketsa
+            </label>
+          </div>
+          <div style={{ maxHeight: 360, overflowY: "auto", border: "1px solid #1a2130", borderRadius: 10 }}>
+            {list.length === 0 && <div style={{ padding: 14, textAlign: "center", color: "#6b7688", fontSize: 12.5 }}>Tidak ada tipe custom{onlyEmpty ? " tanpa sketsa" : ""}.</div>}
+            {list.map((t) => {
+              const ada = hasVehicleSketch(t);
+              return (
+                <div key={t} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderBottom: "1px solid #1a2130" }}>
+                  <input type="checkbox" checked={pick.has(t)} onChange={() => toggle(t)} style={{ width: 17, height: 17, flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 700, color: "#e6edf3", overflowWrap: "anywhere" }}>{t}</div>
+                    <div style={{ fontSize: 11, color: ada ? "#3fb950" : "#f0a742" }}>{ada ? "✓ ada sketsa" : "⚠ tanpa sketsa"}</div>
+                  </div>
+                  <button style={btn} onClick={() => ubahNama(t)} title="Ubah nama">✏️</button>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
+            <button style={{ ...btn, borderColor: "#6e3030", background: "#2a1010", color: "#f0a0a0" }} disabled={!pick.size || busy} onClick={hapusPilihan} data-testid="adm-kelola-tipe-hapus">{busy ? "Menghapus…" : `🗑 Hapus terpilih (${pick.size})`}</button>
+            <button style={btn} onClick={() => setPick(new Set(list))}>Pilih semua yang tampil</button>
+            <button style={btn} onClick={() => setPick(new Set())}>Kosongkan</button>
+          </div>
+          <div style={{ fontSize: 11.5, color: "#6b7688", marginTop: 8 }}>Tipe bawaan tidak bisa dihapus. Menghapus hanya menghilangkan dari pilihan form; order yang sudah masuk tidak berubah.</div>
+          {msg && <div style={{ fontSize: 12.5, color: "#3fb950", marginTop: 6 }}>{msg}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PengaturanPage({ dark, onToggleTheme, onLogout, fixHeicPhotos, fixingHeic, headers }) {
   const row = { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 18px", borderRadius: 12, background: "#0e1420", border: "1px solid #1a2130", marginBottom: 12, gap: 12, flexWrap: "wrap" };
   const [aisDiag, setAisDiag] = useState(null);
@@ -1898,6 +1979,7 @@ function PengaturanPage({ dark, onToggleTheme, onLogout, fixHeicPhotos, fixingHe
           {fixingHeic ? "⏳ Memperbaiki..." : "🩹 Perbaiki Sekarang"}
         </button>
       </div>
+      <KelolaTipeKendaraan headers={headers} />
       <div style={row}>
         <div>
           <div style={{ fontSize: 13.5, fontWeight: 700, color: "#e6edf3" }}>Akun</div>

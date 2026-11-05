@@ -751,6 +751,12 @@ function resolveSketchType(type) {
   return guessSketchType(type) || type;
 }
 
+/* Apakah tipe ini punya sketsa (foto/SVG) — langsung atau hasil tebakan kata kunci? */
+export function hasVehicleSketch(type) {
+  const r = resolveSketchType(type);
+  return !!(TYPE_TO_FILENAME[r] || VEHICLE_SKETCH_MAP[r]);
+}
+
 export function VehicleSketch({ type, className, style, color = "#D4A847", strokeWidth = 2 }) {
   const [imgOk, setImgOk] = React.useState(true);
   const rtype = resolveSketchType(type);

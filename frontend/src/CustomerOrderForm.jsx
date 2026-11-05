@@ -1,7 +1,7 @@
 import { useMemo, useState, useCallback, useEffect } from "react";
 import axios from "axios";
 import "./Order.css";
-import { VEHICLE_TYPE_LIST, VehicleSketch, useVehicleTypes, shortVehicleLabel } from "./VehicleSketches";
+import { VEHICLE_TYPE_LIST, VehicleSketch, useVehicleTypes, shortVehicleLabel, hasVehicleSketch } from "./VehicleSketches";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -334,7 +334,7 @@ export default function CustomerOrderForm() {
                                   ))}
                                 </div>
                               </Field>
-                              {u.vehicle_type && (
+                              {u.vehicle_type && hasVehicleSketch(u.vehicle_type) && (
                                 <div className="of-field--full" style={{ marginTop: 4 }}>
                                   <div style={{ border: "1px solid var(--of-border, #e5e7eb)", borderRadius: 12, background: "#fff", padding: 12, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
                                     <VehicleSketch type={u.vehicle_type} style={{ width: "100%", height: 180 }} />
