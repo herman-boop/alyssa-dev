@@ -806,8 +806,12 @@ export default function SupplierPage() {
     if (!selected) { flash("Pilih supplier dulu"); return; }
     setInvRows(null); setInvMeta({}); resetProjPicker(); setInvOpen(true);
   };
+  const invInputRef = useRef(null);
+  const [invFileName, setInvFileName] = useState("");
   const readInvoiceFile = async (file) => {
-    if (!file || !selected) return;
+    if (!file) { setInvErr("File tidak diterima browser. Pilih lagi, atau coba buka aplikasi lewat Chrome."); return; }
+    if (!selected) { setInvErr("Supplier belum dipilih."); return; }
+    setInvFileName(`${file.name || "file"} (${Math.max(1, Math.round((file.size || 0) / 1024))} KB)`);
     setInvBusy(true); setInvRows(null); setInvErr("");
     try {
       const fd = new FormData(); fd.append("file", file);
@@ -820,7 +824,7 @@ export default function SupplierPage() {
       const msg = (typeof d === "string" ? d : "") || (e?.code === "ECONNABORTED" ? "Waktu habis. Coba lagi atau pakai file lebih kecil." : (e?.message || "Gagal membaca invoice"));
       setInvErr(`${msg}${e?.response?.status ? ` (kode ${e.response.status})` : ""}`); flash("Gagal membaca invoice");
     }
-    finally { setInvBusy(false); }
+    finally { setInvBusy(false); try { if (invInputRef.current) invInputRef.current.value = ""; } catch { /* abaikan */ } }
   };
   const updInv = (k, patch) => setInvRows((rs) => rs.map((x) => (x._k === k ? { ...x, ...patch } : x)));
   const invPicked = (invRows || []).filter((x) => x.pilih);
@@ -1925,11 +1929,13 @@ export default function SupplierPage() {
           foot={<><button style={BTN_GHOST} onClick={() => setInvOpen(false)} disabled={invSaving}>Batal</button>
             {invRows && invRows.length > 0 && <button style={BTN} onClick={saveInvoiceRows} disabled={invSaving || !invPicked.length} data-testid="sup-inv-save">{invSaving ? "Menyimpan…" : `Masukkan ${invPicked.length} Unit ke Tagihan`}</button>}</>}>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <label style={{ ...BTN, display: "block", textAlign: "center", cursor: invBusy ? "wait" : "pointer", opacity: invBusy ? 0.6 : 1 }}>
+            <div style={{ ...BTN, position: "relative", display: "block", textAlign: "center", opacity: invBusy ? 0.6 : 1, overflow: "hidden" }}>
               {invBusy ? "⏳ Membaca invoice… (bisa 10–40 detik)" : (invRows ? "📄 Ganti File Invoice" : "📄 Pilih PDF / Foto Invoice")}
-              <input type="file" accept="application/pdf,image/*" style={{ display: "none" }} disabled={invBusy}
-                onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; readInvoiceFile(f); }} data-testid="sup-inv-file" />
-            </label>
+              <input ref={invInputRef} type="file" accept="application/pdf,image/*" disabled={invBusy}
+                style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, cursor: "pointer", fontSize: 0 }}
+                onChange={(e) => { const f = (e.target.files && e.target.files[0]) || null; readInvoiceFile(f); }} data-testid="sup-inv-file" />
+            </div>
+            {invFileName && <div style={{ fontSize: 12, color: C.mute }}>File dipilih: <b style={{ color: C.ink }}>{invFileName}</b></div>}
             {invErr && <div style={{ fontSize: 13, color: C.red, border: `1px solid ${C.red}`, borderRadius: 10, padding: 10 }} data-testid="sup-inv-err">⚠ {invErr}</div>}
             {invRows && invRows.length === 0 && !invBusy && <div style={{ fontSize: 13, color: C.gold }}>Tidak ada unit yang terbaca di file ini. Coba file yang lebih jelas, atau foto tabelnya utuh (termasuk kolom Nopol dan Harga).</div>}
             {!invRows && !invBusy && <div style={{ fontSize: 12, color: C.mute }}>Upload invoice dari supplier (PDF atau foto). Unit, rute, dan harga dibaca otomatis, sekaligus dicocokkan dengan PO admin (lewat no. polisi/rangka) untuk melengkapi data yang kosong, lalu Anda cek dulu sebelum masuk ke Tagihan. Belum ada yang tersimpan sampai Anda tekan tombol Masukkan.</div>}
