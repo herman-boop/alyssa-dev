@@ -970,7 +970,7 @@ export default function CostCalculator() {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
             <div style={TITLE}>📋 Daftar Harga — {selectedPt.nama_pt} ({ptHistory.length} rute)</div>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <PenawaranCetakButton rows={ptHistory} namaPt={selectedPt.nama_pt} />
+              <PenawaranCetakButton rows={ptHistory} namaPt={selectedPt.nama_pt} adminPin={adminPin} />
               <button onClick={clearAllHarga} style={{ padding: "5px 12px", borderRadius: 7, fontSize: 11, fontWeight: 700, cursor: "pointer", background: "none", border: "1px solid #f85149", color: "#f85149" }}>🗑 Hapus Semua Rute</button>
             </div>
           </div>

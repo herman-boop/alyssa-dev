@@ -1290,12 +1290,13 @@ async def delete_custom_vehicle_type(body: VehicleTypeDeleteBody):
 # Arsip tiap dokumen yang dicetak admin (Invoice, Jadwal per-PO, Jadwal
 # Gabungan). Menyimpan snapshot lengkap (meta + units/lines) supaya bisa
 # dicetak ulang persis, plus tombol hapus. Fire-and-forget dari frontend.
-DOC_JENIS = {"jadwal_gabungan", "jadwal", "invoice", "supplier"}
+DOC_JENIS = {"jadwal_gabungan", "jadwal", "invoice", "supplier", "penawaran"}
 DOC_JENIS_LABEL = {
     "jadwal_gabungan": "Jadwal Gabungan",
     "jadwal": "Jadwal Pengiriman",
     "invoice": "Invoice / Faktur",
     "supplier": "Rekap Supplier",
+    "penawaran": "Penawaran Harga",
 }
 
 
@@ -1328,6 +1329,7 @@ async def list_doc_history(jenis: Optional[str] = None, limit: int = 300):
         "meta.asal_kota": 1, "meta.tujuan_kota": 1, "meta.order_id": 1,
         "meta.pesan": 1, "meta.no_invoice": 1, "meta.customer_nama": 1,
         "meta.ttdNama": 1, "meta.ttdJabatan": 1, "meta.entity_id": 1,
+        "meta.jumlah_rute": 1, "meta.mode": 1, "meta.template": 1, "meta.grand_total": 1,   # penawaran
         "payments": 1,   # pembayaran customer per faktur (ringan: id/tanggal/metode/nominal)
     }
     items = []

@@ -24,7 +24,7 @@ import LabaRugiPage from "@/LabaRugiPage";
 import KompensasiPage from "@/KompensasiPage";
 import MobileVendorPayment from "@/MobileVendorPayment";
 import PermintaanHargaPage from "@/PermintaanHargaPage";
-import { htmlKePng, bagikanPng } from "./PenawaranCetak";
+import { htmlKePng, bagikanPng, printPenawaran, simpanPenawaranGambar } from "./PenawaranCetak";
 import { DOC_BRAND, DOC_BASE_CSS, docHeader, docFooter, terbilangRupiah, nextDocNo, DOC_ENTITIES, DEFAULT_ENTITY_ID, getActiveEntityId, setActiveEntityId, getEntity } from "@/docTheme";
 import { printReport, saveReportPNG } from "@/reportDoc";
 import "@/App.css";
@@ -5151,6 +5151,7 @@ const DOC_HIST_FILTERS = [
   { key: "", label: "Semua" },
   { key: "invoice", label: "Invoice" },
   { key: "supplier", label: "Rekap Supplier" },
+  { key: "penawaran", label: "Penawaran" },
   { key: "jadwal", label: "Jadwal Pengiriman" },
   { key: "jadwal_gabungan", label: "Jadwal Gabungan" },
   { key: "__pricelist", label: "💰 Daftar Harga" },
@@ -5158,6 +5159,7 @@ const DOC_HIST_FILTERS = [
 const DOC_HIST_BADGE = {
   invoice: { txt: "Invoice", bg: "rgba(91,141,239,0.18)", fg: "#9dbcff" },
   supplier: { txt: "Rekap Supplier", bg: "rgba(201,151,58,0.20)", fg: "#e6c375" },
+  penawaran: { txt: "Penawaran", bg: "rgba(44,179,219,0.18)", fg: "#7fd6ef" },
   jadwal: { txt: "Jadwal", bg: "rgba(51,181,124,0.18)", fg: "#7ee0af" },
   jadwal_gabungan: { txt: "Jadwal Gabungan", bg: "rgba(201,151,58,0.20)", fg: "#e6c375" },
 };
@@ -5760,6 +5762,18 @@ function HistoriDokumen({ headers }) {
     setFakturWaBusy("");
   };
 
+  // Kirim penawaran dari Histori sebagai gambar tajam lewat WhatsApp (nomor & template sama seperti saat dibuat).
+  const kirimWaPenawaran = async (rec0) => {
+    setFakturWaBusy(rec0.id + ":pnw");
+    try {
+      let rec = rec0;
+      try { const resp = await axios.get(`${API}/admin/doc-history/${rec0.id}`, { headers }); if (resp.data) rec = resp.data; } catch {}
+      const hasil = await simpanPenawaranGambar(rec.units || [], { ...(rec.meta || {}), noDoc: rec.no_dokumen });
+      if (hasil === "diunduh") alert("Gambar penawaran diunduh. Buka WhatsApp lalu kirim dari galeri/unduhan.");
+    } catch (e) { alert("Gagal membuat gambar penawaran. Coba lagi."); }
+    setFakturWaBusy("");
+  };
+
   // Kirim rekap supplier dari Histori sebagai gambar tajam lewat WhatsApp.
   const kirimWaSupplier = async (rec0) => {
     setFakturWaBusy(rec0.id + ":sup");
@@ -5791,6 +5805,9 @@ function HistoriDokumen({ headers }) {
       printInvoiceDotMatrix(rec, kontak);
     } else if (rec.jenis === "invoice") {
       printInvoiceDoc(rec.lines, rec.meta?.withTax, { ...(rec.meta || {}), payments: rec.payments || [], tanpaStempel: !!(opts && opts.polos) });
+    } else if (rec.jenis === "penawaran") {
+      // Cetak ulang: nomor penawaran SAMA (tidak mengambil nomor baru) dan tidak diarsipkan lagi.
+      printPenawaran(rec.units || [], { ...(rec.meta || {}), noDoc: rec.no_dokumen });
     } else if (rec.jenis === "supplier") {
       printSupplierA4({ nama: rec.meta?.supplier_nama || rec.customer || "-", jobs: rec.units || [] }, null, rec.meta?.no_dokumen || rec.no_dokumen, rec.meta?.tanggal);
     } else if (rec.jenis === "jadwal") {
@@ -5837,7 +5854,9 @@ function HistoriDokumen({ headers }) {
   };
 
   const countUnits = (rec) =>
-    rec.jenis === "invoice" ? `${(rec.lines || []).length} baris` : `${(rec.units || []).length} unit`;
+    rec.jenis === "invoice" ? `${(rec.lines || []).length} baris`
+      : rec.jenis === "penawaran" ? `${rec.meta?.jumlah_rute ?? (rec.units || []).length} rute · ${rec.meta?.mode === "draft" ? "Opsi Harga" : "Resmi"}`
+      : `${(rec.units || []).length} unit`;
 
   return (
     <div className="adm-dochist" data-testid="adm-dochist">
@@ -5997,6 +6016,9 @@ function HistoriDokumen({ headers }) {
                   )}
                   {rec.jenis === "invoice" && (
                     <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={() => reprint(rec, { polos: true })} title="Cetak polos tanpa TTD/stempel (untuk stempel basah)" data-testid="dochist-print-polos">📄 Polos</button>
+                  )}
+                  {rec.jenis === "penawaran" && (
+                    <button className="adm-btn adm-btn-ghost adm-dochist-btn" disabled={!!fakturWaBusy} onClick={() => kirimWaPenawaran(rec)} title="Kirim penawaran lewat WhatsApp (gambar tajam)" data-testid="dochist-wa-penawaran">{fakturWaBusy === rec.id + ":pnw" ? "Membuat…" : "📲 WhatsApp"}</button>
                   )}
                   {rec.jenis === "supplier" && (
                     <button className="adm-btn adm-btn-ghost adm-dochist-btn" disabled={!!fakturWaBusy} onClick={() => kirimWaSupplier(rec)} title="Kirim rekap supplier lewat WhatsApp (gambar tajam)" data-testid="dochist-wa-supplier">{fakturWaBusy === rec.id + ":sup" ? "Membuat…" : "📲 WhatsApp"}</button>
