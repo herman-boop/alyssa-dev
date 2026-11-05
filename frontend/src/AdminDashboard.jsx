@@ -4601,6 +4601,16 @@ function fmtDMY(iso) { if (!iso || !/^\d{4}-\d{2}-\d{2}/.test(iso)) return "—"
    rentang Tanggal Ditagih (= meta.tanggalInvoice, fallback created_at), plus
    entri Manual. Overlay `rekap_penagihan` menyimpan manual/koreksi/sembunyi —
    TIDAK pernah menyentuh invoice/doc asli. */
+// Kirim faktur (dokumen Histori Dokumen jenis invoice) sebagai gambar tajam lewat WhatsApp (Web Share; fallback unduh).
+// polos=true → tanpa TTD/stempel. Memakai nomor & template yang tersimpan; tidak membuat faktur/nomor baru.
+async function kirimFakturWaDoc(docId, polos, headers) {
+  const resp = await axios.get(`${API}/admin/doc-history/${docId}`, { headers });
+  const rec = resp.data;
+  if (!rec || rec.jenis !== "invoice") throw new Error("bukan invoice");
+  const meta = rec.meta || {};
+  return imageInvoiceDoc(rec.lines, meta.withTax, { ...meta, no_invoice: rec.no_dokumen || meta.no_invoice, payments: rec.payments || [], tanpaStempel: !!polos });
+}
+
 function RekapInvoiceDitagih({ headers }) {
   const isoToday = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
   const monthStart = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`; };
@@ -4618,7 +4628,16 @@ function RekapInvoiceDitagih({ headers }) {
   const [toast, setToast] = useState("");
   const [form, setForm] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [waBusy, setWaBusy] = useState("");
   const flash = (m) => { setToast(m); setTimeout(() => setToast(""), 2600); };
+  const kirimWa = async (r, polos) => {
+    setWaBusy(r.doc_id + (polos ? ":p" : ":s"));
+    try {
+      const x = await kirimFakturWaDoc(r.doc_id, polos, headers);
+      if (x.hasil === "diunduh") flash("Gambar faktur diunduh — kirim dari galeri lewat WhatsApp");
+    } catch (e) { flash("Gagal membuat gambar faktur"); }
+    setWaBusy("");
+  };
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -4827,7 +4846,7 @@ function RekapInvoiceDitagih({ headers }) {
         ) : filtered.length === 0 ? (
           <div style={{ padding: 30, textAlign: "center", color: "#8b949e" }}>Tidak ada invoice pada periode/filter ini.</div>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 780 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 900 }}>
             <thead>
               <tr style={{ background: "#0d1117", color: "#8b949e", textAlign: "left" }}>
                 {["Tanggal", "No. Invoice", "Nama Pelanggan", "Nominal", "Sumber", "Keterangan", "Aksi"].map((h) => (
@@ -4850,6 +4869,10 @@ function RekapInvoiceDitagih({ headers }) {
                   <td style={{ padding: "10px 12px", color: "#8b949e", maxWidth: 220 }}>{r.keterangan || "—"}</td>
                   <td style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>
                     <button style={{ ...btnS("none", "#30363d", "#58a6ff"), padding: "4px 10px", fontSize: 12 }} onClick={() => openEdit(r)} data-testid={`rekap-edit-${r.key}`}>Edit</button>
+                    {r.source === "Otomatis" && r.doc_id && (<>
+                      <button style={{ ...btnS("none", "#238636", "#3fb950"), padding: "4px 10px", fontSize: 12, marginLeft: 6 }} disabled={!!waBusy} onClick={() => kirimWa(r, false)} title="Kirim faktur lewat WhatsApp (dengan TTD/stempel)" data-testid={`rekap-wa-${r.key}`}>{waBusy === r.doc_id + ":s" ? "Membuat…" : "📲 WA"}</button>
+                      <button style={{ ...btnS("none", "#30363d", "#c9d1d9"), padding: "4px 10px", fontSize: 12, marginLeft: 6 }} disabled={!!waBusy} onClick={() => kirimWa(r, true)} title="Kirim faktur lewat WhatsApp (polos, tanpa TTD/stempel)" data-testid={`rekap-wa-polos-${r.key}`}>{waBusy === r.doc_id + ":p" ? "Membuat…" : "📲 Polos"}</button>
+                    </>)}
                     <button style={{ ...btnS("none", "#7a2418", "#f85149"), padding: "4px 10px", fontSize: 12, marginLeft: 6 }} onClick={() => del(r)} data-testid={`rekap-del-${r.key}`}>Hapus</button>
                   </td>
                 </tr>
