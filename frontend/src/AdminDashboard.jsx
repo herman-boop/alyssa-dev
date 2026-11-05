@@ -9230,10 +9230,8 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
       if (!token) throw new Error("no token");
       setLeg(i, { task_token: token });
       const link = `${window.location.origin}/task/${token}`;
-      const namaP = pNama || r0.label;
-      const rute = `${leg.asal || "—"} → ${leg.tujuan || "—"}`;
-      const nopol = units.map((u) => u.nopol).filter(Boolean).join(", ") || "-";
-      const teks = `Halo Pak/Bu ${namaP} 👋\n\nDari *PT Alyssa Auto Logistik* (resmi & aman).\nTugas: ${r0.label}\nLokasi: ${rute}\nUnit: ${nopol}\n\nNanti tolong foto kendaraannya ya Pak 🙏\nSaya kirimkan KAMERA di bawah ini. Bapak tinggal:\n📷 Pencet tulisan biru ini → langsung buka kamera → foto.\n\n${link}\n\nResmi & aman dari kantor. Semangat ya Pak! 💪🙏\nInfo: PT Alyssa Auto Logistik · 0818 631 135`;
+      // Pesan ke driver/petugas dibuat SINGKAT: cukup ajakan foto + tombol kamera (link). Tanpa sapaan/rincian tugas/penutup.
+      const teks = `Nanti tolong foto kendaraannya ya Pak 🙏\nSaya kirimkan KAMERA di bawah ini. Bapak tinggal:\n📷 Pencet tulisan biru ini → langsung buka kamera → foto.\n\n${link}`;
       const ok = await copyToClipboard(teks);
       if (ok) { setCopiedLeg(`${i}-${roleKey}`); setTimeout(() => setCopiedLeg(null), 2200); }
     } catch (e) {
@@ -9964,7 +9962,7 @@ function PetugasTaskTab({ tripId, headers }) {
   const linkOf = (tk) => `${window.location.origin}/task/${tk}`;
   const salin = async (tk) => { try { await navigator.clipboard.writeText(linkOf(tk)); setCopied(tk); setTimeout(() => setCopied(""), 1600); } catch {} };
   const waShare = (t) => {
-    const txt = `Halo ${t.petugas_nama || "Petugas"} 👋\n\nTugas foto ${t.jenis || ""} dari *PT Alyssa Auto Logistik* (resmi & aman).\nNanti tolong foto kendaraannya ya Pak 🙏\n📷 Pencet tulisan biru ini → langsung buka kamera → foto:\n${linkOf(t.token)}\n\nResmi & aman dari kantor. Semangat ya Pak! 💪🙏`;
+    const txt = `Nanti tolong foto kendaraannya ya Pak 🙏\nSaya kirimkan KAMERA di bawah ini. Bapak tinggal:\n📷 Pencet tulisan biru ini → langsung buka kamera → foto.\n\n${linkOf(t.token)}`;
     const hp = (t.petugas_hp || "").replace(/\D/g, "").replace(/^0/, "62");
     window.open(hp ? `https://wa.me/${hp}?text=${encodeURIComponent(txt)}` : `https://wa.me/?text=${encodeURIComponent(txt)}`, "_blank");
   };
