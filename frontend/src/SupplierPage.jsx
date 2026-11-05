@@ -795,6 +795,56 @@ export default function SupplierPage() {
     finally { setJobSaving(false); }
   };
 
+  /* ═══ Upload Invoice Supplier (dibaca AI → cek → masuk Tagihan) ═══ */
+  const [invOpen, setInvOpen] = useState(false);
+  const [invBusy, setInvBusy] = useState(false);
+  const [invRows, setInvRows] = useState(null); // null = belum dibaca
+  const [invMeta, setInvMeta] = useState({});
+  const [invSaving, setInvSaving] = useState(false);
+  const openInv = () => {
+    if (!selected) { flash("Pilih supplier dulu"); return; }
+    setInvRows(null); setInvMeta({}); resetProjPicker(); setInvOpen(true);
+  };
+  const readInvoiceFile = async (file) => {
+    if (!file || !selected) return;
+    setInvBusy(true); setInvRows(null);
+    try {
+      const fd = new FormData(); fd.append("file", file);
+      const r = await axios.post(`${API}/admin/suppliers/${selected.id}/parse-invoice`, fd, { headers, timeout: 150000 });
+      const rows = (r.data?.rows || []).map((x, i) => ({ ...x, _k: i, pilih: !x.duplikat, total_harga: String(x.total_harga || "") }));
+      setInvRows(rows); setInvMeta({ no_invoice: r.data?.no_invoice, tanggal_invoice: r.data?.tanggal_invoice, total_invoice: r.data?.total_invoice });
+      if (!rows.length) flash("Tidak ada unit terbaca di invoice ini");
+    } catch (e) { flash(e?.response?.data?.detail || "Gagal membaca invoice"); }
+    finally { setInvBusy(false); }
+  };
+  const updInv = (k, patch) => setInvRows((rs) => rs.map((x) => (x._k === k ? { ...x, ...patch } : x)));
+  const invPicked = (invRows || []).filter((x) => x.pilih);
+  const invSum = invPicked.reduce((a, x) => a + pNum(x.total_harga), 0);
+  const saveInvoiceRows = async () => {
+    if (!selected || !invPicked.length) return;
+    setInvSaving(true);
+    let ok = 0;
+    try {
+      const projectId = await resolveTargetProjectId();
+      const tgl = invMeta.tanggal_invoice || todayStr();
+      const tag = jobTag.trim() || (invMeta.no_invoice ? `Invoice ${invMeta.no_invoice}` : "");
+      for (const x of invPicked) {
+        await axios.post(`${API}/admin/suppliers/${selected.id}/jobs`, {
+          vehicle_type: (x.vehicle_type || "").trim(), nopol: (x.nopol || "").trim(), no_rangka: (x.no_rangka || "").trim(),
+          asal_kota: (x.asal_kota || "").trim(), tujuan_kota: (x.tujuan_kota || "").trim(),
+          total_harga: pNum(x.total_harga), catatan: (x.catatan || "").trim(), tanggal: x.tanggal || tgl,
+          project_id: projectId, tag,
+        }, { headers });
+        ok += 1;
+      }
+      setInvOpen(false); setInvRows(null); resetProjPicker();
+      await reloadSelected(selected.id); setListRefreshTick((t) => t + 1); flash(`${ok} unit masuk ke Tagihan`);
+    } catch (e) {
+      if (!e?.__projErr) flash(`${e?.response?.data?.detail || "Gagal menyimpan"}${ok ? ` (${ok} unit sudah masuk)` : ""}`);
+      if (ok) { await reloadSelected(selected.id); setListRefreshTick((t) => t + 1); }
+    } finally { setInvSaving(false); }
+  };
+
   /* ═══ Tarik unit dari Order (modal) ═══ */
   const [tarikOpen, setTarikOpen] = useState(false);
   const [tarikOrders, setTarikOrders] = useState([]);
@@ -1385,6 +1435,7 @@ export default function SupplierPage() {
               <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
                 <button style={{ ...BTN, flex: 1, minWidth: 150 }} onClick={openTarik} data-testid="sup-tarik-open">+ Tarik Unit dari PO</button>
                 <button style={{ ...BTN_GHOST, flex: 1, minWidth: 130 }} onClick={() => { setJobForm(blankJobForm); resetProjPicker(); setManualOpen(true); }} data-testid="sup-manual-open">+ Tambah Manual</button>
+                <button style={{ ...BTN_GHOST, flex: "1 1 100%", color: C.gold, borderColor: C.gold }} onClick={openInv} data-testid="sup-inv-open">📄 Upload Invoice Supplier (otomatis)</button>
               </div>
               <div style={{ display: "flex", gap: 6, marginBottom: 12, overflowX: "auto" }}>
                 {[["semua", "Semua"], ["belum", "Belum Bayar"], ["sebagian", "Sebagian"], ["lunas", "Lunas"]].map(([k, t]) => (
@@ -1858,6 +1909,56 @@ export default function SupplierPage() {
               style={{ width: "100%", padding: "11px", borderRadius: 10, border: `1px solid ${C.line}`, background: "none", color: C.mute, fontWeight: 700, cursor: "pointer" }}>Batal</button>
           </div>
         </div>
+      )}
+
+      {/* ── Modal: Upload Invoice Supplier ── */}
+      {invOpen && (
+        <Modal title="Upload Invoice Supplier" onClose={() => { if (!invSaving) setInvOpen(false); }}
+          foot={<><button style={BTN_GHOST} onClick={() => setInvOpen(false)} disabled={invSaving}>Batal</button>
+            {invRows && invRows.length > 0 && <button style={BTN} onClick={saveInvoiceRows} disabled={invSaving || !invPicked.length} data-testid="sup-inv-save">{invSaving ? "Menyimpan…" : `Masukkan ${invPicked.length} Unit ke Tagihan`}</button>}</>}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <label style={{ ...BTN, display: "block", textAlign: "center", cursor: invBusy ? "wait" : "pointer", opacity: invBusy ? 0.6 : 1 }}>
+              {invBusy ? "⏳ Membaca invoice… (bisa 10–40 detik)" : (invRows ? "📄 Ganti File Invoice" : "📄 Pilih PDF / Foto Invoice")}
+              <input type="file" accept="application/pdf,image/*" style={{ display: "none" }} disabled={invBusy}
+                onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; readInvoiceFile(f); }} data-testid="sup-inv-file" />
+            </label>
+            {!invRows && !invBusy && <div style={{ fontSize: 12, color: C.mute }}>Upload invoice dari supplier (PDF atau foto). Unit, rute, dan harga dibaca otomatis, lalu Anda cek dulu sebelum masuk ke Tagihan. Belum ada yang tersimpan sampai Anda tekan tombol Masukkan.</div>}
+            {invRows && invRows.length > 0 && (<>
+              {(invMeta.no_invoice || invMeta.total_invoice > 0) && (
+                <div style={{ fontSize: 12, color: C.mute }}>
+                  {invMeta.no_invoice ? <>No. invoice: <b style={{ color: C.ink }}>{invMeta.no_invoice}</b> · </> : null}
+                  {invMeta.total_invoice > 0 ? <>Total di invoice: <b style={{ color: C.ink }}>{fRp(invMeta.total_invoice)}</b> · </> : null}
+                  Total terpilih: <b style={{ color: invMeta.total_invoice > 0 && invSum !== invMeta.total_invoice ? C.red : C.green }}>{fRp(invSum)}</b>
+                  {invMeta.total_invoice > 0 && invSum !== invMeta.total_invoice ? " ⚠ beda dengan total invoice, cek lagi" : ""}
+                </div>
+              )}
+              {renderProjPicker()}
+              {renderTagInput()}
+              {invRows.map((x) => (
+                <div key={x._k} style={{ border: `1px solid ${x.pilih ? C.line : C.inpLine}`, borderRadius: 10, padding: 10, opacity: x.pilih ? 1 : 0.55 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
+                    <input type="checkbox" checked={!!x.pilih} onChange={(e) => updInv(x._k, { pilih: e.target.checked })} />
+                    <span>{x.nopol || x.no_rangka || "(tanpa plat)"}</span>
+                    {x.duplikat && <span style={{ fontSize: 11, color: C.gold, fontWeight: 700 }}>sudah ada di tagihan</span>}
+                  </label>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    <input style={I} placeholder="Tipe kendaraan" value={x.vehicle_type} onChange={(e) => updInv(x._k, { vehicle_type: e.target.value })} />
+                    <input style={I} placeholder="No. Polisi" value={x.nopol} onChange={(e) => updInv(x._k, { nopol: e.target.value.toUpperCase() })} />
+                    <input style={I} placeholder="Kota asal" value={x.asal_kota} onChange={(e) => updInv(x._k, { asal_kota: e.target.value })} />
+                    <input style={I} placeholder="Kota tujuan" value={x.tujuan_kota} onChange={(e) => updInv(x._k, { tujuan_kota: e.target.value })} />
+                  </div>
+                  <input style={{ ...I, marginTop: 8 }} placeholder="No. Rangka" value={x.no_rangka} onChange={(e) => updInv(x._k, { no_rangka: e.target.value.toUpperCase() })} />
+                  <div style={{ display: "flex", alignItems: "center", border: `1px solid ${C.inpLine}`, borderRadius: 10, background: C.inpBg, overflow: "hidden", marginTop: 8 }}>
+                    <span style={{ padding: "0 12px", fontWeight: 800, color: C.mute }}>Rp</span>
+                    <input inputMode="numeric" value={fmtRpInput(x.total_harga)} onChange={(e) => updInv(x._k, { total_harga: onlyDigits(e.target.value) })} placeholder="Total harga" style={{ ...I, border: "none", background: "transparent", flex: 1 }} />
+                  </div>
+                  {x.catatan && <div style={{ fontSize: 11, color: C.mute, marginTop: 6 }}>{x.catatan}</div>}
+                  {x.pilih && pNum(x.total_harga) <= 0 && <div style={{ fontSize: 11, color: C.gold, marginTop: 6 }}>Harga 0 → masuk sebagai Draft (harga belum lengkap).</div>}
+                </div>
+              ))}
+            </>)}
+          </div>
+        </Modal>
       )}
 
       {/* ── Modal: Tambah Manual ── */}
