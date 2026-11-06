@@ -7040,6 +7040,46 @@ def _parse_invoice_ai(data: bytes, media_type: str) -> dict:
         raise HTTPException(422, "Invoice tidak terbaca. Coba foto lebih jelas/terang, atau upload PDF aslinya.")
 
 
+@api_router.get("/admin/ai-check", dependencies=[Depends(require_admin_pin)])
+async def ai_check():
+    """Tes koneksi AI untuk fitur baca invoice. Tidak menampilkan key (hanya 7 karakter awal & panjang)."""
+    key = ANTHROPIC_API_KEY
+    out = {"ada_key": bool(key), "awalan": key[:7] if key else "", "panjang": len(key), "model": ANTHROPIC_MODEL,
+           "format_ok": key.startswith("sk-ant-")}
+    if not key:
+        out["pesan"] = "ANTHROPIC_API_KEY belum terbaca oleh server. Pastikan variable ada di service backend (fleetlocation) dan deploy ulang sudah ACTIVE."
+        return out
+    if not out["format_ok"]:
+        out["pesan"] = "Key tidak diawali 'sk-ant-'. Itu bukan key Anthropic (mungkin dari layanan lain). Buat key di platform.claude.com/settings/keys."
+        return out
+
+    def _call():
+        return _requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+            json={"model": ANTHROPIC_MODEL, "max_tokens": 8, "messages": [{"role": "user", "content": "ping"}]},
+            timeout=30,
+        )
+    try:
+        r = await asyncio.to_thread(_call)
+    except Exception as e:
+        out["status"] = 0
+        out["pesan"] = f"Tidak bisa menghubungi Anthropic dari server: {e}"
+        return out
+    out["status"] = r.status_code
+    if r.status_code == 200:
+        out["pesan"] = "OK. Key valid dan saldo cukup. Baca invoice siap dipakai."
+    else:
+        try:
+            detail = (r.json().get("error") or {}).get("message", "")
+        except Exception:
+            detail = ""
+        hint = {401: "Key ditolak (salah/dihapus/salah salin).", 402: "Saldo tidak cukup.", 403: "Key tidak punya izin.",
+                404: "Nama model tidak dikenali.", 429: "Terlalu banyak permintaan, coba lagi sebentar."}.get(r.status_code, "")
+        out["pesan"] = f"Ditolak Anthropic (kode {r.status_code}). {hint} {detail}".strip()
+    return out
+
+
 @api_router.post("/admin/suppliers/{supplier_id}/parse-invoice", dependencies=[Depends(require_admin_pin)])
 async def parse_supplier_invoice(supplier_id: str, file: UploadFile = File(...)):
     """Baca invoice supplier (PDF/foto) → daftar unit untuk DICEK dulu di layar.
