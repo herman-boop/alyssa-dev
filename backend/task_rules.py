@@ -1,7 +1,7 @@
 """Aturan tugas petugas yang "simple" (saat ini: Driver Tujuan).
 
 Driver Tujuan nggak dijejelin banyak foto: terima mobil = 1 jepret (foto + checkpoint "Unit diterima"),
-lalu 1 checkpoint per hari jam 08.00-16.00 supaya titik di peta akurat. Batas hari (mis. Makassar-Manado
+lalu maksimal 2 checkpoint per hari jam 08.00-16.00 supaya titik di peta akurat. Batas hari (mis. Makassar-Manado
 4 hari) dihitung sejak mobil diterima. Modul ini murni (tanpa DB) supaya gampang dites.
 """
 import os
@@ -11,6 +11,7 @@ JENIS_TERIMA = "Unit diterima"
 JENIS_HARIAN = "Dalam perjalanan"
 CP_JAM_MULAI = 8
 CP_JAM_AKHIR = 16                      # sampai 15:59 (jam < 16)
+CP_MAKS_HARIAN = 2                     # maksimal checkpoint harian per hari (tanggal lokal HP driver)
 TZ_OFFSET_OK = {420, 480, 540}         # WIB / WITA / WIT (menit dari UTC)
 TZ_DEFAULT = 420
 
@@ -51,9 +52,9 @@ def cek_checkpoint(jenis, now, offset_min, checkpoints, has_gps, has_foto):
         lt = local(now, offset_min)
         if not (CP_JAM_MULAI <= lt.hour < CP_JAM_AKHIR):
             return 403, f"Checkpoint hanya bisa jam {CP_JAM_MULAI:02d}.00-{CP_JAM_AKHIR:02d}.00."
-        for c in cps:
-            if c.get("jenis") == JENIS_HARIAN and c.get("ts") and local(c["ts"], offset_min).date() == lt.date():
-                return 409, f"Checkpoint hari ini sudah terkirim. Lanjut besok jam {CP_JAM_MULAI:02d}.00."
+        hari_ini = sum(1 for c in cps if c.get("jenis") == JENIS_HARIAN and c.get("ts") and local(c["ts"], offset_min).date() == lt.date())
+        if hari_ini >= CP_MAKS_HARIAN:
+            return 409, f"Checkpoint hari ini sudah terkirim {CP_MAKS_HARIAN}x. Lanjut besok jam {CP_JAM_MULAI:02d}.00."
         return None
     return 403, "Jenis checkpoint di luar tugas Anda"
 

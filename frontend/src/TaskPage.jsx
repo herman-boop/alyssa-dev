@@ -273,14 +273,16 @@ export default function TaskPage() {
   const baseTabs = task.tabs && task.tabs.length ? task.tabs : ["foto", "checkpoint", "dokumen"];
   const ORDER = ["beranda", "checkpoint", "foto", "dokumen", "scan", "info_kapal"];
   const tabs = ["beranda", ...baseTabs].sort((a, b) => ORDER.indexOf(a) - ORDER.indexOf(b));
-  // ── Driver Tujuan (simple): terima mobil 1 jepret + 1 checkpoint/hari jam 08-16 ──
+  // ── Driver Tujuan (simple): terima mobil 1 jepret + maks 2 checkpoint/hari jam 08-16 ──
   const simple = !!task.simple;
   const cpDef = task.cp_harian || {};
   const cpsAll = task.checkpoints || [];
   const sudahTerima = simple && cpsAll.some((c) => c.jenis === cpDef.jenis_terima);
   const harianList = simple ? cpsAll.filter((c) => c.jenis === cpDef.jenis) : [];
   const nowD = new Date();
-  const sudahHariIni = harianList.some((c) => c.ts && new Date(c.ts).toDateString() === nowD.toDateString());
+  const cpMaks = Number(cpDef.maks) > 0 ? Number(cpDef.maks) : 1;
+  const cpHariIni = harianList.filter((c) => c.ts && new Date(c.ts).toDateString() === nowD.toDateString()).length;
+  const sudahHariIni = cpHariIni >= cpMaks;
   const dalamJam = nowD.getHours() >= (cpDef.jam_mulai ?? 8) && nowD.getHours() < (cpDef.jam_akhir ?? 16);
   const jamTxt = `${String(cpDef.jam_mulai ?? 8).padStart(2, "0")}.00–${String(cpDef.jam_akhir ?? 16).padStart(2, "0")}.00`;
   const fmtTgl = (iso) => { try { return new Date(iso + "T12:00:00").toLocaleDateString("id-ID", { weekday: "short", day: "2-digit", month: "short", year: "numeric" }); } catch { return iso; } };
@@ -321,7 +323,7 @@ export default function TaskPage() {
   // Aturan: minimal 1 checkpoint tiap hari perjalanan. Kalau hari ini sudah terkirim, tombol utama istirahat sampai besok.
   const sudahCpHariIni = cpsAll.some((c) => c.ts && new Date(c.ts).toDateString() === nowD.toDateString());
   const nextStep = (simple && sudahTerima && !sudahHariIni && dalamJam && !selesai)
-    ? { key: "harian", tab: "checkpoint", label: "Checkpoint hari ini" }
+    ? { key: "harian", tab: "checkpoint", label: cpHariIni > 0 ? `Checkpoint ke-${cpHariIni + 1} hari ini` : "Checkpoint hari ini" }
     : (steps.find((x) => !stepDone(x)) || (bisaTambahCp ? { key: "tambah-cp", tab: "checkpoint", label: "Tambah checkpoint", hariIni: sudahCpHariIni } : undefined));
   const unit0 = (task.units || [])[0] || {};
   const bigBtn = { width: "100%", padding: "19px", borderRadius: 18, border: "none", background: C.blue, color: "#fff", fontWeight: 800, fontSize: 16, cursor: "pointer", minHeight: 56, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: "0 10px 26px rgba(37,99,235,0.4)" };
@@ -401,7 +403,7 @@ export default function TaskPage() {
             {nextStep && nextStep.key === "tambah-cp" && (
               <div style={{ fontSize: 12.5, color: C.mute, fontWeight: 600, marginTop: 14, lineHeight: 1.5, textAlign: "center" }} data-testid="task-hint-cp">
                 {nextStep.hariIni
-                  ? "Checkpoint hari ini sudah terkirim. Besok tambah lagi (1x per hari) sampai tiba, lalu tekan \"Tandai Tugas Selesai\"."
+                  ? "Checkpoint hari ini sudah terkirim. Besok tambah lagi sampai tiba, lalu tekan \"Tandai Tugas Selesai\"."
                   : "Perjalanan belum selesai. Kirim 1 checkpoint hari ini, dan ulangi tiap hari sampai tiba, lalu tekan \"Tandai Tugas Selesai\"."}
               </div>
             )}
@@ -483,8 +485,8 @@ export default function TaskPage() {
                   <button style={{ ...bigBtn, flexDirection: "column", gap: 4, padding: "22px 16px", minHeight: 104, fontSize: 19, ...((sudahHariIni || !dalamJam || busy) ? { background: C.gray, color: C.mute, boxShadow: "none", cursor: "default" } : {}) }}
                     disabled={busy || sudahHariIni || !dalamJam} onClick={() => startShot(cpDef.jenis)} data-testid="btn-checkpoint-harian">
                     <span style={{ fontSize: 30, lineHeight: 1 }}>{sudahHariIni ? "✓" : "📍"}</span>
-                    <span>{busy ? "Mengirim..." : sudahHariIni ? "Checkpoint hari ini sudah terkirim" : !dalamJam ? `Checkpoint dibuka jam ${jamTxt}` : "CHECKPOINT HARI INI"}</span>
-                    {!busy && <span style={{ fontSize: 12.5, fontWeight: 700, opacity: 0.9 }}>{sudahHariIni ? `Lanjut besok jam ${String(cpDef.jam_mulai ?? 8).padStart(2, "0")}.00` : !dalamJam ? "1x per hari. Foto mobil, lokasi otomatis" : `1x per hari, jam ${jamTxt}`}</span>}
+                    <span>{busy ? "Mengirim..." : sudahHariIni ? (cpMaks > 1 ? `Checkpoint hari ini sudah terkirim ${cpHariIni}/${cpMaks}` : "Checkpoint hari ini sudah terkirim") : !dalamJam ? `Checkpoint dibuka jam ${jamTxt}` : cpHariIni > 0 ? `CHECKPOINT KE-${cpHariIni + 1} HARI INI` : "CHECKPOINT HARI INI"}</span>
+                    {!busy && <span style={{ fontSize: 12.5, fontWeight: 700, opacity: 0.9 }}>{sudahHariIni ? `Lanjut besok jam ${String(cpDef.jam_mulai ?? 8).padStart(2, "0")}.00` : !dalamJam ? `Maks ${cpMaks}x per hari. Foto mobil, lokasi otomatis` : `${cpHariIni}/${cpMaks} hari ini, jam ${jamTxt}`}</span>}
                   </button>
                 )}
               </>
