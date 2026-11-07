@@ -7296,6 +7296,27 @@ async def _finance_for(supplier_id: str, cutoff: Optional[str] = None):
     return doc, jobs, rk, fin
 
 
+@api_router.get("/admin/finance-audit", dependencies=[Depends(require_admin_pin)])
+async def finance_audit(limit: int = 500):
+    """READ-ONLY. Untuk SEMUA supplier: bandingkan laporan Finance baru dengan angka existing (get_supplier) dan periksa
+    invarian (tidak ada pembayaran hilang/ganda, alokasi <= transfer, biaya admin terpisah). Kosong = semua cocok."""
+    hasil, n, bad = [], 0, 0
+    async for doc in db.supplier_profiles.find({}, {"_id": 0}).limit(max(1, min(int(limit or 500), 2000))):
+        n += 1
+        try:
+            ex = await get_supplier(doc["id"])
+            _doc, jobs, rk, fin = await _finance_for(doc["id"], None)
+            viol = SF.audit(doc.get("jobs") or [], doc.get("rekon_payments") or [], jobs,
+                            {"grand_total_terbayar": ex.get("grand_total_terbayar"), "grand_sisa": ex.get("grand_sisa"),
+                             "total_transferred": ex.get("total_transferred")}, fin)
+        except Exception as e:   # satu supplier bermasalah tidak boleh menghentikan audit
+            viol = [f"gagal dihitung: {e}"]
+        if viol:
+            bad += 1
+            hasil.append({"supplier_id": doc.get("id"), "nama": doc.get("nama"), "pelanggaran": viol})
+    return {"diperiksa": n, "bermasalah": bad, "ok": bad == 0, "detail": hasil}
+
+
 @api_router.get("/admin/suppliers/{supplier_id}/finance", dependencies=[Depends(require_admin_pin)])
 async def supplier_finance(supplier_id: str, cutoff: Optional[str] = None):
     """READ-ONLY. Rekap per Nomor Invoice Supplier + riwayat transfer & alokasi + rekonsiliasi saldo."""

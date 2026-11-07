@@ -278,3 +278,39 @@ def pytest_importorskip(name):
         return importlib.import_module(name)
     except ImportError:
         pytest.skip(f"{name} tidak tersedia")
+
+
+def test_pdf_tabel_muat_lebar_halaman_tanpa_dikecilkan_otomatis():
+    """Tabel tidak boleh lebih lebar dari area cetak: kalau lebih lebar, Chromium mengecilkan SELURUH halaman
+    (teks jadi kecil). Diuji dengan nama kota & nomor invoice sangat panjang."""
+    import asyncio, os
+    pw = pytest_importorskip("playwright.async_api")
+    exe = "/opt/pw-browsers/chromium"
+    if not os.path.exists(exe):
+        import pytest
+        pytest.skip("chromium tidak tersedia")
+    kota = ["Surabaya Tanjung Perak", "Banjarmasin Trisakti", "Makassar Hasanuddin", "Balikpapan Kariangau"]
+    jobs, rps = [], []
+    for i in range(40):
+        jobs.append(job(f"j{i}", 2_345_678_901 if i % 5 == 0 else 2_300_000, f"INV-{1000 + i}/PT-CONTOH-BAHARI-LOGISTIK-NUSANTARA/XI/2026", tgl="2026-10-%02d" % (1 + i % 28),
+                        alloc=2_000_000, rute=(kota[i % 4], kota[(i + 1) % 4])))
+    for r in range(12):
+        rps.append(rk(f"r{r}", 70_000_000, "2026-10-20", [(f"j{(r * 3 + k) % 40}", 2_000_000) for k in range(10)], ref=f"BCA-REF-PANJANG-SEKALI-{r:06d}"))
+    fin = sf.build_finance(jobs, rps)
+    html = sf.render_pdf_html("PT Supplier Dengan Nama Sangat Panjang Sekali Untuk Menguji", "RPS/AAL/TEST", fin,
+                              sf.ringkasan_periode(jobs, rps, "2026-10-01", "2026-10-31"))
+
+    async def ukur():
+        async with pw.async_playwright() as p:
+            b = await p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+            pg = await b.new_page(viewport={"width": 689, "height": 1000})      # 689px = lebar area cetak A4 dengan margin 14mm
+            await pg.set_content(html); await pg.emulate_media(media="print")
+            r = await pg.evaluate("""() => ({
+                tabel: [...document.querySelectorAll('table')].map(t => [Math.round(t.getBoundingClientRect().width), t.parentElement.clientWidth]),
+                angka_terpotong: [...document.querySelectorAll('table.fx td,table.fx th')].filter(c => c.scrollWidth > c.clientWidth + 1).map(c => c.textContent.trim().slice(0, 30))})""")
+            await b.close()
+            return r
+    hasil = asyncio.run(ukur())
+    for w, cw in hasil["tabel"]:
+        assert w <= cw + 1, f"tabel {w}px lebih lebar dari area cetak {cw}px (halaman akan dikecilkan)"
+    assert hasil["angka_terpotong"] == [], f"isi sel meluber dari selnya: {hasil['angka_terpotong'][:5]}"

@@ -42,7 +42,8 @@ const SF_CSS = `
 .sf-btn.pri{background:var(--navy);border-color:var(--navy);color:#fff}
 .sf-btn[disabled]{opacity:.5;cursor:default}
 .sf-kpis{display:grid;grid-template-columns:repeat(5,1fr);background:#fff;border:1px solid var(--ln);border-radius:10px}
-.sf-kpi{padding:14px 16px;border-right:1px solid var(--ln)}.sf-kpi:last-child{border-right:0}
+.sf-kpi{padding:14px 16px;border-right:1px solid var(--ln);display:grid;grid-template-columns:1fr;grid-template-areas:"l" "v" "n";align-content:start}.sf-kpi:last-child{border-right:0}
+.sf-kpi .l{grid-area:l}.sf-kpi .v{grid-area:v}.sf-kpi .n{grid-area:n}
 .sf-kpi .l{font-size:12.5px;color:var(--mut);font-weight:500}
 .sf-kpi .v{font-size:19px;font-weight:700;margin-top:4px;color:var(--navy);font-variant-numeric:tabular-nums;white-space:nowrap}
 .sf-kpi .v.red{color:var(--red)}.sf-kpi .v.ok{color:var(--ok)}.sf-kpi .v.gray{color:var(--mut);font-size:15px}
@@ -68,6 +69,8 @@ const SF_CSS = `
 .sf-chip.navy{color:var(--navy);background:#fff;border-color:#B8C4DA}.sf-chip.gray{color:var(--mut);background:var(--hd)}
 .sf-red{color:var(--red)}.sf-ok{color:var(--ok)}
 .sf-note{font-size:12.5px;color:var(--mut);margin-top:8px}
+.sf-kv{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:2px 12px;padding:10px 0;border-bottom:1px solid var(--ln)}.sf-kv:last-child{border-bottom:0}
+.sf-kv .k{flex:1 1 150px;min-width:0}.sf-kv .v{margin-left:auto;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 .sf-list{background:#fff;border:1px solid var(--ln);border-radius:10px}
 .sf-tx{padding:12px 14px;border-bottom:1px solid var(--ln)}.sf-tx:last-child{border-bottom:0}
 .sf-tx .r1{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
@@ -85,7 +88,15 @@ const SF_CSS = `
 .sf-g2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .sf-hit{display:flex;gap:10px;align-items:flex-start;padding:10px 4px;border-bottom:1px solid var(--ln)}
 .sf-warn{background:var(--redbg);border:1px solid #F5C2BC;color:var(--red);border-radius:8px;padding:8px 10px;font-size:13px;margin-bottom:10px}
-@media (max-width:700px){.sf-kpis{grid-template-columns:1fr 1fr}.sf-kpi{border-bottom:1px solid var(--ln)}.sf-kpi:nth-child(2n){border-right:0}.sf-kpi:nth-child(5){grid-column:1/-1;border-bottom:0;border-right:0}.sf-kpi .v{font-size:18px}}
+.sf-st-m{display:none}
+@media (max-width:700px){
+.sf-kpis{grid-template-columns:1fr}
+.sf-kpi{border-right:0;border-bottom:1px solid var(--ln);grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"l v" "n v";column-gap:10px;align-items:center;padding:12px 12px}
+.sf-kpi .l,.sf-kpi .n{overflow-wrap:anywhere;min-width:0}
+.sf-kpi:last-child{border-bottom:0}.sf-kpi .v{font-size:18px;margin-top:0;text-align:right}.sf-kpi .n{margin-top:0}
+.sf-root th.sf-sticky,.sf-root td.sf-sticky{width:136px;min-width:136px;max-width:136px}
+.sf-col-st{display:none}.sf-st-m{display:block;margin-top:4px}
+}
 `;
 
 const Chip = ({ m }) => <span className={`sf-chip ${m[1]}`}>{m[0]}</span>;
@@ -184,11 +195,11 @@ export default function SupplierFinance({ supplier, adminPin, onClose, flash, on
 
           <div className="sf-sec">Rekonsiliasi Saldo <span>per cut-off {tgl(R.cutoff || cut)}</span></div>
           <div className="sf-card" data-testid="sf-rekon">
-            <table style={{ border: 0 }}><tbody>
-              <tr><td>Saldo menurut Alyssa</td><td className="num"><b>{R.saldo_alyssa == null ? "-" : rp(R.saldo_alyssa)}</b></td></tr>
-              <tr><td>Saldo menurut supplier</td><td className="num"><b>{R.saldo_supplier == null ? "Belum diinput" : rp(R.saldo_supplier)}</b></td></tr>
-              <tr><td>Selisih (Alyssa − supplier)</td><td className="num">{R.selisih == null ? <Chip m={["Belum Direkonsiliasi", "gray"]} /> : <b className={R.selisih ? "sf-red" : "sf-ok"}>{rp(R.selisih)}</b>}</td></tr>
-            </tbody></table>
+            <div data-testid="sf-rekon-rows">
+              <div className="sf-kv"><span className="k">Saldo menurut Alyssa</span><span className="v"><b>{R.saldo_alyssa == null ? "-" : rp(R.saldo_alyssa)}</b></span></div>
+              <div className="sf-kv"><span className="k">Saldo menurut supplier</span><span className="v"><b>{R.saldo_supplier == null ? "Belum diinput" : rp(R.saldo_supplier)}</b></span></div>
+              <div className="sf-kv"><span className="k">Selisih (Alyssa − supplier)</span><span className="v">{R.selisih == null ? <Chip m={["Belum Direkonsiliasi", "gray"]} /> : <b className={R.selisih ? "sf-red" : "sf-ok"}>{rp(R.selisih)}</b>}</span></div>
+            </div>
             <div style={{ marginTop: 10 }}><button className="sf-btn" onClick={() => setSaldoOpen(true)} data-testid="sf-saldo-open">{R.saldo_supplier == null ? "Input saldo supplier" : "Perbarui saldo supplier"}</button></div>
             {R.status === "selisih" && (<>
               <div className="sf-note">{R.arah}</div>
@@ -203,26 +214,26 @@ export default function SupplierFinance({ supplier, adminPin, onClose, flash, on
 
           <div className="sf-sec">Tagihan per Invoice Supplier <span>{data.invoices.length} invoice · geser tabel →</span></div>
           <div className="sf-tw" data-testid="sf-invoices"><table style={{ minWidth: 800 }}>
-            <thead><tr><th className="sf-sticky">No. Invoice Supplier</th><th>Tanggal</th><th>Unit / Rute</th><th className="num">Tagihan</th><th className="num">Terbayar</th><th className="num">Sisa</th><th>Status</th></tr></thead>
+            <thead><tr><th className="sf-sticky">No. Invoice Supplier</th><th>Tanggal</th><th>Unit / Rute</th><th className="num">Tagihan</th><th className="num">Terbayar</th><th className="num">Sisa</th><th className="sf-col-st">Status</th></tr></thead>
             <tbody>
               {data.invoices.map((i) => { const [a, b] = split(i.no); return (
                 <tr key={i.key}>
-                  <td className="sf-sticky sf-inv">{a}{b ? <div className="sf-sub" style={{ fontWeight: 400 }}>{b}</div> : null}</td>
+                  <td className="sf-sticky sf-inv">{a}{b ? <div className="sf-sub" style={{ fontWeight: 400 }}>{b}</div> : null}<span className="sf-st-m"><Chip m={INV_ST[i.status] || [i.status, "gray"]} />{i.duplikat.length > 0 && <div className="sf-sub sf-red" style={{ fontWeight: 400 }}>Periksa nomor</div>}</span></td>
                   <td style={{ whiteSpace: "nowrap" }}>{tgl(i.tanggal)}</td>
                   <td style={{ whiteSpace: "nowrap" }}>{i.unit} unit<div className="sf-sub">{i.rute.slice(0, 2).join("; ")}{i.rute.length > 2 ? " …" : ""}</div></td>
                   <td className="num">{rp(i.tagihan)}</td><td className="num">{rp(i.terbayar)}</td>
                   <td className={`num ${i.status === "selisih" ? "sf-red" : ""}`}><b>{rp(i.sisa)}</b></td>
-                  <td><Chip m={INV_ST[i.status] || [i.status, "gray"]} />{i.duplikat.length > 0 && <div className="sf-sub sf-red">Periksa nomor: {i.duplikat.join("; ")}</div>}</td>
+                  <td className="sf-col-st"><Chip m={INV_ST[i.status] || [i.status, "gray"]} />{i.duplikat.length > 0 && <div className="sf-sub sf-red">Periksa nomor: {i.duplikat.join("; ")}</div>}</td>
                 </tr>); })}
               {data.perlu_dilengkapi.unit > 0 && (
                 <tr data-testid="sf-perlu">
-                  <td className="sf-sticky sf-inv sf-red">Tanpa nomor invoice</td><td>-</td><td>{data.perlu_dilengkapi.unit} unit</td>
+                  <td className="sf-sticky sf-inv sf-red">Tanpa nomor invoice<span className="sf-st-m"><button className="sf-chip red" style={{ cursor: "pointer", font: "inherit", fontSize: 12, fontWeight: 600 }} onClick={() => setLengkapi(true)} data-testid="sf-lengkapi-open-m">Perlu Dilengkapi</button></span></td><td>-</td><td>{data.perlu_dilengkapi.unit} unit</td>
                   <td className="num">{rp(data.perlu_dilengkapi.tagihan)}</td><td className="num">{rp(data.perlu_dilengkapi.terbayar)}</td><td className="num"><b>{rp(data.perlu_dilengkapi.sisa)}</b></td>
-                  <td><button className="sf-chip red" style={{ cursor: "pointer", font: "inherit", fontSize: 12.5, fontWeight: 600 }} onClick={() => setLengkapi(true)} data-testid="sf-lengkapi-open">Perlu Dilengkapi</button></td>
+                  <td className="sf-col-st"><button className="sf-chip red" style={{ cursor: "pointer", font: "inherit", fontSize: 12.5, fontWeight: 600 }} onClick={() => setLengkapi(true)} data-testid="sf-lengkapi-open">Perlu Dilengkapi</button></td>
                 </tr>)}
               {data.invoices.length === 0 && data.perlu_dilengkapi.unit === 0 && <tr><td colSpan="7" className="sf-sub">Belum ada tagihan.</td></tr>}
             </tbody>
-            <tfoot><tr><td className="sf-sticky">Total</td><td /><td /><td className="num">{rp(S.tagihan)}</td><td className="num">{rp(S.terbayar)}</td><td className="num">{rp(S.sisa)}</td><td /></tr></tfoot>
+            <tfoot><tr><td className="sf-sticky">Total</td><td /><td /><td className="num">{rp(S.tagihan)}</td><td className="num">{rp(S.terbayar)}</td><td className="num">{rp(S.sisa)}</td><td className="sf-col-st" /></tr></tfoot>
           </table></div>
           <div className="sf-note">Terbayar = pembayaran yang sudah dialokasikan ke invoice. Transfer yang belum dialokasikan ({rp(S.belum_dialokasikan)}) tidak mengurangi sisa tagihan sampai dialokasikan.{S.penyesuaian > 0 ? ` Penyesuaian kompensasi ${rp(S.penyesuaian)} sudah termasuk dalam Terbayar.` : ""}</div>
         </>)}

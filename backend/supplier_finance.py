@@ -206,14 +206,18 @@ def totals(invoices, perlu, transfers, penyesuaian):
         "belum_dialokasikan": sum(t["belum_dialokasikan"] for t in nyata),
         "penyesuaian": sum(p["nominal"] for p in penyesuaian),
         "biaya_admin_bank": sum(t["nominal"] for t in fee),
+        "biaya_admin_dialokasikan": sum(t["teralokasi"] for t in fee),   # harus 0; >0 = biaya admin ikut menutup tagihan supplier (anomali)
         "invoice_n": len(invoices), "unit_perlu_dilengkapi": perlu["unit"],
     }
 
 
 def anomali(transfers):
     """Daftar kejanggalan data (TIDAK memperbaiki apa pun): alokasi melebihi nilai transfer."""
-    return [{"key": t["key"], "tanggal": t["tanggal"], "nominal": t["nominal"], "teralokasi": t["teralokasi"],
-             "kelebihan": t["lebih_alokasi"]} for t in transfers if t["lebih_alokasi"] > 0]
+    out = [{"jenis": "alokasi_melebihi_transfer", "key": t["key"], "tanggal": t["tanggal"], "nominal": t["nominal"],
+            "teralokasi": t["teralokasi"], "kelebihan": t["lebih_alokasi"]} for t in transfers if t["lebih_alokasi"] > 0]
+    out += [{"jenis": "biaya_admin_dialokasikan_ke_tagihan", "key": t["key"], "tanggal": t["tanggal"], "nominal": t["nominal"],
+             "teralokasi": t["teralokasi"], "kelebihan": t["teralokasi"]} for t in transfers if t["jenis"] == "biaya_admin" and t["teralokasi"] > 0]
+    return out
 
 
 # ── Rekonsiliasi saldo (Alyssa vs supplier) ──────────────────────────────────
@@ -454,10 +458,11 @@ table{width:100%;border-collapse:collapse;font-size:8.6pt;border:.6pt solid #CBD
 th{font-size:8pt;padding:5px 6px;background:#F3F5F8;border-bottom:.6pt solid #CBD3E0;text-align:left;color:#3B4A63;font-weight:600}
 td{padding:5px 6px;border-bottom:.4pt solid #E3E8EF;vertical-align:top}
 .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-thead{display:table-header-group}tfoot{display:table-row-group}tr{break-inside:avoid}
+thead{display:table-header-group}tfoot{display:table-row-group}tr{break-inside:avoid}tr.tall{break-inside:auto}
 tfoot td{background:#F3F5F8;color:var(--navy);font-weight:700;border-top:.8pt solid var(--navy)}
 .sum td{font-size:9.5pt}.sum tr:last-child td{font-weight:700;color:var(--navy);border-top:.8pt solid var(--navy);background:#F3F5F8}
 .inv{font-weight:600;color:var(--navy);font-size:8.3pt}
+table.fx{table-layout:fixed}td,th{overflow-wrap:anywhere;padding-left:4pt;padding-right:4pt}.nw{white-space:nowrap}table.fx td.num,table.fx th.num{padding-right:5pt;font-size:8.2pt}table.fx th.num{white-space:normal}
 .sub{color:var(--mut);font-size:8pt}
 .st{font-weight:600;white-space:nowrap}.st.ok{color:var(--ok)}.st.red{color:var(--red)}.st.navy{color:var(--navy)}.st.gray{color:var(--mut)}
 .box{border:.6pt solid #CBD3E0;padding:6px 8px;font-size:9pt;margin-top:8px;break-inside:avoid}
@@ -475,6 +480,13 @@ def rp(n):
     n = _i(n)
     s = "Rp " + f"{abs(n):,}".replace(",", ".")
     return f"({s})" if n < 0 else s
+
+
+def ang(n):
+    """Angka rupiah tanpa awalan 'Rp' (satuan ada di judul kolom) — negatif dalam kurung."""
+    n = _i(n)
+    t = f"{abs(n):,}".replace(",", ".")
+    return f"({t})" if n < 0 else t
 
 
 def tgl_id(s, panjang=False):
@@ -503,18 +515,18 @@ def render_pdf_html(sup_nama, no_dok, fin, periode, logo_path=None):
         lab, cls = _ST.get(i["status"], (i["status"], "gray"))
         dup = f'<div class="sub red">Periksa nomor: {_e("; ".join(i["duplikat"]))}</div>' if i["duplikat"] else ""
         rows.append(f'<tr><td class="inv">{_e(i["no"])}{dup}</td><td style="white-space:nowrap">{tgl_id(i["tanggal"])}</td>'
-                    f'<td style="white-space:nowrap">{i["unit"]} unit<br><span class="sub">{_e("; ".join(i["rute"][:2]))}{" …" if len(i["rute"]) > 2 else ""}</span></td>'
-                    f'<td class="num">{rp(i["tagihan"])}</td><td class="num">{rp(i["terbayar"])}</td><td class="num">{rp(i["sisa"])}</td>'
+                    f'<td>{i["unit"]} unit<br><span class="sub">{_e("; ".join(i["rute"][:2]))}{" …" if len(i["rute"]) > 2 else ""}</span></td>'
+                    f'<td class="num">{ang(i["tagihan"])}</td><td class="num">{ang(i["terbayar"])}</td><td class="num">{ang(i["sisa"])}</td>'
                     f'<td><span class="st {cls}">{lab}</span></td></tr>')
     if perlu["unit"]:
-        rows.append(f'<tr><td class="inv red">Tanpa nomor invoice</td><td>-</td><td>{perlu["unit"]} unit</td><td class="num">{rp(perlu["tagihan"])}</td>'
-                    f'<td class="num">{rp(perlu["terbayar"])}</td><td class="num">{rp(perlu["sisa"])}</td><td><span class="st red">Perlu Dilengkapi</span></td></tr>')
+        rows.append(f'<tr><td class="inv red">Tanpa nomor invoice</td><td>-</td><td>{perlu["unit"]} unit</td><td class="num">{ang(perlu["tagihan"])}</td>'
+                    f'<td class="num">{ang(perlu["terbayar"])}</td><td class="num">{ang(perlu["sisa"])}</td><td><span class="st red">Perlu Dilengkapi</span></td></tr>')
     trows = []
     for x in trf:
-        al = "<br>".join(f'<span style="white-space:nowrap">{_e(a["invoice_no"] or "Tanpa nomor")} · {a["jumlah"]:,}</span>'.replace(",", ".") for a in x["alokasi"]) or "—"
-        trows.append(f'<tr><td style="white-space:nowrap">{tgl_id(x["tanggal"])}</td><td style="white-space:nowrap">{_e(x["ref"] or "-")}</td>'
-                     f'<td class="num">{rp(x["nominal"])}</td><td style="font-size:8pt">{al}</td><td class="num">{rp(x["teralokasi"])}</td>'
-                     f'<td class="num">{rp(x["belum_dialokasikan"])}</td><td><span class="st {_VR.get(x["verifikasi"], "gray")}">{_e(x["verifikasi_label"])}</span>'
+        al = "<br>".join(f'{_e(a["invoice_no"] or "Tanpa nomor")} · <span class="nw">{a["jumlah"]:,}</span>'.replace(",", ".") for a in x["alokasi"]) or "—"
+        trows.append(f'<tr{" class=tall" if len(x["alokasi"]) > 6 else ""}><td style="white-space:nowrap">{tgl_id(x["tanggal"])}</td><td>{_e(x["ref"] or "-")}</td>'
+                     f'<td class="num">{ang(x["nominal"])}</td><td style="font-size:8pt">{al}</td><td class="num">{ang(x["teralokasi"])}</td>'
+                     f'<td class="num">{ang(x["belum_dialokasikan"])}</td><td><span class="st {_VR.get(x["verifikasi"], "gray")}">{_e(x["verifikasi_label"])}</span>'
                      f'{"<br><span class=sub>Biaya admin bank</span>" if x["jenis"] == "biaya_admin" else ""}</td></tr>')
     if rek["status"] == "belum_direkonsiliasi":
         rekbox = ('<div class="box"><b>Status rekonsiliasi: Belum Direkonsiliasi.</b> Saldo menurut supplier belum diinput, '
@@ -542,16 +554,64 @@ def render_pdf_html(sup_nama, no_dok, fin, periode, logo_path=None):
 {f' Biaya admin bank {rp(t["biaya_admin_bank"])} tidak dialokasikan ke tagihan.' if t["biaya_admin_bank"] else ''}</div>
 {rekbox}
 <div class="h2">Tagihan per Nomor Invoice Supplier</div>
-<table><thead><tr><th>No. Invoice Supplier</th><th>Tanggal</th><th>Unit / Rute</th><th class="num">Tagihan</th><th class="num">Terbayar</th><th class="num">Sisa</th><th>Status</th></tr></thead><tbody>
+<table class="fx"><colgroup><col style="width:21%"><col style="width:11.5%"><col style="width:17.5%"><col style="width:13.5%"><col style="width:13.5%"><col style="width:13.5%"><col style="width:9.5%"></colgroup>
+<thead><tr><th>No. Invoice Supplier</th><th>Tanggal</th><th>Unit / Rute</th><th class="num">Tagihan (Rp)</th><th class="num">Terbayar (Rp)</th><th class="num">Sisa (Rp)</th><th>Status</th></tr></thead><tbody>
 {''.join(rows) or '<tr><td colspan="7" class="sub">Belum ada tagihan.</td></tr>'}</tbody>
-<tfoot><tr><td colspan="3">Total</td><td class="num">{rp(t["tagihan"])}</td><td class="num">{rp(t["terbayar"])}</td><td class="num">{rp(t["sisa"])}</td><td></td></tr></tfoot></table>
+<tfoot><tr><td colspan="3">Total</td><td class="num">{ang(t["tagihan"])}</td><td class="num">{ang(t["terbayar"])}</td><td class="num">{ang(t["sisa"])}</td><td></td></tr></tfoot></table>
 <div class="h2">Riwayat Transfer dan Alokasi Pembayaran</div>
-<table><thead><tr><th>Tgl Transfer</th><th>Ref. Bank</th><th class="num">Nominal Transfer</th><th>Dialokasikan ke Invoice</th><th class="num">Teralokasi</th><th class="num">Belum Alokasi</th><th>Verifikasi</th></tr></thead><tbody>
+<table class="fx"><colgroup><col style="width:12%"><col style="width:12%"><col style="width:12%"><col style="width:24%"><col style="width:12%"><col style="width:12%"><col style="width:16%"></colgroup>
+<thead><tr><th>Tgl Transfer</th><th>Ref. Bank</th><th class="num">Nominal Transfer (Rp)</th><th>Dialokasikan ke Invoice (Rp)</th><th class="num">Teralokasi (Rp)</th><th class="num">Belum Alokasi (Rp)</th><th>Verifikasi</th></tr></thead><tbody>
 {''.join(trows) or '<tr><td colspan="7" class="sub">Belum ada transfer.</td></tr>'}</tbody>
-<tfoot><tr><td colspan="2">Total</td><td class="num">{rp(t["transfer_aktual"])}</td><td></td><td class="num">{rp(t["teralokasi"])}</td><td class="num">{rp(t["belum_dialokasikan"])}</td><td></td></tr></tfoot></table>
+<tfoot><tr><td colspan="2">Total</td><td class="num">{ang(t["transfer_aktual"])}</td><td></td><td class="num">{ang(t["teralokasi"])}</td><td class="num">{ang(t["belum_dialokasikan"])}</td><td></td></tr></tfoot></table>
 <div class="foot"><b>Catatan:</b> Status transfer "diterima" hanya menunjukkan pembayaran berhasil; persetujuan alokasi oleh supplier tercatat pada kolom Verifikasi. Total transfer aktual dibedakan dari pembayaran yang dialokasikan ke invoice. Angka bersumber dari data aplikasi dan tidak diubah oleh tampilan.</div>
 </body>"""
 
 
 PDF_FOOTER = ('<div style="width:100%;font-size:8px;font-family:Inter,Arial,sans-serif;color:#5B6678;padding:0 14mm;display:flex;justify-content:space-between">'
               '<span>PT. Alyssa Auto Logistik · Ringkasan Supplier</span><span>Halaman <span class="pageNumber"></span> dari <span class="totalPages"></span></span></div>')
+
+
+# ── Audit invarian (READ-ONLY): bandingkan tampilan baru dengan angka existing ─────────────────────
+
+def audit(raw_jobs, rekon_payments, computed_jobs, existing, fin):
+    """Daftar pelanggaran invarian (kosong = semua cocok). `existing` = angka dari get_supplier yang sudah berjalan:
+       {grand_total_terbayar, grand_sisa, total_transferred}. Tidak memperbaiki apa pun."""
+    v = []
+    S = fin["ringkasan"]
+    raw_pay = [p for j in (raw_jobs or []) for p in (j.get("payments") or [])]
+    # 1) tidak ada pembayaran manual yang hilang / terhitung dua kali
+    manual_total = sum(_i(p.get("amount")) for p in raw_pay if _i(p.get("amount")) > 0)
+    manual_pos = sum(1 for p in raw_pay if _i(p.get("amount")) > 0)
+    tr_manual = [t for t in fin["transfers"] if t["jenis"] == "manual"]
+    nominal_manual = sum(t["nominal"] for t in tr_manual) + sum(p["nominal"] for p in fin["penyesuaian"])
+    if nominal_manual != manual_total:
+        v.append(f"pembayaran manual: laporan {nominal_manual} != data {manual_total}")
+    # 2) pembayaran rekon bank
+    rk_active = [p for p in (rekon_payments or []) if p.get("status") != "reversed"]
+    rk_nominal = sum(_i(p.get("amount")) for p in rk_active)
+    tr_rk = sum(t["nominal"] for t in fin["transfers"] if t["jenis"] in ("rekon", "biaya_admin"))
+    if rk_nominal != tr_rk:
+        v.append(f"pembayaran rekon: laporan {tr_rk} != data {rk_nominal}")
+    if len([t for t in fin["transfers"] if t["jenis"] in ("rekon", "biaya_admin")]) != len(rk_active):
+        v.append("jumlah transfer rekon berbeda dari data (hilang atau ganda)")
+    # 3) angka existing
+    if S["terbayar"] != _i(existing.get("grand_total_terbayar")):
+        v.append(f"terbayar: laporan {S['terbayar']} != existing {existing.get('grand_total_terbayar')}")
+    if S["sisa"] != _i(existing.get("grand_sisa")):
+        v.append(f"sisa: laporan {S['sisa']} != existing {existing.get('grand_sisa')}")
+    tot_uang = S["transfer_aktual"] + S["penyesuaian"] + S["biaya_admin_bank"]
+    if tot_uang != _i(existing.get("total_transferred")):
+        v.append(f"total uang keluar: laporan {tot_uang} != existing {existing.get('total_transferred')}")
+    # 4) alokasi tidak melebihi transfer, dan kekekalan
+    for t in fin["transfers"]:
+        if t["lebih_alokasi"] > 0:
+            v.append(f"alokasi melebihi transfer: {t['key']}")
+    if S["transfer_aktual"] != S["teralokasi"] + S["belum_dialokasikan"]:
+        v.append("transfer aktual != teralokasi + belum dialokasikan")
+    if S["biaya_admin_dialokasikan"] > 0:
+        v.append(f"biaya admin bank ikut dialokasikan ke tagihan: {S['biaya_admin_dialokasikan']}")
+    # 5) saldo cut-off jauh ke depan harus sama dengan sisa existing
+    sa = saldo_alyssa(computed_jobs, rekon_payments, "2999-12-31")
+    if sa != _i(existing.get("grand_sisa")):
+        v.append(f"saldo Alyssa (cut-off jauh) {sa} != sisa existing {existing.get('grand_sisa')}")
+    return v
