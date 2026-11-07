@@ -8,6 +8,7 @@ import { VEHICLE_TYPE_LIST, useVehicleTypes, hasVehicleSketch } from "@/VehicleS
 import CostCalculator from "@/CostCalculator";
 import DriverData from "@/DriverData";
 import SupplierPage, { printSupplierA4, imageSupplierA4 } from "@/SupplierPage";
+import RekapSupplierPage from "./RekapSupplierPage";
 import SelisihPage from "@/SelisihPage";
 import ShipMasterPage from "@/ShipMasterPage";
 import UsersPage from "@/UsersPage";
@@ -465,6 +466,7 @@ function Dashboard({ pin, me, onLogout }) {
     biaya:        { title: "Biaya / Beban", sub: "Biaya operasional (non-HPP) per PT/CV — terpisah dari tagihan supplier" },
     "kas-bank":   { title: "Kas & Bank", sub: "Saldo bank, kas, dan Saldo Flip; mutasi dan pindah saldo" },
     "laba-rugi":  { title: "Laba Rugi", sub: "Pendapatan − HPP − Biaya per PT/CV & periode (dari transaksi aktual)" },
+    "rekap-supplier": { title: "Rekap Supplier", sub: "Rekap per nomor invoice, riwayat pembayaran, alokasi transfer, rekonsiliasi saldo & PDF A4" },
     "pembayaran-vendor": { title: "Pembayaran Vendor", sub: "Bayar beberapa PO per vendor sekaligus (Keuangan)" },
     kompensasi:   { title: "Kompensasi", sub: "Kompensasi hutang piutang antar pihak" },
     "minta-harga":{ title: "Minta Harga", sub: "Permintaan harga ke perwakilan supplier" },
@@ -596,6 +598,8 @@ function Dashboard({ pin, me, onLogout }) {
       {activeTab === "kompensasi" && (
         <KompensasiPage />
       )}
+
+      {activeTab === "rekap-supplier" && <RekapSupplierPage />}
 
       {activeTab === "pembayaran-vendor" && (
         <div style={{ maxWidth: 560, margin: "0 auto" }}>
@@ -931,7 +935,7 @@ const SIDEBAR_ICON = {
   beranda: "🏠", "rekap-tagih": "💰", kontak: "📇",
   pesanan: "▦", "route-leg": "🧭", drivers: "👤", supplier: "🌿", koordinator: "🧑‍💼",
   kendaraan: "🚙", "master-kapal": "🚢", dokumen: "📄", histori: "🗂️", laporan: "📑", kalkulator: "🧮", selisih: "📊",
-  kompensasi: "🔄", "minta-harga": "📩", pengaturan: "⚙️", "pembayaran-vendor": "🏢", "insentif-driver": "🎯", "kas-bank": "🏦",
+  kompensasi: "🔄", "minta-harga": "📩", pengaturan: "⚙️", "pembayaran-vendor": "🏢", "rekap-supplier": "📊", "insentif-driver": "🎯", "kas-bank": "🏦",
   biaya: "🧾", "laba-rugi": "📈", pengguna: "👥", "nama-kembar": "🧬", kpi: "🏅",
 };
 
@@ -1385,7 +1389,7 @@ function CreateSheet({ onClose, onJadwalGab, onInvoiceGab, onInvoiceAsuransi, on
 let CURRENT_ROLE = null;
 let DOC_DEFAULT_STEMPEL = null;   // gambar TTD+stempel+materai bawaan (dimuat sekali oleh Dashboard)
 const roleCanInvoice = () => !CURRENT_ROLE || CURRENT_ROLE === "pemilik" || CURRENT_ROLE === "keuangan";
-const FINANCE_TABS = ["kas-bank", "laba-rugi", "biaya", "insentif-driver", "selisih", "kompensasi", "rekap-invoice", "rekap-tagih", "pembayaran-vendor", "histori", "dokumen", "laporan"];
+const FINANCE_TABS = ["kas-bank", "laba-rugi", "biaya", "insentif-driver", "selisih", "kompensasi", "rekap-invoice", "rekap-tagih", "pembayaran-vendor", "rekap-supplier", "histori", "dokumen", "laporan"];
 const OPS1_TABS = ["pesanan", "minta-harga", "supplier", "kalkulator", "kontak", "kpi"];
 const OPS2_TABS = ["pesanan", "route-leg", "drivers", "koordinator", "kendaraan", "master-kapal", "kontak", "kpi"];
 function tabAllowedForRole(role, key) {
@@ -1416,6 +1420,7 @@ const SIDEBAR_GROUPS = [
   { title: "Pembelian", items: [
     { key: "supplier", label: "Supplier" },
     { key: "pembayaran-vendor", label: "Pembayaran Supplier" },
+    { key: "rekap-supplier", label: "Rekap Supplier" },
     { key: "insentif-driver", label: "Insentif Driver" },
     { key: "kalkulator", label: "Kalkulator HPP" },
     { key: "selisih", label: "Selisih Harga" },

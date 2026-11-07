@@ -314,3 +314,22 @@ def test_pdf_tabel_muat_lebar_halaman_tanpa_dikecilkan_otomatis():
     for w, cw in hasil["tabel"]:
         assert w <= cw + 1, f"tabel {w}px lebih lebar dari area cetak {cw}px (halaman akan dikecilkan)"
     assert hasil["angka_terpotong"] == [], f"isi sel meluber dari selnya: {hasil['angka_terpotong'][:5]}"
+
+
+# ── Kasus MARTHEN: alokasi rekon ke unit yang tidak ada ─────────────────────
+def test_alokasi_ke_unit_tidak_ada_tidak_masuk_saldo_dan_dilaporkan():
+    jobs = [{"id": "j1", "net_transfer": 10_000_000, "total_terbayar": 10_000_000, "tanggal": "2026-01-01", "payments": [], "nopol": "B1"}]
+    rp = [{"id": "r1", "amount": 10_000_000, "tanggal": "2026-02-01", "status": "active",
+           "allocations": [{"job_id": "j1", "amount": 6_500_000}, {"job_id": "HILANG", "amount": 3_500_000}]}]
+    # saldo sama dengan perhitungan lama: hanya alokasi ke unit yang ada yang dihitung
+    assert sf.saldo_alyssa(jobs, rp, "2999-12-31") == 3_500_000
+    an = sf.alokasi_yatim(jobs, rp)
+    assert len(an) == 1 and an[0]["unit_id"] == "HILANG" and an[0]["teralokasi"] == 3_500_000
+    fin = sf.build_finance(jobs, rp, is_fee=lambda p: False)
+    assert any(a["jenis"] == "alokasi_ke_unit_tidak_ada" for a in fin["anomali"])
+
+
+def test_alokasi_negatif_tidak_dihitung_seperti_perhitungan_lama():
+    jobs = [{"id": "j1", "net_transfer": 5_000_000, "total_terbayar": 0, "tanggal": "2026-01-01", "payments": []}]
+    rp = [{"id": "r1", "amount": 1, "tanggal": "2026-02-01", "status": "active", "allocations": [{"job_id": "j1", "amount": -2_000_000}]}]
+    assert sf.saldo_alyssa(jobs, rp, "2999-12-31") == 5_000_000
