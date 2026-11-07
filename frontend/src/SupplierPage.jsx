@@ -538,33 +538,54 @@ export default function SupplierPage() {
   // Rekap supplier: No. Dokumen (auto/manual) + cetak / simpan ke Histori Dokumen
   const [rekapOpen, setRekapOpen] = useState(false);
   const [rekapNo, setRekapNo] = useState("");
-  const [rekapProj, setRekapProj] = useState("all");   // "all" = semua projek (dipisah), atau id projek tertentu
+  const [rekapProjSet, setRekapProjSet] = useState(() => new Set());   // projek yang ikut dicetak (klik untuk pilih; bisa lebih dari satu)
   const [rekapSel, setRekapSel] = useState(() => new Set()); // id unit yang dicentang utk dicetak/simpan
   const [rekapSaving, setRekapSaving] = useState(false);
   const [rekapWaBusy, setRekapWaBusy] = useState(false);
   const [formatChooser, setFormatChooser] = useState(null); // { jobs, noDoc, tgl } saat pilih format cetak
   const [rekapTgl, setRekapTgl] = useState("");             // tanggal laporan (bisa diubah manual)
+  // Grup projek milik supplier (id projek + "_none" untuk unit tanpa projek), urut sesuai daftar projek.
+  const groupIdsOf = (sup) => {
+    const ids = (sup?.projects || []).map((p) => p.id);
+    if ((sup?.jobs || []).some((j) => !j.project_id || !ids.includes(j.project_id))) ids.push("_none");
+    return ids;
+  };
+  const groupKey = (j, ids) => (j.project_id && ids.includes(j.project_id) ? j.project_id : "_none");
   const openRekap = () => {
-    setMenuOpen(false); setRekapNo(supplierAutoDocNo()); setRekapProj("all"); setRekapTgl(todayStr());
+    setMenuOpen(false); setRekapNo(supplierAutoDocNo()); setRekapTgl(todayStr());
+    setRekapProjSet(new Set(groupIdsOf(selected)));
     setRekapSel(new Set((selected?.jobs || []).map((j) => j.id))); // default: semua unit dicentang
     setRekapOpen(true);
   };
   // Unit dalam scope projek terpilih (buat ditampilkan di checklist).
   const rekapJobs = () => {
     const all = selected?.jobs || [];
-    return rekapProj === "all" ? all : all.filter((j) => (j.project_id || "_none") === rekapProj);
+    const ids = groupIdsOf(selected);
+    return ids.length <= 1 ? all : all.filter((j) => rekapProjSet.has(groupKey(j, ids)));
   };
-  // Ganti scope projek -> otomatis centang semua unit di scope baru.
-  const changeRekapProj = (pid) => {
-    setRekapProj(pid);
-    const all = selected?.jobs || [];
-    const scope = pid === "all" ? all : all.filter((j) => (j.project_id || "_none") === pid);
-    setRekapSel(new Set(scope.map((j) => j.id)));
+  // Klik projek = ikut / tidak ikut dicetak. Unit projek yang baru dipilih otomatis dicentang, yang dilepas ikut tercabut.
+  const toggleRekapProj = (gid) => {
+    const ids = groupIdsOf(selected);
+    const next = new Set(rekapProjSet);
+    const on = !next.has(gid);
+    on ? next.add(gid) : next.delete(gid);
+    setRekapProjSet(next);
+    const unitIds = (selected?.jobs || []).filter((j) => groupKey(j, ids) === gid).map((j) => j.id);
+    setRekapSel((cur) => { const n = new Set(cur); unitIds.forEach((id) => (on ? n.add(id) : n.delete(id))); return n; });
   };
+  const setAllRekapProj = (on) => {
+    const ids = groupIdsOf(selected);
+    setRekapProjSet(on ? new Set(ids) : new Set());
+    setRekapSel(on ? new Set((selected?.jobs || []).map((j) => j.id)) : new Set());
+  };
+  const rekapProjAll = () => { const ids = groupIdsOf(selected); return ids.every((g) => rekapProjSet.has(g)); };
   const toggleRekapUnit = (id) => setRekapSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   // Unit final yang benar-benar dicetak/disimpan = scope ∩ dicentang.
   const chosenJobs = () => rekapJobs().filter((j) => rekapSel.has(j.id));
-  const rekapProjName = () => (selected?.projects || []).find((p) => p.id === rekapProj)?.nama || "";
+  const rekapProjName = () => {
+    const ids = groupIdsOf(selected);
+    return ids.filter((g) => rekapProjSet.has(g)).map((g) => (g === "_none" ? "Tanpa projek" : ((selected?.projects || []).find((p) => p.id === g)?.nama || ""))).filter(Boolean).join(", ");
+  };
   // Kirim rekap sebagai gambar tajam lewat WhatsApp (Web Share; fallback unduh). Tidak menyimpan ke histori.
   const kirimRekapWa = async () => {
     if (!selected) return;
@@ -586,11 +607,11 @@ export default function SupplierPage() {
       const gHarga = jobs.reduce((s, j) => s + (j.total_harga || 0), 0);
       const gBayar = jobs.reduce((s, j) => s + (j.total_terbayar || 0), 0);
       const noDoc = (rekapNo.trim() || supplierAutoDocNo());
-      const suffix = rekapProj === "all" ? "" : ` · ${rekapProjName()}`;
+      const suffix = rekapProjAll() ? "" : ` · ${rekapProjName()}`;
       await axios.post(`${API}/admin/doc-history`, {
         jenis: "supplier", no_dokumen: noDoc, customer: selected.nama || "",
         judul: `${selected.nama || "-"}${suffix} · ${jobs.length} unit · Rp ${gHarga.toLocaleString("id-ID")}`,
-        meta: { supplier_nama: selected.nama, no_dokumen: noDoc, tanggal: rekapTgl, total_harga: gHarga, total_terbayar: gBayar, sisa: gHarga - gBayar, jumlah_unit: jobs.length, projek: rekapProj === "all" ? "Semua" : rekapProjName() },
+        meta: { supplier_nama: selected.nama, no_dokumen: noDoc, tanggal: rekapTgl, total_harga: gHarga, total_terbayar: gBayar, sisa: gHarga - gBayar, jumlah_unit: jobs.length, projek: rekapProjAll() ? "Semua" : rekapProjName() },
         units: jobs,
       }, { headers });
       flash("✓ Rekap supplier disimpan ke Histori Dokumen");
@@ -1840,15 +1861,32 @@ export default function SupplierPage() {
               <input style={I} type="date" value={rekapTgl} onChange={(e) => setRekapTgl(e.target.value)} data-testid="sup-rekap-tgl" />
               <div style={{ fontSize: 11, color: C.mute, marginTop: 4 }}>Default hari ini. Ubah kalau mau tanggal laporan berbeda.</div>
             </div>
-            {(selected.projects || []).length > 1 && (
-              <div>
-                <div style={{ ...L }}>Scope Projek</div>
-                <select style={I} value={rekapProj} onChange={(e) => changeRekapProj(e.target.value)} data-testid="sup-rekap-proj">
-                  <option value="all">Semua Projek (dipisah per grup)</option>
-                  {(selected.projects || []).map((p) => (
-                    <option key={p.id} value={p.id}>📁 {p.nama}</option>
-                  ))}
-                </select>
+            {groupIdsOf(selected).length > 1 && (
+              <div data-testid="sup-rekap-proj">
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                  <div style={{ ...L, margin: 0 }}>Projek yang dicetak — klik untuk pilih ({groupIdsOf(selected).filter((g) => rekapProjSet.has(g)).length}/{groupIdsOf(selected).length})</div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button style={{ ...BTN_GHOST, padding: "4px 10px", fontSize: 11, minHeight: 0 }} onClick={() => setAllRekapProj(true)}>Semua</button>
+                    <button style={{ ...BTN_GHOST, padding: "4px 10px", fontSize: 11, minHeight: 0 }} onClick={() => setAllRekapProj(false)}>Kosongkan</button>
+                  </div>
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {groupIdsOf(selected).map((g) => {
+                    const on = rekapProjSet.has(g);
+                    const ids = groupIdsOf(selected);
+                    const nama = g === "_none" ? "Tanpa projek" : ((selected.projects || []).find((p) => p.id === g)?.nama || "Projek");
+                    const n = (selected.jobs || []).filter((j) => groupKey(j, ids) === g).length;
+                    return (
+                      <button key={g} type="button" onClick={() => toggleRekapProj(g)} data-testid={`sup-rekap-proj-${g}`}
+                        style={{ display: "flex", alignItems: "center", gap: 7, padding: "9px 12px", borderRadius: 12, cursor: "pointer", fontSize: 13, fontWeight: 700, textAlign: "left",
+                          border: `1.5px solid ${on ? C.gold : C.inpLine}`, background: on ? "#2a1f0d" : C.inpBg, color: on ? C.gold : C.ink }}>
+                        <span style={{ fontSize: 15 }}>{on ? "☑" : "☐"}</span>
+                        <span>📁 {nama} <span style={{ fontWeight: 500, color: C.mute }}>· {n} unit</span></span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div style={{ fontSize: 11, color: C.mute, marginTop: 6 }}>Bisa pilih beberapa projek sekaligus; semuanya dicetak dalam satu dokumen, dipisah per grup.</div>
               </div>
             )}
             {(selected.rekon_payments || []).length > 0 && (
@@ -1886,7 +1924,7 @@ export default function SupplierPage() {
                       <input type="checkbox" checked={on} onChange={() => toggleRekapUnit(j.id)} style={{ width: 17, height: 17, flexShrink: 0 }} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 13, fontWeight: 700, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{j.nopol || j.no_rangka || "(tanpa nopol)"} <span style={{ color: C.mute, fontWeight: 500 }}>· {j.vehicle_type || "Unit"}</span></div>
-                        <div style={{ fontSize: 11, color: C.mute }}>{j.asal_kota || "-"} → {j.tujuan_kota || "-"} · {fRp(j.total_harga)}{rekapProj === "all" && pname ? ` · 📁 ${pname}` : ""}</div>
+                        <div style={{ fontSize: 11, color: C.mute }}>{j.asal_kota || "-"} → {j.tujuan_kota || "-"} · {fRp(j.total_harga)}{rekapProjSet.size > 1 && pname ? ` · 📁 ${pname}` : ""}</div>
                       </div>
                     </label>
                   );
