@@ -2305,6 +2305,8 @@ function DuplicateVendorModal({ order, headers, onClose }) {
     tujuan: order.tujuan_kota || "",   // default dari PO, bisa diedit
     catatan: "",
   })));
+  const [noInv, setNoInv] = useState("");     // No. invoice dari supplier (berlaku utk semua unit di batch ini)
+  const [tglInv, setTglInv] = useState("");     // Tgl invoice supplier (YYYY-MM-DD), kosong = hari ini
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
   const [supProjects, setSupProjects] = useState([]);   // projek existing vendor terpilih
@@ -2340,6 +2342,12 @@ function DuplicateVendorModal({ order, headers, onClose }) {
   const autoProjName = `Projek ${(supProjects.length || 0) + 1}`;
 
   const setRow = (key, patch) => setRows((rs) => rs.map((r) => r.key === key ? { ...r, ...patch } : r));
+  // Unit tambahan di luar PO (mis. 1 invoice supplier memuat lebih banyak unit dari PO ini).
+  const addManualRow = () => setRows((rs) => [...rs, {
+    key: `m${Date.now()}${rs.length}`, manual: true, checked: true, vehicle_type: "", nopol: "", no_rangka: "",
+    harga: "", asal: order.asal_kota || "", tujuan: order.tujuan_kota || "", catatan: "",
+  }]);
+  const delRow = (key) => setRows((rs) => rs.filter((r) => r.key !== key));
   const hargaNum = (s) => parseInt(String(s || "").replace(/[^0-9]/g, ""), 10) || 0;
   const checkedRows = rows.filter((r) => r.checked && hargaNum(r.harga) > 0);
   const canSave = !!(supSel && (supSel.id || supSel.nama)) && checkedRows.length > 0 && !saving;
@@ -2376,10 +2384,13 @@ function DuplicateVendorModal({ order, headers, onClose }) {
           nopol: r.nopol, no_rangka: r.no_rangka,
           asal_kota: (r.asal || "").trim(), tujuan_kota: (r.tujuan || "").trim(),
           total_harga: hargaNum(r.harga),
-          catatan: (r.catatan || "").trim() || `Duplikat dari ${order.order_id}`, tanggal: "",
+          catatan: (r.catatan || "").trim() || `Duplikat dari ${order.order_id}`, tanggal: /^\d{4}-\d{2}-\d{2}$/.test(tglInv) ? tglInv : "",
           project_id: projectId || undefined,
-          // Referensi order/customer dibawa otomatis (ledger tetap terpisah dari Invoice Customer)
-          order_id: order.order_id || undefined,
+          no_invoice_supplier: noInv.trim(),
+          tag: noInv.trim() ? `Invoice ${noInv.trim()}` : "",
+          // Referensi order/customer dibawa otomatis (ledger tetap terpisah dari Invoice Customer).
+          // Unit tambahan di luar PO tidak ditautkan ke order.
+          order_id: r.manual ? undefined : (order.order_id || undefined),
           customer_ref: order.customer_nama || "",
         }, { headers });
       }
@@ -2460,17 +2471,33 @@ function DuplicateVendorModal({ order, headers, onClose }) {
                 )}
               </div>
 
+              <div style={{ border: "1px solid #21262d", borderRadius: 10, padding: "10px 12px", margin: "0 0 14px" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-mute)", marginBottom: 8, textTransform: "uppercase" }}>Invoice Supplier <span style={{ textTransform: "none", fontWeight: 400 }}>(opsional)</span></div>
+                <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 8 }}>
+                  <input className="adm-input" placeholder="No. invoice supplier" value={noInv} onChange={(e) => setNoInv(e.target.value)} data-testid="adm-dupvendor-noinv" />
+                  <input className="adm-input" type="date" value={tglInv} onChange={(e) => setTglInv(e.target.value)} data-testid="adm-dupvendor-tglinv" />
+                </div>
+                <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 6 }}>Semua unit di bawah memakai nomor &amp; tanggal invoice ini. Kalau invoice memuat lebih banyak unit dari PO, tekan “+ Tambah unit” di bawah.</div>
+              </div>
+
               <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-mute)", marginBottom: 6, textTransform: "uppercase" }}>Unit dari PO ini · isi harga, rute bisa diubah</div>
               {rows.map((r) => (
                 <div key={r.key} style={{ padding: "10px 0", borderTop: "1px solid #21262d" }}>
                   <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
                     <input type="checkbox" checked={r.checked} onChange={() => setRow(r.key, { checked: !r.checked })} style={{ width: 16, height: 16, flexShrink: 0 }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, fontSize: 13 }}>{r.vehicle_type || "Kendaraan"}{r.nopol ? ` · ${r.nopol}` : ""}</div>
+                      <div style={{ fontWeight: 700, fontSize: 13 }}>{r.manual ? "➕ Unit tambahan" : (r.vehicle_type || "Kendaraan")}{!r.manual && r.nopol ? ` · ${r.nopol}` : ""}</div>
                     </div>
+                    {r.manual && <button type="button" className="adm-btn adm-btn-ghost" style={{ padding: "2px 10px", fontSize: 12 }} onClick={(e) => { e.preventDefault(); delRow(r.key); }}>Hapus</button>}
                   </label>
                   {r.checked && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8, marginLeft: 26 }}>
+                      {r.manual && (
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                          <input className="adm-input" placeholder="Tipe kendaraan" value={r.vehicle_type} onChange={(e) => setRow(r.key, { vehicle_type: e.target.value })} data-testid={`adm-dupvendor-tipe-${r.key}`} />
+                          <input className="adm-input" placeholder="No. polisi / No. rangka" value={r.nopol} onChange={(e) => setRow(r.key, { nopol: e.target.value.toUpperCase() })} data-testid={`adm-dupvendor-nopol-${r.key}`} />
+                        </div>
+                      )}
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                         <input className="adm-input" placeholder="Kota asal" value={r.asal}
                           onChange={(e) => setRow(r.key, { asal: e.target.value })} data-testid={`adm-dupvendor-asal-${r.key}`} />
@@ -2486,6 +2513,7 @@ function DuplicateVendorModal({ order, headers, onClose }) {
                   )}
                 </div>
               ))}
+              <button type="button" className="adm-btn adm-btn-ghost" style={{ width: "100%", marginTop: 8 }} onClick={addManualRow} data-testid="adm-dupvendor-add">+ Tambah unit</button>
             </>
           )}
         </div>
