@@ -802,6 +802,14 @@ export default function SupplierPage() {
   const [invMeta, setInvMeta] = useState({});
   const [invSaving, setInvSaving] = useState(false);
   const [invErr, setInvErr] = useState("");
+  const [aiTest, setAiTest] = useState(null);
+  const [aiTesting, setAiTesting] = useState(false);
+  const tesAi = async () => {
+    setAiTesting(true); setAiTest(null);
+    try { const r = await axios.get(`${API}/admin/ai-check`, { headers, timeout: 45000 }); setAiTest(r.data); }
+    catch (e) { setAiTest({ pesan: `Gagal menghubungi server aplikasi: ${e?.response?.data?.detail || e?.message || "?"}` }); }
+    finally { setAiTesting(false); }
+  };
   const openInv = () => {
     if (!selected) { flash("Pilih supplier dulu"); return; }
     setInvRows(null); setInvMeta({}); resetProjPicker(); setInvOpen(true);
@@ -1935,6 +1943,13 @@ export default function SupplierPage() {
                 style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, cursor: "pointer", fontSize: 0 }}
                 onChange={(e) => { const f = (e.target.files && e.target.files[0]) || null; readInvoiceFile(f); }} data-testid="sup-inv-file" />
             </div>
+            <button type="button" style={{ ...BTN_GHOST, width: "100%", minHeight: 40, padding: "9px 14px", fontSize: 13 }} onClick={tesAi} disabled={aiTesting} data-testid="sup-ai-test">{aiTesting ? "Menguji…" : "🔧 Tes koneksi AI"}</button>
+            {aiTest && (
+              <div style={{ fontSize: 12, border: `1px solid ${aiTest.status === 200 ? C.green : C.red}`, color: aiTest.status === 200 ? C.green : C.red, borderRadius: 10, padding: 10, lineHeight: 1.5 }} data-testid="sup-ai-test-res">
+                <div style={{ fontWeight: 800 }}>{aiTest.pesan}</div>
+                {aiTest.ada_key !== undefined && <div style={{ color: C.mute, marginTop: 4 }}>Key terbaca: {aiTest.ada_key ? "ya" : "tidak"}{aiTest.ada_key ? ` · awalan "${aiTest.awalan}" · panjang ${aiTest.panjang}` : ""} · model {aiTest.model}{aiTest.status !== undefined ? ` · kode ${aiTest.status}` : ""}</div>}
+              </div>
+            )}
             {invFileName && <div style={{ fontSize: 12, color: C.mute }}>File dipilih: <b style={{ color: C.ink }}>{invFileName}</b></div>}
             {invErr && <div style={{ fontSize: 13, color: C.red, border: `1px solid ${C.red}`, borderRadius: 10, padding: 10 }} data-testid="sup-inv-err">⚠ {invErr}</div>}
             {invRows && invRows.length === 0 && !invBusy && <div style={{ fontSize: 13, color: C.gold }}>Tidak ada unit yang terbaca di file ini. Coba file yang lebih jelas, atau foto tabelnya utuh (termasuk kolom Nopol dan Harga).</div>}
