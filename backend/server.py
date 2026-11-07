@@ -4261,7 +4261,7 @@ def _leg_task_public_view(t: dict) -> dict:
         "allowed_document_types": t.get("allowed_document_types", cfg["document_types"]),
         "simple": bool(cfg.get("simple")),
         "disabled_tabs": list(cfg.get("disabled_tabs") or []),
-        "cp_harian": ({"jam_mulai": TR.CP_JAM_MULAI, "jam_akhir": TR.CP_JAM_AKHIR, "jenis": TR.JENIS_HARIAN, "jenis_terima": TR.JENIS_TERIMA}
+        "cp_harian": ({"jam_mulai": TR.CP_JAM_MULAI, "jam_akhir": TR.CP_JAM_AKHIR, "jenis": TR.JENIS_HARIAN, "jenis_terima": TR.JENIS_TERIMA, "maks": TR.CP_MAKS_HARIAN}
                       if cfg.get("simple") else None),
         **(TR.batas_info(t) if cfg.get("simple") else {}),
         "needs_penerima": bool(t.get("needs_penerima")),

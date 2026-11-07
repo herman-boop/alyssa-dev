@@ -2065,7 +2065,9 @@ async def test_task_driver_tujuan():
     ok(c(TR.JENIS_HARIAN, now_ok, 480, terima, True, True) is None, "09.00 WITA: boleh")
     ok(c(TR.JENIS_HARIAN, U(2026, 10, 10, 7, 59), 480, terima, True, True) is None, "15.59 WITA: masih boleh")
     sudah = terima + [{"jenis": TR.JENIS_HARIAN, "ts": U(2026, 10, 10, 1, 5)}]
-    ok(c(TR.JENIS_HARIAN, U(2026, 10, 10, 6, 0), 480, sudah, True, True)[0] == 409, "checkpoint ke-2 di hari yang sama ditolak")
+    ok(c(TR.JENIS_HARIAN, U(2026, 10, 10, 6, 0), 480, sudah, True, True) is None, "checkpoint ke-2 di hari yang sama boleh (maks 2x)")
+    dua = sudah + [{"jenis": TR.JENIS_HARIAN, "ts": U(2026, 10, 10, 6, 0)}]
+    ok(c(TR.JENIS_HARIAN, U(2026, 10, 10, 7, 0), 480, dua, True, True)[0] == 409, "checkpoint ke-3 di hari yang sama ditolak")
     ok(c(TR.JENIS_HARIAN, U(2026, 10, 11, 1, 0), 480, sudah, True, True) is None, "besoknya boleh lagi")
     ok(c("Lainnya", now_ok, 480, terima, True, True)[0] == 403, "jenis lain ditolak")
     # hari dihitung di zona HP, bukan UTC: 17.30 UTC tgl 10 = 01.30 WITA tgl 11 (di luar jam), 23.30 UTC = 07.30 WITA
