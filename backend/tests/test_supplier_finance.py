@@ -256,6 +256,17 @@ def test_pdf_panjang_banyak_halaman_dan_teks_vector():
     n_img = pdf.count(b"/Subtype /Image") + pdf.count(b"/Subtype/Image")
     assert n_img <= 2, n_img            # hanya logo (+ mask transparansinya); tabel/teks bukan gambar
     assert b"/Font" in pdf                                                               # teks vector (font tertanam), bukan screenshot
+    # Baris Total tiap tabel hanya muncul SEKALI (di akhir tabel), bukan diulang di setiap halaman
+    import subprocess, tempfile
+    if shutil.which("pdftotext"):
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+            f.write(pdf)
+        txt = subprocess.run(["pdftotext", "-layout", f.name, "-"], capture_output=True, text=True).stdout
+        os.unlink(f.name)
+        assert txt.count("Halaman 1 dari") == 1 and f"dari {pages}" in txt
+        tot = [ln.strip() for ln in txt.splitlines() if ln.strip().startswith("Total ") and not ln.strip().startswith("Total transfer aktual")]
+        assert len(tot) == 2, f"Total harus tampil sekali per tabel (2 tabel): {tot}"
+        assert txt.count("No. Invoice Supplier") >= 2          # header tabel berulang di halaman lanjutan
     out = os.environ.get("SF_PDF_OUT")
     if out:
         open(out, "wb").write(pdf)

@@ -264,26 +264,37 @@ def rekonsiliasi(jobs, rekon_payments, transfers, invoices, perlu, saldo_entries
     if sa - ss == 0:
         return out
     c = _d(use_cut)
-    cand = []
+    cand = []                      # SEMUA kandidat (dipakai mencari nominal yang persis sama dengan selisih)
     for t in transfers:
         if t["jenis"] == "biaya_admin" or (_d(t["tanggal"]) or date.max) > c:
             continue
         if t["verifikasi"] != "terverifikasi_supplier" and t["teralokasi"] > 0:
-            cand.append({"jenis": "transfer_belum_dikonfirmasi", "ref": t["key"], "tanggal": t["tanggal"],
-                         "nominal": t["teralokasi"], "keterangan": f"Transfer {t['ref'] or t['key']} berstatus {t['verifikasi_label']}"})
+            cand.append({"jenis": "transfer_belum_dikonfirmasi", "ref": t["key"], "tanggal": t["tanggal"], "status": t["verifikasi"],
+                         "nominal": t["teralokasi"], "keterangan": f"Transfer {t['ref'] or t['key']} ({t['verifikasi_label']})"})
         if t["belum_dialokasikan"] > 0:
             cand.append({"jenis": "transfer_belum_dialokasikan", "ref": t["key"], "tanggal": t["tanggal"],
                          "nominal": t["belum_dialokasikan"], "keterangan": f"Transfer {t['ref'] or t['key']} belum dialokasikan ke invoice"})
     for i in invoices:
         if (_d(i["tanggal"]) or date.max) <= c and i["sisa"] != 0:
             cand.append({"jenis": "invoice_belum_lunas", "ref": i["no"], "tanggal": i["tanggal"],
-                         "nominal": i["sisa"], "keterangan": f"Invoice {i['no']} sisa {i['sisa']}"})
+                         "nominal": i["sisa"], "keterangan": f"Invoice {i['no']}: sisa {rp(i['sisa'])}"})
     if perlu["unit"]:
         cand.append({"jenis": "unit_tanpa_nomor_invoice", "ref": f"{perlu['unit']} unit", "tanggal": "",
                      "nominal": perlu["tagihan"], "keterangan": f"{perlu['unit']} unit belum punya nomor invoice supplier"})
-    out["penyebab"] = cand
     sel = abs(sa - ss)
     out["cocok_nominal"] = [c_ for c_ in cand if abs(c_["nominal"]) == sel]
+    # Tampilan ringkas: transfer yang BELUM DIVERIFIKASI digabung jadi satu baris (tidak membanjiri daftar);
+    # transfer yang sudah ditandai menunggu/ada selisih tetap tampil satu per satu.
+    belum = [c_ for c_ in cand if c_["jenis"] == "transfer_belum_dikonfirmasi" and c_["status"] == "belum_diverifikasi"]
+    view = [c_ for c_ in cand if c_ not in belum]
+    if belum:
+        view.append({"jenis": "transfer_belum_diverifikasi", "ref": f"{len(belum)} transfer", "tanggal": "", "nominal": sum(c_["nominal"] for c_ in belum),
+                     "keterangan": f"{len(belum)} transfer belum diverifikasi supplier (supplier mungkin belum mengakui pembayaran ini)",
+                     "rincian": [{"ref": c_["ref"], "tanggal": c_["tanggal"], "nominal": c_["nominal"]} for c_ in belum]})
+    order = {"transfer_belum_dialokasikan": 0, "transfer_belum_dikonfirmasi": 1, "transfer_belum_diverifikasi": 2, "invoice_belum_lunas": 3, "unit_tanpa_nomor_invoice": 4}
+    view.sort(key=lambda x: (x not in out["cocok_nominal"], order.get(x["jenis"], 9), x["tanggal"]))
+    out["penyebab"] = view
+    out["arah"] = "Saldo Alyssa lebih tinggi dari saldo supplier." if sa > ss else "Saldo Alyssa lebih rendah dari saldo supplier."
     return out
 
 
@@ -443,14 +454,14 @@ table{width:100%;border-collapse:collapse;font-size:8.6pt;border:.6pt solid #CBD
 th{font-size:8pt;padding:5px 6px;background:#F3F5F8;border-bottom:.6pt solid #CBD3E0;text-align:left;color:#3B4A63;font-weight:600}
 td{padding:5px 6px;border-bottom:.4pt solid #E3E8EF;vertical-align:top}
 .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-thead{display:table-header-group}tr{break-inside:avoid}
+thead{display:table-header-group}tfoot{display:table-row-group}tr{break-inside:avoid}
 tfoot td{background:#F3F5F8;color:var(--navy);font-weight:700;border-top:.8pt solid var(--navy)}
 .sum td{font-size:9.5pt}.sum tr:last-child td{font-weight:700;color:var(--navy);border-top:.8pt solid var(--navy);background:#F3F5F8}
 .inv{font-weight:600;color:var(--navy);font-size:8.3pt}
 .sub{color:var(--mut);font-size:8pt}
 .st{font-weight:600;white-space:nowrap}.st.ok{color:var(--ok)}.st.red{color:var(--red)}.st.navy{color:var(--navy)}.st.gray{color:var(--mut)}
 .box{border:.6pt solid #CBD3E0;padding:6px 8px;font-size:9pt;margin-top:8px;break-inside:avoid}
-.box.red{border-color:#E7B4AE}
+.box.warn{border-color:#E7B4AE}
 .red{color:var(--red)}
 .foot{font-size:8pt;color:var(--mut);margin-top:12px}
 """
@@ -510,7 +521,7 @@ def render_pdf_html(sup_nama, no_dok, fin, periode, logo_path=None):
                   f'sehingga selisih belum dapat dihitung. Saldo menurut Alyssa per {tgl_id(rek["cutoff"])}: <b>{rp(rek["saldo_alyssa"]) if rek["saldo_alyssa"] is not None else "-"}</b>.</div>')
     else:
         pb = "".join(f'<tr><td>{_e(c["keterangan"])}</td><td class="num">{rp(c["nominal"])}</td></tr>' for c in rek["penyebab"][:10])
-        rekbox = (f'<div class="box{" red" if rek["status"] == "selisih" else ""}"><b>Status rekonsiliasi: {"Cocok" if rek["status"] == "cocok" else "Ada Selisih"}</b> — cut-off {tgl_id(rek["cutoff"])}.'
+        rekbox = (f'<div class="box{" warn" if rek["status"] == "selisih" else ""}"><b>Status rekonsiliasi: {"Cocok" if rek["status"] == "cocok" else "Ada Selisih"}</b> — cut-off {tgl_id(rek["cutoff"])}.'
                   f'<table style="margin-top:6px"><tbody><tr><td>Saldo menurut Alyssa</td><td class="num">{rp(rek["saldo_alyssa"])}</td></tr>'
                   f'<tr><td>Saldo menurut supplier</td><td class="num">{rp(rek["saldo_supplier"])}</td></tr>'
                   f'<tr><td><b>Selisih (Alyssa − supplier)</b></td><td class="num {"red" if rek["selisih"] else ""}"><b>{rp(rek["selisih"])}</b></td></tr></tbody></table>'

@@ -3,6 +3,7 @@ import axios from "axios";
 import { DOC_BRAND, DOC_BASE_CSS, docHeader, docFooter, DOC_ENTITIES } from "./docTheme";
 import { isBankFee } from "./rekonReportData";
 import { htmlKePng, bagikanPng } from "./PenawaranCetak";
+import SupplierFinance from "./SupplierFinance";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "";
 const API = `${BACKEND_URL}/api`;
@@ -534,6 +535,7 @@ export default function SupplierPage() {
   const [tab, setTab] = useState("pembayaran"); // default: Pembayaran (dipakai tiap hari)
   const [filter, setFilter] = useState("semua");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [financeOpen, setFinanceOpen] = useState(false);   // Rekap Keuangan (Enterprise Finance) — tampilan baru, tidak menggantikan yang lama
   const [idCopied, setIdCopied] = useState(false);
   // Rekap supplier: No. Dokumen (auto/manual) + cetak / simpan ke Histori Dokumen
   const [rekapOpen, setRekapOpen] = useState(false);
@@ -1346,12 +1348,13 @@ export default function SupplierPage() {
                 {menuOpen && (
                   <div style={{ position: "absolute", top: "110%", right: 0, background: C.card, border: `1px solid ${C.inpLine}`, borderRadius: 10, minWidth: 180, overflow: "hidden", zIndex: 40, boxShadow: "0 8px 24px rgba(0,0,0,.4)" }}>
                     {[
+                      { t: "📊 Rekap Keuangan (baru)", on: () => { setMenuOpen(false); setFinanceOpen(true); }, },
                       { t: "🧾 Rekap A4 (No. + Simpan)", on: openRekap, },
                       { t: "📁 Projek Baru", on: addProject },
                       { t: "✏️ Edit Supplier", on: openEdit },
                       { t: "🗑️ Hapus Supplier", on: deleteSupplier, danger: true },
                     ].map((m, i) => (
-                      <button key={i} onClick={m.on} style={{ display: "block", width: "100%", textAlign: "left", padding: "11px 14px", background: "none", border: "none", borderBottom: i < 3 ? `1px solid ${C.line}` : "none", color: m.danger ? C.red : C.ink, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{m.t}</button>
+                      <button key={i} onClick={m.on} style={{ display: "block", width: "100%", textAlign: "left", padding: "11px 14px", background: "none", border: "none", borderBottom: i < 4 ? `1px solid ${C.line}` : "none", color: m.danger ? C.red : C.ink, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{m.t}</button>
                     ))}
                   </div>
                 )}
@@ -1967,6 +1970,12 @@ export default function SupplierPage() {
               style={{ width: "100%", padding: "11px", borderRadius: 10, border: `1px solid ${C.line}`, background: "none", color: C.mute, fontWeight: 700, cursor: "pointer" }}>Batal</button>
           </div>
         </div>
+      )}
+
+      {financeOpen && selected && (
+        <SupplierFinance supplier={{ id: selected.id, nama: selected.nama }} adminPin={adminPin} flash={flash}
+          onClose={() => setFinanceOpen(false)} onChanged={() => { reloadSelected(selected.id); setListRefreshTick((t) => t + 1); }}
+          onPdfFallback={() => { setFinanceOpen(false); openRekap(); }} />
       )}
 
       {/* ── Modal: Upload Invoice Supplier ── */}
