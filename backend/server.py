@@ -27,6 +27,7 @@ import driver_notif  # notif WhatsApp ke driver saat insentif dibayar
 import flip_client  # adapter Flip (transfer ke rekening driver)
 import payouts  # transfer driver lewat Flip dengan pengaman (inquiry wajib, anti dobel, payout_logs)
 import cashbank  # Kas & Bank: akun + mutasi + saldo
+import supplier_finance as SF  # rekap per invoice, riwayat transfer, rekonsiliasi saldo, verifikasi (murni, tanpa DB)
 import task_rules as TR  # aturan tugas Driver Tujuan (1 jepret, 1 checkpoint/hari, batas hari)
 import ais  # modul AIS (posisi kapal) — provider-agnostic, aman tanpa key
 import rekon_sync  # integrasi pembayaran supplier dari Audit Rekon (isolated)
@@ -7262,6 +7263,182 @@ async def get_supplier(supplier_id: str):
     doc["total_allocated"] = manual_transfer + rk["total_rekon_allocated"]  # yang sudah nempel ke tagihan
     doc["total_unallocated"] = rk["total_unallocated"]                  # masih belum dialokasikan
     return doc
+
+
+# ══ FINANCE SUPPLIER (Rekap per invoice, Riwayat transfer, Rekonsiliasi, Verifikasi) — hanya MENAMBAH ══
+# Tidak ada perhitungan baru: angka diambil dari _supplier_job_totals / _supplier_rekon_overview lalu
+# disusun ulang per Nomor Invoice Supplier & per transfer (supplier_finance.py). Data historis tidak diubah.
+def _sup_view(doc: dict):
+    rk = _supplier_rekon_overview(doc)
+    jobs = [_supplier_job_totals(j, extra_paid=rk["alloc_by_job"].get(j.get("id"), 0)) for j in (doc.get("jobs") or [])]
+    return jobs, rk
+
+
+async def _invoice_dipakai_supplier_lain(supplier_id: str) -> set:
+    used = set()
+    async for o in db.supplier_profiles.find({"id": {"$ne": supplier_id}, "jobs.no_invoice_supplier": {"$exists": True}},
+                                             {"_id": 0, "jobs.no_invoice_supplier": 1}):
+        for j in (o.get("jobs") or []):
+            k = SF.norm_inv(j.get("no_invoice_supplier"))
+            if k:
+                used.add(k)
+    return used
+
+
+async def _finance_for(supplier_id: str, cutoff: Optional[str] = None):
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    jobs, rk = _sup_view(doc)
+    fin = SF.build_finance(jobs, rk["rekon_payments"], verifikasi=doc.get("verifikasi_transfer") or {},
+                           saldo_entries=doc.get("saldo_supplier") or [], cutoff=cutoff or None,
+                           is_fee=rekon_sync.is_bank_fee, used_elsewhere=await _invoice_dipakai_supplier_lain(supplier_id))
+    return doc, jobs, rk, fin
+
+
+@api_router.get("/admin/finance-audit", dependencies=[Depends(require_admin_pin)])
+async def finance_audit(limit: int = 500):
+    """READ-ONLY. Untuk SEMUA supplier: bandingkan laporan Finance baru dengan angka existing (get_supplier) dan periksa
+    invarian (tidak ada pembayaran hilang/ganda, alokasi <= transfer, biaya admin terpisah). Kosong = semua cocok."""
+    hasil, n, bad = [], 0, 0
+    async for doc in db.supplier_profiles.find({}, {"_id": 0}).limit(max(1, min(int(limit or 500), 2000))):
+        n += 1
+        try:
+            ex = await get_supplier(doc["id"])
+            _doc, jobs, rk, fin = await _finance_for(doc["id"], None)
+            viol = SF.audit(doc.get("jobs") or [], doc.get("rekon_payments") or [], jobs,
+                            {"grand_total_terbayar": ex.get("grand_total_terbayar"), "grand_sisa": ex.get("grand_sisa"),
+                             "total_transferred": ex.get("total_transferred")}, fin)
+        except Exception as e:   # satu supplier bermasalah tidak boleh menghentikan audit
+            viol = [f"gagal dihitung: {e}"]
+        if viol:
+            bad += 1
+            hasil.append({"supplier_id": doc.get("id"), "nama": doc.get("nama"), "pelanggaran": viol})
+    return {"diperiksa": n, "bermasalah": bad, "ok": bad == 0, "detail": hasil}
+
+
+@api_router.get("/admin/suppliers/{supplier_id}/finance", dependencies=[Depends(require_admin_pin)])
+async def supplier_finance(supplier_id: str, cutoff: Optional[str] = None):
+    """READ-ONLY. Rekap per Nomor Invoice Supplier + riwayat transfer & alokasi + rekonsiliasi saldo."""
+    if cutoff and not re.match(r"^\d{4}-\d{2}-\d{2}$", cutoff):
+        raise HTTPException(400, "cutoff harus YYYY-MM-DD")
+    doc, _jobs, _rk, fin = await _finance_for(supplier_id, cutoff)
+    fin["supplier"] = {"id": doc.get("id"), "nama": doc.get("nama")}
+    return fin
+
+
+@api_router.post("/admin/suppliers/{supplier_id}/saldo-supplier", dependencies=[Depends(require_admin_pin)])
+async def set_saldo_supplier(supplier_id: str, cutoff: str = Form(...), saldo: int = Form(...), catatan: str = Form(""),
+                             bukti: Optional[UploadFile] = File(None)):
+    """Catat saldo menurut LAPORAN SUPPLIER pada tanggal cut-off. Riwayat dipertahankan (entri baru, yang lama tidak dihapus)."""
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", (cutoff or "").strip()):
+        raise HTTPException(400, "Tanggal cut-off harus YYYY-MM-DD")
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0, "id": 1})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    bukti_url = None
+    if bukti is not None and bukti.filename:
+        bukti_url, _w = _save_upload_soft(supplier_id, "saldo-supplier", bukti, ALLOWED_IMG | ALLOWED_DOC)
+    entry = {"id": _gen_supplier_id(), "cutoff": cutoff.strip(), "saldo": int(saldo), "catatan": (catatan or "").strip()[:300],
+             "bukti_url": bukti_url or "", "oleh": "admin", "pada": datetime.utcnow().isoformat()}
+    await db.supplier_profiles.update_one({"id": supplier_id}, {"$push": {"saldo_supplier": entry}})
+    return {"ok": True, "entry": entry}
+
+
+@api_router.patch("/admin/suppliers/{supplier_id}/verifikasi-transfer", dependencies=[Depends(require_admin_pin)])
+async def set_verifikasi_transfer(supplier_id: str, key: str = Form(...), status: str = Form(...), catatan: str = Form(""),
+                                  bukti: Optional[UploadFile] = File(None)):
+    """Ubah status verifikasi supplier untuk 1 transfer. Wajib bukti ATAU catatan; setiap perubahan masuk riwayat.
+    Tidak menyentuh nominal/alokasi/pembayaran apa pun."""
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    jobs, rk = _sup_view(doc)
+    transfers, _p = SF.build_transfers(jobs, rk["rekon_payments"], doc.get("verifikasi_transfer") or {}, rekon_sync.is_bank_fee)
+    if key not in {t["key"] for t in transfers}:
+        raise HTTPException(404, "Transfer tidak ditemukan")
+    bukti_url = None
+    if bukti is not None and bukti.filename:
+        bukti_url, _w = _save_upload_soft(supplier_id, "verifikasi", bukti, ALLOWED_IMG | ALLOWED_DOC)
+    cur = (doc.get("verifikasi_transfer") or {}).get(key) or {}
+    new, err = SF.apply_verifikasi(cur, status.strip(), catatan, bukti_url, "admin", datetime.utcnow().isoformat())
+    if err:
+        raise HTTPException(400, err)
+    allv = dict(doc.get("verifikasi_transfer") or {})
+    allv[key] = new
+    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"verifikasi_transfer": allv}})
+    return {"ok": True, "key": key, "verifikasi": new}
+
+
+@api_router.get("/admin/suppliers/{supplier_id}/cari-unit", dependencies=[Depends(require_admin_pin)])
+async def supplier_cari_unit(supplier_id: str, q: str = "", dari: Optional[str] = None, sampai: Optional[str] = None,
+                             nominal: Optional[int] = None, nominal_min: Optional[int] = None, nominal_max: Optional[int] = None,
+                             kosong: bool = False):
+    """READ-ONLY. Cari unit (no polisi/rangka, tanggal, nominal) untuk mencocokkan data lama dengan invoice asli."""
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    jobs, _rk = _sup_view(doc)
+    items = SF.cari_unit(jobs, q=q, dari=dari, sampai=sampai, nominal=nominal, nominal_min=nominal_min, nominal_max=nominal_max, kosong=kosong)
+    return {"count": len(items), "items": items}
+
+
+@api_router.patch("/admin/suppliers/{supplier_id}/no-invoice", dependencies=[Depends(require_admin_pin)])
+async def set_no_invoice(supplier_id: str, body: Dict[str, Any] = Body(...)):
+    """Lengkapi nomor invoice supplier pada unit LAMA. HANYA field nomor yang ditulis di unit (riwayat perubahan di level supplier),
+    lewat operator posisional: nominal, pembayaran, dan alokasi tidak pernah disentuh."""
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    plan = SF.plan_no_invoice(doc.get("jobs") or [], [str(x) for x in (body.get("job_ids") or [])], body.get("no_invoice"),
+                              timpa=bool(body.get("timpa")), used_elsewhere=await _invoice_dipakai_supplier_lain(supplier_id))
+    if plan["errors"]:
+        raise HTTPException(400, " ".join(plan["errors"]))
+    lain = [w for w in plan["warnings"] if "supplier lain" in w]
+    if lain and not body.get("konfirmasi_duplikat"):
+        raise HTTPException(409, {"pesan": " ".join(plan["warnings"]), "perlu_konfirmasi": True})
+    now = datetime.utcnow().isoformat()
+    for u in plan["updates"]:
+        await db.supplier_profiles.update_one(
+            {"id": supplier_id, "jobs.id": u["job_id"]},
+            {"$set": {"jobs.$.no_invoice_supplier": u["ke"]}})
+        # riwayat perubahan nomor disimpan di level supplier (aditif; tidak menyentuh isi unit)
+        await db.supplier_profiles.update_one(
+            {"id": supplier_id},
+            {"$push": {"no_invoice_riwayat": {"job_id": u["job_id"], "dari": u["dari"], "ke": u["ke"], "oleh": "admin", "pada": now}}})
+    return {"ok": True, "diubah": len(plan["updates"]), "warnings": plan["warnings"], "nomor": plan["nomor"]}
+
+
+@api_router.get("/admin/suppliers/{supplier_id}/ringkasan-pdf", dependencies=[Depends(require_admin_pin)])
+async def supplier_ringkasan_pdf(supplier_id: str, cutoff: Optional[str] = None, dari: Optional[str] = None, no_dok: Optional[str] = None):
+    """PDF Ringkasan Supplier A4 dari SERVER (Chromium): teks vector, header tabel berulang, nomor halaman.
+    503 kalau generator PDF belum siap → frontend jatuh ke cetak browser yang sudah ada."""
+    if _browser is None:
+        raise HTTPException(503, "Generator PDF server belum siap.")
+    for v in (cutoff, dari):
+        if v and not re.match(r"^\d{4}-\d{2}-\d{2}$", v):
+            raise HTTPException(400, "Tanggal harus YYYY-MM-DD")
+    cut = cutoff or today_wib()
+    doc, jobs, rk, fin = await _finance_for(supplier_id, cut)
+    tg = sorted(t for t in [j.get("tanggal") for j in jobs] + [p.get("tanggal") for p in rk["rekon_payments"]] if t)
+    per = SF.ringkasan_periode(jobs, rk["rekon_payments"], dari or (tg[0] if tg else cut), cut)
+    html = SF.render_pdf_html(doc.get("nama") or "-", (no_dok or "").strip() or f"RPS/AAL/{cut.replace('-', '')}", fin, per,
+                              logo_path=os.path.join(os.path.dirname(__file__), "assets", "logo.png"))
+    page = await _browser.new_page()
+    try:
+        await page.set_content(html, wait_until="load")
+        await page.evaluate("document.fonts ? document.fonts.ready : Promise.resolve()")
+        pdf_bytes = await page.pdf(format="A4", print_background=True, display_header_footer=True,
+                                   header_template="<span></span>", footer_template=SF.PDF_FOOTER,
+                                   margin={"top": "16mm", "bottom": "18mm", "left": "14mm", "right": "14mm"})
+    except Exception as e:
+        logger.error(f"[pdf] gagal render Ringkasan Supplier {supplier_id}: {e}")
+        raise HTTPException(500, "Gagal membuat PDF, coba lagi.")
+    finally:
+        await page.close()
+    fname = "".join(c for c in (doc.get("nama") or "supplier") if c.isalnum() or c in " -_").strip() or "supplier"
+    return Response(content=pdf_bytes, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="Ringkasan-Supplier-{fname}-{cut}.pdf"'})
 
 
 @api_router.patch("/admin/suppliers/{supplier_id}", dependencies=[Depends(require_admin_pin)])
