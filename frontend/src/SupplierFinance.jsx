@@ -191,7 +191,10 @@ export default function SupplierFinance({ supplier, adminPin, onClose, flash, on
               ? <Kpi l="Selisih Rekonsiliasi" v="Belum Direkonsiliasi" cls="gray" n="saldo supplier belum diinput" />
               : <Kpi l="Selisih Rekonsiliasi" v={rp(R.selisih)} cls={R.selisih ? "red" : "ok"} n={R.status === "cocok" ? "cocok dengan supplier" : "Alyssa − supplier"} />}
           </div>
-          {data.anomali.length > 0 && <div className="sf-warn" style={{ marginTop: 10 }}>Perhatian: {data.anomali.length} transfer memiliki alokasi melebihi nominal transfer. Data tidak diubah; mohon diperiksa.</div>}
+          {data.anomali.filter((a) => a.jenis !== "alokasi_ke_unit_tidak_ada").length > 0 && <div className="sf-warn" style={{ marginTop: 10 }}>Perhatian: {data.anomali.filter((a) => a.jenis !== "alokasi_ke_unit_tidak_ada").length} transfer memiliki alokasi melebihi nominal transfer atau biaya admin yang dialokasikan. Data tidak diubah; mohon diperiksa.</div>}
+          {data.anomali.filter((a) => a.jenis === "alokasi_ke_unit_tidak_ada").map((a, i) => (
+            <div key={i} className="sf-warn" style={{ marginTop: 10 }}>Perhatian: transfer tanggal {tgl(a.tanggal)} punya alokasi {rp(a.teralokasi)} ke unit yang sudah tidak ada pada supplier ini (id unit {a.unit_id}). Nominal ini <b>tidak dihitung</b> sebagai pembayaran invoice, sama seperti perhitungan lama. Data tidak diubah; mohon diperiksa.</div>
+          ))}
 
           <div className="sf-sec">Rekonsiliasi Saldo <span>per cut-off {tgl(R.cutoff || cut)}</span></div>
           <div className="sf-card" data-testid="sf-rekon">
