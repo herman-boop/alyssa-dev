@@ -7754,6 +7754,41 @@ async def riwayat_unclear_items(supplier_id: str, body: Dict[str, Any] = Body(..
     return await _riwayat_clear_op(supplier_id, body, restore=True)
 
 
+async def _selesai_sembunyi_op(supplier_id: str, body: Dict[str, Any], kembalikan: bool):
+    """Sembunyikan/kembalikan unit di tab 'Selesai' (halaman Supplier). HANYA menulis field aditif
+    `selesai_sembunyi` -- jobs/payments/alokasi/total/sisa tidak disentuh dan tidak ada yang dihapus."""
+    ids = [str(i) for i in dict.fromkeys(((body or {}).get("job_ids") or [])) if i]
+    if not ids:
+        raise HTTPException(400, "Pilih minimal 1 unit")
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0, "id": 1, "jobs": 1, "selesai_sembunyi": 1})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    valid = {j.get("id") for j in (doc.get("jobs") or [])}
+    unknown = [i for i in ids if i not in valid]
+    if unknown:
+        raise HTTPException(400, f"Unit tidak ditemukan: {', '.join(unknown[:3])}")
+    cur = [e for e in (doc.get("selesai_sembunyi") or []) if isinstance(e, dict)]
+    if kembalikan:
+        new = [e for e in cur if e.get("job_id") not in set(ids)]
+    else:
+        have = {e.get("job_id") for e in cur}
+        now = datetime.utcnow().isoformat()
+        by = str((body or {}).get("by") or "Admin")[:40]
+        new = cur + [{"job_id": i, "at": now, "by": by} for i in ids if i not in have]
+    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"selesai_sembunyi": new}})
+    return {"ok": True, "selesai_sembunyi": new}
+
+
+@api_router.post("/admin/suppliers/{supplier_id}/selesai/sembunyikan", dependencies=[Depends(require_admin_pin)])
+async def selesai_sembunyikan(supplier_id: str, body: Dict[str, Any] = Body(...)):
+    return await _selesai_sembunyi_op(supplier_id, body, kembalikan=False)
+
+
+@api_router.post("/admin/suppliers/{supplier_id}/selesai/kembalikan", dependencies=[Depends(require_admin_pin)])
+async def selesai_kembalikan(supplier_id: str, body: Dict[str, Any] = Body(...)):
+    return await _selesai_sembunyi_op(supplier_id, body, kembalikan=True)
+
+
 @api_router.post("/admin/suppliers/{supplier_id}/pisah-faktur", dependencies=[Depends(require_admin_pin)])
 async def pisah_faktur(supplier_id: str, body: Dict[str, Any] = Body(...)):
     """Pisahkan unit terpilih jadi FAKTUR (projek) baru dengan No. Faktur OTOMATIS. Hanya
