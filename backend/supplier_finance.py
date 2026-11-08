@@ -220,6 +220,29 @@ def anomali(transfers):
     return out
 
 
+def _alok_valid(p, ids):
+    """Alokasi rekon yang DIHITUNG sebagai pembayaran: sama persis dengan perhitungan lama (_supplier_rekon_overview):
+    hanya nominal > 0 dan hanya ke unit yang memang ada pada supplier ini."""
+    return sum(_i(a.get("amount")) for a in (p.get("allocations") or [])
+               if a.get("job_id") in ids and _i(a.get("amount")) > 0)
+
+
+def alokasi_yatim(jobs, rekon_payments):
+    """Alokasi pembayaran rekon ke unit yang TIDAK ADA di supplier ini (mis. unit dihapus/dipindah).
+    Perhitungan lama mengabaikannya; di sini hanya DILAPORKAN, data tidak diubah."""
+    ids = {j.get("id") for j in (jobs or [])}
+    out = []
+    for p in (rekon_payments or []):
+        if p.get("status") == "reversed":
+            continue
+        for a in (p.get("allocations") or []):
+            if a.get("job_id") and a.get("job_id") not in ids and _i(a.get("amount")) > 0:
+                out.append({"jenis": "alokasi_ke_unit_tidak_ada", "key": "rk:" + str(p.get("id")), "tanggal": p.get("tanggal") or "",
+                            "nominal": _i(p.get("amount")), "unit_id": a.get("job_id"), "teralokasi": _i(a.get("amount")),
+                            "kelebihan": _i(a.get("amount"))})
+    return out
+
+
 # ── Rekonsiliasi saldo (Alyssa vs supplier) ──────────────────────────────────
 
 def saldo_alyssa(jobs, rekon_payments, cutoff):
@@ -231,6 +254,7 @@ def saldo_alyssa(jobs, rekon_payments, cutoff):
         return None
     tagih = sum(_i(j.get("net_transfer")) for j in (jobs or []) if (_d(j.get("tanggal")) or date.min) <= c)
     bayar = 0
+    ids = {j.get("id") for j in (jobs or [])}
     for j in jobs or []:
         for p in (j.get("payments") or []):
             if (_d(p.get("tanggal")) or date.min) <= c:
@@ -238,7 +262,7 @@ def saldo_alyssa(jobs, rekon_payments, cutoff):
     for p in (rekon_payments or []):
         if p.get("status") == "reversed" or (_d(p.get("tanggal")) or date.min) > c:
             continue
-        bayar += sum(_i(a.get("amount")) for a in (p.get("allocations") or []) if a.get("job_id"))
+        bayar += _alok_valid(p, ids)
     return tagih - bayar
 
 
@@ -408,7 +432,7 @@ def build_finance(jobs, rekon_payments, verifikasi=None, saldo_entries=None, cut
     tot = totals(invoices, perlu, transfers, penyesuaian)
     rekon = rekonsiliasi(jobs, rekon_payments, transfers, invoices, perlu, saldo_entries, cutoff)
     return {"ringkasan": tot, "invoices": invoices, "perlu_dilengkapi": perlu, "transfers": transfers,
-            "penyesuaian": penyesuaian, "rekonsiliasi": rekon, "anomali": anomali(transfers)}
+            "penyesuaian": penyesuaian, "rekonsiliasi": rekon, "anomali": anomali(transfers) + alokasi_yatim(jobs, rekon_payments)}
 
 
 # ── Ringkasan periode (saldo awal → saldo akhir) ─────────────────────────────
@@ -421,6 +445,7 @@ def ringkasan_periode(jobs, rekon_payments, dari, cutoff):
         return None
     awal = saldo_alyssa(jobs, rekon_payments, (d1.fromordinal(d1.toordinal() - 1)).isoformat())
     tagihan = bayar = komp = 0
+    ids_all = {j.get("id") for j in (jobs or [])}
     for j in jobs or []:
         if d1 <= (_d(j.get("tanggal")) or date.min) <= c:
             tagihan += _i(j.get("net_transfer"))
@@ -434,7 +459,7 @@ def ringkasan_periode(jobs, rekon_payments, dari, cutoff):
         if p.get("status") == "reversed":
             continue
         if d1 <= (_d(p.get("tanggal")) or date.min) <= c:
-            bayar += sum(_i(a.get("amount")) for a in (p.get("allocations") or []) if a.get("job_id"))
+            bayar += _alok_valid(p, ids_all)
     akhir = awal + tagihan - bayar - komp
     return {"dari": d1.isoformat(), "cutoff": c.isoformat(), "saldo_awal": awal, "tagihan_baru": tagihan,
             "pembayaran": bayar, "penyesuaian": komp, "saldo_akhir": akhir}
