@@ -19,7 +19,7 @@ function buildSupplierA4(sup, jobsOverride, noDocOverride, tglOverride, opt) {
   opt = opt || {};
   if (!sup) return null;
   const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const rp = (n) => "Rp " + (Number(n) || 0).toLocaleString("id-ID");
+  const rp = (n) => (Number(n) < 0 ? "-Rp " : "Rp ") + Math.abs(Number(n) || 0).toLocaleString("id-ID");
   const now = new Date();
   const tgl = (tglOverride ? new Date(`${tglOverride}T00:00:00`) : now).toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
   const noDoc = (noDocOverride && String(noDocOverride).trim()) || supplierAutoDocNo();
@@ -109,7 +109,7 @@ function buildSupplierA4(sup, jobsOverride, noDocOverride, tglOverride, opt) {
     const tbh = (j.tambahan || []).filter((t) => (t.amount || 0) > 0 || (t.label || "").trim());
     const tbhTotal = tbh.reduce((a, t) => a + (t.amount || 0), 0);
     const base = (j.harga_deal != null) ? j.harga_deal : ((j.total_harga || 0) - tbhTotal);
-    const tbhRow = tbh.length ? `<tr class="tb"><td></td><td colspan="6">&#8627; <b>Rincian:</b> Harga deal ${rp(base)}${tbh.map((t) => ` &nbsp;+&nbsp; ${esc((t.label || "Biaya tambahan").trim())} ${rp(t.amount)}`).join("")} &nbsp;=&nbsp; <b>${rp(j.total_harga)}</b></td></tr>` : "";
+    const tbhRow = tbh.length ? `<tr class="tb"><td></td><td colspan="6">&#8627; <b>Rincian:</b> Harga deal ${rp(base)}${tbh.map((t) => ` &nbsp;${(t.amount || 0) < 0 ? "&minus;" : "+"}&nbsp; ${esc((t.label || "Biaya tambahan").trim())} ${rp(Math.abs(t.amount || 0))}`).join("")} &nbsp;=&nbsp; <b>${rp(j.total_harga)}</b></td></tr>` : "";
     return `<tr${tbh.length ? ' class="has-tb"' : ""}>
       <td class="c">${idx}</td>
       <td><b>${esc(nopol)}</b><div class="rp-note">${esc(j.vehicle_type || "Unit")}</div></td>
@@ -285,7 +285,7 @@ export async function imageSupplierA4(sup, jobsOverride, noDocOverride, tglOverr
 export function printDriverRekapA4(sup, jobsOverride, noDocOverride, tglOverride) {
   if (!sup) return;
   const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const rp = (n) => "Rp " + (Number(n) || 0).toLocaleString("id-ID");
+  const rp = (n) => (Number(n) < 0 ? "-Rp " : "Rp ") + Math.abs(Number(n) || 0).toLocaleString("id-ID");
   const now = new Date();
   const tgl = (tglOverride ? new Date(`${tglOverride}T00:00:00`) : now).toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
   const noDoc = (noDocOverride && String(noDocOverride).trim()) || supplierAutoDocNo();
@@ -1009,16 +1009,17 @@ export default function SupplierPage() {
   const [tbhLabel, setTbhLabel] = useState("");
   const [tbhAmount, setTbhAmount] = useState("");
   const [tbhSaving, setTbhSaving] = useState(false);
-  const addTambahan = async () => {
+  const addTambahan = async (potongan = false) => {
     const job = detailJob; if (!job) return;
-    const label = tbhLabel.trim() || "Biaya tambahan"; const amount = pNum(tbhAmount);
-    if (amount <= 0) { flash("Isi nominal biaya tambahan dulu (mis. 900.000)"); return; }
+    const label = tbhLabel.trim() || (potongan ? "Potongan" : "Biaya tambahan"); const amount = pNum(tbhAmount);
+    if (amount <= 0) { flash(potongan ? "Isi nominal potongan dulu (mis. 500.000)" : "Isi nominal biaya tambahan dulu (mis. 900.000)"); return; }
+    if (potongan && !window.confirm(`Kurangi tagihan unit ini sebesar ${fRp(amount)}?\n(${label})`)) return;
     setTbhSaving(true);
     try {
-      await axios.post(`${API}/admin/suppliers/${selected.id}/jobs/${job.id}/tambahan`, { label, amount }, { headers });
+      await axios.post(`${API}/admin/suppliers/${selected.id}/jobs/${job.id}/tambahan`, potongan ? { label, amount, jenis: "potongan" } : { label, amount }, { headers });
       setTbhLabel(""); setTbhAmount("");
       await reloadSelected(selected.id); setListRefreshTick((t) => t + 1);
-      flash("✓ Biaya tambahan ditambahkan");
+      flash(potongan ? "✓ Potongan dicatat, total & sisa berkurang" : "✓ Biaya tambahan ditambahkan");
     } catch (e) { flash(e?.response?.data?.detail || "Gagal tambah biaya"); }
     finally { setTbhSaving(false); }
   };
@@ -2086,9 +2087,9 @@ export default function SupplierPage() {
             </div>
             {(detailJobLive.tambahan || []).map((t) => (
               <div key={t.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, padding: "5px 0", borderTop: `1px dashed ${C.line}` }}>
-                <span style={{ color: C.gold }}>↳ {t.label}</span>
+                <span style={{ color: (t.amount || 0) < 0 ? C.red : C.gold }}>↳ {t.label}{(t.amount || 0) < 0 ? " (potongan)" : ""}</span>
                 <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <b>{fRp(t.amount)}</b>
+                  <b style={{ color: (t.amount || 0) < 0 ? C.red : undefined }}>{(t.amount || 0) < 0 ? `− ${fRp(Math.abs(t.amount))}` : fRp(t.amount)}</b>
                   <button onClick={() => deleteTambahan(detailJobLive.id, t.id)} style={{ background: "none", border: "none", color: C.red, cursor: "pointer", fontSize: 12 }}>Hapus</button>
                 </span>
               </div>
@@ -2096,9 +2097,12 @@ export default function SupplierPage() {
             <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
               <input style={{ ...I, flex: 1.4 }} placeholder="Keterangan (mis. Tambahan BBM)" value={tbhLabel} onChange={(e) => setTbhLabel(e.target.value)} data-testid="sup-tbh-label" />
               <input style={{ ...I, flex: 1 }} inputMode="numeric" placeholder="Nominal" value={fmtRpInput(tbhAmount)} onChange={(e) => setTbhAmount(onlyDigits(e.target.value))} data-testid="sup-tbh-amount" />
-              <button style={{ ...BTN, padding: "0 16px", minWidth: 84, whiteSpace: "nowrap" }} disabled={tbhSaving} onClick={addTambahan} data-testid="sup-tbh-add">{tbhSaving ? "…" : "+ Tambah"}</button>
+              <button style={{ ...BTN, padding: "0 16px", minWidth: 84, whiteSpace: "nowrap" }} disabled={tbhSaving} onClick={() => addTambahan(false)} data-testid="sup-tbh-add">{tbhSaving ? "…" : "+ Tambah"}</button>
             </div>
-            <div style={{ fontSize: 11, color: C.mute, marginTop: 5 }}>Biaya tambahan nambah Total &amp; Sisa unit ini. Harga deal awal tetap.</div>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+              <button style={{ ...BTN_GHOST, color: C.red, borderColor: C.red, padding: "8px 16px", whiteSpace: "nowrap" }} disabled={tbhSaving} onClick={() => addTambahan(true)} data-testid="sup-tbh-minus">− Kurangi (potongan)</button>
+            </div>
+            <div style={{ fontSize: 11, color: C.mute, marginTop: 5 }}>Biaya tambahan nambah Total &amp; Sisa unit ini. <b>Potongan</b> (mis. uang tiket yang sudah diambil driver) mengurangi Total &amp; Sisa. Harga deal awal tetap.</div>
           </div>
 
           {/* ── Tag / Judul Kelompok laporan (pembatas visual PDF, tidak ikut hitungan) ── */}
