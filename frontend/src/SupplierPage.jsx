@@ -1199,11 +1199,20 @@ export default function SupplierPage() {
     return Object.values(map).sort((a, b) => (b.tanggal || "").localeCompare(a.tanggal || ""));
   }, [jobs]);
   const [txnDetail, setTxnDetail] = useState(null);
+  /* ═══ SELESAI: invoice/unit yang sudah lunas pindah ke tab "Selesai" (hanya tampilan; data tidak dihapus/diubah) ═══ */
+  const settledJob = (j) => (j.total_harga || 0) > 0 && statusOf(j) === "lunas";
+  const settledJobIds = useMemo(() => new Set(jobs.filter(settledJob).map((j) => j.id)), [jobs]);
+  // Transaksi LUNAS = semua unit yang dibayar transaksi itu sudah lunas (rekon: juga harus teralokasi penuh).
+  const settledTxns = useMemo(() => txns.filter((t) => t.allocs.length > 0 && t.allocs.every((a) => settledJobIds.has(a.jobId))), [txns, settledJobIds]);
+  const settledRekon = useMemo(() => ((selected && selected.rekon_payments) || []).filter((p) => p.status !== "reversed" && p.alloc_status === "allocated" && (p.allocations || []).length > 0 && p.allocations.every((a) => settledJobIds.has(a.job_id))), [selected, settledJobIds]);
+  const settledKeys = useMemo(() => new Set([...settledTxns.map((t) => `tx:${t.key}`), ...settledRekon.map((p) => `rk:${p.id}`)]), [settledTxns, settledRekon]);
   /* ═══ CLEAR / ARSIP Riwayat Pembayaran (aditif — TIDAK menghapus data/alokasi/status) ═══ */
   const [clrSel, setClrSel] = useState(() => new Set());      // kunci yang dicentang: "rk:<id>" | "tx:<batch/payment id>"
   const [showArsip, setShowArsip] = useState(false);
   const [clrBusy, setClrBusy] = useState(false);
   const clearedSet = useMemo(() => new Set(((selected && selected.riwayat_clear) || []).filter((e) => e.status === "cleared").map((e) => e.key)), [selected]);
+  // Dipakai tab Riwayat: sembunyikan yang di-clear DAN yang sudah lunas (data tetap ada, lihat tab Selesai).
+  const hiddenSet = useMemo(() => new Set([...clearedSet, ...settledKeys]), [clearedSet, settledKeys]);
   const toggleClr = (k) => setClrSel((s0) => { const n = new Set(s0); n.has(k) ? n.delete(k) : n.add(k); return n; });
   // "Belum Dialokasikan" (header): rekon yang sudah di-CLEAR tidak ikut dihitung/ditampilkan; data tidak dihapus.
   const unallocRows = ((selected && selected.rekon_payments) || []).filter((p) => p.status !== "reversed" && (p.unallocated || 0) > 0);
@@ -1278,7 +1287,7 @@ export default function SupplierPage() {
     return out.sort((a, b) => (b.tanggal || "").localeCompare(a.tanggal || ""));
   }, [jobs]);
 
-  const filteredJobs = useMemo(() => filter === "semua" ? jobs : jobs.filter((j) => statusOf(j) === filter), [jobs, filter]);
+  const filteredJobs = useMemo(() => filter === "semua" ? jobs.filter((j) => !((j.total_harga || 0) > 0 && statusOf(j) === "lunas")) : jobs.filter((j) => statusOf(j) === filter), [jobs, filter]);
   // Kelompokkan tagihan per Grup/Projek biar nggak campur (urut sesuai daftar projek).
   const jobsGrouped = useMemo(() => {
     const projs = selected?.projects || [];
@@ -1292,7 +1301,7 @@ export default function SupplierPage() {
     return Array.from(map.values()).filter((g) => g.jobs.length > 0);
   }, [filteredJobs, selected]);
 
-  const TABS = [{ k: "tagihan", t: "Tagihan" }, { k: "pembayaran", t: "Pembayaran" }, { k: "pajak", t: "Pajak" }, { k: "riwayat", t: "Riwayat" }, { k: "dokumen", t: "Dokumen" }];
+  const TABS = [{ k: "tagihan", t: "Tagihan" }, { k: "pembayaran", t: "Pembayaran" }, { k: "pajak", t: "Pajak" }, { k: "riwayat", t: "Riwayat" }, { k: "selesai", t: "Selesai" }, { k: "dokumen", t: "Dokumen" }];
   const pajakJobs = useMemo(() => (selected?.jobs || []).filter((j) => j.pph23_enabled), [selected]);
 
   return (
@@ -1483,10 +1492,11 @@ export default function SupplierPage() {
                 <button style={{ ...BTN_GHOST, flex: "1 1 100%", color: C.gold, borderColor: C.gold }} onClick={openInv} data-testid="sup-inv-open">📄 Upload Invoice Supplier (otomatis)</button>
               </div>
               <div style={{ display: "flex", gap: 6, marginBottom: 12, overflowX: "auto" }}>
-                {[["semua", "Semua"], ["belum", "Belum Bayar"], ["sebagian", "Sebagian"], ["lunas", "Lunas"]].map(([k, t]) => (
+                {[["semua", "Semua"], ["belum", "Belum Bayar"], ["sebagian", "Sebagian"]].map(([k, t]) => (
                   <button key={k} onClick={() => setFilter(k)} style={{ padding: "7px 12px", borderRadius: 20, border: `1px solid ${filter === k ? C.gold : C.line}`, background: filter === k ? "#2a1f0d" : C.card, color: filter === k ? C.gold : C.mute, fontSize: 12, fontWeight: 700, whiteSpace: "nowrap", cursor: "pointer" }}>{t}</button>
                 ))}
               </div>
+              {settledJobIds.size > 0 && <div style={{ fontSize: 11.5, color: C.mute, margin: "-4px 0 10px" }}>✓ {settledJobIds.size} unit yang sudah lunas dipindah ke tab <b style={{ color: C.green }}>Selesai</b>.</div>}
               {filteredJobs.length === 0 && <div style={{ textAlign: "center", padding: 30, color: C.mute }}>Tidak ada tagihan.</div>}
               {jobsGrouped.map((g) => {
                 const gSisa = g.jobs.reduce((s, j) => s + (j.sisa || 0), 0);
@@ -1612,8 +1622,8 @@ export default function SupplierPage() {
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {(() => {
                 const visKeys = [
-                  ...(selected.rekon_payments || []).filter((p) => !clearedSet.has(`rk:${p.id}`)).map((p) => `rk:${p.id}`),
-                  ...txns.filter((t) => !clearedSet.has(`tx:${t.key}`)).map((t) => `tx:${t.key}`),
+                  ...(selected.rekon_payments || []).filter((p) => !hiddenSet.has(`rk:${p.id}`)).map((p) => `rk:${p.id}`),
+                  ...txns.filter((t) => !hiddenSet.has(`tx:${t.key}`)).map((t) => `tx:${t.key}`),
                 ];
                 const arsipN = clearedSet.size;
                 if (visKeys.length === 0 && arsipN === 0) return null;
@@ -1625,8 +1635,8 @@ export default function SupplierPage() {
                         <input type="checkbox" checked={allOn} onChange={() => setClrSel(allOn ? new Set() : new Set(visKeys))} style={{ width: 17, height: 17 }} data-testid="sup-clear-all" /> Pilih Semua
                       </label>
                     )}
-                    <button style={{ ...BTN, padding: "6px 12px", fontSize: 12 }} disabled={clrBusy || [...clrSel].filter((k) => !clearedSet.has(k)).length === 0}
-                      onClick={() => runClear(false)} data-testid="sup-clear-do">✓ Clear yang dipilih{[...clrSel].filter((k) => !clearedSet.has(k)).length ? ` (${[...clrSel].filter((k) => !clearedSet.has(k)).length})` : ""}</button>
+                    <button style={{ ...BTN, padding: "6px 12px", fontSize: 12 }} disabled={clrBusy || [...clrSel].filter((k) => !hiddenSet.has(k)).length === 0}
+                      onClick={() => runClear(false)} data-testid="sup-clear-do">✓ Clear yang dipilih{[...clrSel].filter((k) => !hiddenSet.has(k)).length ? ` (${[...clrSel].filter((k) => !hiddenSet.has(k)).length})` : ""}</button>
                     <button style={{ ...BTN_GHOST, padding: "6px 10px", fontSize: 11.5, marginLeft: "auto" }} onClick={() => { setShowArsip((v) => !v); setClrSel(new Set()); }} data-testid="sup-clear-arsip-toggle">
                       🗂️ Riwayat Clear / Arsip{arsipN ? ` (${arsipN})` : ""}
                     </button>
@@ -1675,12 +1685,12 @@ export default function SupplierPage() {
                   </div>
                 );
               })()}
-              {(selected.rekon_payments || []).filter((p) => !clearedSet.has(`rk:${p.id}`)).length > 0 && (() => {
+              {(selected.rekon_payments || []).filter((p) => !hiddenSet.has(`rk:${p.id}`)).length > 0 && (() => {
                 const jobById = Object.fromEntries((selected.jobs || []).map((j) => [j.id, j]));
                 return (
                 <div style={{ background: "#1a1408", border: `1px solid ${C.gold}`, borderRadius: 12, padding: 12 }}>
                   <div style={{ fontSize: 13, fontWeight: 800, color: C.gold, marginBottom: 8 }}>🏦 Pembayaran dari Audit Rekon Bank</div>
-                  {selected.rekon_payments.filter((p) => !clearedSet.has(`rk:${p.id}`)).map((p) => {
+                  {selected.rekon_payments.filter((p) => !hiddenSet.has(`rk:${p.id}`)).map((p) => {
                     const st = p.alloc_status;
                     const badge = st === "allocated" ? { t: "Dialokasikan", c: C.green } : st === "partial" ? { t: `Sebagian · sisa ${fRp(p.unallocated)}`, c: C.gold } : { t: "Belum Dialokasikan", c: C.red };
                     return (
@@ -1727,10 +1737,10 @@ export default function SupplierPage() {
                 </div>
               )}
               {txns.length === 0 && (selected.rekon_payments || []).length === 0 && <div style={{ textAlign: "center", padding: 30, color: C.mute }}>Belum ada pembayaran.</div>}
-              {txns.length + (selected.rekon_payments || []).length > 0 && txns.filter((t) => !clearedSet.has(`tx:${t.key}`)).length === 0 && (selected.rekon_payments || []).filter((p) => !clearedSet.has(`rk:${p.id}`)).length === 0 && (
-                <div style={{ textAlign: "center", padding: 24, color: C.mute, fontSize: 13 }}>Semua transaksi sudah di-clear. Buka "🗂️ Riwayat Clear / Arsip" untuk melihat/mengembalikan.</div>
+              {txns.length + (selected.rekon_payments || []).length > 0 && txns.filter((t) => !hiddenSet.has(`tx:${t.key}`)).length === 0 && (selected.rekon_payments || []).filter((p) => !hiddenSet.has(`rk:${p.id}`)).length === 0 && (
+                <div style={{ textAlign: "center", padding: 24, color: C.mute, fontSize: 13 }}>Semua transaksi sudah di-clear atau sudah lunas. Yang lunas ada di tab "Selesai"; yang di-clear ada di "🗂️ Riwayat Clear / Arsip".</div>
               )}
-              {txns.filter((t) => !clearedSet.has(`tx:${t.key}`)).map((tx) => (
+              {txns.filter((t) => !hiddenSet.has(`tx:${t.key}`)).map((tx) => (
                 <div key={tx.key} style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
                   <label style={{ display: "flex", alignItems: "center", padding: "0 4px", cursor: "pointer" }}>
                     <input type="checkbox" checked={clrSel.has(`tx:${tx.key}`)} onChange={() => toggleClr(`tx:${tx.key}`)} style={{ width: 18, height: 18 }} data-testid={`sup-clear-chk-tx-${tx.key}`} />
@@ -1753,6 +1763,47 @@ export default function SupplierPage() {
               ))}
             </div>
           )}
+
+          {/* ═══ TAB SELESAI: invoice/unit lunas + pembayarannya (tampilan saja; tidak mengubah data) ═══ */}
+          {tab === "selesai" && (() => {
+            const lunasJobs = jobs.filter(settledJob);
+            const grp = new Map();
+            lunasJobs.forEach((j) => { const k = (j.no_invoice_supplier || "").trim() || "_none"; if (!grp.has(k)) grp.set(k, []); grp.get(k).push(j); });
+            const jobNm = (j) => j.nopol || j.no_rangka || "-";
+            return (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }} data-testid="sup-selesai">
+                <div style={{ fontSize: 12, color: C.mute }}>Invoice/unit yang sudah <b style={{ color: C.green }}>lunas</b> dan pembayarannya. Hanya dipindah tampilannya; angka dan data tetap sama.</div>
+                {lunasJobs.length === 0 && <div style={{ textAlign: "center", padding: 30, color: C.mute }}>Belum ada yang lunas.</div>}
+                {[...grp.entries()].map(([k, js]) => (
+                  <div key={k} style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
+                      <div style={{ fontWeight: 800, fontSize: 13.5, color: k === "_none" ? C.gold : C.ink, minWidth: 0, overflowWrap: "anywhere" }}>{k === "_none" ? "Tanpa nomor invoice" : `Inv ${k}`}</div>
+                      <div style={{ fontWeight: 900, color: C.green, whiteSpace: "nowrap" }}>✓ {fRp(js.reduce((a, j) => a + (j.total_harga || 0), 0))}</div>
+                    </div>
+                    {js.map((j) => (
+                      <div key={j.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12, color: C.mute, padding: "4px 0", borderTop: `1px dashed ${C.line}`, marginTop: 4 }}>
+                        <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{jobNm(j)} · {j.asal_kota || "-"} → {j.tujuan_kota || "-"}</span>
+                        <span style={{ whiteSpace: "nowrap" }}>{fRp(j.total_harga)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+                {(settledTxns.length + settledRekon.length) > 0 && <div style={{ fontSize: 13, fontWeight: 800, color: C.gold, marginTop: 6 }}>Pembayaran yang sudah lunas ({settledTxns.length + settledRekon.length})</div>}
+                {settledRekon.map((p) => (
+                  <div key={p.id} style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}><b>{fRp(p.amount)}</b><span style={{ fontSize: 12, color: C.mute }}>{fDate(p.tanggal)}</span></div>
+                    <div style={{ fontSize: 11.5, color: C.mute, marginTop: 3 }}>Rekon Bank · dialokasikan ke {(p.allocations || []).length} unit lunas{p.catatan ? ` · ${p.catatan}` : ""}</div>
+                  </div>
+                ))}
+                {settledTxns.map((t) => (
+                  <button key={t.key} onClick={() => setTxnDetail(t)} style={{ textAlign: "left", background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 12, color: C.ink, cursor: "pointer" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}><b>{fRp(t.total)}</b><span style={{ fontSize: 12, color: C.mute }}>{fDate(t.tanggal)}</span></div>
+                    <div style={{ fontSize: 11.5, color: C.mute, marginTop: 3 }}>{t.metode || "Transfer"}{t.bank ? ` · ${t.bank}` : ""} · {t.allocs.length} unit lunas{t.no_referensi ? ` · Ref ${t.no_referensi}` : ""}</div>
+                  </button>
+                ))}
+              </div>
+            );
+          })()}
 
           {/* ═══ TAB DOKUMEN ═══ */}
           {tab === "dokumen" && (
