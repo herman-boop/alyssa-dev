@@ -8042,6 +8042,9 @@ async def add_supplier_job_tambahan(supplier_id: str, job_id: str, body: dict = 
         raise HTTPException(400, "Keterangan biaya tambahan wajib diisi")
     if amount <= 0:
         raise HTTPException(400, "Nominal harus lebih dari 0")
+    # jenis="potongan": nominal DIKURANGKAN dari tagihan unit (mis. uang tiket yang sudah diambil driver).
+    # Disimpan sebagai angka negatif di daftar yang sama, jadi total/pajak/sisa ikut rumus yang sudah ada.
+    potongan = str(body.get("jenis") or "").strip().lower() == "potongan"
     doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Supplier tidak ditemukan")
@@ -8049,7 +8052,14 @@ async def add_supplier_job_tambahan(supplier_id: str, job_id: str, body: dict = 
     idx = next((i for i, j in enumerate(jobs) if j.get("id") == job_id), None)
     if idx is None:
         raise HTTPException(404, "Unit/job tidak ditemukan")
+    if potongan:
+        cur = _supplier_job_totals(jobs[idx])
+        if amount > (cur.get("total_harga") or 0):
+            raise HTTPException(400, "Potongan melebihi total harga unit ini")
+        amount = -amount
     item = {"id": _gen_supplier_id(), "label": label[:80], "amount": amount, "created_at": datetime.utcnow().isoformat()}
+    if potongan:
+        item["jenis"] = "potongan"
     jobs[idx].setdefault("tambahan", []).append(item)
     await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
     return _supplier_job_totals(jobs[idx])
