@@ -129,7 +129,7 @@ export default function KasBankPage() {
           {accs.items.map((a) => (
             <button key={a.id} type="button" onClick={() => setSel(a.id)} data-testid={`kas-acc-${a.id}`}
               style={{ ...card, textAlign: "left", cursor: "pointer", color: "#e6edf3", borderColor: sel === a.id ? "#EF9F27" : "#30363d" }}>
-              <div style={{ fontSize: 12, color: "#8b949e", fontWeight: 700 }}>{(JENIS.find(([k]) => k === a.jenis) || [, a.jenis])[1]}{a.sistem ? " · otomatis" : ""}</div>
+              <div style={{ fontSize: 12, color: "#8b949e", fontWeight: 700 }}>{(JENIS.find(([k]) => k === a.jenis) || [undefined, a.jenis])[1]}{a.sistem ? " · otomatis" : ""}</div>
               <div style={{ fontWeight: 800, fontSize: 15, margin: "2px 0" }}>{a.nama}</div>
               <div style={{ fontSize: 20, fontWeight: 900, color: a.saldo < 0 ? "#d2a8ff" : "#e6edf3" }} data-testid={`kas-saldo-${a.id}`}>{rp(a.saldo)}</div>
             </button>
