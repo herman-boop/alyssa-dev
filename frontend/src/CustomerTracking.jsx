@@ -8,6 +8,7 @@ import VesselPositionView from "./VesselPositionView";
 import LiveTrackSummary from "./LiveTrackSummary";
 import { MapFitter, SHIP_ZOOM, REGIONAL_ZOOM } from "./MapAutoCenter";
 import { buildVesselView } from "./vesselPositionData";
+import { renderMapImage } from "./mapShare";
 import { MAP_TILE_URL, MAP_LABEL_URL, MAP_ATTR, MAP_MAX_ZOOM, MAP_MAX_NATIVE_ZOOM, ROUTE_COLOR, ROUTE_WEIGHT, ROUTE_OPACITY, ROUTE_DASH, freshnessDot } from "./mapTheme";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -609,6 +610,13 @@ function MapFlyTo({ target, nonce }) {
   return null;
 }
 
+/* Simpan instance peta Leaflet ke ref (dipakai tombol "Kirim Peta ke WhatsApp"). */
+function MapRefGrab({ mapRef }) {
+  const map = useMap();
+  useEffect(() => { mapRef.current = map; return () => { if (mapRef.current === map) mapRef.current = null; }; }, [map, mapRef]);
+  return null;
+}
+
 /* Reverse-geocode ringan (nama lokasi dari lat/lng) — buat checkpoint yang
    belum simpan alamat. Ambil desa/kec/kota + kabupaten + provinsi. */
 async function reverseGeocodeName(lat, lng) {
@@ -645,6 +653,9 @@ export default function CustomerTracking() {
   const [vesselView, setVesselView] = useState(false);     // layar "Lihat Posisi Kapal"
   const [flyNonce, setFlyNonce] = useState(0);           // fokus map ke kapal saat klik leg
   const mapAreaRef = useRef(null);
+  const leafletMapRef = useRef(null);       // instance Leaflet (untuk render peta tajam)
+  const mapShareCache = useRef({ key: "", file: null });
+  const [mapShareBusy, setMapShareBusy] = useState(false);
   const [geoNames, setGeoNames] = useState({}); // "lat,lng" -> nama lokasi (checkpoint lama tanpa alamat)
   const geoTriedRef = useRef(new Set());
   const panelRef = useRef(null);
@@ -788,6 +799,58 @@ export default function CustomerTracking() {
   const fitPositions = shipPos ? [...positions, shipPos] : positions;
   const hasMap    = gpsPoints.length > 0 || !!shipPos;
 
+  /* Kirim PETA ke WhatsApp sebagai gambar TAJAM (digambar ulang beresolusi tinggi, bukan screenshot buram).
+     Isi = tampilan peta yang sedang dilihat + rute + penanda + judul. Hanya presentasi, tidak mengubah data. */
+  const shareMapWA = async () => {
+    const map = leafletMapRef.current;
+    if (!map || mapShareBusy) return;
+    const size = map.getSize(); const c = map.getCenter(); const z = map.getZoom();
+    const dpr = typeof window !== "undefined" ? (window.devicePixelRatio || 1) : 1;
+    const scale = Math.max(2, Math.min(3, Math.ceil(dpr)));
+    const key = [c.lat.toFixed(5), c.lng.toFixed(5), z, size.x, size.y, shipPos ? shipPos.join(",") : "", gpsPoints.length].join("|");
+    const kirim = async (file) => {
+      const bisa = typeof navigator.share === "function" && typeof navigator.canShare === "function" && navigator.canShare({ files: [file] });
+      if (!bisa) {
+        const a = document.createElement("a"); a.href = URL.createObjectURL(file); a.download = file.name; document.body.appendChild(a); a.click(); a.remove();
+        bagikanToast("Browser ini belum bisa mengirim gambar langsung. Gambar peta tersimpan di HP/komputer; kirim lewat WhatsApp dari galeri/unduhan.");
+        return;
+      }
+      await navigator.share({ files: [file], text: `Posisi unit ${data.nopol || ""}${shipInfo && shipInfo.ship_name ? ` · kapal ${shipInfo.ship_name}` : ""}`.trim() });
+    };
+    try {
+      if (mapShareCache.current.key === key && mapShareCache.current.file) { await kirim(mapShareCache.current.file); return; }
+      setMapShareBusy(true);
+      bagikanToast("Menyiapkan peta beresolusi tinggi…");
+      const lines = [];
+      if (data.nopol) lines.push(`Unit ${data.nopol}${data.route ? ` · ${data.route}` : ""}`);
+      if (shipInfo && shipPos) lines.push(`Kapal ${shipInfo.ship_name || shipAis.ship_name || ""} · posisi AIS ${aisAgeText(shipInfo.age_seconds)} (bukan real-time)`);
+      lines.push(`Dibuat ${new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })} WIB`);
+      const { blob, tileGagal, tileOk } = await renderMapImage({
+        center: [c.lat, c.lng], zoom: z, width: size.x, height: size.y, scale,
+        route: fitPositions.length > 1 ? fitPositions : [],
+        checkpoints: gpsPoints.map((cp, i) => ({ pos: [parseFloat(cp.lat), parseFloat(cp.lng)], n: i + 1, latest: i === gpsPoints.length - 1 })),
+        ship: shipPos ? { pos: shipPos, name: (shipInfo && shipInfo.ship_name) || shipAis.ship_name || "" } : null,
+        title: "Fleet / Live Track · PT Alyssa Auto Logistik", lines,
+        footer: window.location.href.replace(/^https?:\/\//, "").slice(0, 70),
+      });
+      if (tileOk === 0) throw new Error("tile");
+      if (tileGagal > 0) bagikanToast("Sebagian kotak peta gagal dimuat (koneksi). Gambar tetap dibuat; ulangi bila ada bagian kosong.");
+      const file = new File([blob], `peta-${(data.nopol || "unit").replace(/\W+/g, "")}-${Date.now()}.jpg`, { type: "image/jpeg" });
+      mapShareCache.current = { key, file };
+      setMapShareBusy(false);
+      try { await kirim(file); }
+      catch (err) {
+        if (err && err.name === "AbortError") return;
+        if (err && err.name === "NotAllowedError") { bagikanToast("Peta sudah siap. Tekan tombol sekali lagi untuk mengirim."); return; }
+        throw err;
+      }
+    } catch (err) {
+      if (err && err.name === "AbortError") return;
+      bagikanToast("Gambar peta gagal dibuat. Dikirim sebagai link.");
+      shareWaText(`Posisi unit ${data.nopol || ""}: ${window.location.href}`);
+    } finally { setMapShareBusy(false); }
+  };
+
   /* Leg kapal yang sedang berjalan (untuk info Pelabuhan/ETA/ETB di panel).
      Generik: cocokkan MMSI/IMO dgn AIS aktif, lalu leg kapal "Berlangsung",
      lalu leg kapal mana pun. Tidak ada hardcode nama kapal. */
@@ -919,6 +982,7 @@ export default function CustomerTracking() {
             >
               <TileLayer url={MAP_TILE_URL} attribution={MAP_ATTR} maxZoom={MAP_MAX_ZOOM} maxNativeZoom={MAP_MAX_NATIVE_ZOOM} />
               <TileLayer url={MAP_LABEL_URL} maxZoom={MAP_MAX_ZOOM} maxNativeZoom={MAP_MAX_NATIVE_ZOOM} />
+              <MapRefGrab mapRef={leafletMapRef} />
               <MapFitter positions={fitPositions} shipPos={shipPos} />
               <MapFlyTo target={shipPos} nonce={flyNonce} />
 
@@ -1006,6 +1070,15 @@ export default function CustomerTracking() {
               <div className="trk-map-empty-title">Belum Ada Data GPS</div>
               <div className="trk-map-empty-sub">Peta akan muncul saat driver mengirim foto checkpoint dengan lokasi aktif.</div>
             </div>
+          )}
+
+          {/* Tombol kirim peta tajam ke WhatsApp */}
+          {hasMap && (
+            <button onClick={shareMapWA} disabled={mapShareBusy} data-testid="trk-map-wa"
+              title="Kirim peta ini ke WhatsApp sebagai gambar tajam"
+              style={{ position: "absolute", left: 10, bottom: 34, zIndex: 1000, display: "flex", alignItems: "center", gap: 7, padding: "9px 14px", borderRadius: 10, border: "none", background: "#25D366", color: "#06310f", fontWeight: 800, fontSize: 13, cursor: mapShareBusy ? "wait" : "pointer", boxShadow: "0 2px 10px rgba(0,0,0,.25)", opacity: mapShareBusy ? 0.7 : 1 }}>
+              <IcoWA /> {mapShareBusy ? "Menyiapkan…" : "Kirim Peta"}
+            </button>
           )}
 
           {/* Map overlay: GPS count badge */}
