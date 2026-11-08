@@ -1206,6 +1206,32 @@ export default function SupplierPage() {
   const settledTxns = useMemo(() => txns.filter((t) => t.allocs.length > 0 && t.allocs.every((a) => settledJobIds.has(a.jobId))), [txns, settledJobIds]);
   const settledRekon = useMemo(() => ((selected && selected.rekon_payments) || []).filter((p) => p.status !== "reversed" && p.alloc_status === "allocated" && (p.allocations || []).length > 0 && p.allocations.every((a) => settledJobIds.has(a.job_id))), [selected, settledJobIds]);
   const settledKeys = useMemo(() => new Set([...settledTxns.map((t) => `tx:${t.key}`), ...settledRekon.map((p) => `rk:${p.id}`)]), [settledTxns, settledRekon]);
+  // Sembunyikan dari tab Selesai (arsip tampilan; bisa dikembalikan; unit/pembayaran/angka TIDAK dihapus atau diubah).
+  const selesaiHidden = useMemo(() => new Set(((selected && selected.selesai_sembunyi) || []).map((e) => e.job_id)), [selected]);
+  const [showHid, setShowHid] = useState(false);
+  const [selBusy, setSelBusy] = useState(false);
+  const sembunyiUnit = async (ids, kembalikan) => {
+    if (!selected || !ids.length || selBusy) return;
+    if (!kembalikan && !window.confirm(`Sembunyikan ${ids.length} unit dari tab Selesai?\n\nHanya disembunyikan dari tampilan ini. Unit, pembayaran, dan semua angka TIDAK dihapus atau berubah. Bisa dikembalikan lewat "Disembunyikan".`)) return;
+    setSelBusy(true);
+    try {
+      await axios.post(`${API}/admin/suppliers/${selected.id}/selesai/${kembalikan ? "kembalikan" : "sembunyikan"}`, { job_ids: ids, by: "Admin" }, { headers });
+      await reloadSelected(selected.id);
+      flash(kembalikan ? `✓ ${ids.length} unit dikembalikan ke tab Selesai` : `✓ ${ids.length} unit disembunyikan (data tetap utuh)`);
+    } catch (e) { flash(e?.response?.data?.detail || "Gagal memproses"); }
+    finally { setSelBusy(false); }
+  };
+  const sembunyiBayar = async (keys) => {
+    if (!selected || !keys.length || selBusy) return;
+    if (!window.confirm("Sembunyikan transaksi ini dari tab Selesai?\n\nHanya disembunyikan (masuk Riwayat Clear / Arsip). Data transaksi dan alokasi TIDAK dihapus.")) return;
+    setSelBusy(true);
+    try {
+      await axios.post(`${API}/admin/suppliers/${selected.id}/riwayat/clear`, { keys, by: "Admin" }, { headers });
+      await reloadSelected(selected.id);
+      flash("✓ Transaksi disembunyikan (ada di Riwayat Clear / Arsip)");
+    } catch (e) { flash(e?.response?.data?.detail || "Gagal memproses"); }
+    finally { setSelBusy(false); }
+  };
   /* ═══ CLEAR / ARSIP Riwayat Pembayaran (aditif — TIDAK menghapus data/alokasi/status) ═══ */
   const [clrSel, setClrSel] = useState(() => new Set());      // kunci yang dicentang: "rk:<id>" | "tx:<batch/payment id>"
   const [showArsip, setShowArsip] = useState(false);
@@ -1766,7 +1792,8 @@ export default function SupplierPage() {
 
           {/* ═══ TAB SELESAI: invoice/unit lunas + pembayarannya (tampilan saja; tidak mengubah data) ═══ */}
           {tab === "selesai" && (() => {
-            const lunasJobs = jobs.filter(settledJob);
+            const lunasJobs = jobs.filter((j) => settledJob(j) && !selesaiHidden.has(j.id));
+            const hiddenJobs = jobs.filter((j) => settledJob(j) && selesaiHidden.has(j.id));
             const grp = new Map();
             lunasJobs.forEach((j) => { const k = (j.no_invoice_supplier || "").trim() || "_none"; if (!grp.has(k)) grp.set(k, []); grp.get(k).push(j); });
             const jobNm = (j) => j.nopol || j.no_rangka || "-";
@@ -1780,26 +1807,44 @@ export default function SupplierPage() {
                       <div style={{ fontWeight: 800, fontSize: 13.5, color: k === "_none" ? C.gold : C.ink, minWidth: 0, overflowWrap: "anywhere" }}>{k === "_none" ? "Tanpa nomor invoice" : `Inv ${k}`}</div>
                       <div style={{ fontWeight: 900, color: C.green, whiteSpace: "nowrap" }}>✓ {fRp(js.reduce((a, j) => a + (j.total_harga || 0), 0))}</div>
                     </div>
+                    <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 6 }}>
+                      <button disabled={selBusy} onClick={() => sembunyiUnit(js.map((j) => j.id), false)} style={{ ...BTN_GHOST, minHeight: 34, padding: "5px 12px", fontSize: 12, color: C.mute }} data-testid={`sup-selesai-hide-${k}`}>🙈 Sembunyikan semua ({js.length})</button>
+                    </div>
                     {js.map((j) => (
                       <div key={j.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12, color: C.mute, padding: "4px 0", borderTop: `1px dashed ${C.line}`, marginTop: 4 }}>
                         <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{jobNm(j)} · {j.asal_kota || "-"} → {j.tujuan_kota || "-"}</span>
-                        <span style={{ whiteSpace: "nowrap" }}>{fRp(j.total_harga)}</span>
+                        <span style={{ whiteSpace: "nowrap", display: "flex", gap: 8, alignItems: "baseline" }}>{fRp(j.total_harga)}<button disabled={selBusy} onClick={() => sembunyiUnit([j.id], false)} style={{ background: "none", border: "none", color: C.mute, cursor: "pointer", fontSize: 12, textDecoration: "underline" }}>Sembunyikan</button></span>
                       </div>
                     ))}
                   </div>
                 ))}
-                {(settledTxns.length + settledRekon.length) > 0 && <div style={{ fontSize: 13, fontWeight: 800, color: C.gold, marginTop: 6 }}>Pembayaran yang sudah lunas ({settledTxns.length + settledRekon.length})</div>}
-                {settledRekon.map((p) => (
+                {hiddenJobs.length > 0 && (
+                  <div style={{ background: C.card, border: `1px dashed ${C.line}`, borderRadius: 12, padding: 12 }}>
+                    <button onClick={() => setShowHid((v) => !v)} style={{ background: "none", border: "none", color: C.gold, fontWeight: 800, fontSize: 13, cursor: "pointer", padding: 0 }} data-testid="sup-selesai-hidden-toggle">🗂️ Disembunyikan ({hiddenJobs.length}) {showHid ? "▲" : "▼"}</button>
+                    {showHid && hiddenJobs.map((j) => (
+                      <div key={j.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12, color: C.mute, padding: "6px 0", borderTop: `1px dashed ${C.line}`, marginTop: 6, alignItems: "center" }}>
+                        <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{jobNm(j)} · {fRp(j.total_harga)}{j.no_invoice_supplier ? ` · Inv ${j.no_invoice_supplier}` : ""}</span>
+                        <button disabled={selBusy} onClick={() => sembunyiUnit([j.id], true)} style={{ ...BTN_GHOST, minHeight: 32, padding: "4px 10px", fontSize: 12 }}>Kembalikan</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {(settledTxns.filter((t) => !clearedSet.has(`tx:${t.key}`)).length + settledRekon.filter((p) => !clearedSet.has(`rk:${p.id}`)).length) > 0 && <div style={{ fontSize: 13, fontWeight: 800, color: C.gold, marginTop: 6 }}>Pembayaran yang sudah lunas ({settledTxns.filter((t) => !clearedSet.has(`tx:${t.key}`)).length + settledRekon.filter((p) => !clearedSet.has(`rk:${p.id}`)).length})</div>}
+                {settledRekon.filter((p) => !clearedSet.has(`rk:${p.id}`)).map((p) => (
                   <div key={p.id} style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 12 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}><b>{fRp(p.amount)}</b><span style={{ fontSize: 12, color: C.mute }}>{fDate(p.tanggal)}</span></div>
                     <div style={{ fontSize: 11.5, color: C.mute, marginTop: 3 }}>Rekon Bank · dialokasikan ke {(p.allocations || []).length} unit lunas{p.catatan ? ` · ${p.catatan}` : ""}</div>
+                    <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}><button disabled={selBusy} onClick={() => sembunyiBayar([`rk:${p.id}`])} style={{ background: "none", border: "none", color: C.mute, cursor: "pointer", fontSize: 12, textDecoration: "underline" }}>Sembunyikan</button></div>
                   </div>
                 ))}
-                {settledTxns.map((t) => (
-                  <button key={t.key} onClick={() => setTxnDetail(t)} style={{ textAlign: "left", background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 12, color: C.ink, cursor: "pointer" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}><b>{fRp(t.total)}</b><span style={{ fontSize: 12, color: C.mute }}>{fDate(t.tanggal)}</span></div>
-                    <div style={{ fontSize: 11.5, color: C.mute, marginTop: 3 }}>{t.metode || "Transfer"}{t.bank ? ` · ${t.bank}` : ""} · {t.allocs.length} unit lunas{t.no_referensi ? ` · Ref ${t.no_referensi}` : ""}</div>
-                  </button>
+                {settledTxns.filter((t) => !clearedSet.has(`tx:${t.key}`)).map((t) => (
+                  <div key={t.key} style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 12 }}>
+                    <button onClick={() => setTxnDetail(t)} style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: "none", padding: 0, color: C.ink, cursor: "pointer" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}><b>{fRp(t.total)}</b><span style={{ fontSize: 12, color: C.mute }}>{fDate(t.tanggal)}</span></div>
+                      <div style={{ fontSize: 11.5, color: C.mute, marginTop: 3 }}>{t.metode || "Transfer"}{t.bank ? ` · ${t.bank}` : ""} · {t.allocs.length} unit lunas{t.no_referensi ? ` · Ref ${t.no_referensi}` : ""}</div>
+                    </button>
+                    <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}><button disabled={selBusy} onClick={() => sembunyiBayar([`tx:${t.key}`])} style={{ background: "none", border: "none", color: C.mute, cursor: "pointer", fontSize: 12, textDecoration: "underline" }}>Sembunyikan</button></div>
+                  </div>
                 ))}
               </div>
             );
