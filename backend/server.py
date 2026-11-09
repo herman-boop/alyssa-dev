@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse, Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
-import os, logging, uuid, shutil, asyncio, io, re
+import os, logging, uuid, shutil, asyncio, io, re, functools
 import requests as _requests
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
@@ -27,6 +27,7 @@ import driver_notif  # notif WhatsApp ke driver saat insentif dibayar
 import flip_client  # adapter Flip (transfer ke rekening driver)
 import payouts  # transfer driver lewat Flip dengan pengaman (inquiry wajib, anti dobel, payout_logs)
 import cashbank  # Kas & Bank: akun + mutasi + saldo
+import jobs_cas  # compare-and-set array jobs supplier (anti lost-update)
 import supplier_export as SX  # ekspor Excel Rekap Supplier (murni)
 import supplier_import as SI  # impor invoice supplier: validasi, duplikat, pencocokan PO, atomik (murni, tanpa DB)
 import supplier_finance as SF  # rekap per invoice, riwayat transfer, rekonsiliasi saldo, verifikasi (murni, tanpa DB)
@@ -392,6 +393,41 @@ async def require_vendor_access(
 WIB = timezone(timedelta(hours=7))
 def today_wib() -> str:
     return datetime.now(WIB).strftime("%Y-%m-%d")
+
+
+# ── Anti "lost update" pada supplier_profiles.jobs ────────────────────────────
+# Banyak endpoint lama membaca dokumen supplier, mengubah array `jobs` di memori, lalu MENULIS ULANG seluruh array.
+# Dua admin yang bekerja bersamaan bisa saling menimpa (unit/pembayaran hilang). Perbaikan di level MongoDB:
+#   - Penambahan murni (unit baru, impor) = `$push` atomik.
+#   - Edit baca-ubah-tulis = compare-and-set pada penghitung `jobs_ver` (hanya menulis bila belum ada yang mengubah
+#     sejak dibaca), lalu naik satu. Konflik -> baca ulang & ulangi (endpoint tanpa unggah file) atau 409 yang jelas.
+#   - Semua penulis `jobs` (atomik atau CAS) menaikkan `jobs_ver`, sehingga editor yang terlanjur membaca pasti gagal CAS.
+JobsConflict = jobs_cas.JobsConflict
+
+
+async def _jobs_commit(supplier_id: str, ver, fields: dict) -> None:
+    """Tulis `fields` (mis. {"jobs": [...], "projects": [...]}) HANYA bila `jobs_ver` masih sama dengan saat dibaca."""
+    try:
+        await jobs_cas.commit(db, supplier_id, ver, fields)
+    except jobs_cas.SupplierGone:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+
+
+def _jobs_retry(retries: int = 6):
+    """Ulangi seluruh endpoint bila CAS `jobs_ver` bentrok (data dibaca ulang segar). retries=0 untuk endpoint dengan
+    unggahan file (file tidak boleh dibaca dua kali): bentrok langsung menjadi 409 yang meminta ulangi."""
+    def deco(fn):
+        @functools.wraps(fn)
+        async def wrapper(*a, **k):
+            for i in range(retries + 1):
+                try:
+                    return await fn(*a, **k)
+                except JobsConflict:
+                    if i < retries:
+                        await asyncio.sleep(0.02 * (i + 1))
+            raise HTTPException(409, "Data supplier baru saja diubah admin lain. Muat ulang halaman lalu ulangi; tidak ada yang tertimpa.")
+        return wrapper
+    return deco
 
 
 async def notify_odoo(event: str, payload: dict) -> None:
@@ -5254,10 +5290,10 @@ async def _add_trip_supplier_job(trip: dict, *, vendor_name=None, supplier_id=No
         "klasifikasi": "Vendor Cost",
         "source": "trip360",
     }
-    upd = {"jobs": (sup.get("jobs") or []) + [job]}
+    upd = {"$push": {"jobs": job}, "$inc": {"jobs_ver": 1}}
     if projects != (sup.get("projects") or []):
-        upd["projects"] = projects
-    await db.supplier_profiles.update_one({"id": sup["id"]}, {"$set": upd})
+        upd["$set"] = {"projects": projects}
+    await db.supplier_profiles.update_one({"id": sup["id"]}, upd)
     return {"supplier_id": sup["id"], "supplier_nama": sup["nama"], "job": job}
 
 
@@ -5435,6 +5471,7 @@ async def add_trip_vendor_cost(trip_id: str, body: TripVendorCostBody):
 
 
 @api_router.delete("/admin/trips/{trip_id}/finance/costs/{job_id}", dependencies=[Depends(require_admin_pin)])
+@_jobs_retry()
 async def delete_trip_vendor_cost(trip_id: str, job_id: str):
     """Hapus biaya vendor = hapus supplier job-nya (yang di-tag trip ini)."""
     target = None
@@ -5448,7 +5485,7 @@ async def delete_trip_vendor_cost(trip_id: str, job_id: str):
     if not target:
         raise HTTPException(404, "Biaya vendor tidak ditemukan untuk trip ini")
     new_jobs = [j for j in (target.get("jobs") or []) if j.get("id") != job_id]
-    await db.supplier_profiles.update_one({"id": target["id"]}, {"$set": {"jobs": new_jobs}})
+    await _jobs_commit(target["id"], target.get("jobs_ver"), {"jobs": new_jobs})
     doc = await db.trips.find_one({"trip_id": trip_id}, {"_id": 0})
     return await _trip_finance_summary(doc)
 
@@ -5580,6 +5617,7 @@ async def vendor_mobile_history(q: Optional[str] = None, limit: int = 200):
 
 
 @api_router.post("/vendor-mobile/pay", dependencies=[Depends(require_vendor_access)])
+@_jobs_retry(0)
 async def vendor_mobile_pay(
     amount: int = Form(...),
     tanggal: Optional[str] = Form(None),
@@ -5643,7 +5681,7 @@ async def vendor_mobile_pay(
         "metode": (metode or "Transfer").strip()[:40], "source": "vendor-mobile",
     }
     jobs[idx].setdefault("payments", []).append(payment)
-    await db.supplier_profiles.update_one({"id": target_sid}, {"$set": {"jobs": jobs}})
+    await _jobs_commit(target_sid, sup.get("jobs_ver"), {"jobs": jobs})
     jt = _supplier_job_totals(jobs[idx])
     return {
         "ok": True, "supplier_id": target_sid, "supplier_nama": sup.get("nama"),
@@ -5699,6 +5737,7 @@ async def vendor_mobile_vendors_unpaid(limit: int = 300):
 
 
 @api_router.post("/vendor-mobile/pay-batch", dependencies=[Depends(require_vendor_access)])
+@_jobs_retry(0)
 async def vendor_mobile_pay_batch(
     supplier_id: str = Form(...),
     job_ids: str = Form(...),            # id job dipisah koma, urutan = urutan bayar
@@ -5762,7 +5801,7 @@ async def vendor_mobile_pay_batch(
         })
     if not applied:
         raise HTTPException(400, "Tidak ada tagihan yang bisa dibayar (mungkin sudah lunas)")
-    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
+    await _jobs_commit(supplier_id, sup.get("jobs_ver"), {"jobs": jobs})
     return {
         "ok": True, "supplier_id": supplier_id, "supplier_nama": sup.get("nama"),
         "batch_id": batch_id, "total_dibayar": int(amount) - remaining,
@@ -6906,7 +6945,13 @@ async def _ensure_supplier_projects(doc: dict) -> dict:
     target_id = projects[0]["id"]
     for j in orphan:
         j["project_id"] = target_id
-    await db.supplier_profiles.update_one({"id": doc["id"]}, {"$set": {"jobs": jobs, "projects": projects}})
+    # Migrasi lazy: tulis HANYA bila `jobs` belum berubah (CAS). Bila bentrok dengan penulis lain, jangan menimpa:
+    # data di memori tetap lengkap untuk respons ini dan migrasi diulang pada pembacaan berikutnya.
+    try:
+        await _jobs_commit(doc["id"], doc.get("jobs_ver"), {"jobs": jobs, "projects": projects})
+        doc["jobs_ver"] = (doc.get("jobs_ver") or 0) + 1
+    except JobsConflict:
+        pass
     doc["jobs"] = jobs
     doc["projects"] = projects
     return doc
@@ -7265,7 +7310,7 @@ async def import_supplier_invoice(
     ent = plan["idempotent_entry"]
     if ent:
         return {"ok": True, "sudah_diimpor": True, **_import_summary(ent)}
-    upd = {"$push": {"jobs": {"$each": plan["jobs"]}, "import_riwayat": plan["entry"]}}
+    upd = {"$push": {"jobs": {"$each": plan["jobs"]}, "import_riwayat": plan["entry"]}, "$inc": {"jobs_ver": 1}}
     if projects != (doc.get("projects") or []):
         upd["$set"] = {"projects": projects}
     try:
@@ -7514,7 +7559,7 @@ async def set_no_invoice(supplier_id: str, body: Dict[str, Any] = Body(...)):
     for u in plan["updates"]:
         await db.supplier_profiles.update_one(
             {"id": supplier_id, "jobs.id": u["job_id"]},
-            {"$set": {"jobs.$.no_invoice_supplier": u["ke"]}})
+            {"$set": {"jobs.$.no_invoice_supplier": u["ke"]}, "$inc": {"jobs_ver": 1}})
         # riwayat perubahan nomor disimpan di level supplier (aditif; tidak menyentuh isi unit)
         await db.supplier_profiles.update_one(
             {"id": supplier_id},
@@ -7638,14 +7683,18 @@ async def add_supplier_job(supplier_id: str, body: SupplierJobBody):
         "pph23_rate": body.pph23_rate if body.pph23_rate is not None else None,
         "payments": [],
     }
-    upd = {"jobs": (doc.get("jobs") or []) + [job]}
+    # Penambahan murni = $push atomik (tidak menulis ulang array, tidak menimpa penulis lain)
+    upd = {"$push": {"jobs": job}, "$inc": {"jobs_ver": 1}}
     if projects != (doc.get("projects") or []):
-        upd["projects"] = projects
-    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": upd})
+        upd["$set"] = {"projects": projects}
+    res = await db.supplier_profiles.update_one({"id": supplier_id}, upd)
+    if res.matched_count == 0:
+        raise HTTPException(404, "Supplier tidak ditemukan")
     return _supplier_job_totals(job)
 
 
 @api_router.patch("/admin/suppliers/{supplier_id}/jobs/{job_id}/entity", dependencies=[Depends(require_admin_pin)])
+@_jobs_retry()
 async def set_supplier_job_entity(supplier_id: str, job_id: str, body: Dict[str, Any] = Body(...)):
     """Set/ubah entitas PT/CV sebuah HPP/job (additive). Kosong = hapus penetapan.
     Tidak mengubah nominal/pembayaran — cuma label pembukuan."""
@@ -7653,7 +7702,7 @@ async def set_supplier_job_entity(supplier_id: str, job_id: str, body: Dict[str,
     raw = str((body or {}).get("entity_id") or "").strip()
     if raw and not ent:
         raise HTTPException(400, f"entity_id harus salah satu dari {list(DOC_ENTITIES_VALID)}")
-    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0, "jobs": 1})
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0, "jobs": 1, "jobs_ver": 1})
     if not doc:
         raise HTTPException(404, "Supplier tidak ditemukan")
     jobs = doc.get("jobs") or []
@@ -7665,14 +7714,14 @@ async def set_supplier_job_entity(supplier_id: str, job_id: str, body: Dict[str,
             break
     if not found:
         raise HTTPException(404, "Unit/job tidak ditemukan")
-    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
+    await _jobs_commit(supplier_id, doc.get("jobs_ver"), {"jobs": jobs})
     return {"ok": True, "job_id": job_id, "entity_id": ent}
 
 
 @api_router.delete("/admin/suppliers/{supplier_id}/jobs/{job_id}", dependencies=[Depends(require_admin_pin)])
 async def delete_supplier_job(supplier_id: str, job_id: str):
     result = await db.supplier_profiles.update_one(
-        {"id": supplier_id}, {"$pull": {"jobs": {"id": job_id}}}
+        {"id": supplier_id}, {"$pull": {"jobs": {"id": job_id}}, "$inc": {"jobs_ver": 1}}
     )
     if result.modified_count == 0:
         raise HTTPException(404, "Unit/job tidak ditemukan")
@@ -7680,6 +7729,7 @@ async def delete_supplier_job(supplier_id: str, job_id: str):
 
 
 @api_router.patch("/admin/suppliers/{supplier_id}/jobs/{job_id}/tag", dependencies=[Depends(require_admin_pin)])
+@_jobs_retry()
 async def set_supplier_job_tag(supplier_id: str, job_id: str, body: dict = Body(...)):
     """Set/ubah Tag/Judul Kelompok laporan untuk 1 unit. Murni pembatas visual di
     PDF — TIDAK mengubah harga, total, payment, atau sisa. Kosongkan = tanpa tag."""
@@ -7692,7 +7742,7 @@ async def set_supplier_job_tag(supplier_id: str, job_id: str, body: dict = Body(
     if idx is None:
         raise HTTPException(404, "Unit/job tidak ditemukan")
     jobs[idx]["tag"] = tag
-    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
+    await _jobs_commit(supplier_id, doc.get("jobs_ver"), {"jobs": jobs})
     return _supplier_job_totals(jobs[idx])
 
 
@@ -7704,6 +7754,7 @@ class SupplierJobPajakBody(BaseModel):
 
 
 @api_router.patch("/admin/suppliers/{supplier_id}/jobs/{job_id}/pajak", dependencies=[Depends(require_admin_pin)])
+@_jobs_retry()
 async def set_supplier_job_pajak(supplier_id: str, job_id: str, body: SupplierJobPajakBody):
     """Set konfigurasi pajak 1 tagihan (PPN ditagih supplier / potong PPh23).
     Pajak TERPISAH dari harga jasa — tidak mengubah DPP/total_harga/payments.
@@ -7727,11 +7778,12 @@ async def set_supplier_job_pajak(supplier_id: str, job_id: str, body: SupplierJo
         jobs[idx]["pph23_enabled"] = bool(body.pph23_enabled)
     if body.pph23_rate is not None:
         jobs[idx]["pph23_rate"] = body.pph23_rate
-    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
+    await _jobs_commit(supplier_id, doc.get("jobs_ver"), {"jobs": jobs})
     return _supplier_job_totals(jobs[idx])
 
 
 @api_router.post("/admin/suppliers/{supplier_id}/pay-batch", dependencies=[Depends(require_admin_pin)])
+@_jobs_retry(0)
 async def supplier_admin_pay_batch(
     supplier_id: str,
     job_ids: str = Form(...),            # id job dipisah koma; urutan = urutan alokasi
@@ -7795,7 +7847,7 @@ async def supplier_admin_pay_batch(
         })
     if not applied:
         raise HTTPException(400, "Tidak ada tagihan yang bisa dibayar (mungkin sisa transfer sudah 0)")
-    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
+    await _jobs_commit(supplier_id, sup.get("jobs_ver"), {"jobs": jobs})
     return {
         "ok": True, "supplier_id": supplier_id, "supplier_nama": sup.get("nama"),
         "batch_id": batch_id, "total_dibayar": int(amount) - remaining,
@@ -7805,6 +7857,7 @@ async def supplier_admin_pay_batch(
 
 
 @api_router.patch("/admin/suppliers/{supplier_id}/jobs/{job_id}/selisih", dependencies=[Depends(require_admin_pin)])
+@_jobs_retry()
 async def set_supplier_job_selisih(supplier_id: str, job_id: str, body: dict = Body(...)):
     """Set Harga Deal & Harga Invoice per unit (buat laporan Selisih format Supplier).
     Selisih = Invoice - Deal (rumus existing). TIDAK mengubah ongkos/total_harga/
@@ -7824,7 +7877,7 @@ async def set_supplier_job_selisih(supplier_id: str, job_id: str, body: dict = B
         raise HTTPException(404, "Unit/job tidak ditemukan")
     jobs[idx]["selisih_deal"] = _num(body.get("selisih_deal"))
     jobs[idx]["selisih_invoice"] = _num(body.get("selisih_invoice"))
-    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
+    await _jobs_commit(supplier_id, doc.get("jobs_ver"), {"jobs": jobs})
     return _supplier_job_totals(jobs[idx])
 
 
@@ -7916,6 +7969,7 @@ async def selesai_kembalikan(supplier_id: str, body: Dict[str, Any] = Body(...))
 
 
 @api_router.post("/admin/suppliers/{supplier_id}/pisah-faktur", dependencies=[Depends(require_admin_pin)])
+@_jobs_retry()
 async def pisah_faktur(supplier_id: str, body: Dict[str, Any] = Body(...)):
     """Pisahkan unit terpilih jadi FAKTUR (projek) baru dengan No. Faktur OTOMATIS. Hanya
     memindahkan `project_id` unit — nominal/pembayaran/rekon tidak berubah. Kalau semua unit sudah
@@ -7948,7 +8002,7 @@ async def pisah_faktur(supplier_id: str, body: Dict[str, Any] = Body(...)):
     nama = str((body or {}).get("nama") or "").strip() or None
     new_jobs, new_projects, proj = supplier_faktur.move_to_new_project(
         jobs, projects, chosen, _gen_supplier_id(), no_faktur, nama, all_lunas, datetime.utcnow().isoformat())
-    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": new_jobs, "projects": new_projects}})
+    await _jobs_commit(supplier_id, doc.get("jobs_ver"), {"jobs": new_jobs, "projects": new_projects})
     return {"ok": True, "reused": False, "project_id": proj["id"], "no_faktur": no_faktur,
             "nama": proj["nama"], "status": proj["status"], "units": len(chosen), "closed": all_lunas}
 
@@ -8049,6 +8103,7 @@ async def supplier_pricelist(limit: int = 3000):
 
 
 @api_router.post("/admin/suppliers/{supplier_id}/jobs/{job_id}/payments", dependencies=[Depends(require_admin_pin)])
+@_jobs_retry(0)
 async def add_supplier_payment(
     supplier_id: str, job_id: str,
     amount: int = Form(...), catatan: str = Form(""),
@@ -8107,13 +8162,14 @@ async def add_supplier_payment(
     # $ di nested array) -- lebih portable & nggak bergantung ke edge-case
     # implementasi $push/$pull nested tiap driver Mongo/mock.
     jobs[job_idx].setdefault("payments", []).append(payment)
-    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
+    await _jobs_commit(supplier_id, doc.get("jobs_ver"), {"jobs": jobs})
     res = _supplier_job_totals(jobs[job_idx])
     res["bukti_warning"] = bukti_warning
     return res
 
 
 @api_router.delete("/admin/suppliers/{supplier_id}/jobs/{job_id}/payments/{payment_id}", dependencies=[Depends(require_admin_pin)])
+@_jobs_retry()
 async def delete_supplier_payment(supplier_id: str, job_id: str, payment_id: str):
     doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
     if not doc:
@@ -8126,11 +8182,12 @@ async def delete_supplier_payment(supplier_id: str, job_id: str, payment_id: str
     jobs[job_idx]["payments"] = [p for p in (jobs[job_idx].get("payments") or []) if p.get("id") != payment_id]
     if len(jobs[job_idx]["payments"]) == before:
         raise HTTPException(404, "Pembayaran tidak ditemukan")
-    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
+    await _jobs_commit(supplier_id, doc.get("jobs_ver"), {"jobs": jobs})
     return _supplier_job_totals(jobs[job_idx])
 
 
 @api_router.post("/admin/suppliers/{supplier_id}/payments/{txn_key}/bukti", dependencies=[Depends(require_admin_pin)])
+@_jobs_retry(0)
 async def attach_supplier_payment_bukti(
     supplier_id: str, txn_key: str,
     bukti: UploadFile = File(...),
@@ -8159,11 +8216,12 @@ async def attach_supplier_payment_bukti(
             if p.get("batch_id") == txn_key or p.get("id") == txn_key:
                 p["bukti_url"] = bukti_url
                 n += 1
-    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
+    await _jobs_commit(supplier_id, doc.get("jobs_ver"), {"jobs": jobs})
     return {"ok": True, "bukti_url": bukti_url, "updated": n}
 
 
 @api_router.delete("/admin/suppliers/{supplier_id}/payments/{txn_key}", dependencies=[Depends(require_admin_pin)])
+@_jobs_retry()
 async def delete_supplier_payment_txn(supplier_id: str, txn_key: str):
     """Hapus 1 TRANSAKSI pembayaran (1 transfer) dari riwayat — termasuk semua
     baris alokasinya ke beberapa unit. `txn_key` = batch_id (transfer ke banyak
@@ -8185,11 +8243,12 @@ async def delete_supplier_payment_txn(supplier_id: str, txn_key: str):
             j["payments"] = after
     if removed == 0:
         raise HTTPException(404, "Transaksi pembayaran tidak ditemukan")
-    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
+    await _jobs_commit(supplier_id, doc.get("jobs_ver"), {"jobs": jobs})
     return {"ok": True, "txn_key": txn_key, "removed": removed}
 
 
 @api_router.post("/admin/suppliers/{supplier_id}/jobs/{job_id}/tambahan", dependencies=[Depends(require_admin_pin)])
+@_jobs_retry()
 async def add_supplier_job_tambahan(supplier_id: str, job_id: str, body: dict = Body(...)):
     """Tambah 1 biaya tambahan ke unit (keterangan free-text + nominal). Boleh lebih
     dari satu per unit. Disimpan TERPISAH dari harga deal (tidak menimpa). Nambah
@@ -8222,11 +8281,12 @@ async def add_supplier_job_tambahan(supplier_id: str, job_id: str, body: dict = 
     if potongan:
         item["jenis"] = "potongan"
     jobs[idx].setdefault("tambahan", []).append(item)
-    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
+    await _jobs_commit(supplier_id, doc.get("jobs_ver"), {"jobs": jobs})
     return _supplier_job_totals(jobs[idx])
 
 
 @api_router.delete("/admin/suppliers/{supplier_id}/jobs/{job_id}/tambahan/{tambahan_id}", dependencies=[Depends(require_admin_pin)])
+@_jobs_retry()
 async def delete_supplier_job_tambahan(supplier_id: str, job_id: str, tambahan_id: str):
     """Hapus 1 biaya tambahan dari unit. Harga deal & histori payment tidak berubah."""
     doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
@@ -8240,7 +8300,7 @@ async def delete_supplier_job_tambahan(supplier_id: str, job_id: str, tambahan_i
     jobs[idx]["tambahan"] = [t for t in (jobs[idx].get("tambahan") or []) if t.get("id") != tambahan_id]
     if len(jobs[idx]["tambahan"]) == before:
         raise HTTPException(404, "Biaya tambahan tidak ditemukan")
-    await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"jobs": jobs}})
+    await _jobs_commit(supplier_id, doc.get("jobs_ver"), {"jobs": jobs})
     return _supplier_job_totals(jobs[idx])
 
 

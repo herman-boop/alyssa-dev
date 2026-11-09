@@ -374,12 +374,12 @@ async def merge_suppliers(db, canonical_id, duplicate_ids, dry_run=True, reason=
         await db.supplier_profiles.update_one({"id": did}, {"$set": {
             "status": "merged", "merged_into": canonical_id, "merged_at": _now(),
             "jobs": [], "rekon_payments": [], "projects": [],
-        }})
+        }, "$inc": {"jobs_ver": 1}})
 
     cu = {"jobs": new_jobs, "rekon_payments": new_rekon, "projects": new_projects,
           "aliases": aliases, "merged_from": merged_from, "alias_no_hp": alias_phones}
     cu.update(plan["fill_fields"])
-    await db.supplier_profiles.update_one({"id": canonical_id}, {"$set": cu})
+    await db.supplier_profiles.update_one({"id": canonical_id}, {"$set": cu, "$inc": {"jobs_ver": 1}})
     await db[MERGE_LOG].insert_one(dict(log))
 
     return {"status": "merged", "canonical_id": canonical_id, "merged": [d["id"] for d in dup_docs],

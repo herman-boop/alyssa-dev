@@ -24,6 +24,8 @@ SINKRON (additif, logika lama tidak diubah; hanya item bertanda src="leg" yang d
      payments kita_bayar_mereka = transfer. _kompensasi_totals -> sisa = -Outstanding.
 """
 import re
+import asyncio
+import jobs_cas
 import uuid
 from datetime import datetime
 
@@ -178,38 +180,63 @@ async def sync_to_dept(db, rec, ctx, h):
                 j["payments"] = [p for p in j.get("payments") or [] if p.get("src") != "leg"]
                 if j["tambahan"] or j["payments"]:
                     j.pop("leg_ref", None); keep.append(j)
-            await db.supplier_profiles.update_one({"id": op["id"]}, {"$set": {"jobs": keep}})
+            for _try in range(6):
+                try:
+                    await jobs_cas.commit(db, op["id"], op.get("jobs_ver"), {"jobs": keep})
+                    break
+                except jobs_cas.JobsConflict:
+                    if _try == 5:
+                        raise
+                    await asyncio.sleep(0.02 * (_try + 1))
+                    op = await db.supplier_profiles.find_one({"id": op["id"]}, {"_id": 0}) or op
+                    keep = []
+                    for j in op.get("jobs") or []:
+                        if j.get("leg_ref") != ref:
+                            keep.append(j); continue
+                        j["tambahan"] = [t for t in j.get("tambahan") or [] if t.get("src") != "leg"]
+                        j["payments"] = [p for p in j.get("payments") or [] if p.get("src") != "leg"]
+                        if j["tambahan"] or j["payments"]:
+                            j.pop("leg_ref", None); keep.append(j)
 
-    prof = await h["ensure_projects"](prof)
-    jobs = prof.get("jobs") or []
-    job = next((j for j in jobs if j.get("leg_ref") == ref), None)
-    projects = prof.get("projects") or []
-    if job is None:
-        pid, projects = h["active_project"](prof)
-        job = {"id": h["gen_id"](), "project_id": pid, "leg_ref": ref, "tanggal": h["today"](), "tag": "",
-               "entity_id": "", "selisih_deal": None, "selisih_invoice": None, "ppn_enabled": False,
-               "ppn_rate": None, "pph23_enabled": False, "pph23_rate": None, "payments": [], "tambahan": [],
-               "catatan": "Dari Leg: " + (ctx.get("asal") or "-") + " → " + (ctx.get("tujuan") or "-")}
-        jobs.append(job)
-    job["order_id"] = ctx.get("order_id") or None
-    job["customer_ref"] = ctx.get("customer_nama") or ""
-    job["vehicle_type"] = ctx.get("vehicle_type") or ""
-    job["nopol"] = (ctx.get("nopol") or "").upper()
-    job["no_rangka"] = (ctx.get("no_rangka") or "").upper()
-    job["asal_kota"] = ctx.get("asal") or ""
-    job["tujuan_kota"] = ctx.get("tujuan") or ""
-    job["total_harga"] = int(rec.get("harga_deal") or 0)
-    tambahan, payments = _leg_items(rec)
-    job["tambahan"] = [t for t in job.get("tambahan") or [] if t.get("src") != "leg"] + tambahan
-    job["payments"] = [p for p in job.get("payments") or [] if p.get("src") != "leg"] + payments
+    for _try in range(6):
+        if _try:
+            prof = await db.supplier_profiles.find_one({"id": prof["id"]}, {"_id": 0}) or prof
+        prof = await h["ensure_projects"](prof)
+        jobs = prof.get("jobs") or []
+        job = next((j for j in jobs if j.get("leg_ref") == ref), None)
+        projects = prof.get("projects") or []
+        if job is None:
+            pid, projects = h["active_project"](prof)
+            job = {"id": h["gen_id"](), "project_id": pid, "leg_ref": ref, "tanggal": h["today"](), "tag": "",
+                   "entity_id": "", "selisih_deal": None, "selisih_invoice": None, "ppn_enabled": False,
+                   "ppn_rate": None, "pph23_enabled": False, "pph23_rate": None, "payments": [], "tambahan": [],
+                   "catatan": "Dari Leg: " + (ctx.get("asal") or "-") + " → " + (ctx.get("tujuan") or "-")}
+            jobs.append(job)
+        job["order_id"] = ctx.get("order_id") or None
+        job["customer_ref"] = ctx.get("customer_nama") or ""
+        job["vehicle_type"] = ctx.get("vehicle_type") or ""
+        job["nopol"] = (ctx.get("nopol") or "").upper()
+        job["no_rangka"] = (ctx.get("no_rangka") or "").upper()
+        job["asal_kota"] = ctx.get("asal") or ""
+        job["tujuan_kota"] = ctx.get("tujuan") or ""
+        job["total_harga"] = int(rec.get("harga_deal") or 0)
+        tambahan, payments = _leg_items(rec)
+        job["tambahan"] = [t for t in job.get("tambahan") or [] if t.get("src") != "leg"] + tambahan
+        job["payments"] = [p for p in job.get("payments") or [] if p.get("src") != "leg"] + payments
 
-    upd = {"jobs": jobs, "projects": projects}
-    for f_prof, f_sup in (("pic", "pic"), ("email", "email"), ("bank", "bank"), ("no_rekening", "no_rekening")):
-        if sup.get(f_sup):
-            upd[f_prof] = sup[f_sup]
-    if sup.get("no_hp") and not prof.get("no_hp"):
-        upd["no_hp"] = sup["no_hp"]
-    await db.supplier_profiles.update_one({"id": prof["id"]}, {"$set": upd})
+        upd = {"jobs": jobs, "projects": projects}
+        for f_prof, f_sup in (("pic", "pic"), ("email", "email"), ("bank", "bank"), ("no_rekening", "no_rekening")):
+            if sup.get(f_sup):
+                upd[f_prof] = sup[f_sup]
+        if sup.get("no_hp") and not prof.get("no_hp"):
+            upd["no_hp"] = sup["no_hp"]
+        try:
+            await jobs_cas.commit(db, prof["id"], prof.get("jobs_ver"), upd)
+            break
+        except jobs_cas.JobsConflict:
+            if _try == 5:
+                raise
+            await asyncio.sleep(0.02 * (_try + 1))
     rec["dept"] = {"supplier_id": prof["id"], "job_id": job["id"]}
     rec["supplier"]["supplier_id"] = prof["id"]
     return rec
