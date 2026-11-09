@@ -271,3 +271,21 @@ def test_format_lama_total_sudah_termasuk_tambahan_tetap_didukung():
     assert r["harga_dasar"] == 10_600_000 and r["total_harga"] == 12_000_000
     r = SI.normalize_row({"nopol": "B 1 A", "total_harga": "Rp 2.300.000"})
     assert r["harga_dasar"] == 2_300_000
+
+
+def test_kasus_ahmad_konsisten_dengan_rekap_dan_audit_finance(env):
+    """Setelah impor: Rekap menunjukkan 10 unit Rp45,6 jt, terbayar 0, sisa 45,6 jt; audit konsistensi finance tetap bersih; tanpa duplikat."""
+    c, db, run = env
+    assert post(c).status_code == 200
+    fin = c.get("/api/admin/suppliers/s1/finance").json()
+    S = fin["ringkasan"]
+    assert S["tagihan"] == 45_600_000 and S["terbayar"] == 0 and S["sisa"] == 45_600_000
+    assert fin["invoices"] == [] and fin["perlu_dilengkapi"]["unit"] == 10 and fin["perlu_dilengkapi"]["tagihan"] == 45_600_000   # tanpa nomor invoice: tidak dikarang
+    assert fin["anomali"] == [] and S["belum_dialokasikan"] == 0
+    audit = c.get("/api/admin/finance-audit").json()
+    assert audit["ok"] is True and audit["bermasalah"] == 0
+    d = sup(db, run)
+    kunci = [SI.row_key(SI.normalize_row(r)) for r in kasus_rows()]
+    assert len(set(kunci)) == 10 and len(d["jobs"]) == 10                                  # tidak ada duplikasi
+    sumber = [j for j in d["jobs"] if j["nopol"] in ("S 8625 HN", "S 8614 HN")]
+    assert all(j["tambahan"][0]["label"] == "Biaya pengambilan" and j["tambahan"][0]["amount"] == 1_400_000 for j in sumber)
