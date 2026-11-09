@@ -329,6 +329,37 @@ def test_alokasi_ke_unit_tidak_ada_tidak_masuk_saldo_dan_dilaporkan():
     assert any(a["jenis"] == "alokasi_ke_unit_tidak_ada" for a in fin["anomali"])
 
 
+def test_alokasi_yatim_tidak_dianggap_sudah_teralokasi():
+    """Pembayaran ke unit yang hilang tetap menjadi transfer belum dialokasikan."""
+    jobs = [job("ada", 10_000_000, "INV-VALID", alloc=6_500_000)]
+    payments = [rk("r1", 10_000_000, "2026-11-01",
+                   [("ada", 6_500_000), ("unit-hilang", 3_500_000)])]
+    before = [dict(p) for p in payments]
+    res = sf.build_finance(jobs, payments)
+    tr = res["transfers"][0]
+    assert tr["teralokasi"] == 6_500_000
+    assert tr["belum_dialokasikan"] == 3_500_000
+    assert tr["invoice_n"] == 1
+    assert tr["lebih_alokasi"] == 0
+    assert res["ringkasan"]["transfer_aktual"] == 10_000_000
+    assert res["ringkasan"]["teralokasi"] == 6_500_000
+    assert res["ringkasan"]["belum_dialokasikan"] == 3_500_000
+    assert res["invoices"][0]["sisa"] == 3_500_000
+    assert any(a["jenis"] == "alokasi_ke_unit_tidak_ada" for a in res["anomali"])
+    assert payments == before  # read-only, tidak menulis ulang transaksi asli
+
+
+def test_alokasi_yatim_tetap_dihitung_untuk_deteksi_kelebihan_transfer():
+    jobs = [job("ada", 10_000_000, "INV-VALID", alloc=6_500_000)]
+    payments = [rk("r1", 10_000_000, "2026-11-01",
+                   [("ada", 6_500_000), ("unit-hilang", 5_000_000)])]
+    res = sf.build_finance(jobs, payments)
+    tr = res["transfers"][0]
+    assert tr["teralokasi"] == 6_500_000
+    assert tr["lebih_alokasi"] == 1_500_000
+    assert any(a["jenis"] == "alokasi_melebihi_transfer" for a in res["anomali"])
+
+
 def test_alokasi_negatif_tidak_dihitung_seperti_perhitungan_lama():
     jobs = [{"id": "j1", "net_transfer": 5_000_000, "total_terbayar": 0, "tanggal": "2026-01-01", "payments": []}]
     rp = [{"id": "r1", "amount": 1, "tanggal": "2026-02-01", "status": "active", "allocations": [{"job_id": "j1", "amount": -2_000_000}]}]

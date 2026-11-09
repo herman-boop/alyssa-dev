@@ -162,27 +162,36 @@ def build_transfers(jobs, rekon_payments, verifikasi=None, is_fee=None):
             continue
         amt = _i(p.get("amount"))
         per_job = {}
+        # Hanya alokasi ke unit milik supplier ini yang boleh menutup invoice.
+        # Alokasi yatim tetap tersimpan pada data asli dan dilaporkan oleh alokasi_yatim().
+        raw_allocated = 0
         for a in (p.get("allocations") or []):
-            if a.get("job_id") and _i(a.get("amount")) > 0:
-                per_job[a["job_id"]] = per_job.get(a["job_id"], 0) + _i(a.get("amount"))
+            jid, allocated = a.get("job_id"), _i(a.get("amount"))
+            if not jid or allocated <= 0:
+                continue
+            raw_allocated += allocated
+            if jid in job_by_id:
+                per_job[jid] = per_job.get(jid, 0) + allocated
         rk = p.get("rekon") or {}
         transfers.append({
             "key": "rk:" + str(p.get("id")), "jenis": "biaya_admin" if is_fee(p) else "rekon",
             "tanggal": p.get("tanggal") or "", "bank": rk.get("beneficiary_bank_code") or "",
             "ref": rk.get("referensi_bank") or p.get("bank_transaction_id") or "",
             "bukti_url": p.get("bukti_url") or "", "catatan": p.get("catatan") or "",
-            "per_job": per_job, "nominal": amt,
+            "per_job": per_job, "nominal": amt, "raw_allocated": raw_allocated,
         })
     out = []
     for t in transfers:
         per_job = t.pop("per_job")
         alok = _alok_rows(per_job)
         teralokasi = sum(per_job.values())
+        # Lebih alokasi dinilai dari semua referensi (termasuk yang sudah yatim).
+        raw_allocated = t.pop("raw_allocated", teralokasi)
         v = verifikasi.get(t["key"]) or {}
         t.update({
             "alokasi": alok, "invoice_n": len([a for a in alok if a["invoice_key"] != "_none"]),
             "teralokasi": teralokasi, "belum_dialokasikan": max(0, t["nominal"] - teralokasi),
-            "lebih_alokasi": max(0, teralokasi - t["nominal"]),   # harus 0; >0 = anomali data
+            "lebih_alokasi": max(0, raw_allocated - t["nominal"]),   # turut mengawasi referensi yatim
             "verifikasi": v.get("status") or "belum_diverifikasi",
             "verifikasi_label": VERIF_LABEL.get(v.get("status") or "belum_diverifikasi"),
             "verifikasi_riwayat": v.get("riwayat") or [],
