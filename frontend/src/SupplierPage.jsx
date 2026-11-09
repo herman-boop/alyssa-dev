@@ -835,6 +835,29 @@ export default function SupplierPage() {
     try { const r = await axios.get(`${API}/admin/suppliers/${selected.id}/import-riwayat`, { headers }); setInvHist(r.data); }
     catch { flash("Gagal memuat riwayat impor"); }
   };
+  const [batalBusy, setBatalBusy] = useState(false);
+  // Batalkan batch impor: preview dampak -> diblokir bila ada pembayaran/alokasi -> alasan + konfirmasi admin -> hapus HANYA unit batch itu (jejak audit tersimpan)
+  const batalkanBatch = async (h) => {
+    if (!selected || batalBusy) return;
+    setBatalBusy(true);
+    try {
+      const pv = (await axios.get(`${API}/admin/suppliers/${selected.id}/import-riwayat/${encodeURIComponent(h.key)}/batal-preview`, { headers })).data;
+      if (pv.sudah_dibatalkan) { flash("Batch ini sudah dibatalkan"); await bukaRiwayatImpor(); return; }
+      if (!pv.boleh) {
+        window.alert(`Pembatalan batch ${pv.batch_no} DIBLOKIR karena:\n\n${(pv.blokir || []).map((b) => `• ${b.unit}: ${b.alasan.join("; ")}`).join("\n")}\n\nTidak ada data yang diubah. Hapus atau koreksi unit satu per satu bila memang perlu.`);
+        return;
+      }
+      const alasan = window.prompt(`Batalkan batch ${pv.batch_no}?\n\n${pv.dampak.jumlah_unit} unit akan dihapus dan total tagihan berkurang ${fRp(pv.dampak.total_tagihan)}.\nTidak ada pembayaran/transaksi yang dihapus. Salinan unit disimpan sebagai jejak audit.\n\nIsi alasan pembatalan (min. 5 huruf):`);
+      if (!alasan || alasan.trim().length < 5) { flash("Pembatalan dibatalkan"); return; }
+      if (!window.confirm(`Konfirmasi: hapus ${pv.dampak.jumlah_unit} unit batch ${pv.batch_no}?`)) return;
+      await axios.post(`${API}/admin/suppliers/${selected.id}/import-riwayat/${encodeURIComponent(h.key)}/batalkan`, { konfirmasi: true, alasan: alasan.trim() }, { headers });
+      flash(`Batch ${pv.batch_no} dibatalkan`);
+      await reloadSelected(selected.id); setListRefreshTick((t) => t + 1); await bukaRiwayatImpor();
+    } catch (e) {
+      const d = e?.response?.data?.detail;
+      flash(typeof d === "object" ? (d.pesan || "Pembatalan gagal") : (d || "Pembatalan gagal"));
+    } finally { setBatalBusy(false); }
+  };
   const rowTotal = (x) => pNum(x.harga_dasar) + (x.tambahan || []).reduce((a, t) => a + pNum(t.amount), 0);
   const [aiTest, setAiTest] = useState(null);
   const [aiTesting, setAiTesting] = useState(false);
@@ -2115,6 +2138,26 @@ export default function SupplierPage() {
                 {aiTest.ada_key !== undefined && <div style={{ color: C.mute, marginTop: 4 }}>Key terbaca: {aiTest.ada_key ? "ya" : "tidak"}{aiTest.ada_key ? ` · awalan "${aiTest.awalan}" · panjang ${aiTest.panjang}` : ""} · model {aiTest.model}{aiTest.status !== undefined ? ` · kode ${aiTest.status}` : ""}</div>}
               </div>
             )}
+            <button type="button" style={{ ...BTN_GHOST, minHeight: 38, fontSize: 12.5 }} onClick={bukaRiwayatImpor} data-testid="sup-inv-riwayat">🗂️ Riwayat impor supplier ini</button>
+            {invHist && (
+              <div style={{ fontSize: 12, border: `1px solid ${C.line}`, borderRadius: 10, padding: 10 }}>
+                {invHist.riwayat.length === 0 && invHist.gagal.length === 0 && <div style={{ color: C.mute }}>Belum ada riwayat impor.</div>}
+                {invHist.riwayat.slice(0, 15).map((h) => (
+                  <div key={h.id} style={{ padding: "6px 0", borderTop: `1px dashed ${C.line}` }}>
+                    <b>{h.batch_no}</b> · {fDate((h.at || "").slice(0, 10))} · {h.oleh} · {h.jumlah_unit} unit · {fRp(h.total)}
+                    {h.status === "dibatalkan" && <span style={{ color: C.red, fontWeight: 800 }}> · DIBATALKAN</span>}
+                    <div style={{ color: C.mute }}>Sumber: {h.sumber?.nama || "-"} · PO cocok {h.pencocokan?.cocok || 0}, rute beda {h.pencocokan?.beda_rute || 0}, sebagian {h.pencocokan?.kemungkinan || 0}, tanpa PO {h.pencocokan?.tidak_ada || 0}{h.perlu_konfirmasi ? ` · ${h.perlu_konfirmasi} identitas perlu konfirmasi` : ""}</div>
+                    {h.status === "dibatalkan" && h.dibatalkan && <div style={{ color: C.mute }}>Dibatalkan {fDate((h.dibatalkan.at || "").slice(0, 10))} oleh {h.dibatalkan.oleh}: {h.dibatalkan.alasan}</div>}
+                    {h.status === "berhasil" && <button type="button" disabled={batalBusy} onClick={() => batalkanBatch(h)} style={{ background: "none", border: "none", color: C.red, cursor: "pointer", fontSize: 12, fontWeight: 700, padding: "4px 0", textDecoration: "underline" }} data-testid={`sup-inv-batal-${h.key}`}>Batalkan batch ini…</button>}
+                  </div>
+                ))}
+                {invHist.gagal.slice(0, 5).map((g, i) => (
+                  <div key={i} style={{ padding: "6px 0", borderTop: `1px dashed ${C.line}`, color: C.red }}>
+                    {g.status === "gagal" ? "Gagal menyimpan" : g.status === "batal_diblokir" ? "Pembatalan diblokir" : "Ditolak"} · {fDate((g.at || "").slice(0, 10))} · {g.oleh}: {(g.errors || [])[0] || ""}
+                  </div>
+                ))}
+              </div>
+            )}
             {invFileName && <div style={{ fontSize: 12, color: C.mute }}>File dipilih: <b style={{ color: C.ink }}>{invFileName}</b></div>}
             {invErr && <div style={{ fontSize: 13, color: C.red, border: `1px solid ${C.red}`, borderRadius: 10, padding: 10 }} data-testid="sup-inv-err">⚠ {invErr}</div>}
             {invRows && invRows.length === 0 && !invBusy && <div style={{ fontSize: 13, color: C.gold }}>Tidak ada unit yang terbaca di file ini. Coba file yang lebih jelas, atau foto tabelnya utuh (termasuk kolom Nopol dan Harga).</div>}
@@ -2197,23 +2240,6 @@ export default function SupplierPage() {
                   {x.pilih && tot <= 0 && <div style={{ fontSize: 11, color: C.gold, marginTop: 6 }}>Harga 0 → masuk sebagai Draft (harga belum lengkap).</div>}
                 </div>
               ); })}
-              <button type="button" style={{ ...BTN_GHOST, minHeight: 38, fontSize: 12.5 }} onClick={bukaRiwayatImpor} data-testid="sup-inv-riwayat">🗂️ Riwayat impor supplier ini</button>
-              {invHist && (
-                <div style={{ fontSize: 12, border: `1px solid ${C.line}`, borderRadius: 10, padding: 10 }}>
-                  {invHist.riwayat.length === 0 && invHist.gagal.length === 0 && <div style={{ color: C.mute }}>Belum ada riwayat impor.</div>}
-                  {invHist.riwayat.slice(0, 15).map((h) => (
-                    <div key={h.id} style={{ padding: "6px 0", borderTop: `1px dashed ${C.line}` }}>
-                      <b>{h.batch_no}</b> · {fDate((h.at || "").slice(0, 10))} · {h.oleh} · {h.jumlah_unit} unit · {fRp(h.total)}
-                      <div style={{ color: C.mute }}>Sumber: {h.sumber?.nama || "-"} · PO cocok {h.pencocokan?.cocok || 0}, rute beda {h.pencocokan?.beda_rute || 0}, sebagian {h.pencocokan?.kemungkinan || 0}, tanpa PO {h.pencocokan?.tidak_ada || 0}{h.perlu_konfirmasi ? ` · ${h.perlu_konfirmasi} identitas perlu konfirmasi` : ""}</div>
-                    </div>
-                  ))}
-                  {invHist.gagal.slice(0, 5).map((g, i) => (
-                    <div key={i} style={{ padding: "6px 0", borderTop: `1px dashed ${C.line}`, color: C.red }}>
-                      {g.status === "gagal" ? "Gagal menyimpan" : "Ditolak"} · {fDate((g.at || "").slice(0, 10))} · {g.oleh}: {(g.errors || [])[0] || ""}
-                    </div>
-                  ))}
-                </div>
-              )}
             </>)}
           </div>
         </Modal>

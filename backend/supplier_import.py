@@ -186,6 +186,61 @@ def batch_no(key, today):
     return f"IMP-{today.replace('-', '')}-{hashlib.sha1(key.encode()).hexdigest()[:5].upper()}"
 
 
+def unit_sig(job):
+    """Sidik jari data keuangan sebuah unit saat diimpor (untuk mendeteksi perubahan SETELAH impor)."""
+    tam = sorted(int(t.get("amount") or 0) for t in (job.get("tambahan") or []))
+    raw = f"{int(job.get('total_harga') or 0)}|{tam}|{bool(job.get('ppn_enabled'))}|{bool(job.get('pph23_enabled'))}|{nk(job.get('nopol'))}|{nk(job.get('no_rangka'))}"
+    return hashlib.sha1(raw.encode()).hexdigest()[:16]
+
+
+def batal_preview(doc, key):
+    """Dampak pembatalan sebuah batch impor (TANPA menulis apa pun). Pembatalan diblokir bila ada unit yang sudah punya
+    pembayaran, alokasi transfer, keterkaitan transaksi lain, atau data keuangan yang diubah setelah impor."""
+    entry = next((e for e in (doc.get("import_riwayat") or []) if e.get("key") == key), None)
+    if not entry:
+        return {"ada": False}
+    if entry.get("status") == "dibatalkan":
+        return {"ada": True, "sudah_dibatalkan": True, "batch_no": entry.get("batch_no"), "boleh": False, "unit": [], "blokir": [],
+                "dibatalkan": entry.get("dibatalkan") or {}}
+    sig = {x.get("job_id"): x.get("sig") for x in (entry.get("unit") or [])}
+    by_id = {j.get("id"): j for j in (doc.get("jobs") or [])}
+    alok = set()
+    for p in (doc.get("rekon_payments") or []):
+        for a in (p.get("allocations") or []):
+            if a.get("job_id"):
+                alok.add(a["job_id"])
+    units, blokir = [], []
+    for jid in sig:
+        j = by_id.get(jid)
+        if j is None:
+            units.append({"job_id": jid, "unit": "(sudah tidak ada)", "total": 0, "ada": False})
+            continue
+        total = int(j.get("total_harga") or 0) + sum(int(t.get("amount") or 0) for t in (j.get("tambahan") or []))
+        u = {"job_id": jid, "unit": j.get("nopol") or j.get("no_rangka") or j.get("vehicle_type") or jid, "total": total, "ada": True}
+        units.append(u)
+        why = []
+        pays = j.get("payments") or []
+        if pays:
+            why.append(f"{len(pays)} pembayaran tercatat (Rp{sum(int(p.get('amount') or 0) for p in pays):,})".replace(",", "."))
+        if jid in alok:
+            why.append("ada alokasi transfer ke unit ini")
+        if j.get("leg_ref") or j.get("trip_id"):
+            why.append("terkait Leg/Trip")
+        if j.get("selisih_deal") or j.get("selisih_invoice"):
+            why.append("selisih harga sudah diisi")
+        if j.get("import_id") != key:
+            why.append("unit bukan bagian dari batch ini")
+        if sig.get(jid) and unit_sig(j) != sig[jid]:
+            why.append("nominal/biaya tambahan/pajak diubah setelah impor")
+        if why:
+            blokir.append({"job_id": jid, "unit": u["unit"], "alasan": why})
+    ada = [u for u in units if u["ada"]]
+    return {"ada": True, "sudah_dibatalkan": False, "batch_no": entry.get("batch_no"), "boleh": bool(ada) and not blokir,
+            "unit": units, "blokir": blokir,
+            "dampak": {"jumlah_unit": len(ada), "total_tagihan": sum(u["total"] for u in ada)},
+            "oleh": entry.get("oleh"), "at": entry.get("at"), "sumber": entry.get("sumber") or {}}
+
+
 class ImportError_(Exception):
     def __init__(self, errors, warnings=None):
         super().__init__("; ".join(errors))
@@ -290,7 +345,7 @@ def build_plan(supplier_id, doc, body, *, today, now_iso, by, new_id, po_matches
         }
         jobs.append(job)
         ringkas.append({"job_id": job["id"], "unit": r["nopol"] or r["no_rangka"] or r["vehicle_type"], "total": r["total_harga"],
-                        "ident_status": r["ident_status"], "po_status": job["po_status"], "order_id": link.get("order_id") or ""})
+                        "ident_status": r["ident_status"], "po_status": job["po_status"], "order_id": link.get("order_id") or "", "sig": unit_sig(job)})
     entry = {
         "id": new_id(), "key": key, "batch_no": bno, "status": "berhasil", "oleh": by, "at": now_iso,
         "sumber": source, "no_invoice": no_inv, "tanggal_invoice": tgl_inv, "tag": tag,

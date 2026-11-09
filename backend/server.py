@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse, Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
-import os, logging, uuid, shutil, asyncio, io, re, functools
+import os, logging, uuid, shutil, asyncio, io, re, functools, copy
 import requests as _requests
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
@@ -7327,6 +7327,8 @@ async def import_supplier_invoice(
         old = next((e for e in (cur.get("import_riwayat") or []) if e.get("key") == plan["key"] and e.get("status") == "berhasil"), None)
         if old:
             return {"ok": True, "sudah_diimpor": True, **_import_summary(old)}
+        if any(e.get("key") == plan["key"] and e.get("status") == "dibatalkan" for e in (cur.get("import_riwayat") or [])):
+            raise HTTPException(409, "Batch impor ini sudah dibatalkan. Unggah ulang invoice (kunci baru) untuk membuat impor baru.")
         raise HTTPException(409, "Impor tidak dapat diproses. Muat ulang halaman lalu coba lagi.")
     return {"ok": True, "sudah_diimpor": False, **_import_summary(plan["entry"]), "peringatan": plan["warnings"]}
 
@@ -7335,6 +7337,80 @@ def _import_summary(e: dict) -> dict:
     return {"batch_no": e.get("batch_no"), "jumlah_unit": e.get("jumlah_unit"), "total": e.get("total"), "key": e.get("key"),
             "job_ids": [x.get("job_id") for x in (e.get("unit") or [])], "pencocokan": e.get("pencocokan") or {},
             "perlu_konfirmasi": e.get("perlu_konfirmasi") or 0, "at": e.get("at"), "oleh": e.get("oleh")}
+
+
+@api_router.get("/admin/suppliers/{supplier_id}/import-riwayat/{key}/batal-preview", dependencies=[Depends(require_admin_pin)])
+async def import_batal_preview(supplier_id: str, key: str):
+    """Pratinjau dampak pembatalan batch impor (unit mana yang dihapus, total berkurang berapa, dan apa yang MEMBLOKIR). Hanya baca."""
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    pv = SI.batal_preview(doc, key)
+    if not pv.get("ada"):
+        raise HTTPException(404, "Batch impor tidak ditemukan")
+    return pv
+
+
+@api_router.post("/admin/suppliers/{supplier_id}/import-riwayat/{key}/batalkan", dependencies=[Depends(require_admin_pin)])
+@_jobs_retry()
+async def import_batalkan(
+    supplier_id: str, key: str, request: Request, body: Dict[str, Any] = Body(...),
+    x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    """Batalkan satu batch impor (hanya setelah konfirmasi admin + alasan).
+    - Hanya unit milik batch (import_id) yang dihapus, dan HANYA bila SEMUA unit bersih: tanpa pembayaran, alokasi transfer,
+      keterkaitan Leg/Trip, dan tanpa perubahan nominal setelah impor. Bila ada yang tidak bersih -> 409, tidak ada yang berubah.
+    - Transaksi historis tidak pernah dihapus. Salinan lengkap unit yang dibatalkan disimpan di `import_dibatalkan` (jejak audit).
+    - Atomik: satu update (dijaga versi `jobs_ver` dan syarat tidak ada alokasi ke unit tsb). Pembatalan ulang = tidak berbuat apa-apa."""
+    if body.get("konfirmasi") is not True:
+        raise HTTPException(400, "Konfirmasi admin diperlukan untuk membatalkan batch impor.")
+    alasan = re.sub(r"\s+", " ", str(body.get("alasan") or "").strip())[:300]
+    if len(alasan) < 5:
+        raise HTTPException(400, "Isi alasan pembatalan (minimal 5 karakter).")
+    who = await _resolve_admin(request, x_admin_pin, authorization)
+    u = who.get("user") or {}
+    oleh = (u.get("nama") or u.get("email") or ("PIN admin" if who.get("kind") == "pin" else "Admin"))[:80]
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    pv = SI.batal_preview(doc, key)
+    if not pv.get("ada"):
+        raise HTTPException(404, "Batch impor tidak ditemukan")
+    if pv.get("sudah_dibatalkan"):
+        return {"ok": True, "sudah_dibatalkan": True, "batch_no": pv.get("batch_no"), "dibatalkan": pv.get("dibatalkan")}
+    if not pv.get("boleh"):
+        await _import_log_gagal(supplier_id, {"at": datetime.utcnow().isoformat(), "oleh": oleh, "status": "batal_diblokir", "errors": [
+            f"{b['unit']}: {'; '.join(b['alasan'])}" for b in pv["blokir"]][:20], "sumber": {"batch_no": pv.get("batch_no")}})
+        raise HTTPException(409, {"pesan": "Pembatalan diblokir: ada unit yang sudah memiliki pembayaran/alokasi/keterkaitan atau diubah setelah impor. Tidak ada data yang diubah.",
+                                  "blokir": pv["blokir"], "errors": [f"{b['unit']}: {'; '.join(b['alasan'])}" for b in pv["blokir"]]})
+    ids = [x["job_id"] for x in pv["unit"] if x.get("ada")]
+    removed = [copy.deepcopy(j) for j in (doc.get("jobs") or []) if j.get("id") in ids]
+    remaining = [j for j in (doc.get("jobs") or []) if j.get("id") not in ids]
+    now = datetime.utcnow().isoformat()
+    audit = {"id": _gen_supplier_id(), "key": key, "batch_no": pv.get("batch_no"), "at": now, "oleh": oleh, "alasan": alasan,
+             "jumlah_unit": len(removed), "total_tagihan": pv["dampak"]["total_tagihan"], "unit_dibatalkan": removed}
+    ver = doc.get("jobs_ver")
+    flt = {"id": supplier_id, "jobs_ver": ver if ver is not None else {"$exists": False},
+           "import_riwayat": {"$elemMatch": {"key": key, "status": "berhasil"}},
+           "rekon_payments.allocations.job_id": {"$nin": ids}}
+    upd = {"$set": {"jobs": remaining, "import_riwayat.$.status": "dibatalkan",
+                    "import_riwayat.$.dibatalkan": {"at": now, "oleh": oleh, "alasan": alasan}},
+           "$inc": {"jobs_ver": 1}, "$push": {"import_dibatalkan": audit}}
+    res = await db.supplier_profiles.update_one(flt, upd)
+    if res.matched_count == 0:
+        cur = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+        if not cur:
+            raise HTTPException(404, "Supplier tidak ditemukan")
+        pv2 = SI.batal_preview(cur, key)
+        if pv2.get("sudah_dibatalkan"):
+            return {"ok": True, "sudah_dibatalkan": True, "batch_no": pv2.get("batch_no"), "dibatalkan": pv2.get("dibatalkan")}
+        if not pv2.get("boleh"):
+            raise HTTPException(409, {"pesan": "Pembatalan diblokir karena data unit berubah (mis. alokasi/pembayaran baru). Tidak ada data yang diubah.",
+                                      "blokir": pv2.get("blokir") or [], "errors": [f"{b['unit']}: {'; '.join(b['alasan'])}" for b in pv2.get("blokir") or []]})
+        raise JobsConflict()
+    return {"ok": True, "sudah_dibatalkan": False, "batch_no": pv.get("batch_no"), "jumlah_unit_dihapus": len(removed),
+            "total_tagihan_berkurang": pv["dampak"]["total_tagihan"], "oleh": oleh, "at": now}
 
 
 @api_router.get("/admin/suppliers/{supplier_id}/import-riwayat", dependencies=[Depends(require_admin_pin)])
