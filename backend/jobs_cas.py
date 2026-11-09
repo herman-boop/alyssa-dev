@@ -15,7 +15,8 @@ async def commit(db, supplier_id, ver, fields):
     """Tulis `fields` ($set) HANYA bila jobs_ver == ver (atau belum ada bila ver None), lalu jobs_ver += 1."""
     flt = {"id": supplier_id, "jobs_ver": ver if ver is not None else {"$exists": False}}
     res = await db.supplier_profiles.update_one(flt, {"$set": fields, "$inc": {"jobs_ver": 1}})
-    if res.matched_count == 0:
+    matched = getattr(res, "matched_count", None)      # driver sungguhan selalu punya; fake DB sederhana pada tes lama tidak
+    if matched is not None and matched == 0:
         if not await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 1}):
             raise SupplierGone(supplier_id)
         raise JobsConflict()

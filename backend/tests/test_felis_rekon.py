@@ -1432,7 +1432,8 @@ async def test_selisih_ringkasan_auth():
     d = _DB(); d.selisih_profiles = FakeColl()
     await d.selisih_profiles.insert_one({"id": "P1", "nama": "RACHMAT", "tagihan": [{"id": "T1", "items": []}]})
     ns = {"os": os, "db": d, "HTTPException": _HTTP, "Optional": typing.Optional, "Query": lambda *a, **k: None, "Header": lambda *a, **k: None,
-          "_selisih_tagihan_totals": lambda t: {**t, "total_selisih": 0, "total_terbayar": 0, "sisa": 0}}
+          "_selisih_tagihan_totals": lambda t: {**t, "total_selisih": 0, "total_terbayar": 0, "sisa": 0},
+          "app_users": __import__("types").SimpleNamespace(ENFORCE_CACHE={"v": False})}   # _admin_is_open() memakai app_users (tes lama belum menyediakannya)
     exec(code, ns)
     fn = ns["selisih_ringkasan_data"]
     saved = {k: os.environ.get(k) for k in ("ADMIN_LOCK", "ADMIN_PIN")}

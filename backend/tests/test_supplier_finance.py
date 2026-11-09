@@ -229,10 +229,7 @@ def _banyak(n):
 def test_pdf_panjang_banyak_halaman_dan_teks_vector():
     import asyncio, re, shutil
     pw = pytest_importorskip("playwright.async_api")
-    exe = "/opt/pw-browsers/chromium"
-    if not os.path.exists(exe):
-        import pytest
-        pytest.skip("chromium tidak tersedia")
+    exe = _chromium_exe()
     jobs, rps = _banyak(60)
     fin = sf.build_finance(jobs, rps)
     per = sf.ringkasan_periode(jobs, rps, "2026-10-01", "2026-10-31")
@@ -242,7 +239,7 @@ def test_pdf_panjang_banyak_halaman_dan_teks_vector():
 
     async def run():
         async with pw.async_playwright() as p:
-            b = await p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+            b = await p.chromium.launch(**({"executable_path": exe} if exe else {}), args=["--no-sandbox"])
             pg = await b.new_page()
             await pg.set_content(html)
             data = await pg.pdf(format="A4", print_background=True, display_header_footer=True,
@@ -272,6 +269,12 @@ def test_pdf_panjang_banyak_halaman_dan_teks_vector():
         open(out, "wb").write(pdf)
 
 
+def _chromium_exe():
+    """Path Chromium: env PLAYWRIGHT_CHROMIUM_PATH, atau bawaan sandbox, atau None = Chromium milik Playwright (CI: `playwright install chromium`)."""
+    exe = os.environ.get("PLAYWRIGHT_CHROMIUM_PATH") or ("/opt/pw-browsers/chromium" if os.path.exists("/opt/pw-browsers/chromium") else None)
+    return exe
+
+
 def pytest_importorskip(name):
     import importlib, pytest
     try:
@@ -285,10 +288,7 @@ def test_pdf_tabel_muat_lebar_halaman_tanpa_dikecilkan_otomatis():
     (teks jadi kecil). Diuji dengan nama kota & nomor invoice sangat panjang."""
     import asyncio, os
     pw = pytest_importorskip("playwright.async_api")
-    exe = "/opt/pw-browsers/chromium"
-    if not os.path.exists(exe):
-        import pytest
-        pytest.skip("chromium tidak tersedia")
+    exe = _chromium_exe()
     kota = ["Surabaya Tanjung Perak", "Banjarmasin Trisakti", "Makassar Hasanuddin", "Balikpapan Kariangau"]
     jobs, rps = [], []
     for i in range(40):
@@ -302,7 +302,7 @@ def test_pdf_tabel_muat_lebar_halaman_tanpa_dikecilkan_otomatis():
 
     async def ukur():
         async with pw.async_playwright() as p:
-            b = await p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+            b = await p.chromium.launch(**({"executable_path": exe} if exe else {}), args=["--no-sandbox"])
             pg = await b.new_page(viewport={"width": 689, "height": 1000})      # 689px = lebar area cetak A4 dengan margin 14mm
             await pg.set_content(html); await pg.emulate_media(media="print")
             r = await pg.evaluate("""() => ({

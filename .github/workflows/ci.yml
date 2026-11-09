@@ -1,0 +1,61 @@
+name: CI
+
+# Setiap PR/push ke main: tes backend + build backend/frontend. Tidak melakukan deploy apa pun.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (tes + kompilasi)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      MONGO_URL: mongodb://localhost:27017
+      DB_NAME: ci_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+      - name: Pasang dependensi
+        run: pip install -r requirements-dev.txt
+      - name: Pasang Chromium (tes PDF Rekap Supplier)
+        run: python -m playwright install --with-deps chromium
+      - name: Build backend (kompilasi semua modul)
+        run: python -m compileall -q .
+      - name: Tes backend (tes live dilewati eksplisit, lihat header pytest)
+        run: python -m pytest -q -p no:cacheprovider -rs
+      - name: Tes Supplier TIDAK boleh dilewati diam-diam
+        run: |
+          python -m pytest tests/test_supplier_*.py tests/test_selesai_sembunyikan.py tests/test_felis_rekon.py -q -p no:cacheprovider -rs | tee /tmp/supplier-tests.txt
+          if grep -Eiq "skipped" /tmp/supplier-tests.txt; then echo "Ada tes Supplier yang dilewati"; exit 1; fi
+
+  frontend:
+    name: Frontend (build produksi)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Pasang dependensi (sama dengan Railway)
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+      - name: Build (sama dengan Railway)
+        run: CI=false npm run build
