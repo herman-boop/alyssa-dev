@@ -825,6 +825,40 @@ export default function SupplierPage() {
   const [invMeta, setInvMeta] = useState({});
   const [invSaving, setInvSaving] = useState(false);
   const [invErr, setInvErr] = useState("");
+  const [invErrs, setInvErrs] = useState([]);          // daftar kesalahan validasi dari server (impor ditolak, tidak ada yang tersimpan)
+  const [invKey, setInvKey] = useState("");            // kunci idempotensi: tombol simpan boleh ditekan ulang tanpa menggandakan tagihan
+  const [invIzinSelisih, setInvIzinSelisih] = useState(false);
+  const [invHist, setInvHist] = useState(null);        // riwayat impor supplier (dibuka lewat tombol)
+  const newKey = () => { try { return (crypto && crypto.randomUUID) ? crypto.randomUUID() : `k-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`; } catch { return `k-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`; } };
+  const bukaRiwayatImpor = async () => {
+    if (!selected) return;
+    try { const r = await axios.get(`${API}/admin/suppliers/${selected.id}/import-riwayat`, { headers }); setInvHist(r.data); }
+    catch { flash("Gagal memuat riwayat impor"); }
+  };
+  const [batalBusy, setBatalBusy] = useState(false);
+  // Batalkan batch impor: preview dampak -> diblokir bila ada pembayaran/alokasi -> alasan + konfirmasi admin -> hapus HANYA unit batch itu (jejak audit tersimpan)
+  const batalkanBatch = async (h) => {
+    if (!selected || batalBusy) return;
+    setBatalBusy(true);
+    try {
+      const pv = (await axios.get(`${API}/admin/suppliers/${selected.id}/import-riwayat/${encodeURIComponent(h.key)}/batal-preview`, { headers })).data;
+      if (pv.sudah_dibatalkan) { flash("Batch ini sudah dibatalkan"); await bukaRiwayatImpor(); return; }
+      if (!pv.boleh) {
+        window.alert(`Pembatalan batch ${pv.batch_no} DIBLOKIR karena:\n\n${(pv.blokir || []).map((b) => `• ${b.unit}: ${b.alasan.join("; ")}`).join("\n")}\n\nTidak ada data yang diubah. Hapus atau koreksi unit satu per satu bila memang perlu.`);
+        return;
+      }
+      const alasan = window.prompt(`Batalkan batch ${pv.batch_no}?\n\n${pv.dampak.jumlah_unit} unit akan dihapus dan total tagihan berkurang ${fRp(pv.dampak.total_tagihan)}.\nTidak ada pembayaran/transaksi yang dihapus. Salinan unit disimpan sebagai jejak audit.\n\nIsi alasan pembatalan (min. 5 huruf):`);
+      if (!alasan || alasan.trim().length < 5) { flash("Pembatalan dibatalkan"); return; }
+      if (!window.confirm(`Konfirmasi: hapus ${pv.dampak.jumlah_unit} unit batch ${pv.batch_no}?`)) return;
+      await axios.post(`${API}/admin/suppliers/${selected.id}/import-riwayat/${encodeURIComponent(h.key)}/batalkan`, { konfirmasi: true, alasan: alasan.trim() }, { headers });
+      flash(`Batch ${pv.batch_no} dibatalkan`);
+      await reloadSelected(selected.id); setListRefreshTick((t) => t + 1); await bukaRiwayatImpor();
+    } catch (e) {
+      const d = e?.response?.data?.detail;
+      flash(typeof d === "object" ? (d.pesan || "Pembatalan gagal") : (d || "Pembatalan gagal"));
+    } finally { setBatalBusy(false); }
+  };
+  const rowTotal = (x) => pNum(x.harga_dasar) + (x.tambahan || []).reduce((a, t) => a + pNum(t.amount), 0);
   const [aiTest, setAiTest] = useState(null);
   const [aiTesting, setAiTesting] = useState(false);
   const tesAi = async () => {
@@ -835,7 +869,7 @@ export default function SupplierPage() {
   };
   const openInv = () => {
     if (!selected) { flash("Pilih supplier dulu"); return; }
-    setInvRows(null); setInvMeta({}); resetProjPicker(); setInvOpen(true);
+    setInvRows(null); setInvMeta({}); setInvErrs([]); setInvErr(""); setInvKey(""); setInvIzinSelisih(false); setInvHist(null); resetProjPicker(); setInvOpen(true);
   };
   const invInputRef = useRef(null);
   const [invFileName, setInvFileName] = useState("");
@@ -843,12 +877,16 @@ export default function SupplierPage() {
     if (!file) { setInvErr("File tidak diterima browser. Pilih lagi, atau coba buka aplikasi lewat Chrome."); return; }
     if (!selected) { setInvErr("Supplier belum dipilih."); return; }
     setInvFileName(`${file.name || "file"} (${Math.max(1, Math.round((file.size || 0) / 1024))} KB)`);
-    setInvBusy(true); setInvRows(null); setInvErr("");
+    setInvBusy(true); setInvRows(null); setInvErr(""); setInvErrs([]); setInvIzinSelisih(false); setInvKey(newKey());
     try {
       const fd = new FormData(); fd.append("file", file);
       const r = await axios.post(`${API}/admin/suppliers/${selected.id}/parse-invoice`, fd, { headers, timeout: 150000 });
-      const rows = (r.data?.rows || []).map((x, i) => ({ ...x, _k: i, pilih: !x.duplikat, total_harga: String(x.total_harga || "") }));
-      setInvRows(rows); setInvMeta({ no_invoice: r.data?.no_invoice, tanggal_invoice: r.data?.tanggal_invoice, total_invoice: r.data?.total_invoice });
+      const rows = (r.data?.rows || []).map((x, i) => ({
+        ...x, _k: i, pilih: !x.duplikat, konfPo: false,
+        harga_dasar: String(x.harga_dasar != null ? x.harga_dasar : (x.total_harga || "")),
+        tambahan: (x.tambahan || []).map((t) => ({ label: t.label, amount: String(t.amount) })),
+      }));
+      setInvRows(rows); setInvMeta({ no_invoice: r.data?.no_invoice, tanggal_invoice: r.data?.tanggal_invoice, total_invoice: r.data?.total_invoice, sumber: r.data?.sumber, sudah: r.data?.file_sudah_diimpor });
       if (!rows.length) flash("Tidak ada unit terbaca di invoice ini");
     } catch (e) {
       const d = e?.response?.data?.detail;
@@ -859,31 +897,37 @@ export default function SupplierPage() {
   };
   const updInv = (k, patch) => setInvRows((rs) => rs.map((x) => (x._k === k ? { ...x, ...patch } : x)));
   const invPicked = (invRows || []).filter((x) => x.pilih);
-  const invSum = invPicked.reduce((a, x) => a + pNum(x.total_harga), 0);
+  const invSum = invPicked.reduce((a, x) => a + rowTotal(x), 0);
+  // KONFIRMASI & SIMPAN: SATU permintaan atomik ke server (semua unit masuk, atau tidak satu pun). Aman ditekan ulang (kunci sama).
   const saveInvoiceRows = async () => {
-    if (!selected || !invPicked.length) return;
-    setInvSaving(true);
-    let ok = 0;
+    if (!selected || !invPicked.length || invSaving) return;
+    setInvSaving(true); setInvErrs([]); setInvErr("");
     try {
       const projectId = await resolveTargetProjectId();
       const noInv = (invMeta.no_invoice || "").trim();
       const tglInv = /^\d{4}-\d{2}-\d{2}$/.test(invMeta.tanggal_invoice || "") ? invMeta.tanggal_invoice : "";
-      const tag = jobTag.trim() || (noInv ? `Invoice ${noInv}` : "");
-      for (const x of invPicked) {
-        await axios.post(`${API}/admin/suppliers/${selected.id}/jobs`, {
-          vehicle_type: (x.vehicle_type || "").trim(), nopol: (x.nopol || "").trim(), no_rangka: (x.no_rangka || "").trim(),
-          asal_kota: (x.asal_kota || "").trim(), tujuan_kota: (x.tujuan_kota || "").trim(),
-          total_harga: pNum(x.total_harga), catatan: (x.catatan || "").trim(), tanggal: tglInv || x.tanggal || todayStr(),
-          project_id: projectId, tag, no_invoice_supplier: noInv,
-          order_id: x.po?.order_id || null, customer_ref: x.po?.customer || "",
-        }, { headers });
-        ok += 1;
-      }
+      const rows = invPicked.map((x) => ({
+        vehicle_type: (x.vehicle_type || "").trim(), nopol: (x.nopol || "").trim(), no_rangka: (x.no_rangka || "").trim(),
+        asal_kota: (x.asal_kota || "").trim(), tujuan_kota: (x.tujuan_kota || "").trim(), tanggal: x.tanggal || tglInv || "",
+        harga_dasar: pNum(x.harga_dasar), tambahan: (x.tambahan || []).filter((t) => pNum(t.amount) > 0).map((t) => ({ label: t.label, amount: pNum(t.amount) })),
+        catatan: (x.catatan || "").trim(),
+      }));
+      const r = await axios.post(`${API}/admin/suppliers/${selected.id}/import-invoice`, {
+        key: invKey || newKey(), tag: jobTag.trim(), no_invoice: noInv, tanggal_invoice: tglInv, total_invoice: invMeta.total_invoice || 0,
+        source: invMeta.sumber || {}, project_id: projectId || undefined, rows,
+        izinkan_duplikat: invPicked.map((x, i) => (x.duplikat ? i : -1)).filter((i) => i >= 0),
+        konfirmasi_po: invPicked.map((x, i) => (x.po_status === "kemungkinan" && x.konfPo ? i : -1)).filter((i) => i >= 0),
+        izinkan_selisih_total: invIzinSelisih,
+      }, { headers, timeout: 60000 });
       setInvOpen(false); setInvRows(null); resetProjPicker();
-      await reloadSelected(selected.id); setListRefreshTick((t) => t + 1); flash(`${ok} unit masuk ke Tagihan`);
+      await reloadSelected(selected.id); setListRefreshTick((t) => t + 1);
+      flash(r.data?.sudah_diimpor ? `Impor ini sudah tersimpan sebelumnya (${r.data.batch_no}); tidak digandakan` : `${r.data.jumlah_unit} unit masuk ke Tagihan · batch ${r.data.batch_no}`);
     } catch (e) {
-      if (!e?.__projErr) flash(`${e?.response?.data?.detail || "Gagal menyimpan"}${ok ? ` (${ok} unit sudah masuk)` : ""}`);
-      if (ok) { await reloadSelected(selected.id); setListRefreshTick((t) => t + 1); }
+      if (e?.__projErr) { setInvSaving(false); return; }
+      const d = e?.response?.data?.detail;
+      if (d && typeof d === "object") { setInvErrs(d.errors || []); setInvErr(d.pesan || "Gagal menyimpan"); }
+      else setInvErr(`${(typeof d === "string" ? d : "") || e?.message || "Gagal menyimpan"} Tidak ada unit yang tersimpan; boleh tekan Simpan lagi.`);
+      flash("Impor belum tersimpan");
     } finally { setInvSaving(false); }
   };
 
@@ -2079,7 +2123,7 @@ export default function SupplierPage() {
       {invOpen && (
         <Modal title="Upload Invoice Supplier" onClose={() => { if (!invSaving) setInvOpen(false); }}
           foot={<><button style={BTN_GHOST} onClick={() => setInvOpen(false)} disabled={invSaving}>Batal</button>
-            {invRows && invRows.length > 0 && <button style={BTN} onClick={saveInvoiceRows} disabled={invSaving || !invPicked.length} data-testid="sup-inv-save">{invSaving ? "Menyimpan…" : `Masukkan ${invPicked.length} Unit ke Tagihan`}</button>}</>}>
+            {invRows && invRows.length > 0 && <button style={BTN} onClick={saveInvoiceRows} disabled={invSaving || !invPicked.length} data-testid="sup-inv-save">{invSaving ? "Menyimpan…" : `Konfirmasi & Simpan Tagihan (${invPicked.length} unit · ${fRp(invSum)})`}</button>}</>}>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ ...BTN, position: "relative", display: "block", textAlign: "center", opacity: invBusy ? 0.6 : 1, overflow: "hidden" }}>
               {invBusy ? "⏳ Membaca invoice… (bisa 10–40 detik)" : (invRows ? "📄 Ganti File Invoice" : "📄 Pilih PDF / Foto Invoice")}
@@ -2092,6 +2136,26 @@ export default function SupplierPage() {
               <div style={{ fontSize: 12, border: `1px solid ${aiTest.status === 200 ? C.green : C.red}`, color: aiTest.status === 200 ? C.green : C.red, borderRadius: 10, padding: 10, lineHeight: 1.5 }} data-testid="sup-ai-test-res">
                 <div style={{ fontWeight: 800 }}>{aiTest.pesan}</div>
                 {aiTest.ada_key !== undefined && <div style={{ color: C.mute, marginTop: 4 }}>Key terbaca: {aiTest.ada_key ? "ya" : "tidak"}{aiTest.ada_key ? ` · awalan "${aiTest.awalan}" · panjang ${aiTest.panjang}` : ""} · model {aiTest.model}{aiTest.status !== undefined ? ` · kode ${aiTest.status}` : ""}</div>}
+              </div>
+            )}
+            <button type="button" style={{ ...BTN_GHOST, minHeight: 38, fontSize: 12.5 }} onClick={bukaRiwayatImpor} data-testid="sup-inv-riwayat">🗂️ Riwayat impor supplier ini</button>
+            {invHist && (
+              <div style={{ fontSize: 12, border: `1px solid ${C.line}`, borderRadius: 10, padding: 10 }}>
+                {invHist.riwayat.length === 0 && invHist.gagal.length === 0 && <div style={{ color: C.mute }}>Belum ada riwayat impor.</div>}
+                {invHist.riwayat.slice(0, 15).map((h) => (
+                  <div key={h.id} style={{ padding: "6px 0", borderTop: `1px dashed ${C.line}` }}>
+                    <b>{h.batch_no}</b> · {fDate((h.at || "").slice(0, 10))} · {h.oleh} · {h.jumlah_unit} unit · {fRp(h.total)}
+                    {h.status === "dibatalkan" && <span style={{ color: C.red, fontWeight: 800 }}> · DIBATALKAN</span>}
+                    <div style={{ color: C.mute }}>Sumber: {h.sumber?.nama || "-"} · PO cocok {h.pencocokan?.cocok || 0}, rute beda {h.pencocokan?.beda_rute || 0}, sebagian {h.pencocokan?.kemungkinan || 0}, tanpa PO {h.pencocokan?.tidak_ada || 0}{h.perlu_konfirmasi ? ` · ${h.perlu_konfirmasi} identitas perlu konfirmasi` : ""}</div>
+                    {h.status === "dibatalkan" && h.dibatalkan && <div style={{ color: C.mute }}>Dibatalkan {fDate((h.dibatalkan.at || "").slice(0, 10))} oleh {h.dibatalkan.oleh}: {h.dibatalkan.alasan}</div>}
+                    {h.status === "berhasil" && <button type="button" disabled={batalBusy} onClick={() => batalkanBatch(h)} style={{ background: "none", border: "none", color: C.red, cursor: "pointer", fontSize: 12, fontWeight: 700, padding: "4px 0", textDecoration: "underline" }} data-testid={`sup-inv-batal-${h.key}`}>Batalkan batch ini…</button>}
+                  </div>
+                ))}
+                {invHist.gagal.slice(0, 5).map((g, i) => (
+                  <div key={i} style={{ padding: "6px 0", borderTop: `1px dashed ${C.line}`, color: C.red }}>
+                    {g.status === "gagal" ? "Gagal menyimpan" : g.status === "batal_diblokir" ? "Pembatalan diblokir" : "Ditolak"} · {fDate((g.at || "").slice(0, 10))} · {g.oleh}: {(g.errors || [])[0] || ""}
+                  </div>
+                ))}
               </div>
             )}
             {invFileName && <div style={{ fontSize: 12, color: C.mute }}>File dipilih: <b style={{ color: C.ink }}>{invFileName}</b></div>}
@@ -2113,29 +2177,69 @@ export default function SupplierPage() {
               )}
               {renderProjPicker()}
               {renderTagInput()}
-              {invRows.map((x) => (
+              {invMeta.sudah && <div style={{ fontSize: 12.5, color: C.red, border: `1px solid ${C.red}`, borderRadius: 10, padding: 10 }}>⚠ File ini sudah pernah diimpor ({invMeta.sudah.batch_no}, {invMeta.sudah.jumlah_unit} unit). Menyimpan lagi akan ditolak agar tagihan tidak ganda.</div>}
+              {!(invMeta.no_invoice || "").trim() && <div style={{ fontSize: 12, color: C.mute }}>Invoice tanpa nomor: nomor invoice supplier dibiarkan kosong (tidak dikarang). Unit diberi <b style={{ color: C.ink }}>nomor batch impor internal</b> (IMP-…) yang berbeda dari nomor invoice supplier.</div>}
+              {invErr && invErrs.length > 0 && (
+                <div style={{ fontSize: 12.5, color: C.red, border: `1px solid ${C.red}`, borderRadius: 10, padding: 10, lineHeight: 1.5 }} data-testid="sup-inv-errs">
+                  <div style={{ fontWeight: 800, marginBottom: 4 }}>{invErr}</div>
+                  {invErrs.slice(0, 12).map((e2, i) => <div key={i}>• {e2}</div>)}
+                  {invErrs.some((e2) => e2.includes("tidak sama dengan total invoice")) && (
+                    <label style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, color: C.ink, fontWeight: 700 }}>
+                      <input type="checkbox" checked={invIzinSelisih} onChange={(e) => setInvIzinSelisih(e.target.checked)} /> Saya sudah memeriksa; total berbeda dari dokumen memang benar
+                    </label>
+                  )}
+                </div>
+              )}
+              {invRows.map((x, idx) => {
+                const poSt = x.po_status || (x.po ? "cocok" : "tidak_ada");
+                const tot = rowTotal(x);
+                return (
                 <div key={x._k} style={{ border: `1px solid ${x.pilih ? C.line : C.inpLine}`, borderRadius: 10, padding: 10, opacity: x.pilih ? 1 : 0.55 }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, marginBottom: 6, flexWrap: "wrap" }}>
                     <input type="checkbox" checked={!!x.pilih} onChange={(e) => updInv(x._k, { pilih: e.target.checked })} />
-                    <span>{x.nopol || x.no_rangka || "(tanpa plat)"}</span>
-                    {x.po && <span style={{ fontSize: 11, color: C.green, fontWeight: 700 }}>✓ PO{x.po.customer ? `: ${x.po.customer}` : ""}{x.po.order_id ? ` · ${x.po.order_id}` : ""}{x.po.jumlah > 1 ? ` (+${x.po.jumlah - 1} PO lain)` : ""}</span>}
-                    {x.duplikat && <span style={{ fontSize: 11, color: C.gold, fontWeight: 700 }}>sudah ada di tagihan (plat & rute sama)</span>}
+                    <span>{idx + 1}. {x.nopol || x.no_rangka || "(tanpa plat)"}</span>
+                    {poSt === "cocok" && <span style={{ fontSize: 11, color: C.green, fontWeight: 700 }}>✓ PO{x.po?.customer ? `: ${x.po.customer}` : ""}{x.po?.order_id ? ` · ${x.po.order_id}` : ""}</span>}
+                    {poSt === "cocok_beda_rute" && <span style={{ fontSize: 11, color: C.gold, fontWeight: 700 }}>⚠ PO {x.po?.order_id} ditemukan, rute berbeda ({x.po?.asal_kota}→{x.po?.tujuan_kota})</span>}
+                    {poSt === "kemungkinan" && <span style={{ fontSize: 11, color: C.gold, fontWeight: 700 }}>⚠ Hanya cocok sebagian dengan PO {x.po?.order_id}</span>}
+                    {poSt === "tidak_ada" && <span style={{ fontSize: 11, color: C.mute, fontWeight: 600 }}>belum ada PO</span>}
+                    {x.duplikat && <span style={{ fontSize: 11, color: C.gold, fontWeight: 700 }}>sudah ada di tagihan (unit & rute sama)</span>}
                   </label>
+                  {poSt === "kemungkinan" && (
+                    <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: C.gold, marginBottom: 6 }}>
+                      <input type="checkbox" checked={!!x.konfPo} onChange={(e) => updInv(x._k, { konfPo: e.target.checked })} /> Ya, tautkan ke PO {x.po?.order_id} ({x.po?.customer || "-"}) setelah saya cek
+                    </label>
+                  )}
+                  {x.ident_status === "perlu_konfirmasi" && <div style={{ fontSize: 11.5, color: C.gold, marginBottom: 6 }}>⚠ Perlu dikonfirmasi: {x.ident_catatan}</div>}
+                  {(x.duplikat_supplier_lain || []).length > 0 && <div style={{ fontSize: 11.5, color: C.gold, marginBottom: 6 }}>⚠ Unit & rute yang sama juga ada di supplier: {x.duplikat_supplier_lain.join(", ")}</div>}
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                     <input style={I} placeholder="Tipe kendaraan" value={x.vehicle_type} onChange={(e) => updInv(x._k, { vehicle_type: e.target.value })} />
                     <input style={I} placeholder="No. Polisi" value={x.nopol} onChange={(e) => updInv(x._k, { nopol: e.target.value.toUpperCase() })} />
                     <input style={I} placeholder="Kota asal" value={x.asal_kota} onChange={(e) => updInv(x._k, { asal_kota: e.target.value })} />
                     <input style={I} placeholder="Kota tujuan" value={x.tujuan_kota} onChange={(e) => updInv(x._k, { tujuan_kota: e.target.value })} />
                   </div>
-                  <input style={{ ...I, marginTop: 8 }} placeholder="No. Rangka" value={x.no_rangka} onChange={(e) => updInv(x._k, { no_rangka: e.target.value.toUpperCase() })} />
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
+                    <input style={I} placeholder="No. Rangka" value={x.no_rangka} onChange={(e) => updInv(x._k, { no_rangka: e.target.value.toUpperCase() })} />
+                    <input type="date" style={I} value={x.tanggal || ""} onChange={(e) => updInv(x._k, { tanggal: e.target.value })} />
+                  </div>
                   <div style={{ display: "flex", alignItems: "center", border: `1px solid ${C.inpLine}`, borderRadius: 10, background: C.inpBg, overflow: "hidden", marginTop: 8 }}>
-                    <span style={{ padding: "0 12px", fontWeight: 800, color: C.mute }}>Rp</span>
-                    <input inputMode="numeric" value={fmtRpInput(x.total_harga)} onChange={(e) => updInv(x._k, { total_harga: onlyDigits(e.target.value) })} placeholder="Total harga" style={{ ...I, border: "none", background: "transparent", flex: 1 }} />
+                    <span style={{ padding: "0 12px", fontWeight: 800, color: C.mute, fontSize: 12 }}>Harga</span>
+                    <input inputMode="numeric" value={fmtRpInput(x.harga_dasar)} onChange={(e) => updInv(x._k, { harga_dasar: onlyDigits(e.target.value) })} placeholder="Harga dasar" style={{ ...I, border: "none", background: "transparent", flex: 1 }} data-testid={`sup-inv-harga-${idx}`} />
+                  </div>
+                  {(x.tambahan || []).map((t, ti) => (
+                    <div key={ti} style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center" }}>
+                      <input style={{ ...I, flex: 1.3 }} value={t.label} onChange={(e) => updInv(x._k, { tambahan: x.tambahan.map((q, qi) => (qi === ti ? { ...q, label: e.target.value } : q)) })} placeholder="Biaya tambahan" />
+                      <input style={{ ...I, flex: 1 }} inputMode="numeric" value={fmtRpInput(t.amount)} onChange={(e) => updInv(x._k, { tambahan: x.tambahan.map((q, qi) => (qi === ti ? { ...q, amount: onlyDigits(e.target.value) } : q)) })} placeholder="Nominal" />
+                      <button type="button" onClick={() => updInv(x._k, { tambahan: x.tambahan.filter((_, qi) => qi !== ti) })} style={{ background: "none", border: "none", color: C.red, cursor: "pointer", fontSize: 16 }} aria-label="Hapus biaya tambahan">✕</button>
+                    </div>
+                  ))}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
+                    <button type="button" onClick={() => updInv(x._k, { tambahan: [...(x.tambahan || []), { label: "Biaya tambahan", amount: "" }] })} style={{ background: "none", border: "none", color: C.gold, cursor: "pointer", fontSize: 12, fontWeight: 700, padding: 0 }}>+ biaya tambahan</button>
+                    <span style={{ fontSize: 13, fontWeight: 800 }}>Total unit: {fRp(tot)}</span>
                   </div>
                   {x.catatan && <div style={{ fontSize: 11, color: C.mute, marginTop: 6 }}>{x.catatan}</div>}
-                  {x.pilih && pNum(x.total_harga) <= 0 && <div style={{ fontSize: 11, color: C.gold, marginTop: 6 }}>Harga 0 → masuk sebagai Draft (harga belum lengkap).</div>}
+                  {x.pilih && tot <= 0 && <div style={{ fontSize: 11, color: C.gold, marginTop: 6 }}>Harga 0 → masuk sebagai Draft (harga belum lengkap).</div>}
                 </div>
-              ))}
+              ); })}
             </>)}
           </div>
         </Modal>
@@ -2171,6 +2275,8 @@ export default function SupplierPage() {
           foot={<button style={{ ...BTN_GHOST, color: C.red, borderColor: C.red }} onClick={() => deleteJob(detailJobLive.id)}>🗑️ Hapus Unit</button>}>
           {detailJobLive.no_invoice_supplier && <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: C.mute }}>No. Invoice Supplier</span><b>{detailJobLive.no_invoice_supplier}</b></div>}
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: C.mute }}>Tgl Invoice / Tagihan</span><b>{fDate(detailJobLive.tanggal)}</b></div>
+          {detailJobLive.import_batch_no && <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: C.mute }}>Batch impor (internal)</span><b style={{ fontSize: 12 }}>{detailJobLive.import_batch_no}</b></div>}
+          {detailJobLive.ident_status === "perlu_konfirmasi" && <div style={{ fontSize: 11.5, color: C.gold, marginBottom: 6 }}>⚠ Identitas perlu dikonfirmasi: {detailJobLive.ident_catatan}</div>}
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: C.mute }}>Total</span><b>{fRp(detailJobLive.total_harga)}</b></div>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: C.mute }}>Terbayar</span><b style={{ color: C.green }}>{fRp(detailJobLive.total_terbayar)}</b></div>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}><span style={{ color: C.mute }}>Sisa</span><b style={{ color: detailJobLive.sisa > 0 ? C.red : C.green }}>{fRp(detailJobLive.sisa)}</b></div>
