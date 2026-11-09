@@ -157,6 +157,18 @@ export default function SupplierFinance({ supplier, adminPin, onClose, flash, on
     setPdfBusy(false);
   };
 
+  const [xlsBusy, setXlsBusy] = useState(false);
+  const doExcel = async () => {
+    setXlsBusy(true);
+    try {
+      const r = await axios.get(`${API}/admin/suppliers/${supplier.id}/ringkasan-excel`, { headers, params: { cutoff: cut }, responseType: "blob", timeout: 60000 });
+      const a = document.createElement("a"); a.href = URL.createObjectURL(r.data);
+      a.download = `Rekap-Supplier-${(supplier.nama || "supplier").replace(/[^\w-]+/g, "_")}-${cut}.xlsx`; document.body.appendChild(a); a.click(); a.remove();
+      note("Excel diunduh.");
+    } catch { note("Gagal membuat Excel. Coba lagi."); }
+    setXlsBusy(false);
+  };
+
   const S = data?.ringkasan;
   const R = data?.rekonsiliasi;
   const afterChange = async () => { await load(); if (onChanged) onChanged(); };
@@ -181,6 +193,7 @@ export default function SupplierFinance({ supplier, adminPin, onClose, flash, on
             <div style={{ flex: 1 }} />
             <button className="sf-btn pri" disabled={pdfBusy} onClick={() => doPdf("buka")} data-testid="sf-pdf">{pdfBusy ? "Membuat PDF…" : "PDF A4"}</button>
             <button className="sf-btn" disabled={pdfBusy} onClick={() => doPdf("wa")} data-testid="sf-pdf-wa">Kirim WhatsApp</button>
+            <button className="sf-btn" disabled={xlsBusy} onClick={doExcel} data-testid="sf-excel">{xlsBusy ? "Membuat Excel…" : "Excel"}</button>
           </div>
           <div className="sf-kpis" data-testid="sf-kpis">
             <Kpi l="Total Tagihan Supplier" v={rp(S.tagihan)} n={`${S.invoice_n} invoice${S.unit_perlu_dilengkapi ? ` + ${S.unit_perlu_dilengkapi} unit tanpa nomor` : ""}`} />

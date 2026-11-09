@@ -27,6 +27,8 @@ import driver_notif  # notif WhatsApp ke driver saat insentif dibayar
 import flip_client  # adapter Flip (transfer ke rekening driver)
 import payouts  # transfer driver lewat Flip dengan pengaman (inquiry wajib, anti dobel, payout_logs)
 import cashbank  # Kas & Bank: akun + mutasi + saldo
+import supplier_export as SX  # ekspor Excel Rekap Supplier (murni)
+import supplier_import as SI  # impor invoice supplier: validasi, duplikat, pencocokan PO, atomik (murni, tanpa DB)
 import supplier_finance as SF  # rekap per invoice, riwayat transfer, rekonsiliasi saldo, verifikasi (murni, tanpa DB)
 import task_rules as TR  # aturan tugas Driver Tujuan (1 jepret, 1 checkpoint/hari, batas hari)
 import ais  # modul AIS (posisi kapal) — provider-agnostic, aman tanpa key
@@ -6979,15 +6981,15 @@ _INVOICE_PROMPT = (
     "(kolom bisa bernama TGL, TUJUAN, DESKRIPSI, JENIS UNIT, NOPOL, NOKA/NOPOL, VIN/VRN, DESTINATION, HARGA, PRICE, AMOUNT, JUMLAH, KAPAL). "
     "Baca SEMUA baris yang berisi unit (satu baris = satu kendaraan/unit); abaikan baris kosong dan baris total. "
     "Balas HANYA dengan JSON valid, tanpa penjelasan, bentuk:\n"
-    '{"rows":[{"vehicle_type":"","nopol":"","no_rangka":"","asal_kota":"","tujuan_kota":"","total_harga":0,"tanggal":"YYYY-MM-DD atau kosong","catatan":""}],'
+    '{"rows":[{"vehicle_type":"","nopol":"","no_rangka":"","asal_kota":"","tujuan_kota":"","harga_satuan":0,"biaya_tambahan":[{"label":"","amount":0}],"total_harga":0,"tanggal":"YYYY-MM-DD atau kosong","catatan":""}],'
     '"no_invoice":"","tanggal_invoice":"YYYY-MM-DD atau kosong","total_invoice":0}\n'
     "Aturan:\n"
     "- no_invoice = nomor invoice/Ref No/Invoice No di kepala dokumen. tanggal_invoice = tanggal invoice di kepala dokumen "
     "(bulan Indonesia atau Inggris, mis. '5 November 2026', '05-Nov-26', '10 Oktober 2026'), ubah ke YYYY-MM-DD.\n"
-    "- total_harga = harga per unit dalam rupiah, angka bulat tanpa titik/koma. Kalau ada kolom harga satuan dan jumlah, pakai jumlah per baris. "
-    "Biaya tambahan di baris yang sama dijumlahkan dan dirinci di catatan.\n"
+    "- harga_satuan = harga jasa per unit tanpa biaya tambahan; biaya_tambahan = daftar biaya per unit di luar harga satuan (mis. 'Biaya pengambilan' 1.400.000), tiap item label + amount. "
+    "total_harga = harga_satuan + jumlah biaya_tambahan, dalam rupiah, angka bulat tanpa titik/koma. Kalau ada kolom harga satuan dan jumlah, pakai jumlah per baris.\n"
     "- nopol = plat nomor (mis. 'B 9496 BBF', 'G 1054 VE'), huruf besar. Kalau kolomnya gabungan Noka/Nopol: isi nopol bila bentuknya plat; "
-    "bila hanya angka/kode panjang tanpa pola plat (mis. '135666', '11897', VIN/VRN), isi no_rangka dan kosongkan nopol.\n"
+    "bila hanya angka/kode panjang tanpa pola plat (mis. '135666', '11897', VIN/VRN), isi no_rangka dan kosongkan nopol. Nomor yang hanya beberapa digit (mis. 6 digit) tulis apa adanya di no_rangka; JANGAN dilengkapi atau ditebak.\n"
     "- vehicle_type = jenis/merek unit (mis. 'HILUX DC', 'X Pander', 'Bus Medium', 'CD PEMADAM'). Kalau ada kolom jenis dan deskripsi terpisah, pakai jenis dan taruh sisanya di catatan.\n"
     "- asal_kota dan tujuan_kota: ambil dari baris bila ada pola 'A-B' / 'A - B' (mis. 'Surabaya-Lombok', 'BPP - JKT'). "
     "Kalau baris hanya punya tujuan, ambil asal dari kepala dokumen (Port of Loading / asal), dan tujuan dari baris atau Port of Discharge. "
@@ -6996,7 +6998,7 @@ _INVOICE_PROMPT = (
     "Pecah menjadi SATU objek rows PER unit/plat; tiap unit memakai harga satuan (BUKAN jumlah baris). "
     "Contoh: Unit 2, plat 'S 8625 HN' dan 'S 8614 HN', harga satuan 10.600.000 -> 2 rows masing-masing 10.600.000.\n"
     "- Biaya tambahan yang tertulis di baris/di bawah baris yang sama dengan harga satuan sendiri (mis. 'Ambil di ... 1.400.000' per unit, jumlah 2.800.000 untuk 2 unit) "
-    "ditambahkan ke total_harga tiap unit itu (10.600.000 + 1.400.000 = 12.000.000) dan dirinci di catatan (mis. 'Harga 10.600.000 + Ambil 1.400.000; Ambil PT. United Tractors, Semen Gresik, Tuban'). "
+    "dimasukkan sebagai biaya_tambahan tiap unit itu (harga_satuan 10.600.000, biaya_tambahan [{label:'Biaya pengambilan', amount:1.400.000}], total_harga 12.000.000) dan keterangan lokasinya di catatan. "
     "Jumlah semua total_harga harus sama dengan total di dokumen.\n"
     "- Kolom deskripsi sering berisi: tanggal, rute 'Kota A-Kota B', jenis unit, dan keterangan lain; pisahkan sesuai field.\n"
     "- tanggal = tanggal di baris unit itu bila ada (YYYY-MM-DD), selain itu kosong.\n"
@@ -7085,12 +7087,13 @@ async def ai_check():
 async def parse_supplier_invoice(supplier_id: str, file: UploadFile = File(...)):
     """Baca invoice supplier (PDF/foto) → daftar unit untuk DICEK dulu di layar.
     Endpoint ini TIDAK menyimpan apa pun; penyimpanan lewat endpoint jobs biasa."""
-    sup = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0, "id": 1, "jobs": 1})
+    sup = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0, "id": 1, "jobs": 1, "import_riwayat": 1})
     if not sup:
         raise HTTPException(404, "Supplier tidak ditemukan")
     data = await file.read()
     if not data:
         raise HTTPException(400, "File kosong")
+    src_info = {"nama": (file.filename or "")[:200], "ukuran": len(data), "sha256": SI.source_sha(data)}
     if len(data) > 20 * 1024 * 1024:
         raise HTTPException(413, "File terlalu besar (maks 20 MB)")
     ext = os.path.splitext(file.filename or "")[1].lower()
@@ -7130,62 +7133,172 @@ async def parse_supplier_invoice(supplier_id: str, file: UploadFile = File(...))
     for r in (res.get("rows") or [])[:300]:
         if not isinstance(r, dict):
             continue
-        nopol = str(r.get("nopol") or "").strip().upper()
-        rangka = str(r.get("no_rangka") or "").strip().upper()
+        nr = SI.normalize_row(r)      # harga dasar + biaya tambahan, identitas lemah (mis. 6 digit) ditandai
+        nopol, rangka = nr["nopol"], nr["no_rangka"]
         row = {
-            "vehicle_type": str(r.get("vehicle_type") or "").strip(),
+            "vehicle_type": nr["vehicle_type"],
             "nopol": nopol, "no_rangka": rangka,
-            "asal_kota": str(r.get("asal_kota") or "").strip(),
-            "tujuan_kota": str(r.get("tujuan_kota") or "").strip(),
-            "total_harga": _int(r.get("total_harga")),
-            "tanggal": str(r.get("tanggal") or "").strip()[:10],
-            "catatan": str(r.get("catatan") or "").strip(),
+            "asal_kota": nr["asal_kota"], "tujuan_kota": nr["tujuan_kota"],
+            "total_harga": nr["total_harga"], "harga_dasar": nr["harga_dasar"], "tambahan": nr["tambahan"],
+            "ident_status": nr["ident_status"], "ident_catatan": nr["ident_catatan"],
+            "tanggal": nr["tanggal"] or str(r.get("tanggal") or "").strip()[:10],
+            "catatan": nr["catatan"],
             "duplikat": False,
         }
         rute = (_kn(row["asal_kota"]), _kn(row["tujuan_kota"]))
         row["duplikat"] = bool((_kn(nopol), rute) in existing and nopol) or bool((_kn(rangka), rute) in existing and rangka)
         if row["nopol"] or row["no_rangka"] or row["total_harga"] or row["vehicle_type"]:
             rows.append(row)
-    # ── Cocokkan dengan PO/Order admin (db.orders) lewat no. polisi / no. rangka ──
-    def _nk(v):
-        return re.sub(r"[^A-Z0-9]", "", str(v or "").upper())
-    idents = {_nk(x) for r in rows for x in (r["nopol"], r["no_rangka"]) if _nk(x)}
-    po_by_ident = {}
-    if idents:
-        pats = ["".join(re.escape(ch) + r"\s*" for ch in i) for i in idents]
-        rx = re.compile("^\\s*(" + "|".join(pats) + ")\\s*$", re.IGNORECASE)
-        flt = {"$or": [{"units.nopol": rx}, {"units.no_rangka": rx}, {"nopol": rx}, {"no_rangka": rx}]}
-        async for o in db.orders.find(flt, {"_id": 0}).sort("created_at", -1).limit(400):
-            us = o.get("units") if isinstance(o.get("units"), list) and o.get("units") else [o]
-            for u in us:
-                for key in (_nk(u.get("nopol")), _nk(u.get("no_rangka"))):
-                    if key in idents:
-                        po_by_ident.setdefault(key, []).append((o, u))
+    # ── Cocokkan dengan PO/Order admin (db.orders): identitas persis + rute; 6 digit terakhir noka = "kemungkinan" ──
+    pairs = await _import_po_pairs(rows)
     for row in rows:
-        cands = []
-        for key in (_nk(row["nopol"]), _nk(row["no_rangka"])):
-            if key:
-                cands += po_by_ident.get(key, [])
-        if not cands:
+        m = SI.match_po(row, pairs)
+        row["po_status"] = m["status"]
+        if m["status"] == "tidak_ada":
             row["po"] = None
             continue
-        tuj = _kn(row["tujuan_kota"])
-        pick = next(((o, u) for o, u in cands if tuj and _kn(o.get("tujuan_kota")) == tuj), cands[0])
-        o, u = pick
-        vt = f"{u.get('vehicle_type') or o.get('vehicle_type') or ''} {u.get('tipe_model') or o.get('tipe_model') or ''}".strip()
         row["po"] = {
-            "order_id": o.get("order_id") or "", "customer": o.get("customer_nama") or "",
-            "vehicle_type": vt, "nopol": str(u.get("nopol") or "").upper(), "no_rangka": str(u.get("no_rangka") or "").upper(),
-            "asal_kota": o.get("asal_kota") or "", "tujuan_kota": o.get("tujuan_kota") or "",
-            "jumlah": len({(x[0].get("order_id")) for x in cands}),
+            "order_id": m["order_id"], "customer": m["customer"], "vehicle_type": "", "nopol": m["nopol"], "no_rangka": m["no_rangka"],
+            "asal_kota": m["asal_kota"], "tujuan_kota": m["tujuan_kota"], "jumlah": 1, "status": m["status"],
         }
-        # isi yang kosong dari PO (data invoice tidak ditimpa)
-        for k in ("vehicle_type", "nopol", "no_rangka", "asal_kota", "tujuan_kota"):
-            if not row[k] and row["po"].get(k):
-                row[k] = row["po"][k]
+        if m["status"] != "kemungkinan":      # isi yang kosong dari PO (data invoice tidak ditimpa); sebagian cocok tidak dipakai
+            for k in ("nopol", "no_rangka", "asal_kota", "tujuan_kota"):
+                if not row[k] and row["po"].get(k):
+                    row[k] = row["po"][k]
+    # ── Duplikat terhadap supplier LAIN (peringatan, tidak memblokir) + file yang sama pernah diimpor ──
+    lain = await _import_dupe_other_suppliers(rows, supplier_id)
+    for i, row in enumerate(rows):
+        row["duplikat_supplier_lain"] = lain.get(i, [])
+    sudah = next((e for e in (sup.get("import_riwayat") or []) if e.get("status") == "berhasil" and (e.get("sumber") or {}).get("sha256") == src_info["sha256"]), None)
     return {"rows": rows, "no_invoice": str(res.get("no_invoice") or "").strip(),
             "tanggal_invoice": str(res.get("tanggal_invoice") or "").strip()[:10],
-            "total_invoice": _int(res.get("total_invoice"))}
+            "total_invoice": _int(res.get("total_invoice")), "sumber": src_info,
+            "file_sudah_diimpor": ({"batch_no": sudah.get("batch_no"), "at": sudah.get("at"), "jumlah_unit": sudah.get("jumlah_unit")} if sudah else None)}
+
+
+async def _import_po_pairs(rows):
+    """Kumpulkan pasangan (order, unit) kandidat PO untuk baris-baris impor (satu query)."""
+    nk = SI.nk
+    exact = {nk(x) for r in rows for x in (r.get("nopol"), r.get("no_rangka")) if nk(x)}
+    if not exact:
+        return []
+    pats = ["".join(re.escape(ch) + r"\s*" for ch in i) for i in exact]
+    rx = re.compile("^\\s*(" + "|".join(pats) + ")\\s*$", re.IGNORECASE)
+    conds = [{"units.nopol": rx}, {"units.no_rangka": rx}, {"nopol": rx}, {"no_rangka": rx}]
+    tails = [re.escape(i) for i in exact if i.isdigit() and 4 <= len(i) < 17]
+    if tails:
+        rx2 = re.compile("(" + "|".join(tails) + ")\\s*$", re.IGNORECASE)
+        conds += [{"units.no_rangka": rx2}, {"no_rangka": rx2}]
+    pairs = []
+    async for o in db.orders.find({"$or": conds}, {"_id": 0}).sort("created_at", -1).limit(600):
+        us = o.get("units") if isinstance(o.get("units"), list) and o.get("units") else [o]
+        for u in us:
+            pairs.append((o, u))
+    return pairs
+
+
+async def _import_dupe_other_suppliers(rows, supplier_id):
+    """{indeks baris: [nama supplier lain]} untuk unit yang sama di rute yang sama pada supplier lain."""
+    idents = {SI.nk(x) for r in rows for x in (r.get("nopol"), r.get("no_rangka")) if SI.nk(x)}
+    if not idents:
+        return {}
+    pats = ["".join(re.escape(ch) + r"\s*" for ch in i) for i in idents]
+    rx = re.compile("^\\s*(" + "|".join(pats) + ")\\s*$", re.IGNORECASE)
+    keys_by_sup = {}
+    async for sp in db.supplier_profiles.find({"id": {"$ne": supplier_id}, "$or": [{"jobs.nopol": rx}, {"jobs.no_rangka": rx}]},
+                                              {"_id": 0, "id": 1, "nama": 1, "jobs.nopol": 1, "jobs.no_rangka": 1, "jobs.asal_kota": 1, "jobs.tujuan_kota": 1, "jobs.tanggal": 1}).limit(100):
+        keys_by_sup[sp.get("nama") or sp.get("id")] = SI.existing_keys(sp.get("jobs") or [])
+    out = {}
+    for i, r in enumerate(rows):
+        k = SI.row_key(r)
+        if not k:
+            continue
+        hit = [nama for nama, ks in keys_by_sup.items() if k in ks]
+        if hit:
+            out[i] = hit[:5]
+    return out
+
+
+async def _import_log_gagal(supplier_id: str, info: dict):
+    """Catat percobaan impor yang gagal/ditolak (best-effort; terpisah dari riwayat sukses agar kunci idempotensi tidak terblokir)."""
+    try:
+        await db.supplier_profiles.update_one({"id": supplier_id}, {"$push": {"import_gagal": {"$each": [info], "$slice": -50}}})
+    except Exception as e:   # pencatatan gagal tidak boleh menutupi error aslinya
+        logger.warning("import_gagal log error: %s", e)
+
+
+@api_router.post("/admin/suppliers/{supplier_id}/import-invoice", dependencies=[Depends(require_admin_pin)])
+async def import_supplier_invoice(
+    supplier_id: str, request: Request, body: Dict[str, Any] = Body(...),
+    x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    """KONFIRMASI & SIMPAN TAGIHAN dari preview impor invoice.
+    - Semua unit divalidasi dulu; bila ada kesalahan -> 422 dan TIDAK ada yang tersimpan.
+    - Penyimpanan = SATU update atomik pada dokumen supplier (unit + riwayat impor sekaligus). Tidak ada data setengah masuk.
+    - Idempoten: kunci `key` yang sama tidak menambah unit lagi (mengembalikan hasil impor sebelumnya).
+    - Tidak membuat pembayaran dan tidak mengubah status lunas. Nomor invoice supplier tidak pernah dikarang
+      (bila kosong, unit diberi nomor batch impor internal IMP-... di field terpisah)."""
+    who = await _resolve_admin(request, x_admin_pin, authorization)
+    u = who.get("user") or {}
+    oleh = (u.get("nama") or u.get("email") or ("PIN admin" if who.get("kind") == "pin" else "Admin"))[:80]
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    rows_in = body.get("rows") if isinstance(body.get("rows"), list) else []
+    now = datetime.utcnow().isoformat()
+    today = today_wib()
+    norm = [SI.normalize_row(r) for r in rows_in[: SI.MAX_ROWS + 1]]
+    pairs = await _import_po_pairs(norm) if norm and len(norm) <= SI.MAX_ROWS else []
+    po_matches = {i: SI.match_po(r, pairs) for i, r in enumerate(norm)}
+    projects = list(doc.get("projects") or [])
+    pid = body.get("project_id") if body.get("project_id") and any(p.get("id") == body.get("project_id") for p in projects) else None
+    if not pid:
+        pid, projects = _get_or_create_active_project(doc)
+    try:
+        plan = SI.build_plan(supplier_id, doc, body, today=today, now_iso=now, by=oleh, new_id=_gen_supplier_id,
+                             po_matches=po_matches, project_id=pid, projects=projects)
+    except SI.ImportError_ as e:
+        await _import_log_gagal(supplier_id, {"at": now, "oleh": oleh, "status": "ditolak", "errors": e.errors[:30],
+                                              "sumber": body.get("source") if isinstance(body.get("source"), dict) else {}})
+        raise HTTPException(422, {"pesan": "Impor ditolak. Tidak ada data yang tersimpan.", "errors": e.errors, "warnings": e.warnings})
+    ent = plan["idempotent_entry"]
+    if ent:
+        return {"ok": True, "sudah_diimpor": True, **_import_summary(ent)}
+    upd = {"$push": {"jobs": {"$each": plan["jobs"]}, "import_riwayat": plan["entry"]}}
+    if projects != (doc.get("projects") or []):
+        upd["$set"] = {"projects": projects}
+    try:
+        res = await db.supplier_profiles.update_one({"id": supplier_id, "import_riwayat.key": {"$ne": plan["key"]}}, upd)
+    except Exception as e:
+        logger.exception("import-invoice gagal menyimpan")
+        await _import_log_gagal(supplier_id, {"at": now, "oleh": oleh, "status": "gagal", "errors": [f"Gagal menyimpan: {e}"][:1],
+                                              "sumber": plan["entry"].get("sumber") or {}})
+        raise HTTPException(500, {"pesan": "Gagal menyimpan. Tidak ada unit yang masuk; aman diulang dengan kunci yang sama.", "errors": [str(e)[:200]], "warnings": []})
+    if res.matched_count == 0:     # kunci sudah ada (permintaan ulang/balapan) atau supplier hilang
+        cur = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0, "import_riwayat": 1})
+        if not cur:
+            raise HTTPException(404, "Supplier tidak ditemukan")
+        old = next((e for e in (cur.get("import_riwayat") or []) if e.get("key") == plan["key"] and e.get("status") == "berhasil"), None)
+        if old:
+            return {"ok": True, "sudah_diimpor": True, **_import_summary(old)}
+        raise HTTPException(409, "Impor tidak dapat diproses. Muat ulang halaman lalu coba lagi.")
+    return {"ok": True, "sudah_diimpor": False, **_import_summary(plan["entry"]), "peringatan": plan["warnings"]}
+
+
+def _import_summary(e: dict) -> dict:
+    return {"batch_no": e.get("batch_no"), "jumlah_unit": e.get("jumlah_unit"), "total": e.get("total"), "key": e.get("key"),
+            "job_ids": [x.get("job_id") for x in (e.get("unit") or [])], "pencocokan": e.get("pencocokan") or {},
+            "perlu_konfirmasi": e.get("perlu_konfirmasi") or 0, "at": e.get("at"), "oleh": e.get("oleh")}
+
+
+@api_router.get("/admin/suppliers/{supplier_id}/import-riwayat", dependencies=[Depends(require_admin_pin)])
+async def import_riwayat_supplier(supplier_id: str):
+    """Riwayat impor invoice (siapa, kapan, sumber file, hasil pencocokan) + percobaan yang gagal/ditolak. Hanya baca."""
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0, "id": 1, "import_riwayat": 1, "import_gagal": 1})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    return {"riwayat": list(reversed(doc.get("import_riwayat") or [])), "gagal": list(reversed(doc.get("import_gagal") or []))}
 
 
 @api_router.post("/admin/suppliers", dependencies=[Depends(require_admin_pin)])
@@ -7407,6 +7520,19 @@ async def set_no_invoice(supplier_id: str, body: Dict[str, Any] = Body(...)):
             {"id": supplier_id},
             {"$push": {"no_invoice_riwayat": {"job_id": u["job_id"], "dari": u["dari"], "ke": u["ke"], "oleh": "admin", "pada": now}}})
     return {"ok": True, "diubah": len(plan["updates"]), "warnings": plan["warnings"], "nomor": plan["nomor"]}
+
+
+@api_router.get("/admin/suppliers/{supplier_id}/ringkasan-excel", dependencies=[Depends(require_admin_pin)])
+async def supplier_ringkasan_excel(supplier_id: str, cutoff: Optional[str] = None):
+    """READ-ONLY. Ekspor Excel (.xlsx): Ringkasan, Invoice, Unit, Riwayat Pembayaran, Alokasi. Angka dari laporan Finance yang sama dengan layar."""
+    if cutoff and not re.match(r"^\d{4}-\d{2}-\d{2}$", cutoff):
+        raise HTTPException(400, "cutoff harus YYYY-MM-DD")
+    doc, jobs, _rk, fin = await _finance_for(supplier_id, cutoff)
+    data = SX.build_workbook(doc.get("nama") or "", (fin.get("rekonsiliasi") or {}).get("cutoff") or cutoff or today_wib(), fin, jobs,
+                             dibuat=datetime.now(timezone(timedelta(hours=7))).strftime("%d/%m/%Y %H:%M WIB"))
+    fn = re.sub(r"[^A-Za-z0-9_-]+", "_", f"rekap-supplier-{doc.get('nama') or supplier_id}-{cutoff or today_wib()}").strip("_") + ".xlsx"
+    return Response(content=data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{fn}"'})
 
 
 @api_router.get("/admin/suppliers/{supplier_id}/ringkasan-pdf", dependencies=[Depends(require_admin_pin)])
