@@ -1276,6 +1276,25 @@ export default function SupplierPage() {
     } catch (e) { flash(e?.response?.data?.detail || "Gagal memproses"); }
     finally { setSelBusy(false); }
   };
+  /* ═══ HAPUS PERMANEN pembayaran lama (Jan–Jun) yang sudah lunas + unit lunasnya. Dipagari server (dry-run dulu). ═══ */
+  const BATAS_HAPUS = "2026-06-30";
+  const hapusPermanen = async (keys) => {
+    if (!selected || !keys.length || selBusy) return;
+    setSelBusy(true);
+    try {
+      const { data: dr } = await axios.post(`${API}/admin/suppliers/${selected.id}/selesai/hapus-permanen`, { keys, sampai: BATAS_HAPUS, dry_run: true }, { headers });
+      if (!dr.ok) { window.alert("Tidak bisa dihapus:\n\n• " + (dr.blokir || []).slice(0, 5).join("\n• ")); return; }
+      const d = dr.dampak || {};
+      const ringkas = `${d.jumlah_unit} unit lunas (${fRp(d.total_tagihan_unit)}) + ${(d.pembayaran_rekon || 0) + (d.pembayaran_manual || 0)} pembayaran (${fRp((d.total_rekon || 0) + (d.total_manual || 0))})`;
+      if (!window.confirm(`HAPUS PERMANEN?\n\n${ringkas}\n\nHilang dari aplikasi dan TIDAK bisa dikembalikan lewat tombol. Unit & pembayaran lain tidak tersentuh.`)) return;
+      const ketik = window.prompt('Ketik HAPUS (huruf besar) untuk melanjutkan:');
+      if (ketik !== "HAPUS") { flash("Dibatalkan — tidak ada yang dihapus"); return; }
+      await axios.post(`${API}/admin/suppliers/${selected.id}/selesai/hapus-permanen`, { keys, sampai: BATAS_HAPUS, konfirmasi: "HAPUS", by: "Admin" }, { headers });
+      await reloadSelected(selected.id);
+      flash(`✓ Dihapus permanen: ${ringkas}`);
+    } catch (e) { flash(e?.response?.data?.detail || "Gagal menghapus"); }
+    finally { setSelBusy(false); }
+  };
   /* ═══ CLEAR / ARSIP Riwayat Pembayaran (aditif — TIDAK menghapus data/alokasi/status) ═══ */
   const [clrSel, setClrSel] = useState(() => new Set());      // kunci yang dicentang: "rk:<id>" | "tx:<batch/payment id>"
   const [showArsip, setShowArsip] = useState(false);
@@ -1873,12 +1892,13 @@ export default function SupplierPage() {
                     ))}
                   </div>
                 )}
+                {(() => { const lama = [...settledRekon.filter((p) => String(p.tanggal || "").slice(0, 10) <= BATAS_HAPUS).map((p) => `rk:${p.id}`), ...settledTxns.filter((t) => String(t.tanggal || "").slice(0, 10) <= BATAS_HAPUS).map((t) => `tx:${t.key}`)]; return lama.length > 0 && <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 6 }}><button disabled={selBusy} onClick={() => hapusPermanen(lama)} style={{ ...BTN_GHOST, minHeight: 34, padding: "5px 12px", fontSize: 12, color: C.red }} data-testid="sup-hapus-lama">🗑️ Hapus semua pembayaran lama s/d 30 Jun 2026 ({lama.length})</button></div>; })()}
                 {(settledTxns.filter((t) => !clearedSet.has(`tx:${t.key}`)).length + settledRekon.filter((p) => !clearedSet.has(`rk:${p.id}`)).length) > 0 && <div style={{ fontSize: 13, fontWeight: 800, color: C.gold, marginTop: 6 }}>Pembayaran yang sudah lunas ({settledTxns.filter((t) => !clearedSet.has(`tx:${t.key}`)).length + settledRekon.filter((p) => !clearedSet.has(`rk:${p.id}`)).length})</div>}
                 {settledRekon.filter((p) => !clearedSet.has(`rk:${p.id}`)).map((p) => (
                   <div key={p.id} style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 12 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}><b>{fRp(p.amount)}</b><span style={{ fontSize: 12, color: C.mute }}>{fDate(p.tanggal)}</span></div>
                     <div style={{ fontSize: 11.5, color: C.mute, marginTop: 3 }}>Rekon Bank · dialokasikan ke {(p.allocations || []).length} unit lunas{p.catatan ? ` · ${p.catatan}` : ""}</div>
-                    <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}><button disabled={selBusy} onClick={() => sembunyiBayar([`rk:${p.id}`])} style={{ background: "none", border: "none", color: C.mute, cursor: "pointer", fontSize: 12, textDecoration: "underline" }}>Sembunyikan</button></div>
+                    <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}><button disabled={selBusy} onClick={() => sembunyiBayar([`rk:${p.id}`])} style={{ background: "none", border: "none", color: C.mute, cursor: "pointer", fontSize: 12, textDecoration: "underline" }}>Sembunyikan</button>{String(p.tanggal || "").slice(0, 10) <= BATAS_HAPUS && <button disabled={selBusy} onClick={() => hapusPermanen([`rk:${p.id}`])} style={{ background: "none", border: "none", color: C.red, cursor: "pointer", fontSize: 12, textDecoration: "underline", marginLeft: 14 }} data-testid={`sup-hapus-rk-${p.id}`}>🗑️ Hapus</button>}</div>
                   </div>
                 ))}
                 {settledTxns.filter((t) => !clearedSet.has(`tx:${t.key}`)).map((t) => (
@@ -1887,7 +1907,7 @@ export default function SupplierPage() {
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}><b>{fRp(t.total)}</b><span style={{ fontSize: 12, color: C.mute }}>{fDate(t.tanggal)}</span></div>
                       <div style={{ fontSize: 11.5, color: C.mute, marginTop: 3 }}>{t.metode || "Transfer"}{t.bank ? ` · ${t.bank}` : ""} · {t.allocs.length} unit lunas{t.no_referensi ? ` · Ref ${t.no_referensi}` : ""}</div>
                     </button>
-                    <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}><button disabled={selBusy} onClick={() => sembunyiBayar([`tx:${t.key}`])} style={{ background: "none", border: "none", color: C.mute, cursor: "pointer", fontSize: 12, textDecoration: "underline" }}>Sembunyikan</button></div>
+                    <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}><button disabled={selBusy} onClick={() => sembunyiBayar([`tx:${t.key}`])} style={{ background: "none", border: "none", color: C.mute, cursor: "pointer", fontSize: 12, textDecoration: "underline" }}>Sembunyikan</button>{String(t.tanggal || "").slice(0, 10) <= BATAS_HAPUS && <button disabled={selBusy} onClick={() => hapusPermanen([`tx:${t.key}`])} style={{ background: "none", border: "none", color: C.red, cursor: "pointer", fontSize: 12, textDecoration: "underline", marginLeft: 14 }} data-testid={`sup-hapus-tx-${t.key}`}>🗑️ Hapus</button>}</div>
                   </div>
                 ))}
               </div>
