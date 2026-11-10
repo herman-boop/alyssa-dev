@@ -35,7 +35,9 @@ import task_rules as TR  # aturan tugas Driver Tujuan (1 jepret, 1 checkpoint/ha
 import ais  # modul AIS (posisi kapal) — provider-agnostic, aman tanpa key
 import rekon_sync  # integrasi pembayaran supplier dari Audit Rekon (isolated)
 import supplier_faktur  # pisah unit ke faktur (projek) baru — logika murni
+import hashlib
 import riwayat_clear  # clear/arsip Riwayat Pembayaran Supplier — aditif, tanpa delete
+import riwayat_hapus  # hapus PERMANEN pembayaran lunas lama (+ unit lunasnya), berpagar & berjejak
 import rekon_felis_client  # adapter PULL dari Felis (stub sampai kontrak final)
 import expenses as expenses_mod  # Biaya Umum & Administratif (Fase 3, isolated, terpisah dari HPP)
 import ledger_status  # status tagihan supplier (Belum/Sebagian/Lunas) dari ledger — pure
@@ -8042,6 +8044,50 @@ async def selesai_sembunyikan(supplier_id: str, body: Dict[str, Any] = Body(...)
 @api_router.post("/admin/suppliers/{supplier_id}/selesai/kembalikan", dependencies=[Depends(require_admin_pin)])
 async def selesai_kembalikan(supplier_id: str, body: Dict[str, Any] = Body(...)):
     return await _selesai_sembunyi_op(supplier_id, body, kembalikan=True)
+
+
+@api_router.post("/admin/suppliers/{supplier_id}/selesai/hapus-permanen", dependencies=[Depends(require_admin_pin)])
+@_jobs_retry()
+async def selesai_hapus_permanen(supplier_id: str, body: Dict[str, Any] = Body(...)):
+    """HAPUS PERMANEN pembayaran lama yang sudah lunas (tab Selesai) beserta unit lunas yang dilunasinya.
+    Dipagari riwayat_hapus.plan: hanya yang lunas, bertanggal <= `sampai`, dan semua pembayaran yang menyentuh
+    unit itu ikut dipilih. `dry_run=true` hanya menghitung dampak (tidak menulis). Eksekusi wajib `konfirmasi="HAPUS"`.
+    Salinan lengkap data yang dihapus disimpan di koleksi `supplier_hapus_arsip` (tidak tampil di aplikasi)."""
+    b = body or {}
+    keys = [str(k) for k in (b.get("keys") or []) if k]
+    sampai = str(b.get("sampai") or "").strip()[:10]
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    alloc_by_job = _supplier_rekon_overview(doc)["alloc_by_job"]
+    settled = set()
+    for j in (doc.get("jobs") or []):
+        t = _supplier_job_totals(j, extra_paid=alloc_by_job.get(j.get("id"), 0))
+        if (t.get("total_harga") or 0) > 0 and (t.get("sisa") or 0) <= 0:
+            settled.add(j.get("id"))
+    p = riwayat_hapus.plan(doc, keys, settled, sampai)
+    if b.get("dry_run"):
+        return {"ok": p["ok"], "dry_run": True, "blokir": p["blokir"], "dampak": p["dampak"]}
+    if not p["ok"]:
+        raise HTTPException(409, "Tidak dihapus: " + " | ".join(p["blokir"][:4]))
+    if str(b.get("konfirmasi") or "") != "HAPUS":
+        raise HTTPException(400, 'Konfirmasi wajib: kirim konfirmasi="HAPUS"')
+    now = datetime.utcnow().isoformat()
+    by = str(b.get("by") or "Admin")[:40]
+    jobs_by_id = {j.get("id"): j for j in (doc.get("jobs") or [])}
+    rk_by_id = {x.get("id"): x for x in (doc.get("rekon_payments") or [])}
+    bid = hashlib.sha256(f"{supplier_id}|{doc.get('jobs_ver')}|{'|'.join(sorted(keys))}".encode()).hexdigest()[:20]
+    await db.supplier_hapus_arsip.replace_one({"id": bid}, {
+        "id": bid, "supplier_id": supplier_id, "supplier_nama": doc.get("nama"), "at": now, "by": by, "sampai": sampai, "keys": keys,
+        "dampak": p["dampak"], "unit_dihapus": [jobs_by_id[u] for u in p["unit_ids"] if u in jobs_by_id],
+        "rekon_dihapus": [rk_by_id[r] for r in p["rekon_ids"] if r in rk_by_id]}, upsert=True)
+    new = riwayat_hapus.apply(doc, p, keys)
+    # jobs + penanda tampilan lewat CAS; rekon_payments lewat $pull atomik (tidak menimpa tarikan rekon yang masuk bersamaan)
+    await _jobs_commit(supplier_id, doc.get("jobs_ver"), {"jobs": new["jobs"], "riwayat_clear": new["riwayat_clear"], "selesai_sembunyi": new["selesai_sembunyi"]})
+    if p["rekon_ids"]:
+        await db.supplier_profiles.update_one({"id": supplier_id}, {"$pull": {"rekon_payments": {"id": {"$in": p["rekon_ids"]}}}})
+    logger.warning("[hapus-permanen] supplier=%s by=%s unit=%d rekon=%d arsip=%s", supplier_id, by, len(p["unit_ids"]), len(p["rekon_ids"]), bid)
+    return {"ok": True, "dampak": p["dampak"], "arsip_id": bid}
 
 
 @api_router.post("/admin/suppliers/{supplier_id}/pisah-faktur", dependencies=[Depends(require_admin_pin)])
