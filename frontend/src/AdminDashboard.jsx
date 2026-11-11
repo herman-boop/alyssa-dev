@@ -26,6 +26,7 @@ import KompensasiPage from "@/KompensasiPage";
 import MobileVendorPayment from "@/MobileVendorPayment";
 import PermintaanHargaPage from "@/PermintaanHargaPage";
 import { htmlKePng, bagikanPng, printPenawaran, simpanPenawaranGambar } from "./PenawaranCetak";
+import SuratPermohonanModal, { cetakUlangSurat } from "./SuratPermohonan";
 import { DOC_BRAND, DOC_BASE_CSS, docHeader, docFooter, terbilangRupiah, nextDocNo, DOC_ENTITIES, DEFAULT_ENTITY_ID, getActiveEntityId, setActiveEntityId, getEntity } from "@/docTheme";
 import { printReport, saveReportPNG } from "@/reportDoc";
 import "@/App.css";
@@ -5208,6 +5209,7 @@ const DOC_HIST_FILTERS = [
   { key: "invoice", label: "Invoice" },
   { key: "supplier", label: "Rekap Supplier" },
   { key: "penawaran", label: "Penawaran" },
+  { key: "permohonan_bayar", label: "Surat Permohonan" },
   { key: "jadwal", label: "Jadwal Pengiriman" },
   { key: "jadwal_gabungan", label: "Jadwal Gabungan" },
   { key: "__pricelist", label: "💰 Daftar Harga" },
@@ -5216,6 +5218,7 @@ const DOC_HIST_BADGE = {
   invoice: { txt: "Invoice", bg: "rgba(91,141,239,0.18)", fg: "#9dbcff" },
   supplier: { txt: "Rekap Supplier", bg: "rgba(201,151,58,0.20)", fg: "#e6c375" },
   penawaran: { txt: "Penawaran", bg: "rgba(44,179,219,0.18)", fg: "#7fd6ef" },
+  permohonan_bayar: { txt: "Surat Permohonan", bg: "rgba(238,130,200,0.18)", fg: "#f3a6dc" },
   jadwal: { txt: "Jadwal", bg: "rgba(51,181,124,0.18)", fg: "#7ee0af" },
   jadwal_gabungan: { txt: "Jadwal Gabungan", bg: "rgba(201,151,58,0.20)", fg: "#e6c375" },
 };
@@ -5702,6 +5705,7 @@ function HistoriDokumen({ headers }) {
   const [payRec, setPayRec] = useState(null);        // faktur yang lagi dibuka modal pembayarannya
   const [editRec, setEditRec] = useState(null);      // faktur yang lagi dibuka modal Edit / Tambah Unit
   const [stempelRec, setStempelRec] = useState(null); // faktur yang lagi dibuka modal TTD / Stempel / Materai
+  const [suratRec, setSuratRec] = useState(null);     // faktur yang lagi dibuka modal Surat Permohonan Pembayaran
   const [showDup, setShowDup] = useState(false);      // modal nomor faktur dobel
   const [showPPP, setShowPPP] = useState(false);      // laporan penjualan per pelanggan
 
@@ -5861,6 +5865,8 @@ function HistoriDokumen({ headers }) {
       printInvoiceDotMatrix(rec, kontak);
     } else if (rec.jenis === "invoice") {
       printInvoiceDoc(rec.lines, rec.meta?.withTax, { ...(rec.meta || {}), payments: rec.payments || [], tanpaStempel: !!(opts && opts.polos) });
+    } else if (rec.jenis === "permohonan_bayar") {
+      cetakUlangSurat(rec, DOC_DEFAULT_STEMPEL);   // nomor & isi sama seperti saat dibuat; tidak diarsipkan lagi
     } else if (rec.jenis === "penawaran") {
       // Cetak ulang: nomor penawaran SAMA (tidak mengambil nomor baru) dan tidak diarsipkan lagi.
       printPenawaran(rec.units || [], { ...(rec.meta || {}), noDoc: rec.no_dokumen });
@@ -5912,6 +5918,7 @@ function HistoriDokumen({ headers }) {
   const countUnits = (rec) =>
     rec.jenis === "invoice" ? `${(rec.lines || []).length} baris`
       : rec.jenis === "penawaran" ? `${rec.meta?.jumlah_rute ?? (rec.units || []).length} rute · ${rec.meta?.mode === "draft" ? "Opsi Harga" : "Resmi"}`
+      : rec.jenis === "permohonan_bayar" ? `Rp ${(Number(rec.meta?.nominal) || 0).toLocaleString("id-ID")} · Inv ${rec.meta?.invoice_no || "-"}`
       : `${(rec.units || []).length} unit`;
 
   return (
@@ -6060,6 +6067,9 @@ function HistoriDokumen({ headers }) {
                   {rec.jenis === "invoice" && (
                     <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={() => setStempelRec(rec)} title="TTD / Stempel / Materai" data-testid="dochist-stempel">🖋️ TTD</button>
                   )}
+                  {rec.jenis === "invoice" && roleCanInvoice() && (
+                    <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={async () => { let full = rec; try { const r = await axios.get(`${API}/admin/doc-history/${rec.id}`, { headers }); if (r.data) full = r.data; } catch {} setSuratRec(full); }} title="Surat Permohonan Pembayaran (data dari invoice ini)" data-testid="dochist-surat">📄 Surat Bayar</button>
+                  )}
                   {rec.jenis === "invoice" && (
                     <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={() => ubahNomor(rec)} title="Ubah nomor faktur" data-testid="dochist-nomor">🔢 No.</button>
                   )}
@@ -6121,6 +6131,16 @@ function HistoriDokumen({ headers }) {
           headers={headers}
           onClose={() => setStempelRec(null)}
           onDone={(andPrint) => { const r = stempelRec; setStempelRec(null); if (andPrint) reprint(r); }}
+        />
+      )}
+      {suratRec && (
+        <SuratPermohonanModal
+          rec={suratRec}
+          pay={invPayFromRec(suratRec)}
+          headers={headers}
+          stempelBawaan={DOC_DEFAULT_STEMPEL}
+          onClose={() => setSuratRec(null)}
+          onSaved={() => { setPage(1); load(); }}
         />
       )}
       {payRec && (
