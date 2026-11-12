@@ -1977,7 +1977,7 @@ export default function SupplierPage() {
       {/* ── Modal: Tarik dari PO ── */}
       {tarikOpen && (
         <Modal title="Tarik Unit dari PO" onClose={() => setTarikOpen(false)}
-          foot={<><button style={BTN_GHOST} onClick={() => setTarikOpen(false)}>Batal</button><button style={BTN} onClick={doTarik} disabled={tarikSaving} data-testid="sup-tarik-save">{tarikSaving ? "Menarik…" : `Tarik ${tarikSelArr.length} Unit${tarikTotal > 0 ? ` · ${fRp(tarikTotal)}` : ""}`}</button></>}>
+          foot={<>{tarikSelArr.filter((r) => !(pNum(r.total_harga) > 0)).length > 0 && <span style={{ marginRight: "auto", alignSelf: "center", fontSize: 12, fontWeight: 700, color: C.red }} data-testid="sup-tarik-hint">{tarikSelArr.filter((r) => !(pNum(r.total_harga) > 0)).length} unit belum diisi HPP — tidak ikut ditarik</span>}<button style={BTN_GHOST} onClick={() => setTarikOpen(false)}>Batal</button><button style={BTN} onClick={doTarik} disabled={tarikSaving} data-testid="sup-tarik-save">{tarikSaving ? "Menarik…" : `Tarik ${tarikSelArr.length} Unit${tarikTotal > 0 ? ` · ${fRp(tarikTotal)}` : ""}`}</button></>}>
           <div style={{ fontSize: 12, color: C.mute, marginBottom: 10 }}>Centang unit, isi HPP (biaya ke supplier ini). Unit, nopol, customer &amp; rute otomatis dari PO.</div>
           <input style={{ ...I, marginBottom: 10 }} placeholder="🔎 cari: no PO / no rangka / nama pelanggan / asal / tujuan" value={tarikQ} onChange={(e) => setTarikQ(e.target.value)} data-testid="sup-tarik-search" />
           <div style={{ marginBottom: 12 }}>{renderProjPicker()}</div>
@@ -2461,7 +2461,7 @@ export default function SupplierPage() {
       )}
 
       {toast && (
-        <div style={{ position: "fixed", bottom: 90, left: "50%", transform: "translateX(-50%)", background: "#1a2233", border: `1px solid ${C.gold}`, color: C.gold, padding: "10px 18px", borderRadius: 10, fontSize: 13, fontWeight: 700, zIndex: 999, maxWidth: "90%", textAlign: "center" }}>{toast}</div>
+        <div style={{ position: "fixed", bottom: 90, left: "50%", transform: "translateX(-50%)", background: "#1a2233", border: `1px solid ${C.gold}`, color: C.gold, padding: "10px 18px", borderRadius: 10, fontSize: 13, fontWeight: 700, zIndex: 1100, maxWidth: "90%", textAlign: "center" }}>{toast}</div>
       )}
     </div>
   );
