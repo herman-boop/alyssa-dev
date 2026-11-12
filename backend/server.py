@@ -37,6 +37,7 @@ import rekon_sync  # integrasi pembayaran supplier dari Audit Rekon (isolated)
 import supplier_faktur  # pisah unit ke faktur (projek) baru — logika murni
 import hashlib
 import riwayat_clear  # clear/arsip Riwayat Pembayaran Supplier — aditif, tanpa delete
+import pricelist_jual  # daftar harga jual dari invoice (baca saja)
 import riwayat_hapus  # hapus PERMANEN pembayaran lunas lama (+ unit lunasnya), berpagar & berjejak
 import rekon_felis_client  # adapter PULL dari Felis (stub sampai kontrak final)
 import expenses as expenses_mod  # Biaya Umum & Administratif (Fase 3, isolated, terpisah dari HPP)
@@ -1487,6 +1488,17 @@ async def get_doc_history(doc_id: str):
     if not d:
         raise HTTPException(404, "Dokumen tidak ditemukan")
     return d
+
+
+@api_router.get("/admin/doc-history-pricelist", dependencies=[Depends(require_admin_pin)])
+async def doc_history_pricelist(limit: int = 5000):
+    """Daftar Harga JUAL: harga per unit yang sudah ditagih ke pelanggan (dari invoice Histori Dokumen). Hanya baca."""
+    invoices = [d async for d in db.doc_history.find(
+        {"jenis": "invoice"},
+        {"_id": 0, "id": 1, "no_dokumen": 1, "customer": 1, "lines": 1, "created_at": 1,
+         "meta.tanggalInvoice": 1, "meta.tipe": 1, "meta.asal_kota": 1, "meta.tujuan_kota": 1,
+         "meta.customer_nama": 1, "meta.no_invoice": 1}).allow_disk_use(True)]
+    return {"items": pricelist_jual.rows_from_invoices(invoices, max(1, min(20000, limit)))}
 
 
 @api_router.post("/admin/doc-history", dependencies=[Depends(require_admin_pin)])
@@ -7476,6 +7488,34 @@ async def list_suppliers(q: Optional[str] = None):
     return {"count": len(items), "items": items}
 
 
+# NB: harus SEBELUM /admin/suppliers/{supplier_id}; kalau tidak, 'pricelist' tertangkap sebagai supplier_id (404).
+@api_router.get("/admin/suppliers/pricelist", dependencies=[Depends(require_admin_pin)])
+async def supplier_pricelist(limit: int = 3000):
+    """Daftar Harga: semua job supplier yang sudah LUNAS (sisa<=0 & ada harga)
+    -> referensi harga aktual per rute (HPP). Dicari asal/tujuan di frontend."""
+    out = []
+    async for s in db.supplier_profiles.find({}, {"_id": 0}):
+        snama = s.get("nama") or "-"
+        for j in (s.get("jobs") or []):
+            jt = _supplier_job_totals(j)
+            total = jt.get("total_harga") or 0
+            if total <= 0 or (jt.get("sisa") or 0) > 0:
+                continue  # cuma yang LUNAS & ada harganya
+            asal = (j.get("asal_kota") or "").strip()
+            tuj = (j.get("tujuan_kota") or "").strip()
+            out.append({
+                "supplier_id": s.get("id"), "supplier_nama": snama,
+                "job_id": j.get("id"),
+                "asal": asal, "tujuan": tuj, "rute": _rute_str(asal, tuj),
+                "vehicle_type": j.get("vehicle_type") or "",
+                "nopol": j.get("nopol") or "",
+                "harga": total,
+                "tanggal": j.get("tanggal") or j.get("created_at") or "",
+            })
+    out.sort(key=lambda x: x.get("tanggal") or "", reverse=True)
+    return {"items": out[:limit]}
+
+
 @api_router.get("/admin/suppliers/{supplier_id}", dependencies=[Depends(require_admin_pin)])
 async def get_supplier(supplier_id: str):
     """Detail supplier lengkap — semua job/unit + payments + grand total,
@@ -8197,33 +8237,6 @@ async def rename_supplier_project(supplier_id: str, project_id: str, body: Suppl
     projects[idx]["nama"] = nama[:80]
     await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {"projects": projects}})
     return projects[idx]
-
-
-@api_router.get("/admin/suppliers/pricelist", dependencies=[Depends(require_admin_pin)])
-async def supplier_pricelist(limit: int = 3000):
-    """Daftar Harga: semua job supplier yang sudah LUNAS (sisa<=0 & ada harga)
-    -> referensi harga aktual per rute (HPP). Dicari asal/tujuan di frontend."""
-    out = []
-    async for s in db.supplier_profiles.find({}, {"_id": 0}):
-        snama = s.get("nama") or "-"
-        for j in (s.get("jobs") or []):
-            jt = _supplier_job_totals(j)
-            total = jt.get("total_harga") or 0
-            if total <= 0 or (jt.get("sisa") or 0) > 0:
-                continue  # cuma yang LUNAS & ada harganya
-            asal = (j.get("asal_kota") or "").strip()
-            tuj = (j.get("tujuan_kota") or "").strip()
-            out.append({
-                "supplier_id": s.get("id"), "supplier_nama": snama,
-                "job_id": j.get("id"),
-                "asal": asal, "tujuan": tuj, "rute": _rute_str(asal, tuj),
-                "vehicle_type": j.get("vehicle_type") or "",
-                "nopol": j.get("nopol") or "",
-                "harga": total,
-                "tanggal": j.get("tanggal") or j.get("created_at") or "",
-            })
-    out.sort(key=lambda x: x.get("tanggal") or "", reverse=True)
-    return {"items": out[:limit]}
 
 
 @api_router.post("/admin/suppliers/{supplier_id}/jobs/{job_id}/payments", dependencies=[Depends(require_admin_pin)])
