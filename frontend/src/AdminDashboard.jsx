@@ -27,6 +27,7 @@ import MobileVendorPayment from "@/MobileVendorPayment";
 import PermintaanHargaPage from "@/PermintaanHargaPage";
 import { htmlKePng, bagikanPng, printPenawaran, simpanPenawaranGambar } from "./PenawaranCetak";
 import SuratPermohonanModal, { cetakUlangSurat } from "./SuratPermohonan";
+import DaftarHargaGrid from "./DaftarHargaGrid";
 import { DOC_BRAND, DOC_BASE_CSS, docHeader, docFooter, terbilangRupiah, nextDocNo, DOC_ENTITIES, DEFAULT_ENTITY_ID, getActiveEntityId, setActiveEntityId, getEntity } from "@/docTheme";
 import { printReport, saveReportPNG } from "@/reportDoc";
 import "@/App.css";
@@ -5692,11 +5693,9 @@ function HistoriDokumen({ headers }) {
   const [filter, setFilter] = useState("");            // jenis (chip) — fetch server-side
   const [err, setErr] = useState("");
   const [priceRows, setPriceRows] = useState([]);   // Daftar Harga (job supplier lunas)
-  const [priceQ, setPriceQ] = useState("");         // cari asal/tujuan
   const [priceJual, setPriceJual] = useState([]);     // Daftar Harga JUAL: harga per unit yang sudah ditagih (invoice pelanggan)
   const [priceMode, setPriceMode] = useState("jual"); // "jual" (invoice pelanggan) | "beli" (supplier lunas)
   const [priceFail, setPriceFail] = useState({ jual: false, beli: false });
-  const [priceOpen, setPriceOpen] = useState({});     // rute yang dibuka (rincian)
 
   // Filter tambahan (client-side, hanya untuk tampilan — tidak mengubah data).
   const [fEntity, setFEntity] = useState("all");     // all | pt-alyssa | cv-alyssa-trans
@@ -5995,77 +5994,7 @@ function HistoriDokumen({ headers }) {
             ))}
           </div>
           {priceFail[priceMode] && <div style={{ color: "#e06b6b", fontSize: 12.5, marginBottom: 8 }}>Sebagian data gagal dimuat. Tekan ↻ untuk coba lagi.</div>}
-          <input value={priceQ} onChange={(e) => setPriceQ(e.target.value)} data-testid="pricelist-search"
-            placeholder={priceMode === "jual" ? "🔎 ketik asal / tujuan / pelanggan / no. invoice…" : "🔎 ketik asal / tujuan (mis. jakarta / berau)…"}
-            style={{ width: "100%", boxSizing: "border-box", padding: "10px 14px", borderRadius: 10, border: "1px solid #30363d", background: "#0d1117", color: "#e6edf3", fontSize: 14, marginBottom: 12, outline: "none" }} />
-          {priceMode === "jual" && (() => {
-            const pq = priceQ.trim().toLowerCase();
-            const rows = pq ? priceJual.filter((r) => `${r.asal} ${r.tujuan} ${r.vehicle_type} ${r.customer} ${r.no_invoice}`.toLowerCase().includes(pq)) : priceJual;
-            if (!rows.length) return <div className="adm-dochist-empty">{priceJual.length ? "Nggak ada rute yang cocok." : "Belum ada harga dari invoice yang sudah ditagih."}</div>;
-            const norm = (x) => String(x || "").trim().toLowerCase();
-            const grp = new Map();
-            rows.forEach((r) => { const k = `${norm(r.asal)}|${norm(r.tujuan)}`; if (!grp.has(k)) grp.set(k, { key: k, rute: r.rute, rows: [] }); grp.get(k).rows.push(r); });
-            const list = [...grp.values()].map((g) => { const hs = g.rows.map((r) => r.harga); return { ...g, min: Math.min(...hs), max: Math.max(...hs), last: g.rows[0] }; })
-              .sort((a, b) => String(b.last.tanggal).localeCompare(String(a.last.tanggal)));
-            const rp = (n) => "Rp " + Number(n || 0).toLocaleString("id-ID");
-            const tg = (t) => (t ? String(t).slice(0, 10).split("-").reverse().join("/") : "");
-            return (
-              <div className="adm-dochist-list" data-testid="pricelist-jual">
-                <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>{list.length} rute · {rows.length} harga dari invoice. Harga per unit, termasuk jasa pengiriman saja (tanpa PPN/asuransi).</div>
-                {list.map((g) => (
-                  <div key={g.key} className="adm-dochist-row" style={{ display: "block" }} data-testid="pricelist-jual-row">
-                    <div style={{ display: "flex", gap: 10, alignItems: "center", cursor: "pointer" }} onClick={() => setPriceOpen((o) => ({ ...o, [g.key]: !o[g.key] }))}>
-                      <span className="adm-dochist-badge" style={{ background: "rgba(91,141,239,0.18)", color: "#9dbcff" }}>JUAL</span>
-                      <div className="adm-dochist-main" style={{ flex: 1, minWidth: 0 }}>
-                        <div className="adm-dochist-no">{g.rute}</div>
-                        <div className="adm-dochist-sub">Terakhir {tg(g.last.tanggal)} · {g.last.customer || "-"} · {g.rows.length}× ditagih{g.min !== g.max ? ` · kisaran ${rp(g.min)} – ${rp(g.max)}` : ""}</div>
-                      </div>
-                      <div style={{ textAlign: "right", fontWeight: 900, color: "#e6edf3", fontSize: 14, whiteSpace: "nowrap" }}>{rp(g.last.harga)}<div style={{ fontSize: 10.5, opacity: 0.6, fontWeight: 500 }}>{priceOpen[g.key] ? "▲ tutup" : "▼ rincian"}</div></div>
-                    </div>
-                    {priceOpen[g.key] && (
-                      <div style={{ marginTop: 8, borderTop: "1px dashed #30363d", paddingTop: 6 }}>
-                        {g.rows.map((r, i) => (
-                          <div key={(r.doc_id || "") + i} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12, padding: "3px 0" }}>
-                            <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{tg(r.tanggal)} · {r.customer || "-"} · {r.no_invoice || "-"}{r.vehicle_type ? ` · ${r.vehicle_type}` : ""}{r.qty > 1 ? ` · ${r.qty} unit` : ""}</span>
-                            <b style={{ whiteSpace: "nowrap" }}>{rp(r.harga)}</b>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            );
-          })()}
-          {priceMode === "beli" && (() => {
-            const pq = priceQ.trim().toLowerCase();
-            let shown = priceRows;
-            if (pq) {
-              shown = priceRows.filter((r) => `${r.asal} ${r.tujuan} ${r.vehicle_type} ${r.supplier_nama} ${r.nopol}`.toLowerCase().includes(pq));
-              shown = shown.slice().sort((a, b) => {
-                const sc = (r) => (((r.asal || "").toLowerCase().startsWith(pq) || (r.tujuan || "").toLowerCase().startsWith(pq)) ? 0 : 1);
-                return sc(a) - sc(b);
-              });
-            }
-            if (!shown.length) return <div className="adm-dochist-empty">{priceRows.length ? "Nggak ada rute yang cocok." : "Belum ada harga supplier yang lunas."}</div>;
-            return (
-              <div className="adm-dochist-list">
-                {shown.map((r, i) => (
-                  <div key={r.job_id || i} className="adm-dochist-row" data-testid="pricelist-row">
-                    <span className="adm-dochist-badge" style={{ background: "rgba(51,181,124,0.18)", color: "#7ee0af" }}>HARGA</span>
-                    <div className="adm-dochist-main">
-                      <div className="adm-dochist-no">{r.rute || "—"}</div>
-                      <div className="adm-dochist-sub">{r.vehicle_type || "-"} · {r.supplier_nama}{r.nopol ? ` · ${r.nopol}` : ""}</div>
-                    </div>
-                    <div className="adm-dochist-when" style={{ textAlign: "right" }}>
-                      <div style={{ fontWeight: 900, color: "#e6edf3", fontSize: 14 }}>Rp {Number(r.harga || 0).toLocaleString("id-ID")}</div>
-                      <div style={{ fontSize: 11, opacity: 0.7 }}>{r.tanggal ? String(r.tanggal).slice(0, 10).split("-").reverse().join("/") : ""}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            );
-          })()}
+          <DaftarHargaGrid rows={priceMode === "jual" ? priceJual : priceRows} mode={priceMode} />
         </div>
       ) : filteredDocs.length === 0 ? (
         <div className="adm-dochist-empty">
