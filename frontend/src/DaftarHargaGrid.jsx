@@ -4,6 +4,7 @@
   Hanya tampilan: tidak mengubah data apa pun. Fungsi murni (filterSortRows, ringkasHarga, toCsv) diekspor untuk diuji.
 */
 import { useMemo, useState } from "react";
+import { PenawaranCetakButton } from "./PenawaranCetak";
 
 const rp = (n) => "Rp " + Number(n || 0).toLocaleString("id-ID");
 const tg = (t) => (t ? String(t).slice(0, 10).split("-").reverse().join("/") : "");
@@ -70,6 +71,32 @@ export function toCsv(rows, cols) {
   return [head, ...body].join("\r\n");
 }
 
+/* Rapikan teks kendaraan untuk penawaran: buang nopol dan nomor rangka (data pelanggan lain tidak ikut tercetak). */
+export function bersihKendaraan(v) {
+  return String(v == null ? "" : v)
+    .replace(/\b[A-HJ-NPR-Z0-9]{17}\b/g, " ")
+    .replace(/\b[A-Z]{1,2}\s?\d{1,4}\s?[A-Z]{1,3}\b/g, " ")
+    .replace(/\s*[-–]\s*$/g, "").replace(/\s+/g, " ").trim();
+}
+
+/* Baris tercentang -> entri penawaran (format PenawaranCetakButton). Mode beli: HPP + margin% (naik ke ribuan, seperti kalkulator).
+   Entri kembar (rute + kendaraan + harga sama) digabung jadi satu. */
+export function rowsKePenawaran(rows, selIdx, mode, marginPct) {
+  const m = Number(marginPct) || 0;
+  const seen = new Set(), out = [];
+  [...selIdx].sort((a, b) => a - b).forEach((i) => {
+    const r = rows[i]; if (!r) return;
+    const base = Number(r.harga) || 0; if (base <= 0) return;
+    const harga = mode === "beli" ? Math.ceil((base * (1 + m / 100)) / 1000) * 1000 : base;
+    const rute = r.asal && r.tujuan ? `${r.asal} → ${r.tujuan}` : (r.rute || r.asal || r.tujuan || "-");
+    const tipe = bersihKendaraan(r.vehicle_type);
+    const k = `${rute}|${tipe}|${harga}`;
+    if (seen.has(k)) return; seen.add(k);
+    out.push({ rute, moda: "", tipe_kendaraan: tipe, harga_deal: harga, catatan: "", tanggal: String(r.tanggal || "").slice(0, 10) });
+  });
+  return out;
+}
+
 const CSS = `
 .dhg-wrap{border:1px solid #30363d;border-radius:12px;overflow:hidden;background:#0d1117}
 .dhg-scroll{overflow:auto;max-height:68vh;-webkit-overflow-scrolling:touch}
@@ -84,6 +111,11 @@ const CSS = `
 .dhg-table tbody tr:nth-child(even){background:rgba(255,255,255,.025)}
 .dhg-table tbody tr:hover{background:rgba(239,159,39,.10)}
 .dhg-r{text-align:right!important}
+.dhg-ck{width:38px;min-width:38px;text-align:center!important;padding:6px 4px!important}
+.dhg-ck input{width:16px;height:16px;accent-color:#EF9F27;cursor:pointer}
+.dhg-table tbody tr.dhg-on{background:rgba(239,159,39,.16)}
+.dhg-act{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px;border-bottom:1px solid #EF9F27;background:#1a1405}
+.dhg-act input.dhg-in{padding:7px 9px;border-radius:6px;border:1px solid #5a4a1a;background:#0d1117;color:#e6edf3;font-size:12.5px;outline:none;min-width:180px}
 .dhg-price{font-weight:800;color:#f5f7fb}
 .dhg-sum{display:flex;gap:8px;flex-wrap:wrap;padding:10px;border-bottom:1px solid #1c2433;background:#0b1220}
 .dhg-chip{background:#111826;border:1px solid #22304a;border-radius:10px;padding:6px 12px;min-width:92px}
@@ -98,10 +130,18 @@ export default function DaftarHargaGrid({ rows, mode }) {
   const [filters, setFilters] = useState({});
   const [sort, setSort] = useState({ key: "tanggal", dir: "desc" });
   const [limit, setLimit] = useState(200);
+  const [pilih, setPilih] = useState(() => new Set());   // indeks baris (di `rows`) yang dicentang; bertahan walau filter diganti
+  const [kepada, setKepada] = useState("");
+  const [margin, setMargin] = useState("10");
+  const idx = useMemo(() => new Map((rows || []).map((r, i) => [r, i])), [rows]);
   const shown = useMemo(() => filterSortRows(rows, cols, filters, sort), [rows, cols, filters, sort]);
   const sum = useMemo(() => ringkasHarga(shown), [shown]);
   const setF = (k) => (e) => { setFilters((p) => ({ ...p, [k]: e.target.value })); setLimit(200); };
   const clickSort = (k) => setSort((s) => (s.key === k ? { key: k, dir: s.dir === "asc" ? "desc" : "asc" } : { key: k, dir: k === "harga" || k === "tanggal" ? "desc" : "asc" }));
+  const toggle = (r) => setPilih((s) => { const n = new Set(s); const i = idx.get(r); n.has(i) ? n.delete(i) : n.add(i); return n; });
+  const semuaTercentang = shown.length > 0 && shown.every((r) => pilih.has(idx.get(r)));
+  const toggleSemua = () => setPilih((s) => { const n = new Set(s); if (semuaTercentang) shown.forEach((r) => n.delete(idx.get(r))); else shown.forEach((r) => n.add(idx.get(r))); return n; });
+  const entriPenawaran = useMemo(() => rowsKePenawaran(rows || [], pilih, mode, margin), [rows, pilih, mode, margin]);
   const aktif = Object.values(filters).some((v) => String(v || "").trim());
   const unduh = () => {
     try {
@@ -121,6 +161,23 @@ export default function DaftarHargaGrid({ rows, mode }) {
         <div className="dhg-chip"><b>{rp(sum.median)}</b><span>median</span></div>
         <div className="dhg-chip"><b>{rp(sum.max)}</b><span>tertinggi</span></div>
       </div>
+      {pilih.size > 0 && (
+        <div className="dhg-act" data-testid="dhg-act">
+          <b style={{ color: "#EF9F27", fontSize: 13 }} data-testid="dhg-picked">{pilih.size} dicentang</b>
+          <input className="dhg-in" placeholder="Kepada (nama pelanggan)" value={kepada} onChange={(e) => setKepada(e.target.value)} data-testid="dhg-kepada" />
+          {mode === "beli" && (
+            <label style={{ fontSize: 12, color: "#d9c58a", display: "flex", alignItems: "center", gap: 6 }}>Margin %
+              <input className="dhg-in" style={{ minWidth: 0, width: 64 }} inputMode="decimal" value={margin} onChange={(e) => setMargin(e.target.value.replace(/[^0-9.]/g, ""))} data-testid="dhg-margin" />
+            </label>
+          )}
+          <span data-testid="dhg-penawaran-wrap"><PenawaranCetakButton rows={entriPenawaran} namaPt={kepada} style={{ padding: "8px 14px", fontSize: 12 }} /></span>
+          <button className="dhg-btn" onClick={() => setPilih(new Set())} data-testid="dhg-kosongkan">Kosongkan centang</button>
+          <span style={{ fontSize: 11.5, color: "#a89868", flexBasis: "100%" }}>
+            {mode === "beli" ? "Harga Beli + margin dijadikan harga penawaran. " : "Harga yang pernah ditagih dipakai sebagai harga penawaran. "}
+            {entriPenawaran.length} rute akan masuk ke form penawaran (entri kembar digabung); harga, jumlah unit, dan asuransi masih bisa diubah di sana.
+          </span>
+        </div>
+      )}
       <div className="dhg-bar">
         <span style={{ fontSize: 12, color: "#8b98ad" }}>{aktif ? "Filter aktif" : "Ketik di baris filter untuk menyaring"} · klik judul kolom untuk mengurutkan</span>
         <span style={{ display: "flex", gap: 8 }}>
@@ -131,8 +188,8 @@ export default function DaftarHargaGrid({ rows, mode }) {
       <div className="dhg-scroll">
         <table className="dhg-table">
           <thead>
-            <tr>{cols.map((c) => <th key={c.key} className={"dhg-th" + (c.right ? " dhg-r" : "")} style={{ minWidth: c.w }} onClick={() => clickSort(c.key)}>{c.label}{arrow(c.key)}</th>)}</tr>
-            <tr>{cols.map((c) => (
+            <tr><th className="dhg-th dhg-ck" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={semuaTercentang} onChange={toggleSemua} title="Centang semua hasil filter" data-testid="dhg-all" /></th>{cols.map((c) => <th key={c.key} className={"dhg-th" + (c.right ? " dhg-r" : "")} style={{ minWidth: c.w }} onClick={() => clickSort(c.key)}>{c.label}{arrow(c.key)}</th>)}</tr>
+            <tr><th className="dhg-flt" />{cols.map((c) => (
               <th key={c.key} className="dhg-flt">
                 {c.filter === "range" ? (
                   <div style={{ display: "flex", gap: 4 }}>
@@ -145,7 +202,8 @@ export default function DaftarHargaGrid({ rows, mode }) {
           </thead>
           <tbody>
             {shown.slice(0, limit).map((r, i) => (
-              <tr key={(r.doc_id || r.job_id || "") + ":" + i} data-testid="dhg-row">
+              <tr key={(r.doc_id || r.job_id || "") + ":" + i} data-testid="dhg-row" className={pilih.has(idx.get(r)) ? "dhg-on" : ""}>
+                <td className="dhg-ck"><input type="checkbox" checked={pilih.has(idx.get(r))} onChange={() => toggle(r)} data-testid="dhg-ck" /></td>
                 {cols.map((c) => {
                   const v = c.get(r);
                   return <td key={c.key} className={(c.right ? "dhg-r " : "") + (c.key === "harga" ? "dhg-price" : "")} title={c.num ? undefined : String(v || "")} style={c.key === "kendaraan" || c.key === "pihak" ? { maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis" } : undefined}>
@@ -154,7 +212,7 @@ export default function DaftarHargaGrid({ rows, mode }) {
                 })}
               </tr>
             ))}
-            {!shown.length && <tr><td colSpan={cols.length} style={{ textAlign: "center", padding: 28, color: "#8b98ad" }}>{(rows || []).length ? "Tidak ada baris yang cocok dengan filter." : "Belum ada data harga."}</td></tr>}
+            {!shown.length && <tr><td colSpan={cols.length + 1} style={{ textAlign: "center", padding: 28, color: "#8b98ad" }}>{(rows || []).length ? "Tidak ada baris yang cocok dengan filter." : "Belum ada data harga."}</td></tr>}
           </tbody>
         </table>
       </div>
