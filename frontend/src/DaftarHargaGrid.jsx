@@ -4,7 +4,7 @@
   Hanya tampilan: tidak mengubah data apa pun. Fungsi murni (filterSortRows, ringkasHarga, toCsv) diekspor untuk diuji.
 */
 import { useMemo, useState } from "react";
-import { PenawaranCetakButton } from "./PenawaranCetak";
+import { PenawaranCetakButton, METODE_LIST } from "./PenawaranCetak";
 
 const rp = (n) => "Rp " + Number(n || 0).toLocaleString("id-ID");
 const tg = (t) => (t ? String(t).slice(0, 10).split("-").reverse().join("/") : "");
@@ -81,7 +81,7 @@ export function bersihKendaraan(v) {
 
 /* Baris tercentang -> entri penawaran (format PenawaranCetakButton). Mode beli: HPP + margin% (naik ke ribuan, seperti kalkulator).
    Entri kembar (rute + kendaraan + harga sama) digabung jadi satu. */
-export function rowsKePenawaran(rows, selIdx, mode, marginPct) {
+export function rowsKePenawaran(rows, selIdx, mode, marginPct, moda) {
   const m = Number(marginPct) || 0;
   const seen = new Set(), out = [];
   [...selIdx].sort((a, b) => a - b).forEach((i) => {
@@ -90,9 +90,9 @@ export function rowsKePenawaran(rows, selIdx, mode, marginPct) {
     const harga = mode === "beli" ? Math.ceil((base * (1 + m / 100)) / 1000) * 1000 : base;
     const rute = r.asal && r.tujuan ? `${r.asal} → ${r.tujuan}` : (r.rute || r.asal || r.tujuan || "-");
     const tipe = bersihKendaraan(r.vehicle_type);
-    const k = `${rute}|${tipe}|${harga}`;
+    const k = `${rute}|${tipe}|${harga}|${moda || ""}`;
     if (seen.has(k)) return; seen.add(k);
-    out.push({ rute, moda: "", tipe_kendaraan: tipe, harga_deal: harga, catatan: "", tanggal: String(r.tanggal || "").slice(0, 10) });
+    out.push({ rute, moda: String(moda || ""), tipe_kendaraan: tipe, harga_deal: harga, catatan: "", tanggal: String(r.tanggal || "").slice(0, 10) });
   });
   return out;
 }
@@ -133,6 +133,7 @@ export default function DaftarHargaGrid({ rows, mode }) {
   const [pilih, setPilih] = useState(() => new Set());   // indeks baris (di `rows`) yang dicentang; bertahan walau filter diganti
   const [kepada, setKepada] = useState("");
   const [margin, setMargin] = useState("10");
+  const [moda, setModa] = useState("");   // moda untuk SEMUA baris yang dicentang ("" = kosong, diisi di form penawaran)
   const idx = useMemo(() => new Map((rows || []).map((r, i) => [r, i])), [rows]);
   const shown = useMemo(() => filterSortRows(rows, cols, filters, sort), [rows, cols, filters, sort]);
   const sum = useMemo(() => ringkasHarga(shown), [shown]);
@@ -141,7 +142,7 @@ export default function DaftarHargaGrid({ rows, mode }) {
   const toggle = (r) => setPilih((s) => { const n = new Set(s); const i = idx.get(r); n.has(i) ? n.delete(i) : n.add(i); return n; });
   const semuaTercentang = shown.length > 0 && shown.every((r) => pilih.has(idx.get(r)));
   const toggleSemua = () => setPilih((s) => { const n = new Set(s); if (semuaTercentang) shown.forEach((r) => n.delete(idx.get(r))); else shown.forEach((r) => n.add(idx.get(r))); return n; });
-  const entriPenawaran = useMemo(() => rowsKePenawaran(rows || [], pilih, mode, margin), [rows, pilih, mode, margin]);
+  const entriPenawaran = useMemo(() => rowsKePenawaran(rows || [], pilih, mode, margin, moda), [rows, pilih, mode, margin, moda]);
   const aktif = Object.values(filters).some((v) => String(v || "").trim());
   const unduh = () => {
     try {
@@ -165,6 +166,12 @@ export default function DaftarHargaGrid({ rows, mode }) {
         <div className="dhg-act" data-testid="dhg-act">
           <b style={{ color: "#EF9F27", fontSize: 13 }} data-testid="dhg-picked">{pilih.size} dicentang</b>
           <input className="dhg-in" placeholder="Kepada (nama pelanggan)" value={kepada} onChange={(e) => setKepada(e.target.value)} data-testid="dhg-kepada" />
+          <label style={{ fontSize: 12, color: "#d9c58a", display: "flex", alignItems: "center", gap: 6 }}>Moda
+            <select className="dhg-in" style={{ minWidth: 0 }} value={moda} onChange={(e) => setModa(e.target.value)} data-testid="dhg-moda">
+              <option value="">(isi nanti di form)</option>
+              {METODE_LIST.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </label>
           {mode === "beli" && (
             <label style={{ fontSize: 12, color: "#d9c58a", display: "flex", alignItems: "center", gap: 6 }}>Margin %
               <input className="dhg-in" style={{ minWidth: 0, width: 64 }} inputMode="decimal" value={margin} onChange={(e) => setMargin(e.target.value.replace(/[^0-9.]/g, ""))} data-testid="dhg-margin" />
@@ -174,7 +181,7 @@ export default function DaftarHargaGrid({ rows, mode }) {
           <button className="dhg-btn" onClick={() => setPilih(new Set())} data-testid="dhg-kosongkan">Kosongkan centang</button>
           <span style={{ fontSize: 11.5, color: "#a89868", flexBasis: "100%" }}>
             {mode === "beli" ? "Harga Beli + margin dijadikan harga penawaran. " : "Harga yang pernah ditagih dipakai sebagai harga penawaran. "}
-            {entriPenawaran.length} rute akan masuk ke form penawaran (entri kembar digabung); harga, jumlah unit, dan asuransi masih bisa diubah di sana.
+            {entriPenawaran.length} rute akan masuk ke form penawaran (entri kembar digabung); moda, harga, jumlah unit, dan asuransi masih bisa diubah di sana.
           </span>
         </div>
       )}

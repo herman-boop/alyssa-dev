@@ -34,7 +34,7 @@ const gold = "#b8860b";
 
 // Opsi harga/metode per rute. PENTING: opsi = ALTERNATIF (customer pilih salah
 // satu), BUKAN komponen yang dijumlahkan. Tidak ada SUM antar-opsi.
-const METODE_LIST = ["Self Drive", "Kapal Laut", "Container", "Car Carrier", "Towing", "Self Loader", "Low Bed", "Handling / Pelabuhan", "Lainnya"];
+export const METODE_LIST = ["Self Drive", "Kapal Laut", "Container", "Car Carrier", "Towing", "Self Loader", "Low Bed", "Handling / Pelabuhan", "Lainnya"];
 function routeOptions(e) {
   return Array.isArray(e && e.options) ? e.options.filter((o) => (String(o.metode || "").trim() || (Number(o.harga) || 0) > 0)) : [];
 }
