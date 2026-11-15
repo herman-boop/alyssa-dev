@@ -6,10 +6,11 @@ import "leaflet/dist/leaflet.css";
 import "./Tracking.css";
 import VesselPositionView from "./VesselPositionView";
 import LiveTrackSummary from "./LiveTrackSummary";
+import { ShipMarker, ShipCard } from "./ShipMarkerCard";
 import { MapFitter, SHIP_ZOOM, REGIONAL_ZOOM } from "./MapAutoCenter";
 import { buildVesselView } from "./vesselPositionData";
 import { renderMapImage } from "./mapShare";
-import { MAP_TILE_URL, MAP_LABEL_URL, MAP_ATTR, MAP_MAX_ZOOM, MAP_MAX_NATIVE_ZOOM, ROUTE_COLOR, ROUTE_WEIGHT, ROUTE_OPACITY, ROUTE_DASH, freshnessDot, tilesFor } from "./mapTheme";
+import { MAP_TILE_URL, MAP_LABEL_URL, MAP_ATTR, MAP_MAX_ZOOM, MAP_MAX_NATIVE_ZOOM, ROUTE_COLOR, ROUTE_WEIGHT, ROUTE_OPACITY, ROUTE_DASH, tilesFor } from "./mapTheme";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -500,87 +501,6 @@ function createCpIcon(num, isLatest, dark) {
   });
 }
 
-/* Kondisi kapal untuk simbol di peta (sama seperti app pelacak kapal umum):
-     jalan    → PANAH biru, berputar mengikuti arah gerak (COG; fallback heading)
-     sandar   → kotak oranye (nav_status 5 / sudah tercatat sandar, kapal diam)
-     berlabuh → bulatan + jangkar (nav_status 1 = lego jangkar, kapal diam)
-     diam     → bulatan abu-biru (diam tanpa status jelas / arah tidak diketahui)
-   Kapal yang nyaris diam (< 1 knot) TIDAK diberi panah: COG/heading saat diam cuma
-   noise, jadi panahnya akan terlihat "ngawur". Kecepatan mengalahkan status nav
-   (kru sering lupa update status), konsisten dengan teks status di panel. */
-function shipMarkerState(info) {
-  const num = (v) => (v == null || v === "" || isNaN(Number(v)) ? null : Number(v));
-  const sp = num(info && info.speed);
-  const ns = num(info && info.nav_status);
-  const cg = num(info && info.course);
-  const hd = num(info && info.heading);
-  const course = cg != null && cg >= 0 && cg < 360 ? cg : null;     // 360 = tidak tersedia
-  const head = hd != null && hd >= 0 && hd < 360 ? hd : null;        // 511 = tidak tersedia
-  if (sp != null && sp >= 1) return { kind: "jalan", rot: course != null ? course : head };
-  if (ns === 1) return { kind: "berlabuh", rot: null };
-  if (ns === 5 || (info && info.berthed_at)) return { kind: "sandar", rot: null };
-  if (sp == null) {                                                    // kecepatan tak diketahui → perilaku lama
-    const r = head != null ? head : course;
-    return r != null ? { kind: "jalan", rot: r } : { kind: "diam", rot: null };
-  }
-  return { kind: "diam", rot: null };
-}
-
-/* Marker kapal (AIS): simbol sesuai kondisi (lihat shipMarkerState). Nama kapal
-   jadi pill kecil di samping; kesegaran jadi dot kecil di pill (BUKAN mewarnai
-   seluruh marker). */
-function createShipIcon(freshness, info, shipName) {
-  const S = 26;                                  // kotak ikon (px)
-  const dot = freshnessDot(freshness);
-  // Posisi basi (> 6 jam): arah/kecepatan lama bisa menyesatkan (mis. dari pelayaran sebelumnya) → tanpa panah.
-  const st = freshness === "stale" ? { kind: "diam", rot: null } : shipMarkerState(info);
-  const shadow = "filter:drop-shadow(0 1px 2px rgba(0,0,0,.4));";
-  let glyph;
-  if (st.kind === "jalan" && st.rot != null) {
-    glyph = `<svg viewBox="0 0 24 24" width="${S}" height="${S}" style="display:block;transform:rotate(${st.rot}deg);${shadow}">
-         <path d="M12 2 L19 21 L12 17 L5 21 Z" fill="#1d4ed8" stroke="#ffffff" stroke-width="1.4" stroke-linejoin="round"/>
-       </svg>`;
-  } else if (st.kind === "sandar") {
-    glyph = `<svg viewBox="0 0 24 24" width="${S}" height="${S}" style="display:block;${shadow}">
-         <rect x="5.5" y="5.5" width="13" height="13" rx="2.5" fill="#d97706" stroke="#ffffff" stroke-width="1.6"/>
-       </svg>`;
-  } else if (st.kind === "berlabuh") {
-    glyph = `<svg viewBox="0 0 24 24" width="${S}" height="${S}" style="display:block;${shadow}">
-         <circle cx="12" cy="12" r="10" fill="#0e7490" stroke="#ffffff" stroke-width="1.6"/>
-         <g fill="none" stroke="#ffffff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-           <circle cx="12" cy="7.4" r="1.7"/><path d="M12 9.1V17.5M8.6 11.6h6.8M6.8 13.8c.5 2.7 2.6 3.9 5.2 3.9s4.7-1.2 5.2-3.9"/>
-         </g>
-       </svg>`;
-  } else {
-    glyph = `<svg viewBox="0 0 24 24" width="${S}" height="${S}" style="display:block;${shadow}">
-         <circle cx="12" cy="12" r="6.5" fill="#64748b" stroke="#ffffff" stroke-width="1.6"/>
-       </svg>`;
-  }
-  // Label nama kapal gaya BENDERA di tiang: kecil, warna terang (gradient biru→cyan),
-  // + branding "ALYSSA LOGISTIK". Menempel di kanan marker seperti bendera kapal.
-  const name = shipName
-    ? `<div style="position:absolute;left:${S - 5}px;top:1px;display:flex;align-items:flex-start;pointer-events:none;">
-         <div style="width:1.5px;height:19px;background:#94a3b8;flex:none;border-radius:1px;"></div>
-         <div style="background:linear-gradient(90deg,#1d4ed8,#38bdf8);color:#fff;
-              padding:2px 7px 2.5px 6px;border-radius:0 5px 5px 0;white-space:nowrap;
-              box-shadow:0 1px 4px rgba(0,0,0,.35);line-height:1.05;">
-           <div style="display:flex;align-items:center;gap:4px;">
-             <span style="width:6px;height:6px;border-radius:50%;background:${dot};box-shadow:0 0 4px ${dot};flex:none;"></span>
-             <span style="font:800 9.5px Inter,system-ui,sans-serif;letter-spacing:.2px;">${shipName}</span>
-           </div>
-           <div style="font:800 6.5px Inter,system-ui,sans-serif;letter-spacing:.7px;opacity:.92;margin-left:10px;">ALYSSA LOGISTIK</div>
-         </div>
-       </div>`
-    : "";
-  return L.divIcon({
-    html: `<div style="position:relative;width:${S}px;height:${S}px;">${glyph}${name}</div>`,
-    className: "",
-    iconSize: [S, S],
-    iconAnchor: [S / 2, S / 2],
-    popupAnchor: [0, -S / 2],
-  });
-}
-
 /* Badge & label kesegaran AIS. Tidak pernah menyebut LIVE kalau bukan fresh. */
 function aisBadge(freshness) {
   if (freshness === "fresh") return { label: "🟢 Fresh", color: "#16a34a", bg: "#e7f6ee", bd: "#b6e2ca" };
@@ -643,6 +563,7 @@ export default function CustomerTracking() {
   const tripId = useMemo(readTripId, []);
   const [dark, toggleDark] = useDarkMode();
   const [data, setData] = useState(null);
+  const [shipCardOpen, setShipCardOpen] = useState(true);   // kartu info kapal melayang di peta
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState(null);
@@ -973,7 +894,7 @@ export default function CustomerTracking() {
       <div className="trk-layout">
 
         {/* MAP */}
-        <div className="trk-map-area" ref={mapAreaRef}>
+        <div className={"trk-map-area" + (shipPos ? " has-ship" : "")} ref={mapAreaRef}>
           {hasMap ? (
             <MapContainer
               center={shipPos || (lastGps ? [parseFloat(lastGps.lat), parseFloat(lastGps.lng)] : defaultCenter)}
@@ -991,24 +912,12 @@ export default function CustomerTracking() {
 
               {/* Marker kapal (AIS) — hanya kalau ada posisi */}
               {shipPos && shipInfo && (
-                <Marker position={shipPos} icon={createShipIcon(shipInfo.freshness, shipInfo, shipInfo.ship_name || shipAis.ship_name || "")}>
-                  <Popup className="trk-popup" maxWidth={260}>
-                    <div className="trk-popup-inner">
-                      <div className="trk-popup-header"><b>🚢 {shipInfo.ship_name || shipAis.ship_name || "Kapal"}</b></div>
-                      <div style={{ fontSize: 12, lineHeight: 1.6 }}>
-                        <div>Posisi: {Number(shipInfo.latitude).toFixed(4)}, {Number(shipInfo.longitude).toFixed(4)}</div>
-                        {shipInfo.speed != null ? <div>Kecepatan: {shipInfo.speed} knot{shipInfo.course != null ? ` · ${shipInfo.course}°` : ""}</div> : (shipInfo.course != null ? <div>Course: {shipInfo.course}°</div> : null)}
-                        {shipInfo.nav_status_text ? <div>Status: {shipInfo.nav_status_text}</div> : null}
-                        {(() => { const m = shipMarkerState(shipInfo); return <div>Simbol: {m.kind === "jalan" ? (m.rot != null ? `➤ berlayar, arah ${Math.round(m.rot)}°` : "➤ berlayar") : m.kind === "sandar" ? "◼ sandar" : m.kind === "berlabuh" ? "⚓ berlabuh (lego jangkar)" : "● diam"}</div>; })()}
-                        {shipInfo.destination ? <div>Tujuan: {shipInfo.destination}</div> : null}
-                        {shipInfo.eta ? <div>ETA: {shipInfo.eta}</div> : null}
-                        {shipInfo.draught != null ? <div>Draft: {shipInfo.draught} m</div> : null}
-                        {shipInfo.mmsi ? <div style={{ color: "#6e7681" }}>MMSI: {shipInfo.mmsi}{shipInfo.imo ? ` · IMO: ${shipInfo.imo}` : ""}</div> : null}
-                        <div style={{ marginTop: 3, color: "#6e7681" }}>{aisBadge(shipInfo.freshness).label} · {aisAgeText(shipInfo.age_seconds)}</div>
-                      </div>
-                    </div>
-                  </Popup>
-                </Marker>
+                <ShipMarker
+                  position={shipPos}
+                  info={shipInfo}
+                  shipName={shipInfo.ship_name || shipAis.ship_name || ""}
+                  onToggle={() => setShipCardOpen((v) => !v)}
+                />
               )}
 
               {/* Route polyline — checkpoint darat + tersambung sampai ke KAPAL yang
@@ -1073,6 +982,18 @@ export default function CustomerTracking() {
               <div className="trk-map-empty-title">Belum Ada Data GPS</div>
               <div className="trk-map-empty-sub">Peta akan muncul saat driver mengirim foto checkpoint dengan lokasi aktif.</div>
             </div>
+          )}
+          {shipPos && shipInfo && shipCardOpen && (
+            <ShipCard
+              info={shipInfo}
+              shipName={shipInfo.ship_name || shipAis.ship_name || ""}
+              origin={(activeShipLeg && activeShipLeg.asal) || ""}
+              destination={(activeShipLeg && activeShipLeg.tujuan) || shipInfo.destination || ""}
+              unit={[data.no_rangka, data.tipe_kendaraan ? (data.no_rangka ? `(${data.tipe_kendaraan})` : data.tipe_kendaraan) : ""].filter(Boolean).join(" ") || data.nopol || ""}
+              umurText={aisAgeText(shipInfo.age_seconds)}
+              badge={aisBadge(shipInfo.freshness)}
+              onClose={() => setShipCardOpen(false)}
+            />
           )}
 
           {/* Tombol kirim peta tajam ke WhatsApp */}

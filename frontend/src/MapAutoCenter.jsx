@@ -25,6 +25,7 @@ export function MapFitter({ positions, shipPos }) {
   const fitted = useRef("");            // "" | "pos" | "ship"
   const touched = useRef(false);        // pengguna sudah berinteraksi
   const shipRef = useRef(null);
+  const lastShip = useRef("");          // posisi kapal terakhir yang diikuti
   shipRef.current = shipPos && shipPos.length === 2 ? shipPos : null;
 
   // Tandai interaksi pengguna (bukan setView programatik).
@@ -71,7 +72,10 @@ export function MapFitter({ positions, shipPos }) {
           map.invalidateSize({ animate: false });
           map.setView(shipRef.current, SHIP_ZOOM, { animate: false });
           fitted.current = "ship";
+        } else if (lastShip.current !== shipRef.current.join(",")) {
+          map.panTo(shipRef.current, { animate: true, duration: 1 });   // kapal bergerak: peta mengikuti (selama belum disentuh)
         }
+        lastShip.current = shipRef.current.join(",");
         return;
       }
       if (fitted.current || !positions || positions.length === 0) return;
