@@ -1,6 +1,7 @@
 import "@/App.css";
 import { useMemo } from "react";
 import DriverCheckpoint from "@/DriverCheckpoint";
+import DriverQuickCheckpoint from "@/DriverQuickCheckpoint";
 import CustomerTracking from "@/CustomerTracking";
 import BASTKPage from "@/BASTKPage";
 import CustomerOrderForm from "@/CustomerOrderForm";
@@ -54,6 +55,7 @@ function App() {
     if (p.startsWith("/rombongan/")) return { route: "rombongan" };
     if (p.startsWith("/track/"))    return { route: "track" };
     if (p.startsWith("/trip/"))     return { route: "driver" };
+    if (p.startsWith("/cp/"))       return { route: "cp" };   // foto checkpoint cepat (satu ketukan)
     if (p.startsWith("/bastk/"))    return { route: "bastk" };
     if (p.startsWith("/status/"))   return { route: "status" };
     if (p.startsWith("/supplier-ringkasan/")) return { route: "supplier-ringkasan" };
@@ -112,6 +114,7 @@ function App() {
   if (route === "task")   return <TaskPage />;
   if (route === "rombongan") return <RombonganCommandCenter />;
   if (route === "driver") return <DriverCheckpoint />;
+  if (route === "cp")     return <DriverQuickCheckpoint />;
   if (route === "koordinator") return <KoordinatorPage />;
   if (route === "harga") return <CustomerPricePage />;
   if (route === "supplier-ringkasan") return <SupplierRingkasan />;
