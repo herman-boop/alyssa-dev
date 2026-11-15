@@ -71,9 +71,10 @@ const roundRect = (ctx, x, y, w, h, r) => {
 */
 export async function renderMapImage(opts) {
   const { center, zoom, route = [], checkpoints = [], ship = null, title = "", lines = [], footer = "" } = opts;
+  const tiles = opts.tiles || { base: MAP_TILE_URL, label: MAP_LABEL_URL, maxNative: MAP_MAX_NATIVE_ZOOM };
   const W = Math.max(320, Math.round(opts.width || 800)), H = Math.max(320, Math.round(opts.height || 600));
   const scale = Math.max(2, Math.min(3, opts.scale || 2));
-  const zTile = Math.max(0, Math.min(MAP_MAX_NATIVE_ZOOM, Math.ceil(zoom + Math.log2(scale))));
+  const zTile = Math.max(0, Math.min(tiles.maxNative, Math.ceil(zoom + Math.log2(scale))));
   const cnv = document.createElement("canvas");
   cnv.width = Math.round(W * scale); cnv.height = Math.round(H * scale);
   const ctx = cnv.getContext("2d");
@@ -81,8 +82,8 @@ export async function renderMapImage(opts) {
   ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
 
   const common = { cx: center, zView: zoom, zTile, W, H, scale };
-  const base = await drawTiles(ctx, MAP_TILE_URL, common);
-  const lab = await drawTiles(ctx, MAP_LABEL_URL, common);
+  const base = await drawTiles(ctx, tiles.base, common);
+  const lab = await drawTiles(ctx, tiles.label, common);
 
   const [wx, wy] = worldPx(center[0], center[1], zoom);
   const P = (ll) => { const [x, y] = worldPx(ll[0], ll[1], zoom); return [(x - (wx - W / 2)) * scale, (y - (wy - H / 2)) * scale]; };

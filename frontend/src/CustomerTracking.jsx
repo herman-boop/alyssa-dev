@@ -9,7 +9,7 @@ import LiveTrackSummary from "./LiveTrackSummary";
 import { MapFitter, SHIP_ZOOM, REGIONAL_ZOOM } from "./MapAutoCenter";
 import { buildVesselView } from "./vesselPositionData";
 import { renderMapImage } from "./mapShare";
-import { MAP_TILE_URL, MAP_LABEL_URL, MAP_ATTR, MAP_MAX_ZOOM, MAP_MAX_NATIVE_ZOOM, ROUTE_COLOR, ROUTE_WEIGHT, ROUTE_OPACITY, ROUTE_DASH, freshnessDot } from "./mapTheme";
+import { MAP_TILE_URL, MAP_LABEL_URL, MAP_ATTR, MAP_MAX_ZOOM, MAP_MAX_NATIVE_ZOOM, ROUTE_COLOR, ROUTE_WEIGHT, ROUTE_OPACITY, ROUTE_DASH, freshnessDot, tilesFor } from "./mapTheme";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -797,6 +797,7 @@ export default function CustomerTracking() {
   const shipPos = (shipInfo && shipInfo.latitude != null && shipInfo.longitude != null)
     ? [parseFloat(shipInfo.latitude), parseFloat(shipInfo.longitude)] : null;
   const fitPositions = shipPos ? [...positions, shipPos] : positions;
+  const mapTiles = tilesFor(!!shipPos);   // laut (ada posisi kapal) atau darat
   const hasMap    = gpsPoints.length > 0 || !!shipPos;
 
   /* Kirim PETA ke WhatsApp sebagai gambar TAJAM (digambar ulang beresolusi tinggi, bukan screenshot buram).
@@ -830,6 +831,7 @@ export default function CustomerTracking() {
         route: fitPositions.length > 1 ? fitPositions : [],
         checkpoints: gpsPoints.map((cp, i) => ({ pos: [parseFloat(cp.lat), parseFloat(cp.lng)], n: i + 1, latest: i === gpsPoints.length - 1 })),
         ship: shipPos ? { pos: shipPos, name: (shipInfo && shipInfo.ship_name) || shipAis.ship_name || "" } : null,
+        tiles: mapTiles,
         title: "Fleet / Live Track · PT Alyssa Auto Logistik", lines,
         footer: window.location.href.replace(/^https?:\/\//, "").slice(0, 70),
       });
@@ -980,8 +982,9 @@ export default function CustomerTracking() {
               zoomControl={true}
               attributionControl={true}
             >
-              <TileLayer url={MAP_TILE_URL} attribution={MAP_ATTR} maxZoom={MAP_MAX_ZOOM} maxNativeZoom={MAP_MAX_NATIVE_ZOOM} />
-              <TileLayer url={MAP_LABEL_URL} maxZoom={MAP_MAX_ZOOM} maxNativeZoom={MAP_MAX_NATIVE_ZOOM} />
+              {/* Kapal di laut -> peta Ocean (nama laut/pulau/pelabuhan terbaca); darat -> Light Gray. key = ganti set ubin bersih. */}
+              <TileLayer key={"b-" + (shipPos ? "laut" : "darat")} url={mapTiles.base} attribution={MAP_ATTR} maxZoom={MAP_MAX_ZOOM} maxNativeZoom={mapTiles.maxNative} />
+              <TileLayer key={"l-" + (shipPos ? "laut" : "darat")} url={mapTiles.label} maxZoom={MAP_MAX_ZOOM} maxNativeZoom={mapTiles.maxNative} />
               <MapRefGrab mapRef={leafletMapRef} />
               <MapFitter positions={fitPositions} shipPos={shipPos} />
               <MapFlyTo target={shipPos} nonce={flyNonce} />

@@ -42,3 +42,11 @@ export const OCEAN_TILE_URL =
 export const OCEAN_LABEL_URL =
   "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}";
 export const OCEAN_MAX_NATIVE_ZOOM = 10;
+
+/* Pilih set ubin peta. Kapal di laut -> Esri Ocean (laut biru, pulau, dan NAMA laut/pulau/pelabuhan terbaca);
+   perjalanan darat -> Light Gray (jalan & kota). Dipakai peta tracking dan gambar "Kirim Peta" supaya sama. */
+export function tilesFor(laut) {
+  return laut
+    ? { base: OCEAN_TILE_URL, label: OCEAN_LABEL_URL, maxNative: OCEAN_MAX_NATIVE_ZOOM }
+    : { base: MAP_TILE_URL, label: MAP_LABEL_URL, maxNative: MAP_MAX_NATIVE_ZOOM };
+}
