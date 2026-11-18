@@ -55,7 +55,7 @@ export default function PermintaanHarga({ headers }) {
   const badge = (r) => r.cocok === "kendaraan" ? { t: `kendaraan sama · ${r.n}x`, c: "#3fb950" } : r.cocok === "rute" ? { t: `rute sama (kendaraan lain) · ${r.n}x`, c: "#d29922" } : { t: "belum ada HPP", c: "#f85149" };
 
   return (
-    <div data-testid="ph" style={{ border: "1px solid #2b3445", borderRadius: 10, background: "#0f1520", marginBottom: 12 }}>
+    <div data-testid="ph" style={{ border: "1px solid #2b3445", borderRadius: 10, background: "#0f1520", color: "#e6edf3", marginBottom: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", flexWrap: "wrap" }}>
         <b style={{ color: "#EF9F27", fontSize: 13.5 }}>📤 Upload Permintaan Harga</b>
         <span style={{ fontSize: 11.5, color: "#8b98ad", flex: 1, minWidth: 180 }}>Unggah lembar dari pelanggan (Excel/CSV/foto/PDF). HPP terisi otomatis, Anda tinggal setel margin.</span>
@@ -83,7 +83,7 @@ export default function PermintaanHarga({ headers }) {
           </div>
           {kosong > 0 && <div style={{ fontSize: 12, color: "#d29922", marginBottom: 8 }} data-testid="ph-kosong">⚠️ {kosong} baris belum punya harga (isi manual di kolom Biaya Pengiriman). Baris itu tidak ikut ke penawaran.</div>}
           <div style={{ maxHeight: 420, overflow: "auto", border: "1px solid #1c2433", borderRadius: 8 }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, color: "#e6edf3", background: "#0f1520" }}>
               <thead><tr style={{ position: "sticky", top: 0, background: "#161b22", color: "#8b98ad", textAlign: "left" }}>
                 {["No", "Tipe Kendaraan", "Pengambilan", "Pengiriman", "HPP", "Biaya Pengiriman"].map((h) => <th key={h} style={{ padding: "7px 8px", fontSize: 11, textTransform: "uppercase", whiteSpace: "nowrap" }}>{h}</th>)}
               </tr></thead>
@@ -91,7 +91,7 @@ export default function PermintaanHarga({ headers }) {
                 {rows.map((r, i) => {
                   const b = badge(r);
                   return (
-                    <tr key={i} data-testid="ph-row" style={{ borderTop: "1px solid #1c2433" }}>
+                    <tr key={i} data-testid="ph-row" style={{ borderTop: "1px solid #1c2433", color: "#e6edf3" }}>
                       <td style={{ padding: "6px 8px", color: "#8b98ad" }}>{r.no || i + 1}</td>
                       <td style={{ padding: "6px 8px" }}>{r.tipe}</td>
                       <td style={{ padding: "6px 8px" }}>{r.asal}</td>
