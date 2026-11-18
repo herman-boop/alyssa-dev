@@ -714,3 +714,17 @@
   .trk-brand-sub { display: none; }
   .trk-panel-nopol { font-size: 26px; }
 }
+
+/* Kartu info kapal (gaya aplikasi pelacak maritim): putih, bingkai halus, melayang di atas peta */
+.fs-card { position:absolute; z-index:1000; left:54px; right:8px; top:8px; background:#fff; color:#0f172a;
+  border:1px solid #cbd5e1; border-radius:10px; padding:9px 11px 7px; box-shadow:0 6px 22px rgba(15,23,42,.28);
+  font-family:Inter,system-ui,sans-serif; max-height:calc(100% - 40px); overflow:auto; box-sizing:border-box; }
+.fs-card-title { font-weight:800; font-size:13.5px; color:#1d4ed8; text-decoration:underline; text-decoration-color:#93c5fd;
+  text-underline-offset:3px; margin:0 22px 6px 0; line-height:1.25; }
+.fs-card-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px 10px; }
+.fs-card-foot { margin-top:6px; padding-top:5px; border-top:1px solid #e2e8f0; font-size:11px; color:#64748b; line-height:1.35; }
+.fs-card-foot b { color:#0f172a; }
+.fs-card-x { position:absolute; top:3px; right:5px; width:26px; height:26px; border:0; background:transparent; color:#64748b; font-size:22px; line-height:1; cursor:pointer; border-radius:50%; }
+.fs-card-x:hover { background:#f1f5f9; }
+@media (min-width: 861px) { .fs-card { left:auto; right:12px; top:12px; bottom:auto; width:330px; } }
+@media (max-width: 860px) { .trk-map-area.has-ship, .trk-fleet .trk-map-area.has-ship { height:56vh; min-height:380px; max-height:520px; } }
