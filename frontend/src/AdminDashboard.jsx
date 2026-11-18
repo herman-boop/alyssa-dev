@@ -30,6 +30,7 @@ import SuratPermohonanModal, { cetakUlangSurat } from "./SuratPermohonan";
 import DaftarHargaGrid from "./DaftarHargaGrid";
 import PermintaanHarga from "./PermintaanHarga";
 import { daftarDriverRows, daftarDriverCsv } from "./daftarDriver";
+import { namaUntukLink, pesanLinkTugas } from "./pesanLinkTugas";
 import { htmlDaftarDriver, kirimGambarDaftarDriver } from "./daftarDriverDoc";
 import { DOC_BRAND, DOC_BASE_CSS, docHeader, docFooter, terbilangRupiah, nextDocNo, DOC_ENTITIES, DEFAULT_ENTITY_ID, getActiveEntityId, setActiveEntityId, getEntity } from "@/docTheme";
 import { printReport, saveReportPNG } from "@/reportDoc";
@@ -9364,7 +9365,7 @@ function TripDetailModal({ tripId, order, onClose, onSave, headers }) {
       setLeg(i, { task_token: token });
       const link = `${window.location.origin}/task/${token}`;
       // Pesan ke driver/petugas dibuat SINGKAT: cukup ajakan foto + tombol kamera (link). Tanpa sapaan/rincian tugas/penutup.
-      const teks = `Nanti tolong foto kendaraannya ya Pak 🙏\nSaya kirimkan KAMERA di bawah ini. Bapak tinggal:\n📷 Pencet tulisan biru ini → langsung buka kamera → foto.\n\n${link}`;
+      const teks = pesanLinkTugas({ nama: (r0.src === "driver" ? namaUntukLink(order, leg) : pNama), units, link });
       const ok = await copyToClipboard(teks);
       if (ok) { setCopiedLeg(`${i}-${roleKey}`); setTimeout(() => setCopiedLeg(null), 2200); }
     } catch (e) {
@@ -10095,7 +10096,7 @@ function PetugasTaskTab({ tripId, headers }) {
   const linkOf = (tk) => `${window.location.origin}/task/${tk}`;
   const salin = async (tk) => { try { await navigator.clipboard.writeText(linkOf(tk)); setCopied(tk); setTimeout(() => setCopied(""), 1600); } catch {} };
   const waShare = (t) => {
-    const txt = `Nanti tolong foto kendaraannya ya Pak 🙏\nSaya kirimkan KAMERA di bawah ini. Bapak tinggal:\n📷 Pencet tulisan biru ini → langsung buka kamera → foto.\n\n${linkOf(t.token)}`;
+    const txt = pesanLinkTugas({ nama: t.petugas_nama, units: t.units, link: linkOf(t.token) });
     const hp = (t.petugas_hp || "").replace(/\D/g, "").replace(/^0/, "62");
     window.open(hp ? `https://wa.me/${hp}?text=${encodeURIComponent(txt)}` : `https://wa.me/?text=${encodeURIComponent(txt)}`, "_blank");
   };
