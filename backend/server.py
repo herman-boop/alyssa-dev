@@ -4279,17 +4279,18 @@ def _leg_task_admin_view(t: dict) -> dict:
 
 async def _task_view(t: dict) -> dict:
     """View publik + batas hari yang diisi admin di leg (dibaca dari trip, jadi bisa diubah tanpa buat link baru)."""
-    if _role_cfg(t.get("tipe_tugas")).get("simple"):
-        try:
-            trip = await db.trips.find_one({"trip_id": t.get("trip_id")}, {"legs": 1})
-            legs = (trip or {}).get("legs") or []
-            leg = next((l for l in legs if t.get("route_leg_id") and l.get("route_leg_id") == t.get("route_leg_id")), None)
-            if leg is None and isinstance(t.get("leg_index"), int) and 0 <= t["leg_index"] < len(legs):
-                leg = legs[t["leg_index"]]
-            if leg and leg.get("batas_hari") not in (None, ""):
-                t = {**t, "batas_hari": leg.get("batas_hari")}
-        except Exception as e:
-            logger.warning(f"[task] gagal baca batas_hari leg: {e}")
+    try:
+        trip = await db.trips.find_one({"trip_id": t.get("trip_id")}, {"legs": 1, "nama_driver": 1})
+        legs = (trip or {}).get("legs") or []
+        leg = TR.leg_for(legs, t)
+        if _role_cfg(t.get("tipe_tugas")).get("simple") and leg and leg.get("batas_hari") not in (None, ""):
+            t = {**t, "batas_hari": leg.get("batas_hari")}
+        # nama driver/petugas = yang dipilih admin di input leg (live), bukan hanya snapshot saat link dibuat
+        nama = TR.nama_petugas(legs, t, (trip or {}).get("nama_driver") or "")
+        if nama:
+            t = {**t, "petugas_nama": nama}
+    except Exception as e:
+        logger.warning(f"[task] gagal baca data leg untuk view tugas: {e}")
     return _leg_task_public_view(t)
 
 
