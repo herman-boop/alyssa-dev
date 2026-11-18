@@ -100,3 +100,13 @@ def test_sim_baru_nomornya_nik_16_digit_tanpa_peringatan():
     assert n["fields"]["no_sim"] == "3602241708940002" and n["peringatan"] == []
     n2 = ds.normalisasi({"sim": {"no_sim": "12345"}})
     assert any("Nomor SIM" in w for w in n2["peringatan"])
+
+
+def test_sudut_valid_dan_tidak_valid():
+    ok = [[0.1, 0.1], [0.6, 0.12], [0.58, 0.4], [0.09, 0.38]]
+    assert ds._sudut(ok) == ok
+    assert ds._sudut([[0.1, 0.1], [0.6, 0.1], [0.1, 0.4], [0.6, 0.4]]) is None      # menyilang (urutan salah)
+    assert ds._sudut([[0.1, 0.1], [0.2, 0.1], [0.2, 0.15], [0.1, 0.15]]) is None    # terlalu kecil
+    assert ds._sudut([[0.1, 0.1], [0.6, 0.1]]) is None and ds._sudut("x") is None
+    n = ds.normalisasi({"ktp": {"ada": True, "sudut": ok, "box": [0.05, 0.05, 0.6, 0.4]}})
+    assert n["ktp"]["sudut"] == ok and n["sim"]["sudut"] is None
