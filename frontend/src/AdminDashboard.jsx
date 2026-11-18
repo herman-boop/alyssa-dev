@@ -328,6 +328,23 @@ function Dashboard({ pin, me, onLogout }) {
   }, []);
   const clearCart = useCallback(() => setJadwalCart([]), []);
   const [driverWaBusy, setDriverWaBusy] = useState(false);
+  const [konfBusy, setKonfBusy] = useState(false);
+  const unduhKonfirmasiHarga = async () => {
+    if (!jadwalCart.length) return;
+    setKonfBusy(true);
+    try {
+      const custs = Array.from(new Set(jadwalCart.map((c) => c.customer_nama).filter(Boolean)));
+      const body = {
+        judul: `Konfirmasi Harga${custs.length === 1 ? " - " + custs[0] : ""}`,
+        items: jadwalCart.map((c) => ({ order_id: c.order_id, unit_id: c.unit?.unit_id || "", no_rangka: c.unit?.no_rangka || "", nopol: c.unit?.nopol || "" })),
+      };
+      const r = await axios.post(`${API}/admin/konfirmasi-harga/xlsx`, body, { headers, responseType: "blob" });
+      const a = document.createElement("a"); a.href = URL.createObjectURL(r.data);
+      a.download = "konfirmasi-harga.xlsx"; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+    } catch (e) { alert("Gagal membuat Excel konfirmasi harga. Coba lagi."); }
+    setKonfBusy(false);
+  };
   const kirimWaDaftarDriver = async () => {
     const rows = daftarDriverRows(jadwalCart, orders);
     if (!rows.length) return;
@@ -848,6 +865,7 @@ function Dashboard({ pin, me, onLogout }) {
             <button className="adm-btn adm-btn-sm adm-btn-gold" onClick={() => setShowJadwalGab(true)} data-testid="adm-cartbar-jadwal">Buat Jadwal Gabungan</button>
             <button className="adm-btn adm-btn-sm" onClick={() => printDaftarDriver(daftarDriverRows(jadwalCart, orders))} data-testid="adm-cartbar-driver" title="Daftar driver per unit yang dicentang (cetak / simpan PDF)">🧑‍✈️ Daftar Driver</button>
             <button className="adm-btn adm-btn-sm" onClick={() => unduhDaftarDriver(daftarDriverRows(jadwalCart, orders))} data-testid="adm-cartbar-driver-csv" title="Unduh CSV (buka di Excel)">⬇ CSV</button>
+            <button className="adm-btn adm-btn-sm" disabled={konfBusy} onClick={unduhKonfirmasiHarga} data-testid="adm-cartbar-konfharga" title="Excel: NO | NO POL | HARGA DEAL | HARGA INVOICE | SELISIH untuk unit yang dicentang">{konfBusy ? "Membuat…" : "🧾 Konfirmasi Harga"}</button>
             <button className="adm-btn adm-btn-sm" disabled={driverWaBusy} onClick={kirimWaDaftarDriver} data-testid="adm-cartbar-driver-wa" title="Kirim daftar driver lewat WhatsApp sebagai gambar tajam">{driverWaBusy ? "Membuat…" : "📲 WhatsApp"}</button>
           </div>
         </div>
