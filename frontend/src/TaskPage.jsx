@@ -365,7 +365,11 @@ export default function TaskPage() {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <div style={chipBox}><Truck size={19} color={C.blueSoft} /></div>
-            <div style={{ fontSize: 14, color: C.mute, fontWeight: 600 }}>{unitLabel}</div>
+            <div style={{ fontSize: 14, color: C.mute, fontWeight: 600 }}>
+              <div>{unitLabel}</div>
+              {unit0.nopol && unit0.no_rangka ? <div data-testid="task-rangka" style={{ fontSize: 12.5, fontWeight: 500, marginTop: 2 }}>No. Rangka: {unit0.no_rangka}</div> : null}
+              {(task.units || []).length > 1 ? <div style={{ fontSize: 12.5, fontWeight: 500, marginTop: 2 }}>+{(task.units || []).length - 1} unit lain</div> : null}
+            </div>
           </div>
         </div>
         {tab === "beranda" && (
