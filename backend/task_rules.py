@@ -96,11 +96,8 @@ def leg_for(legs, task):
 
 
 def nama_rombongan(leg, maks=3):
-    """Leg rombongan (multi-unit): kepala rombongan dulu; kalau kosong, nama driver anggota (unik, maks 3, sisanya '+N')."""
-    kr = ((leg.get("kepala_rombongan") or {}).get("nama") if isinstance(leg.get("kepala_rombongan"), dict) else "") or ""
-    kr = " ".join(str(kr).split())
-    if kr:
-        return kr
+    """Leg rombongan (multi-unit): nama driver anggota di daftar `drivers` (unik, maks 3, sisanya '+N').
+    `kepala_rombongan` sengaja TIDAK dipakai: di layar admin blok itu berlabel SUPPLIER, bukan driver."""
     nama = []
     for d in (leg.get("drivers") or []):
         n = " ".join(str((d or {}).get("driver") or "").split()) if isinstance(d, dict) else ""
@@ -123,7 +120,7 @@ def nama_petugas(legs, task, nama_driver_trip=""):
     driver = tipe.startswith("driver")
     live = (l.get("kord_kapal") if kapal else l.get("driver")) or l.get("petugas_nama") or ""
     if not live and driver:
-        live = nama_rombongan(l)       # leg rombongan: nama ada di kepala rombongan / daftar driver, bukan kolom 'driver'
+        live = nama_rombongan(l)       # leg rombongan: nama ada di daftar driver anggota, bukan kolom 'driver'
     for n in (live, task.get("petugas_nama"), (nama_driver_trip if driver else "")):
         n = " ".join(str(n or "").split())
         if n:
