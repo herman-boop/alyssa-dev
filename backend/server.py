@@ -3834,6 +3834,19 @@ async def admin_export_csv(
     )
 
 
+async def _driver_master_nama(driver_id: str) -> str:
+    """Nama driver (HURUF BESAR) dari master `drivers` berdasarkan driver_id; kosong bila tidak ada."""
+    did = (driver_id or "").strip()
+    if not did:
+        return ""
+    try:
+        d = await db.drivers.find_one({"driver_id": did}, {"nama": 1})
+    except Exception as e:
+        logger.warning(f"[driver] gagal baca master driver {did}: {e}")
+        return ""
+    return " ".join(str((d or {}).get("nama") or "").split()).upper()
+
+
 class OrderPatchBody(BaseModel):
     status: Optional[str] = None
     driver_id: Optional[str] = None
@@ -3867,6 +3880,12 @@ async def admin_patch_order(order_id: str, payload: OrderPatchBody):
         upd["driver_id"] = payload.driver_id.strip()[:60]
     if payload.nama_driver is not None:
         upd["nama_driver"] = payload.nama_driver.strip()[:120]
+    elif upd.get("driver_id") and not (order.get("nama_driver") or "").strip():
+        # Driver dipilih dari master tapi "Nama Driver" masih kosong -> tarik otomatis namanya
+        # (nama_driver dipakai link tugas, BASTK, pengingat). Yang sudah diisi manual tidak ditimpa.
+        nm = await _driver_master_nama(upd["driver_id"])
+        if nm:
+            upd["nama_driver"] = nm[:120]
     if payload.catatan is not None:
         upd["catatan"] = payload.catatan.strip()[:500]
     if payload.vehicle_type is not None:
@@ -4280,13 +4299,17 @@ def _leg_task_admin_view(t: dict) -> dict:
 async def _task_view(t: dict) -> dict:
     """View publik + batas hari yang diisi admin di leg (dibaca dari trip, jadi bisa diubah tanpa buat link baru)."""
     try:
-        trip = await db.trips.find_one({"trip_id": t.get("trip_id")}, {"legs": 1, "nama_driver": 1})
+        trip = await db.trips.find_one({"trip_id": t.get("trip_id")}, {"legs": 1, "nama_driver": 1, "driver_id": 1})
         legs = (trip or {}).get("legs") or []
         leg = TR.leg_for(legs, t)
         if _role_cfg(t.get("tipe_tugas")).get("simple") and leg and leg.get("batas_hari") not in (None, ""):
             t = {**t, "batas_hari": leg.get("batas_hari")}
-        # nama driver/petugas = yang dipilih admin di input leg (live), bukan hanya snapshot saat link dibuat
-        nama = TR.nama_petugas(legs, t, (trip or {}).get("nama_driver") or "")
+        # nama driver/petugas = yang dipilih admin di input leg (live), bukan hanya snapshot saat link dibuat.
+        # Cadangan akhir (peran driver): nama trip, lalu master driver dari driver_id yang dipilih di detail order.
+        nama_trip = (trip or {}).get("nama_driver") or ""
+        if not nama_trip and str(t.get("tipe_tugas") or "").startswith("driver"):
+            nama_trip = await _driver_master_nama((trip or {}).get("driver_id") or "")
+        nama = TR.nama_petugas(legs, t, nama_trip)
         if nama:
             t = {**t, "petugas_nama": nama}
     except Exception as e:

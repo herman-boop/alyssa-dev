@@ -63,3 +63,38 @@ def test_endpoint_menampilkan_nama_driver_dari_leg(monkeypatch):
                                                        "tipe_tugas": "driver_tujuan", "petugas_nama": "", "status": "belum_dibuka", "units": []}))
     r = TestClient(server.app).get("/api/public/task/tok1")
     assert r.status_code == 200 and r.json()["petugas_nama"] == "AMRAN HARAHAP"
+
+
+# ── driver dipilih dari master (DRIVER) -> NAMA DRIVER terisi otomatis & link tugas ikut ──
+def _patch_env(monkeypatch):
+    mdb = AsyncMongoMockClient()["t"]
+    monkeypatch.setattr(server, "db", mdb)
+    loop = asyncio.new_event_loop()
+    run = loop.run_until_complete
+    run(mdb.drivers.insert_one({"driver_id": "DRV-1", "nama": "Asep Gunawan"}))
+    run(mdb.orders.insert_one({"order_id": "ORD-1", "trip_id": "TRIP-1", "nama_driver": "", "status": "NEW"}))
+    run(mdb.trips.insert_one({"trip_id": "TRIP-1", "nama_driver": "", "legs": [{"route_leg_id": "R1"}]}))
+    return mdb, run, TestClient(server.app)
+
+
+def test_pilih_driver_master_mengisi_nama_driver_otomatis(monkeypatch):
+    mdb, run, c = _patch_env(monkeypatch)
+    assert c.patch("/api/admin/orders/ORD-1", json={"driver_id": "DRV-1"}).status_code == 200
+    assert run(mdb.orders.find_one({"order_id": "ORD-1"}))["nama_driver"] == "ASEP GUNAWAN"
+    assert run(mdb.trips.find_one({"trip_id": "TRIP-1"}))["nama_driver"] == "ASEP GUNAWAN"      # ikut ke BASTK/link
+
+
+def test_nama_driver_manual_tidak_ditimpa(monkeypatch):
+    mdb, run, c = _patch_env(monkeypatch)
+    run(mdb.orders.update_one({"order_id": "ORD-1"}, {"$set": {"nama_driver": "PAK MANUAL"}}))
+    c.patch("/api/admin/orders/ORD-1", json={"driver_id": "DRV-1"})
+    assert run(mdb.orders.find_one({"order_id": "ORD-1"}))["nama_driver"] == "PAK MANUAL"
+
+
+def test_link_tugas_pakai_master_driver_untuk_order_lama(monkeypatch):
+    # order lama: driver_id sudah dipilih, nama_driver kosong, leg tanpa nama
+    mdb, run, c = _patch_env(monkeypatch)
+    run(mdb.trips.update_one({"trip_id": "TRIP-1"}, {"$set": {"driver_id": "DRV-1"}}))
+    run(mdb.leg_tasks.insert_one({"token": "tk9", "trip_id": "TRIP-1", "route_leg_id": "R1", "leg_index": 0,
+                                  "tipe_tugas": "driver_full", "petugas_nama": "", "status": "belum_dibuka", "units": []}))
+    assert c.get("/api/public/task/tk9").json()["petugas_nama"] == "ASEP GUNAWAN"
