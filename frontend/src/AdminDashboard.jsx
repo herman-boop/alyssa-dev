@@ -29,6 +29,7 @@ import { htmlKePng, bagikanPng, printPenawaran, simpanPenawaranGambar } from "./
 import SuratPermohonanModal, { cetakUlangSurat } from "./SuratPermohonan";
 import DaftarHargaGrid from "./DaftarHargaGrid";
 import PermintaanHarga from "./PermintaanHarga";
+import { daftarDriverRows, daftarDriverCsv, KOLOM_DRIVER } from "./daftarDriver";
 import { DOC_BRAND, DOC_BASE_CSS, docHeader, docFooter, terbilangRupiah, nextDocNo, DOC_ENTITIES, DEFAULT_ENTITY_ID, getActiveEntityId, setActiveEntityId, getEntity } from "@/docTheme";
 import { printReport, saveReportPNG } from "@/reportDoc";
 import "@/App.css";
@@ -833,6 +834,8 @@ function Dashboard({ pin, me, onLogout }) {
             <button className="adm-btn adm-btn-sm" onClick={clearCart}>Kosongkan</button>
             {roleCanInvoice() && <button className="adm-btn adm-btn-sm adm-btn-blue" onClick={() => setShowInvoiceGab(true)} data-testid="adm-cartbar-invoice">Buat Invoice Gabungan</button>}
             <button className="adm-btn adm-btn-sm adm-btn-gold" onClick={() => setShowJadwalGab(true)} data-testid="adm-cartbar-jadwal">Buat Jadwal Gabungan</button>
+            <button className="adm-btn adm-btn-sm" onClick={() => printDaftarDriver(daftarDriverRows(jadwalCart, orders))} data-testid="adm-cartbar-driver" title="Daftar driver per unit yang dicentang (cetak / simpan PDF)">🧑‍✈️ Daftar Driver</button>
+            <button className="adm-btn adm-btn-sm" onClick={() => unduhDaftarDriver(daftarDriverRows(jadwalCart, orders))} data-testid="adm-cartbar-driver-csv" title="Unduh CSV (buka di Excel)">⬇ CSV</button>
           </div>
         </div>
       )}
@@ -7010,6 +7013,42 @@ function printJadwalDoc(meta, units) {
 /* ════════════════════════════════════════
    JADWAL PENGIRIMAN GABUNGAN — kumpulin unit lintas-PO ke 1 A4 (gold)
 ════════════════════════════════════════ */
+function printDaftarDriver(rows) {
+  if (!rows || !rows.length) return;
+  const esc = (v) => String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Daftar Driver</title>
+  <style>
+    ${DOC_BASE_CSS}
+    table.dd { width:100%; border-collapse:collapse; margin:10px 0; }
+    table.dd th { text-align:left; font-size:9.5px; text-transform:uppercase; color:#fff; background:${DOC_BRAND.gold}; padding:7px 7px; }
+    table.dd td { padding:7px 7px; font-size:11px; border-bottom:1px solid ${DOC_BRAND.line}; vertical-align:top; }
+    table.dd tbody tr:nth-child(even) td { background:#fbf6ea; }
+    table.dd tr { break-inside:avoid; page-break-inside:avoid; }
+    table.dd thead { display:table-header-group; }
+    @page { size:A4; margin:12mm; }
+  </style></head><body>
+  <div class="doc-sheet">
+    ${docHeader({ docTitle: "DAFTAR DRIVER" })}
+    <div style="font-size:11px;margin-bottom:6px">${rows.length} unit &middot; dicetak ${jpFmt(new Date().toISOString().slice(0, 10))}</div>
+    <table class="dd"><thead><tr>${KOLOM_DRIVER.map((k) => `<th>${k}</th>`).join("")}</tr></thead>
+    <tbody>${rows.map((r) => `<tr><td>${r.no}</td><td><b>${esc(r.driver) || "—"}</b></td><td>${esc(r.asal)}</td><td>${esc(r.tujuan)}</td><td>${esc(r.ket)}</td><td>${esc(r.tipe)}</td><td>${esc(r.nopol)}</td></tr>`).join("")}</tbody></table>
+    ${docFooter({ docNo: "Daftar Driver" })}
+  </div>
+  <script>window.onload=()=>window.print()<\/script>
+  </body></html>`;
+  const w = window.open("", "aal_print"); w.document.write(html); w.document.close();
+}
+
+function unduhDaftarDriver(rows) {
+  if (!rows || !rows.length) return;
+  try {
+    const blob = new Blob(["\ufeff" + daftarDriverCsv(rows)], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+    a.download = "daftar-driver.csv"; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+  } catch (e) { window.alert("Gagal mengunduh."); }
+}
+
 function printJadwalGabungan(meta, units) {
   const rows = (units || []).filter(Boolean);
   if (!rows.length) return "";
