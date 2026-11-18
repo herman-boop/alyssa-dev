@@ -18,7 +18,11 @@ export function namaDriverUnit(order, unit) {
     const nm = String((l && l.driver) || "").trim();
     if (nm) return nm.toUpperCase();
   }
-  return String((order && order.nama_driver) || "").trim().toUpperCase();
+  const po = String((order && order.nama_driver) || "").trim();
+  if (po) return po.toUpperCase();
+  // Chip DRIVER di kartu PO memakai driver_id; di banyak PO isinya sudah berupa nama (bukan kode master DRV-xxxx).
+  const did = String((order && order.driver_id) || "").trim();
+  return did && !/^DRV-[A-Z0-9]+$/i.test(did) ? did.toUpperCase() : "";
 }
 
 /* cart = [{order_id, asal_kota, tujuan_kota, unit}], orders = daftar PO. -> baris tabel. */
