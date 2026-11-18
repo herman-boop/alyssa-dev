@@ -98,3 +98,11 @@ def test_link_tugas_pakai_master_driver_untuk_order_lama(monkeypatch):
     run(mdb.leg_tasks.insert_one({"token": "tk9", "trip_id": "TRIP-1", "route_leg_id": "R1", "leg_index": 0,
                                   "tipe_tugas": "driver_full", "petugas_nama": "", "status": "belum_dibuka", "units": []}))
     assert c.get("/api/public/task/tk9").json()["petugas_nama"] == "ASEP GUNAWAN"
+
+
+def test_driver_id_berisi_nama_dipakai_sebagai_nama_driver(monkeypatch):
+    mdb, run, c = _patch_env(monkeypatch)
+    c.patch("/api/admin/orders/ORD-1", json={"driver_id": "Asep Gunawan"})      # bukan kode master DRV-xxxx
+    assert run(mdb.orders.find_one({"order_id": "ORD-1"}))["nama_driver"] == "ASEP GUNAWAN"
+    c.patch("/api/admin/orders/ORD-1", json={"nama_driver": "", "driver_id": "DRV-ZZZZZZ"})   # kode master tak dikenal: jangan jadi nama
+    assert run(mdb.orders.find_one({"order_id": "ORD-1"}))["nama_driver"] == ""

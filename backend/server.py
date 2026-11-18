@@ -3844,8 +3844,14 @@ async def _driver_master_nama(driver_id: str) -> str:
         d = await db.drivers.find_one({"driver_id": did}, {"nama": 1})
     except Exception as e:
         logger.warning(f"[driver] gagal baca master driver {did}: {e}")
-        return ""
-    return " ".join(str((d or {}).get("nama") or "").split()).upper()
+        d = None
+    nm = " ".join(str((d or {}).get("nama") or "").split()).upper()
+    if nm:
+        return nm
+    # driver_id di PO sering berisi NAMA yang diketik (bukan kode master DRV-xxxx): pakai teksnya.
+    if not re.match(r"^DRV-[A-Z0-9]+$", did, re.I):
+        return " ".join(did.split()).upper()
+    return ""
 
 
 class OrderPatchBody(BaseModel):
