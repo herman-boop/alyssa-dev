@@ -17,7 +17,7 @@ PROMPT = (
     "- ada = true bila kartu itu terlihat di foto.\n"
     "- box = [x, y, lebar, tinggi] persegi panjang yang membungkus SELURUH kartu itu (tepi kartu, bukan seluruh foto), "
     "dalam pecahan 0..1 terhadap lebar dan tinggi foto. Longgarkan sedikit (sekitar 1-2%) supaya tepi kartu tidak terpotong.\n"
-    "- nik = 16 digit NIK di KTP, tulis angka saja. no_sim = nomor SIM (12-14 digit, boleh tanda hubung seperti tercetak).\n"
+    "- nik = 16 digit NIK di KTP, tulis angka saja. no_sim = nomor SIM seperti tercetak: SIM lama 12-14 digit (boleh tanda hubung); SIM model baru memakai NIK 16 digit sebagai nomor SIM, itu benar, tulis apa adanya.\n"
     "- golongan = golongan SIM seperti tercetak (A, B I, B II, C, D, B I Umum, B II Umum, dst).\n"
     "- nama = nama persis seperti tercetak. alamat = alamat di kartu itu; untuk KTP gabungkan Alamat, RT/RW, Kel/Desa, Kecamatan, "
     "dan kota/kabupaten dari kepala kartu, dipisah koma.\n"
@@ -108,8 +108,8 @@ def normalisasi(raw: dict) -> dict:
     no_sim = re.sub(r"[^0-9\-]", "", str(sim.get("no_sim") or "")).strip("-")
     if no_sim:
         fields["no_sim"] = no_sim
-        if not 12 <= len(_digits(no_sim)) <= 14:
-            warn.append("Nomor SIM terbaca tidak lazim (bukan 12-14 digit) — periksa ulang.")
+        if not 12 <= len(_digits(no_sim)) <= 16:       # SIM lama 12-14 digit; SIM baru = NIK 16 digit
+            warn.append("Nomor SIM terbaca tidak lazim (bukan 12-16 digit) — periksa ulang.")
     tipe = golongan_ke_tipe(sim.get("golongan"))
     if tipe:
         fields["tipe_sim"] = tipe
