@@ -7,13 +7,24 @@ export function hargaDariHpp(hpp, marginPct) {
   return Math.ceil((h * (1 + (Number(marginPct) || 0) / 100)) / 1000) * 1000;
 }
 
-/* Harga akhir baris i: isian manual admin > HPP+margin > harga yang sudah tertulis di lembar pelanggan > 0. */
+/* Harga akhir baris: isian manual admin > harga yang sudah tertulis di lembar pelanggan > 0.
+   HPP TIDAK mengisi otomatis (hanya acuan); admin memakainya per baris ("pakai HPP + margin") atau sekaligus ("Isi dari HPP + margin"). */
 export function hargaBaris(r, marginPct, manual) {
   const m = manual == null || manual === "" ? null : Number(String(manual).replace(/\D/g, ""));
   if (m != null && !isNaN(m) && m > 0) return m;
-  const dariHpp = hargaDariHpp(r.hpp, marginPct);
-  if (dariHpp > 0) return dariHpp;
   return Number(r.harga) > 0 ? Number(r.harga) : 0;
+}
+
+/* Baris yang punya HPP (acuan), apa pun tingkat kecocokannya. */
+export const punyaHpp = (r) => !!r && Number(r.hpp) > 0;
+
+/* Isian manual untuk semua baris ber-HPP yang belum diisi: { indeks: "1.234.000" } (HPP + margin). */
+export function isiDariHpp(rows, marginPct, manualSekarang) {
+  const out = { ...(manualSekarang || {}) };
+  (rows || []).forEach((r, i) => {
+    if (punyaHpp(r) && (out[i] == null || out[i] === "")) out[i] = hargaDariHpp(r.hpp, marginPct).toLocaleString("id-ID");
+  });
+  return out;
 }
 
 /* Entri untuk PenawaranCetakButton ({rute, moda, tipe_kendaraan, harga_deal, ...}). Baris tanpa harga dilewati. */
