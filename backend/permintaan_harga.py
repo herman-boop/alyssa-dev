@@ -129,14 +129,23 @@ def baca_ai(data: bytes, media_type: str, key: str, model: str, post):
 
 # ── pencocokan ke harga beli ──
 _ALIAS = {"makasar": "makassar", "jogja": "yogyakarta", "jogjakarta": "yogyakarta", "yogya": "yogyakarta",
-          "djakarta": "jakarta", "dki jakarta": "jakarta", "banjarmasin": "banjarmasin"}
+          "djakarta": "jakarta", "dki jakarta": "jakarta", "jkt": "jakarta", "ujung pandang": "makassar"}
+_BUANG = {"utara", "selatan", "barat", "timur", "pusat", "kota", "kab", "kabupaten", "city"}
+# kota yang dianggap satu wilayah asal untuk harga muat (Jabodetabek)
+_JABODETABEK = {"jakarta", "bekasi", "cikarang", "tangerang", "tangsel", "tangerangselatan", "bogor", "depok", "cibitung", "cileungsi"}
 
 
 def norm_kota(s):
     s = re.sub(r"[^a-z0-9 ]+", "", str(s or "").lower().replace("-", " "))
-    s = re.sub(r"^(kota|kab|kabupaten)\s+", "", " ".join(s.split()))
+    s = " ".join(s.split())
     s = _ALIAS.get(s, s)
+    kata = [w for w in s.split() if w not in _BUANG] or s.split()      # "Jakarta Utara" / "Kota Semarang" -> inti nama kota
+    s = _ALIAS.get(" ".join(kata), " ".join(kata))
     return s.replace(" ", "")
+
+
+def wilayah_asal(norm):
+    return "jabodetabek" if norm in _JABODETABEK else ""
 
 
 _GENERIK = {"hybrid", "cvt", "type", "tipe", "the", "new", "all", "dan", "mt", "at", "dc", "ps", "std"}
@@ -146,10 +155,17 @@ def token_kendaraan(s):
     return {w for w in re.findall(r"[a-z0-9]+", str(s or "").lower()) if len(w) >= 3 and w not in _GENERIK}
 
 
+def _pilih(cands, tk):
+    """cands = [(token, harga)] -> (daftar harga terpilih, 'kendaraan'|'lain'): kendaraan serupa diprioritaskan."""
+    sama = [hv for t, hv in cands if tk and t and len(tk & t) / len(tk) >= 0.5]
+    return (sama, "kendaraan") if sama else ([hv for _, hv in cands], "lain")
+
+
 def cocokkan(baris, harga_beli):
     """Tiap baris permintaan -> HPP dari daftar harga beli (baris {asal,tujuan,vehicle_type,harga}).
-    cocok: 'kendaraan' (rute + kendaraan serupa), 'rute' (rute sama, kendaraan lain), '' (tidak ada)."""
-    per_rute = {}
+    cocok: 'kendaraan' (rute + kendaraan serupa), 'rute' (rute sama, kendaraan lain),
+           'wilayah' (tujuan sama, asal lain di Jabodetabek - mis. Cikarang/Bekasi untuk permintaan dari Jakarta), '' (tidak ada)."""
+    per_rute, per_tujuan = {}, {}
     for h in harga_beli or []:
         try:
             hv = int(h.get("harga") or 0)
@@ -157,17 +173,25 @@ def cocokkan(baris, harga_beli):
             continue
         if hv <= 0:
             continue
-        per_rute.setdefault((norm_kota(h.get("asal")), norm_kota(h.get("tujuan"))), []).append((token_kendaraan(h.get("vehicle_type")), hv))
+        a, t = norm_kota(h.get("asal")), norm_kota(h.get("tujuan"))
+        tok = token_kendaraan(h.get("vehicle_type"))
+        per_rute.setdefault((a, t), []).append((tok, hv))
+        if wilayah_asal(a):
+            per_tujuan.setdefault(t, []).append((tok, hv))
     out = []
     for b in baris or []:
-        key = (norm_kota(b.get("asal")), norm_kota(b.get("tujuan")))
-        cand = per_rute.get(key, [])
+        a, t = norm_kota(b.get("asal")), norm_kota(b.get("tujuan"))
         tk = token_kendaraan(b.get("tipe"))
-        sama = [hv for t, hv in cand if tk and t and len(tk & t) / len(tk) >= 0.5]
-        pilih, cocok = (sama, "kendaraan") if sama else (([hv for _, hv in cand], "rute") if cand else ([], ""))
+        harga, cocok = [], ""
+        if per_rute.get((a, t)):
+            harga, jenis = _pilih(per_rute[(a, t)], tk)
+            cocok = "kendaraan" if jenis == "kendaraan" else "rute"
+        elif wilayah_asal(a) and per_tujuan.get(t):
+            harga, _ = _pilih(per_tujuan[t], tk)
+            cocok = "wilayah"
         r = dict(b)
-        r.update({"hpp": int(statistics.median(pilih)) if pilih else 0, "n": len(pilih),
-                  "min": min(pilih) if pilih else 0, "max": max(pilih) if pilih else 0, "cocok": cocok})
+        r.update({"hpp": int(statistics.median(harga)) if harga else 0, "n": len(harga),
+                  "min": min(harga) if harga else 0, "max": max(harga) if harga else 0, "cocok": cocok})
         out.append(r)
     return out
 

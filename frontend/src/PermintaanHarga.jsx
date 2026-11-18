@@ -52,7 +52,7 @@ export default function PermintaanHarga({ headers }) {
     } catch { setErr("Gagal membuat file Excel."); }
   };
 
-  const badge = (r) => r.cocok === "kendaraan" ? { t: `kendaraan sama · ${r.n}x`, c: "#3fb950" } : r.cocok === "rute" ? { t: `rute sama (kendaraan lain) · ${r.n}x`, c: "#d29922" } : { t: "belum ada HPP", c: "#f85149" };
+  const badge = (r) => r.cocok === "kendaraan" ? { t: `kendaraan sama · ${r.n}x`, c: "#3fb950" } : r.cocok === "rute" ? { t: `rute sama (kendaraan lain) · ${r.n}x`, c: "#d29922" } : r.cocok === "wilayah" ? { t: `tujuan sama, asal sekitar Jakarta · ${r.n}x`, c: "#d29922" } : { t: "belum ada HPP", c: "#f85149" };
 
   return (
     <div data-testid="ph" style={{ border: "1px solid #2b3445", borderRadius: 10, background: "#0f1520", color: "#e6edf3", marginBottom: 12 }}>
@@ -113,7 +113,7 @@ export default function PermintaanHarga({ headers }) {
               </tbody>
             </table>
           </div>
-          <div style={{ fontSize: 11.5, color: "#a89868", marginTop: 8 }}>Biaya Pengiriman = HPP + margin, dibulatkan ke atas ribuan. Kolom HPP memakai median harga beli supplier (lunas) untuk rute itu; kendaraan yang serupa diprioritaskan. Isi manual di kolom Biaya Pengiriman bila perlu (bertanda oranye).</div>
+          <div style={{ fontSize: 11.5, color: "#a89868", marginTop: 8 }}>Biaya Pengiriman = HPP + margin, dibulatkan ke atas ribuan. Kolom HPP memakai median harga beli supplier (lunas): rute yang sama, lalu tujuan yang sama dari asal sekitar Jakarta (Cikarang, Bekasi, dll); kendaraan yang serupa diprioritaskan. Tanda oranye = perkiraan, cek dulu. Isi manual di kolom Biaya Pengiriman bila perlu (bertanda oranye).</div>
         </div>
       )}
     </div>

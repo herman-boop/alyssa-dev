@@ -75,3 +75,20 @@ def test_endpoint_unggah_dan_unduh(monkeypatch):
     assert r2.status_code == 200 and r2.content[:2] == b"PK"
     assert c.post("/api/admin/penawaran/permintaan-harga", files={"file": ("a.txt", b"x", "text/plain")}).status_code == 400
     assert c.post("/api/admin/penawaran/permintaan-harga", files={"file": ("k.xlsx", _xlsx([], header=("a", "b")), "application/octet-stream")}).status_code == 422
+
+
+def test_nama_kota_diperlebar():
+    assert ph.norm_kota("Jakarta Utara") == ph.norm_kota("JAKARTA") == "jakarta"
+    assert ph.norm_kota("Kota Semarang") == "semarang" and ph.norm_kota("Kab. Bekasi") == "bekasi"
+    assert ph.norm_kota("Pare-pare") == ph.norm_kota("Pare pare") and ph.norm_kota("JKT") == "jakarta"
+
+
+def test_cocok_wilayah_asal_jabodetabek():
+    beli = [{"asal": "Cikarang", "tujuan": "Semarang", "vehicle_type": "Innova", "harga": 2500000},
+            {"asal": "Bekasi", "tujuan": "Semarang", "vehicle_type": "Hilux", "harga": 2700000},
+            {"asal": "Surabaya", "tujuan": "Padang", "vehicle_type": "Hilux", "harga": 9000000}]
+    m = ph.cocokkan([{"tipe": "Innova Zenix", "asal": "Jakarta", "tujuan": "Semarang"},
+                     {"tipe": "Innova", "asal": "Jakarta", "tujuan": "Padang"},          # asal Surabaya bukan Jabodetabek -> tidak dipakai
+                     {"tipe": "Innova", "asal": "Surabaya", "tujuan": "Semarang"}], beli)   # asal bukan Jabodetabek -> tidak jatuh ke wilayah
+    assert (m[0]["cocok"], m[0]["hpp"]) == ("wilayah", 2500000)                           # kendaraan serupa diprioritaskan
+    assert m[1]["cocok"] == "" and m[2]["cocok"] == ""
