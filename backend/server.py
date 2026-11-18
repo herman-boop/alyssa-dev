@@ -21,6 +21,7 @@ import app_users  # akun pengguna (Pemilik, undangan, login) — Tahap 1
 import kpi  # KPI & poin Admin Operasional 2 (pekan Minggu 09:00 WIB)
 import aktivitas  # Riwayat Aktivitas akun
 import belum_tagih  # Excel unit PO belum ditagih
+import permintaan_harga  # upload permintaan harga pelanggan -> HPP + Excel hasil
 import leg_supplier  # supplier per leg + pembayaran supplier
 import driver_incentive  # insentif per checkpoint driver borongan (antrean bayar)
 import driver_notif  # notif WhatsApp ke driver saat insentif dibayar
@@ -7559,6 +7560,57 @@ async def supplier_pricelist(limit: int = 3000):
             })
     out.sort(key=lambda x: x.get("tanggal") or "", reverse=True)
     return {"items": out[:limit]}
+
+
+@api_router.post("/admin/penawaran/permintaan-harga", dependencies=[Depends(require_admin_pin)])
+async def penawaran_baca_permintaan(file: UploadFile = File(...)):
+    """Baca lembar permintaan harga pelanggan (Excel/CSV, atau foto/PDF lewat AI) dan cocokkan tiap baris
+    ke harga beli supplier (HPP). Hanya membaca & menghitung; tidak menyimpan apa pun.
+    Margin dan harga akhir ditentukan admin di layar."""
+    data = await file.read()
+    if not data or len(data) > 10 * 1024 * 1024:
+        raise HTTPException(400, "File kosong atau lebih dari 10 MB.")
+    nama = (file.filename or "").lower()
+    media = (file.content_type or "").split(";")[0].strip().lower()
+    try:
+        if nama.endswith((".xlsx", ".xlsm")) or "spreadsheetml" in media:
+            baris = permintaan_harga.baca_xlsx(data)
+        elif nama.endswith(".csv") or media in ("text/csv", "application/csv"):
+            baris = permintaan_harga.baca_csv(data)
+        elif media in ("image/jpeg", "image/png", "image/webp", "application/pdf"):
+            if not ANTHROPIC_API_KEY:
+                raise HTTPException(503, "Baca foto/PDF belum aktif: ANTHROPIC_API_KEY belum diisi di Railway. Pakai file Excel/CSV.")
+            baris = await asyncio.to_thread(permintaan_harga.baca_ai, data, media, ANTHROPIC_API_KEY, ANTHROPIC_MODEL, _requests.post)
+        else:
+            raise HTTPException(400, "Format file harus Excel (.xlsx), CSV, foto (JPG/PNG), atau PDF.")
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"[permintaan-harga] gagal membaca file: {e}")
+        raise HTTPException(422, "File tidak bisa dibaca. Pastikan ada kolom Tipe Kendaraan, Lokasi Pengambilan, Lokasi Pengiriman.")
+    if not baris:
+        raise HTTPException(422, "Tidak ada baris yang terbaca. Pastikan ada judul kolom Tipe Kendaraan, Lokasi Pengambilan, dan Lokasi Pengiriman.")
+    if len(baris) > 1000:
+        raise HTTPException(400, "Maksimal 1000 baris per file.")
+    harga_beli = (await supplier_pricelist(limit=20000)).get("items", [])
+    hasil = permintaan_harga.cocokkan(baris, harga_beli)
+    return {"rows": hasil, "total": len(hasil),
+            "cocok": sum(1 for r in hasil if r["cocok"]), "tanpa_hpp": sum(1 for r in hasil if not r["cocok"])}
+
+
+@api_router.post("/admin/penawaran/permintaan-harga/xlsx", dependencies=[Depends(require_admin_pin)])
+async def penawaran_permintaan_xlsx(body: dict = Body(...)):
+    """Tulis Excel hasil (tata letak sama dengan lembar permintaan; kolom Biaya Pengiriman terisi)."""
+    rows = [r for r in (body.get("rows") or []) if isinstance(r, dict)][:1000]
+    if not rows:
+        raise HTTPException(400, "Tidak ada baris")
+    judul = str(body.get("judul") or "")[:120]
+    xl = permintaan_harga.ke_xlsx(rows, judul)
+    fn = "penawaran-" + re.sub(r"[^a-z0-9]+", "-", (judul or "harga").lower()).strip("-")[:40] + ".xlsx"
+    return Response(xl, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{fn}"'})
 
 
 @api_router.get("/admin/suppliers/{supplier_id}", dependencies=[Depends(require_admin_pin)])

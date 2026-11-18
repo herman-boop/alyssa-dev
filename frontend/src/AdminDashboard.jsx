@@ -28,6 +28,7 @@ import PermintaanHargaPage from "@/PermintaanHargaPage";
 import { htmlKePng, bagikanPng, printPenawaran, simpanPenawaranGambar } from "./PenawaranCetak";
 import SuratPermohonanModal, { cetakUlangSurat } from "./SuratPermohonan";
 import DaftarHargaGrid from "./DaftarHargaGrid";
+import PermintaanHarga from "./PermintaanHarga";
 import { DOC_BRAND, DOC_BASE_CSS, docHeader, docFooter, terbilangRupiah, nextDocNo, DOC_ENTITIES, DEFAULT_ENTITY_ID, getActiveEntityId, setActiveEntityId, getEntity } from "@/docTheme";
 import { printReport, saveReportPNG } from "@/reportDoc";
 import "@/App.css";
@@ -5994,6 +5995,7 @@ function HistoriDokumen({ headers }) {
             ))}
           </div>
           {priceFail[priceMode] && <div style={{ color: "#e06b6b", fontSize: 12.5, marginBottom: 8 }}>Sebagian data gagal dimuat. Tekan ↻ untuk coba lagi.</div>}
+          <PermintaanHarga headers={headers} />
           <DaftarHargaGrid rows={priceMode === "jual" ? priceJual : priceRows} mode={priceMode} />
         </div>
       ) : filteredDocs.length === 0 ? (
