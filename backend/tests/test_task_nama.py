@@ -33,6 +33,15 @@ def test_cocok_leg_lewat_index_bila_tanpa_route_leg_id():
     assert TR.nama_petugas(legs, {"tipe_tugas": "driver_full", "leg_index": 1}) == "B"
 
 
+def test_leg_rombongan_pakai_kepala_atau_daftar_driver():
+    kr = [{"route_leg_id": "R1", "kepala_rombongan": {"nama": "PAK KEPALA", "hp": ""}, "drivers": [{"driver": "A"}]}]
+    assert TR.nama_petugas(kr, _t()) == "PAK KEPALA"
+    dr = [{"route_leg_id": "R1", "kepala_rombongan": {"nama": ""}, "drivers": [{"driver": "Andi"}, {"driver": "ANDI"}, {"driver": "Budi"}, {"driver": "Citra"}, {"driver": "Dedi"}]}]
+    assert TR.nama_petugas(dr, _t()) == "Andi, Budi, Citra +1"
+    assert TR.nama_petugas(dr, _t(tipe_tugas="kapal")) == ""      # peran kapal tidak memakai daftar driver
+    assert TR.nama_petugas([{"route_leg_id": "R1", "driver": "SOLO", "drivers": [{"driver": "Z"}]}], _t()) == "SOLO"
+
+
 # ── endpoint publik: nama di halaman link ikut leg ──
 import os, sys, asyncio
 os.environ.setdefault("MONGO_URL", "mongodb://localhost:27017"); os.environ.setdefault("DB_NAME", "test_tn")
