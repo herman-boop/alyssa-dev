@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
+import { scanFoto } from "./dokumenScan";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -539,13 +540,56 @@ function DriverModal({ mode, driver, headers, onClose, onSaved }) {
   const [form, setForm] = useState({ nama: "", no_hp: "", no_ktp: "", no_sim: "", tipe_sim: "B1", alamat: "", status: "aktif", ...driver });
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  // Scan KTP/SIM otomatis: foto hasil potongan ditahan di sini dan baru diunggah saat driver disimpan.
+  const [scanning, setScanning] = useState(false);
+  const [scanMsg, setScanMsg] = useState({ ok: "", warn: [], err: "" });
+  const [fotoBaru, setFotoBaru] = useState({ ktp: null, sim: null });     // { blob, url }
+  const scanRef = useRef(null);
+  useEffect(() => () => { ["ktp", "sim"].forEach(k => fotoBaru[k] && URL.revokeObjectURL(fotoBaru[k].url)); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const doScan = async (files) => {
+    const list = Array.from(files || []);
+    if (!list.length) return;
+    setScanning(true); setScanMsg({ ok: "", warn: [], err: "" });
+    const API_ = `${process.env.REACT_APP_BACKEND_URL}/api`;
+    const post = async (blob) => {
+      const fd = new FormData(); fd.append("foto", blob, "scan.jpg");
+      const r = await axios.post(`${API_}/admin/drivers/scan-dokumen`, fd, { headers, timeout: 120000 });
+      return r.data;
+    };
+    const filled = {}; const warn = []; const baru = { ...fotoBaru }; let err = "";
+    for (const f of list) {
+      try {
+        const r = await scanFoto(f, post);
+        Object.assign(filled, r.fields); warn.push(...r.peringatan);
+        ["ktp", "sim"].forEach(k => { if (r[k]) { if (baru[k]) URL.revokeObjectURL(baru[k].url); baru[k] = { blob: r[k], url: URL.createObjectURL(r[k]) }; } });
+      } catch (e) { err = e?.response?.data?.detail || e?.message || "Gagal membaca foto"; }
+    }
+    setForm(fm => ({ ...fm, ...filled }));
+    setFotoBaru(baru);
+    const n = Object.keys(filled).length;
+    setScanMsg({ ok: n ? `${n} isian terisi otomatis. Periksa dulu sebelum menyimpan.` : "", warn: [...new Set(warn)], err: n ? "" : err });
+    setScanning(false);
+    if (scanRef.current) scanRef.current.value = "";
+  };
 
   const submit = async () => {
     if (!form.nama.trim()) { alert("Nama wajib diisi"); return; }
     setSaving(true);
     try {
-      if (mode === "add") await axios.post(`${process.env.REACT_APP_BACKEND_URL}/api/admin/drivers`, form, { headers });
-      else await axios.patch(`${process.env.REACT_APP_BACKEND_URL}/api/admin/drivers/${driver.driver_id}`, form, { headers });
+      const base = `${process.env.REACT_APP_BACKEND_URL}/api/admin/drivers`;
+      let id = driver && driver.driver_id;
+      if (mode === "add") { const r = await axios.post(base, form, { headers }); id = r.data.driver_id; }
+      else await axios.patch(`${base}/${id}`, form, { headers });
+      const gagalFoto = [];
+      for (const k of ["ktp", "sim"]) {
+        if (!fotoBaru[k]) continue;
+        try {
+          const fd = new FormData(); fd.append("foto", fotoBaru[k].blob, `${k}.jpg`);
+          await axios.post(`${base}/${id}/foto/${k}`, fd, { headers });
+        } catch { gagalFoto.push(k.toUpperCase()); }
+      }
+      if (gagalFoto.length) alert(`Driver tersimpan, tapi foto ${gagalFoto.join(" & ")} gagal diunggah. Upload ulang lewat Detail driver.`);
       onSaved();
     } catch (e) { alert("Gagal: " + (e?.response?.data?.detail || "error")); }
     finally { setSaving(false); }
@@ -563,6 +607,28 @@ function DriverModal({ mode, driver, headers, onClose, onSaved }) {
           <button onClick={onClose} style={{ background: "none", border: "none", color: "#8b949e", cursor: "pointer" }}><IcoX /></button>
         </div>
         <div style={{ padding: 20 }}>
+          <div style={{ marginBottom: 14, padding: 12, borderRadius: 10, border: "1px dashed #EF9F27", background: "#1a1408" }}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: "#EF9F27", marginBottom: 4 }}>📷 Scan KTP &amp; SIM otomatis</div>
+            <div style={{ fontSize: 11, color: "#8b949e", marginBottom: 8, lineHeight: 1.5 }}>Foto KTP dan SIM boleh dalam satu foto. Nama, NIK, No. SIM, tipe SIM, alamat terisi sendiri, dan foto tiap kartu dipotong rapi lalu tersimpan saat Anda menekan simpan.</div>
+            <input ref={scanRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={e => doScan(e.target.files)} data-testid="driver-scan-input" />
+            <button type="button" onClick={() => scanRef.current && scanRef.current.click()} disabled={scanning}
+              style={{ padding: "8px 14px", borderRadius: 7, border: "none", background: "#EF9F27", color: "#000", fontWeight: 800, fontSize: 12, cursor: scanning ? "wait" : "pointer" }}>
+              {scanning ? "Membaca foto…" : "Upload foto KTP / SIM"}
+            </button>
+            {scanMsg.ok && <div style={{ marginTop: 8, fontSize: 11, color: "#3fb950" }}>✅ {scanMsg.ok}</div>}
+            {scanMsg.warn.map((w, i) => <div key={i} style={{ marginTop: 4, fontSize: 11, color: "#d29922" }}>⚠️ {w}</div>)}
+            {scanMsg.err && <div style={{ marginTop: 8, fontSize: 11, color: "#f85149" }}>❌ {scanMsg.err}</div>}
+            {(fotoBaru.ktp || fotoBaru.sim) && (
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                {["ktp", "sim"].map(k => fotoBaru[k] && (
+                  <div key={k} style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 10, color: "#8b949e", marginBottom: 3, fontWeight: 700 }}>Foto {k.toUpperCase()} (hasil potong)</div>
+                    <img src={fotoBaru[k].url} alt={`Foto ${k}`} data-testid={`driver-scan-${k}`} style={{ width: "100%", borderRadius: 6, border: "1px solid #30363d", display: "block" }} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           <div style={{ marginBottom: 10 }}>
             <label style={L2}>Nama Lengkap *</label>
             <input style={I} value={form.nama} onChange={e => set("nama", e.target.value)} placeholder="Budi Santoso" autoFocus />

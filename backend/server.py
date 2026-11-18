@@ -6314,6 +6314,27 @@ async def upload_driver_foto(driver_id: str, slot: str, foto: UploadFile = File(
     await db.drivers.update_one({"driver_id": driver_id}, {"$set": {f"foto_{slot}": url, "updated_at": datetime.utcnow().isoformat()}})
     return {"ok": True, "url": url}
 
+@api_router.post("/admin/drivers/scan-dokumen", dependencies=[Depends(require_admin_pin)])
+async def scan_dokumen_driver(foto: UploadFile = File(...)):
+    """Baca foto KTP/SIM (satu foto bisa memuat keduanya) pakai AI -> isian form + kotak potong tiap kartu.
+    TIDAK menyimpan apa pun: admin memeriksa hasilnya, lalu menyimpan driver dan mengunggah potongan foto
+    lewat endpoint foto driver yang sudah ada."""
+    import driver_scan
+    if not ANTHROPIC_API_KEY:
+        raise HTTPException(503, "Fitur scan KTP/SIM belum aktif: ANTHROPIC_API_KEY belum diisi di Railway.")
+    media = (foto.content_type or "").split(";")[0].strip().lower()
+    if media not in driver_scan.ALLOWED_MEDIA:
+        raise HTTPException(400, "Format foto harus JPG, PNG, atau WEBP.")
+    data = await foto.read()
+    if not data or len(data) > driver_scan.MAX_BYTES:
+        raise HTTPException(400, "Foto kosong atau lebih dari 8 MB.")
+    try:
+        raw = await asyncio.to_thread(driver_scan.call_ai, data, media, ANTHROPIC_API_KEY, ANTHROPIC_MODEL, _requests.post)
+    except ValueError as e:
+        raise HTTPException(422 if "tidak terbaca" in str(e) else 502, str(e))
+    return driver_scan.normalisasi(raw)
+
+
 @api_router.get("/admin/drivers/{driver_id}", dependencies=[Depends(require_admin_pin)])
 async def get_driver(driver_id: str):
     drv = await db.drivers.find_one({"driver_id": driver_id}, {"_id": 0})
