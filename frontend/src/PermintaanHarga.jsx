@@ -6,7 +6,7 @@
 import { useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { PenawaranCetakButton, METODE_LIST } from "./PenawaranCetak";
-import { hargaBaris, entriPenawaran, hargaDariHpp, perkiraan } from "./hitungPermintaan";
+import { hargaBaris, entriPenawaran, hargaDariHpp, punyaHpp, isiDariHpp } from "./hitungPermintaan";
 
 const API = `${process.env.REACT_APP_BACKEND_URL || ""}/api`;
 const rp = (n) => (Number(n) > 0 ? "Rp " + Number(n).toLocaleString("id-ID") : "—");
@@ -78,6 +78,7 @@ export default function PermintaanHarga({ headers }) {
               <option value="">Moda (isi nanti)</option>
               {METODE_LIST.map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
+            <button style={BTN} onClick={() => setManual((m) => isiDariHpp(rows, margin, m))} data-testid="ph-isi-semua" title="Isi Biaya Pengiriman semua baris yang punya HPP dengan HPP + margin">Isi dari HPP + margin</button>
             <button style={BTN} onClick={unduhExcel} data-testid="ph-excel">⬇ Excel (Biaya Pengiriman terisi)</button>
             <span data-testid="ph-penawaran-wrap"><PenawaranCetakButton rows={entri} namaPt={kepada} style={{ padding: "8px 14px", fontSize: 12.5 }} /></span>
           </div>
@@ -99,7 +100,7 @@ export default function PermintaanHarga({ headers }) {
                       <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>
                         <div>{rp(r.hpp)}</div>
                         <div style={{ fontSize: 10.5, color: b.c }} title={r.n > 1 ? `Median dari ${r.n} harga (terendah ${rp(r.min)}, tertinggi ${rp(r.max)})` : ""}>{b.t}</div>
-                        {perkiraan(r) && manual[i] == null && (
+                        {punyaHpp(r) && manual[i] == null && (
                           <button type="button" style={{ ...BTN, padding: "2px 8px", fontSize: 10.5, marginTop: 3 }} onClick={() => setManual((m) => ({ ...m, [i]: hargaDariHpp(r.hpp, margin).toLocaleString("id-ID") }))} data-testid="ph-pakai">pakai HPP + margin</button>
                         )}
                       </td>
@@ -116,7 +117,7 @@ export default function PermintaanHarga({ headers }) {
               </tbody>
             </table>
           </div>
-          <div style={{ fontSize: 11.5, color: "#a89868", marginTop: 8 }}>Biaya Pengiriman = HPP + margin, dibulatkan ke atas ribuan. Kolom HPP memakai median harga beli supplier (lunas): rute yang sama, lalu tujuan yang sama dari asal sekitar Jakarta (Cikarang, Bekasi, dll); kendaraan yang serupa diprioritaskan. Baris oranye = perkiraan: Biaya Pengiriman sengaja dikosongkan (isi manual, atau tekan “pakai HPP + margin”). Hanya baris hijau (kendaraan sama) terisi otomatis. Isian manual berbingkai oranye.</div>
+          <div style={{ fontSize: 11.5, color: "#a89868", marginTop: 8 }}>Harga dari HPP = HPP + margin, dibulatkan ke atas ribuan. Kolom HPP memakai median harga beli supplier (lunas): rute yang sama, lalu tujuan yang sama dari asal sekitar Jakarta (Cikarang, Bekasi, dll); kendaraan yang serupa diprioritaskan. Biaya Pengiriman sengaja dikosongkan: HPP hanya acuan (hijau = kendaraan sama, oranye = perkiraan). Isi manual, tekan “pakai HPP + margin” per baris, atau “Isi dari HPP + margin” untuk semua baris ber-HPP. Isian manual berbingkai oranye.</div>
         </div>
       )}
     </div>
