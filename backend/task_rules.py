@@ -95,6 +95,20 @@ def leg_for(legs, task):
     return None
 
 
+def nama_rombongan(leg, maks=3):
+    """Leg rombongan (multi-unit): nama driver anggota di daftar `drivers` (unik, maks 3, sisanya '+N').
+    `kepala_rombongan` sengaja TIDAK dipakai: di layar admin blok itu berlabel SUPPLIER, bukan driver."""
+    nama = []
+    for d in (leg.get("drivers") or []):
+        n = " ".join(str((d or {}).get("driver") or "").split()) if isinstance(d, dict) else ""
+        if n and n.upper() not in [x.upper() for x in nama]:
+            nama.append(n)
+    if not nama:
+        return ""
+    sisa = len(nama) - maks
+    return ", ".join(nama[:maks]) + (f" +{sisa}" if sisa > 0 else "")
+
+
 def nama_petugas(legs, task, nama_driver_trip=""):
     """Nama petugas/driver yang DITAMPILKAN di halaman link tugas.
     Diambil LANGSUNG dari leg di trip (yang dipilih admin di input leg), jadi nama yang diisi/diganti setelah link
@@ -105,6 +119,8 @@ def nama_petugas(legs, task, nama_driver_trip=""):
     kapal = tipe == "kapal"
     driver = tipe.startswith("driver")
     live = (l.get("kord_kapal") if kapal else l.get("driver")) or l.get("petugas_nama") or ""
+    if not live and driver:
+        live = nama_rombongan(l)       # leg rombongan: nama ada di daftar driver anggota, bukan kolom 'driver'
     for n in (live, task.get("petugas_nama"), (nama_driver_trip if driver else "")):
         n = " ".join(str(n or "").split())
         if n:
