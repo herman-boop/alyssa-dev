@@ -341,6 +341,7 @@ export default function TaskPage() {
         <div style={{ marginBottom: 22 }}>
           <div style={{ fontSize: 14, color: C.mute, fontWeight: 600 }}>{greeting},</div>
           <div style={{ fontSize: 27, fontWeight: 800, color: "#fff", marginTop: 2, letterSpacing: -0.3 }}>{who}</div>
+          {task.petugas_nama && task.role_label ? <div data-testid="task-role-label" style={{ fontSize: 12.5, color: C.mute, fontWeight: 700, marginTop: 3, letterSpacing: 0.4 }}>{String(task.role_label).toUpperCase()}</div> : null}
         </div>
         {tab === "beranda" && (
           <div style={{ background: "linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%)", borderRadius: 24, padding: 24, marginBottom: 16, boxShadow: "0 10px 32px rgba(37,99,235,0.35)" }} data-testid="task-progress">

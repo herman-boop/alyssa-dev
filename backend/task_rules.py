@@ -95,6 +95,23 @@ def leg_for(legs, task):
     return None
 
 
+def nama_petugas(legs, task, nama_driver_trip=""):
+    """Nama petugas/driver yang DITAMPILKAN di halaman link tugas.
+    Diambil LANGSUNG dari leg di trip (yang dipilih admin di input leg), jadi nama yang diisi/diganti setelah link
+    dibuat tetap ikut. Peran kapal -> koordinator kapal; peran lain -> driver (lalu petugas leg). Cadangan: nama yang
+    tersimpan di tugas saat link dibuat, lalu nama driver di trip (khusus peran driver)."""
+    tipe = str(task.get("tipe_tugas") or "")
+    l = leg_for(legs, task) or {}
+    kapal = tipe == "kapal"
+    driver = tipe.startswith("driver")
+    live = (l.get("kord_kapal") if kapal else l.get("driver")) or l.get("petugas_nama") or ""
+    for n in (live, task.get("petugas_nama"), (nama_driver_trip if driver else "")):
+        n = " ".join(str(n or "").split())
+        if n:
+            return n
+    return ""
+
+
 def leg_selesai(legs, task):
     """True kalau admin sudah memilih status leg = Selesai -> semua link tugas leg itu ditutup."""
     l = leg_for(legs, task)
