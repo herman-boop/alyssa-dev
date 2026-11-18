@@ -7,14 +7,20 @@ export function hargaDariHpp(hpp, marginPct) {
   return Math.ceil((h * (1 + (Number(marginPct) || 0) / 100)) / 1000) * 1000;
 }
 
-/* Harga akhir baris i: isian manual admin > HPP+margin > harga yang sudah tertulis di lembar pelanggan > 0. */
+/* Harga akhir baris i: isian manual admin > HPP+margin (HANYA bila kendaraan sama = yakin) > harga yang sudah tertulis
+   di lembar pelanggan > 0. Baris perkiraan (rute sama / asal sekitar Jakarta) tidak diisi otomatis: HPP hanya acuan. */
 export function hargaBaris(r, marginPct, manual) {
   const m = manual == null || manual === "" ? null : Number(String(manual).replace(/\D/g, ""));
   if (m != null && !isNaN(m) && m > 0) return m;
-  const dariHpp = hargaDariHpp(r.hpp, marginPct);
-  if (dariHpp > 0) return dariHpp;
+  if (r.cocok === "kendaraan") {
+    const dariHpp = hargaDariHpp(r.hpp, marginPct);
+    if (dariHpp > 0) return dariHpp;
+  }
   return Number(r.harga) > 0 ? Number(r.harga) : 0;
 }
+
+/* Baris perkiraan: ada HPP tapi bukan dari kendaraan yang sama. */
+export const perkiraan = (r) => !!r && (r.cocok === "rute" || r.cocok === "wilayah") && Number(r.hpp) > 0;
 
 /* Entri untuk PenawaranCetakButton ({rute, moda, tipe_kendaraan, harga_deal, ...}). Baris tanpa harga dilewati. */
 export function entriPenawaran(rows, marginPct, manualMap, moda) {
