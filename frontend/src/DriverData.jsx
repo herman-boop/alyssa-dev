@@ -623,7 +623,7 @@ function DriverModal({ mode, driver, headers, onClose, onSaved }) {
                 {["ktp", "sim"].map(k => fotoBaru[k] && (
                   <div key={k} style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 10, color: "#8b949e", marginBottom: 3, fontWeight: 700 }}>Foto {k.toUpperCase()} (hasil potong)</div>
-                    <img src={fotoBaru[k].url} alt={`Foto ${k}`} data-testid={`driver-scan-${k}`} style={{ width: "100%", borderRadius: 6, border: "1px solid #30363d", display: "block" }} />
+                    <img src={fotoBaru[k].url} alt={`Foto ${k}`} data-testid={`driver-scan-${k}`} style={{ width: "100%", aspectRatio: "85.6 / 53.98", objectFit: "contain", background: "#0d1117", borderRadius: 6, border: "1px solid #30363d", display: "block" }} />
                   </div>
                 ))}
               </div>

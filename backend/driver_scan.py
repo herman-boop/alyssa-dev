@@ -11,10 +11,13 @@ import re
 PROMPT = (
     "Foto ini berisi KTP Indonesia dan/atau SIM Indonesia (bisa keduanya dalam satu foto, atas-bawah atau kiri-kanan, "
     "bisa miring/berdebu/sedikit buram). Balas HANYA dengan JSON valid, tanpa penjelasan, bentuk:\n"
-    '{"ktp":{"ada":false,"box":[0,0,1,1],"nik":"","nama":"","alamat":""},'
-    '"sim":{"ada":false,"box":[0,0,1,1],"no_sim":"","golongan":"","nama":"","alamat":""}}\n'
+    '{"ktp":{"ada":false,"sudut":[[0,0],[1,0],[1,1],[0,1]],"box":[0,0,1,1],"nik":"","nama":"","alamat":""},'
+    '"sim":{"ada":false,"sudut":[[0,0],[1,0],[1,1],[0,1]],"box":[0,0,1,1],"no_sim":"","golongan":"","nama":"","alamat":""}}\n'
     "Aturan:\n"
     "- ada = true bila kartu itu terlihat di foto.\n"
+    "- sudut = EMPAT SUDUT kartu itu tepat di tepi kartunya (bukan latar/meja), sebagai [x,y] pecahan 0..1 terhadap lebar dan tinggi foto, "
+    "berurutan: kiri-atas, kanan-atas, kanan-bawah, kiri-bawah menurut posisi TEKS kartu saat dibaca tegak (kalau kartunya miring atau terputar, "
+    "'atas' tetap sisi atas kartu itu sendiri, tempat judul seperti 'PROVINSI ...' / 'INDONESIA SURAT IZIN MENGEMUDI'). Jangan longgarkan; pas di tepi kartu.\n"
     "- box = [x, y, lebar, tinggi] persegi panjang yang membungkus SELURUH kartu itu (tepi kartu, bukan seluruh foto), "
     "dalam pecahan 0..1 terhadap lebar dan tinggi foto. Longgarkan sedikit (sekitar 1-2%) supaya tepi kartu tidak terpotong.\n"
     "- nik = 16 digit NIK di KTP, tulis angka saja. no_sim = nomor SIM seperti tercetak: SIM lama 12-14 digit (boleh tanda hubung); SIM model baru memakai NIK 16 digit sebagai nomor SIM, itu benar, tulis apa adanya.\n"
@@ -52,6 +55,29 @@ def call_ai(data: bytes, media_type: str, key: str, model: str, post) -> dict:
         return json.loads(txt[a:b + 1])
     except Exception:
         raise ValueError("Foto tidak terbaca. Coba foto lebih terang/lurus, kartu penuh di dalam foto.")
+
+
+def _sudut(v):
+    """4 sudut [[x,y]x4] (kiri-atas, kanan-atas, kanan-bawah, kiri-bawah) pecahan 0..1, atau None bila tak masuk akal.
+    Dicek: bentuk cembung dan luas wajar. Rasio sisi (kartu ID-1 = 1,59) dicek di frontend dalam piksel, karena pecahan tergantung rasio foto."""
+    try:
+        pts = [(float(p[0]), float(p[1])) for p in v]
+        if len(pts) != 4:
+            return None
+    except Exception:
+        return None
+    pts = [(max(-0.02, min(1.02, x)), max(-0.02, min(1.02, y))) for x, y in pts]
+    pts = [(max(0.0, min(1.0, x)), max(0.0, min(1.0, y))) for x, y in pts]
+    cross = []
+    for i in range(4):
+        (x0, y0), (x1, y1), (x2, y2) = pts[i], pts[(i + 1) % 4], pts[(i + 2) % 4]
+        cross.append((x1 - x0) * (y2 - y1) - (y1 - y0) * (x2 - x1))
+    if not (all(c > 0 for c in cross) or all(c < 0 for c in cross)):
+        return None
+    area = abs(sum(pts[i][0] * pts[(i + 1) % 4][1] - pts[(i + 1) % 4][0] * pts[i][1] for i in range(4))) / 2
+    if area < 0.03:
+        return None
+    return [[round(x, 4), round(y, 4)] for x, y in pts]
 
 
 def _digits(v) -> str:
@@ -129,7 +155,7 @@ def normalisasi(raw: dict) -> dict:
 
     return {
         "fields": fields,
-        "ktp": {"ada": bool(ktp.get("ada")), "box": _box(ktp.get("box"))},
-        "sim": {"ada": bool(sim.get("ada")), "box": _box(sim.get("box"))},
+        "ktp": {"ada": bool(ktp.get("ada")), "box": _box(ktp.get("box")), "sudut": _sudut(ktp.get("sudut"))},
+        "sim": {"ada": bool(sim.get("ada")), "box": _box(sim.get("box")), "sudut": _sudut(sim.get("sudut"))},
         "peringatan": warn,
     }
