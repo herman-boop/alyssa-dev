@@ -92,3 +92,11 @@ def test_endpoint_sukses_tidak_menyimpan(client, monkeypatch):
     assert r.status_code == 200
     j = r.json()
     assert j["fields"]["no_ktp"] == "3174091405720005" and j["sim"]["box"] and j["ktp"]["box"]
+
+
+def test_sim_baru_nomornya_nik_16_digit_tanpa_peringatan():
+    n = ds.normalisasi({"ktp": {"ada": True, "nik": "3602241708940002", "nama": "A"},
+                        "sim": {"ada": True, "no_sim": "3602241708940002", "golongan": "B II Umum", "nama": "A"}})
+    assert n["fields"]["no_sim"] == "3602241708940002" and n["peringatan"] == []
+    n2 = ds.normalisasi({"sim": {"no_sim": "12345"}})
+    assert any("Nomor SIM" in w for w in n2["peringatan"])
