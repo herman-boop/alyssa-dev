@@ -22,6 +22,7 @@ import kpi  # KPI & poin Admin Operasional 2 (pekan Minggu 09:00 WIB)
 import aktivitas  # Riwayat Aktivitas akun
 import belum_tagih  # Excel unit PO belum ditagih
 import permintaan_harga  # upload permintaan harga pelanggan -> HPP + Excel hasil
+import konfirmasi_harga  # Excel konfirmasi harga: deal vs invoice per unit
 import leg_supplier  # supplier per leg + pembayaran supplier
 import driver_incentive  # insentif per checkpoint driver borongan (antrean bayar)
 import driver_notif  # notif WhatsApp ke driver saat insentif dibayar
@@ -3689,6 +3690,26 @@ async def admin_deal_prices():
         units = o.get("units") or []
         out[oid] = {"price": price_by_order.get(oid, 0), "units": (len(units) if units else 1)}
     return {"prices": out}
+
+
+@api_router.post("/admin/konfirmasi-harga/xlsx", dependencies=[Depends(require_admin_pin)])
+async def konfirmasi_harga_xlsx(body: dict = Body(...)):
+    """Excel Konfirmasi Harga untuk unit PO yang dicentang: NO | NO POL | HARGA DEAL | HARGA INVOICE | SELISIH.
+    Hanya membaca (PO, trip, Histori Dokumen); tidak mengubah apa pun."""
+    items = [i for i in (body.get("items") or []) if isinstance(i, dict) and i.get("order_id")][:500]
+    if not items:
+        raise HTTPException(400, "Tidak ada unit")
+    oids = sorted({str(i["order_id"]) for i in items})
+    orders = {o["order_id"]: o async for o in db.orders.find({"order_id": {"$in": oids}}, {"_id": 0})}
+    deal = {}
+    async for t in db.trips.find({"order_id": {"$in": oids}}, {"_id": 0, "order_id": 1, "finance": 1}):
+        deal[t.get("order_id")] = int((t.get("finance") or {}).get("invoice_total") or 0)
+    invoices = [d async for d in db.doc_history.find({"jenis": "invoice"}, {"_id": 0, "no_dokumen": 1, "order_ids": 1, "lines": 1}).allow_disk_use(True)]
+    baris = konfirmasi_harga.hitung(items, orders, deal, invoices)
+    judul = str(body.get("judul") or "Konfirmasi Harga")[:120]
+    xl = konfirmasi_harga.ke_xlsx(baris, judul)
+    return Response(xl, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": 'attachment; filename="konfirmasi-harga.xlsx"'})
 
 
 class DocSeqBody(BaseModel):
