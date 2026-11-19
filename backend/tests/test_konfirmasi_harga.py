@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 import konfirmasi_harga as kh
 import server
 
-O1 = {"order_id": "O1", "units": [{"unit_id": "u1", "nopol": "B 9520 KAW", "no_rangka": "MHCPHR54CNJ516232"}]}
+O1 = {"order_id": "O1", "asal_kota": "JAKARTA", "tujuan_kota": "MEDAN", "units": [{"unit_id": "u1", "nopol": "B 9520 KAW", "no_rangka": "MHCPHR54CNJ516232", "vehicle_type": "MPV", "tipe_model": "Innova"}]}
 O2 = {"order_id": "O2", "units": [{"unit_id": "a", "no_rangka": "YV2RP90D1TA381470"}, {"unit_id": "b", "no_rangka": "YV2RP90DXTA381483"}]}
 INV = [{"no_dokumen": "INV-1", "order_ids": ["O1"], "lines": [{"ket": "MPV B 9520 KAW (JKT–MDN)<br>No. Rangka: MHCPHR54CNJ516232", "harga": 4500000, "qty": 1}]},
        {"no_dokumen": "INV-2", "order_ids": ["O2"], "lines": [{"ket": "SIDE DUMP No. Rangka: YV2RP90D1TA381470", "harga": 9000000}, {"ket": "SIDE DUMP No. Rangka: YV2RP90DXTA381483", "harga": 9500000}]}]
@@ -40,9 +40,10 @@ def test_excel_selisih_rumus_dan_total():
     r = kh.hitung([{"order_id": "O1", "unit_id": "u1"}], {"O1": O1}, {"O1": 5000000}, INV)
     ws = load_workbook(io.BytesIO(kh.ke_xlsx(r, "PT X"))).active
     rows = [[c.value for c in row] for row in ws.iter_rows(min_row=3)]
-    assert rows[0] == ["NO", "NO POL", "HARGA DEAL", "HARGA INVOICE", "SELISIH"]
-    assert rows[1][:4] == [1, "B 9520 KAW", 5000000, 4500000] and str(rows[1][4]).startswith("=IF(")
-    assert rows[2][1] == "TOTAL" and rows[2][2] == "=SUM(C4:C4)"
+    assert rows[0] == ["NO", "NO POL", "NO RANGKA", "TIPE UNIT", "ASAL", "TUJUAN", "HARGA DEAL", "HARGA INVOICE", "SELISIH"]
+    assert rows[1][:8] == [1, "B 9520 KAW", "MHCPHR54CNJ516232", "MPV Innova", "JAKARTA", "MEDAN", 5000000, 4500000]
+    assert rows[1][8] == '=IF(OR(G4="",H4=""),"",G4-H4)'
+    assert rows[2][1] == "TOTAL" and rows[2][6] == "=SUM(G4:G4)" and rows[2][8] == "=SUM(I4:I4)"
 
 
 def test_endpoint(monkeypatch):
@@ -55,5 +56,5 @@ def test_endpoint(monkeypatch):
     r = c.post("/api/admin/konfirmasi-harga/xlsx", json={"items": [{"order_id": "O1", "unit_id": "u1"}], "judul": "PT X"})
     assert r.status_code == 200 and r.content[:2] == b"PK"
     ws = load_workbook(io.BytesIO(r.content)).active
-    assert [ws.cell(row=4, column=k).value for k in (1, 2, 3, 4)] == [1, "B 9520 KAW", 5000000, 4500000]
+    assert [ws.cell(row=4, column=k).value for k in (1, 2, 5, 6, 7, 8)] == [1, "B 9520 KAW", "JAKARTA", "MEDAN", 5000000, 4500000]
     assert c.post("/api/admin/konfirmasi-harga/xlsx", json={"items": []}).status_code == 400
