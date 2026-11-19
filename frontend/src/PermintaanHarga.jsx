@@ -6,7 +6,7 @@
 import { useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { PenawaranCetakButton, METODE_LIST } from "./PenawaranCetak";
-import { hargaBaris, entriPenawaran, hargaDariHpp, punyaHpp, isiDariHpp } from "./hitungPermintaan";
+import { gabungModa, hargaBaris, entriPenawaran, hargaDariHpp, punyaHpp, isiDariHpp } from "./hitungPermintaan";
 
 const API = `${process.env.REACT_APP_BACKEND_URL || ""}/api`;
 const rp = (n) => (Number(n) > 0 ? "Rp " + Number(n).toLocaleString("id-ID") : "—");
@@ -18,7 +18,10 @@ export default function PermintaanHarga({ headers }) {
   const [info, setInfo] = useState({ nama: "", total: 0, cocok: 0, tanpa: 0 });
   const [margin, setMargin] = useState("10");
   const [kepada, setKepada] = useState("");
-  const [moda, setModa] = useState("");
+  const [pilihModa, setPilihModa] = useState([]);   // chip metode yang dicentang
+  const [modaManual, setModaManual] = useState("");
+  const [modaBaris, setModaBaris] = useState({});    // { indeksBaris: "Kapal Laut + Car Carrier" }
+  const [centang, setCentang] = useState({});        // { indeksBaris: true }
   const [manual, setManual] = useState({});          // { indeksBaris: "isian admin" }
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -31,7 +34,7 @@ export default function PermintaanHarga({ headers }) {
     try {
       const fd = new FormData(); fd.append("file", f);
       const r = await axios.post(`${API}/admin/penawaran/permintaan-harga`, fd, { headers, timeout: 180000 });
-      setRows(r.data.rows || []); setManual({});
+      setRows(r.data.rows || []); setManual({}); setModaBaris({}); setCentang({});
       setInfo({ nama: f.name, total: r.data.total, cocok: r.data.cocok, tanpa: r.data.tanpa_hpp });
     } catch (e) {
       setErr(e?.response?.data?.detail || "Gagal membaca file. Coba Excel/CSV.");
@@ -39,7 +42,11 @@ export default function PermintaanHarga({ headers }) {
   };
 
   const harga = useMemo(() => rows.map((r, i) => hargaBaris(r, margin, manual[i])), [rows, margin, manual]);
-  const entri = useMemo(() => entriPenawaran(rows, margin, manual, moda), [rows, margin, manual, moda]);
+  const entri = useMemo(() => entriPenawaran(rows, margin, manual, modaBaris), [rows, margin, manual, modaBaris]);
+  const modaTerpilih = gabungModa(pilihModa, METODE_LIST, modaManual);
+  const idxCentang = rows.map((_, i) => i).filter((i) => centang[i]);
+  const semuaCentang = rows.length > 0 && idxCentang.length === rows.length;
+  const terapkan = (idxs) => setModaBaris((m) => { const n = { ...m }; idxs.forEach((i) => { if (modaTerpilih) n[i] = modaTerpilih; else delete n[i]; }); return n; });
   const kosong = harga.filter((h) => h <= 0).length;
 
   const unduhExcel = async () => {
@@ -74,29 +81,44 @@ export default function PermintaanHarga({ headers }) {
               <input style={{ ...IN, width: 70 }} inputMode="decimal" value={margin} onChange={(e) => setMargin(e.target.value.replace(/[^0-9.]/g, ""))} data-testid="ph-margin" />
             </label>
             <input style={{ ...IN, minWidth: 170 }} placeholder="Kepada (nama pelanggan)" value={kepada} onChange={(e) => setKepada(e.target.value)} data-testid="ph-kepada" />
-            <select style={IN} value={moda} onChange={(e) => setModa(e.target.value)} data-testid="ph-moda">
-              <option value="">Moda (isi nanti)</option>
-              {METODE_LIST.map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
             <button style={BTN} onClick={() => setManual((m) => isiDariHpp(rows, margin, m))} data-testid="ph-isi-semua" title="Isi Biaya Pengiriman semua baris yang punya HPP dengan HPP + margin">Isi dari HPP + margin</button>
             <button style={BTN} onClick={unduhExcel} data-testid="ph-excel">⬇ Excel (Biaya Pengiriman terisi)</button>
             <span data-testid="ph-penawaran-wrap"><PenawaranCetakButton rows={entri} namaPt={kepada} style={{ padding: "8px 14px", fontSize: 12.5 }} /></span>
+          </div>
+          <div style={{ border: "1px solid #1c2433", borderRadius: 8, padding: 10, marginBottom: 10 }} data-testid="ph-moda-panel">
+            <div style={{ fontSize: 12, color: "#d9c58a", fontWeight: 700, marginBottom: 6 }}>Moda Pengiriman — centang metode, lalu terapkan ke baris</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+              {METODE_LIST.map((m) => {
+                const on = pilihModa.includes(m);
+                return <button key={m} type="button" data-testid="ph-chip" aria-pressed={on} onClick={() => setPilihModa((p) => on ? p.filter((x) => x !== m) : [...p, m])}
+                  style={{ ...BTN, padding: "6px 12px", background: on ? "#EF9F27" : "#161b22", color: on ? "#000" : "#e6edf3", borderColor: on ? "#EF9F27" : "#30363d" }}>{on ? "✓ " : ""}{m}</button>;
+              })}
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <input style={{ ...IN, flex: 1, minWidth: 180 }} placeholder="atau ketik manual, mis. Kapal Laut + Car Carrier" value={modaManual} onChange={(e) => setModaManual(e.target.value)} data-testid="ph-moda-manual" />
+              <button style={BTN} disabled={!idxCentang.length} onClick={() => terapkan(idxCentang)} data-testid="ph-moda-centang">Terapkan ke {idxCentang.length} baris dicentang</button>
+              <button style={BTN} onClick={() => terapkan(rows.map((_, i) => i))} data-testid="ph-moda-semua">Terapkan ke semua baris</button>
+            </div>
+            <div style={{ fontSize: 11.5, color: "#8b98ad", marginTop: 6 }}>Dipilih: <b style={{ color: "#e6edf3" }}>{modaTerpilih || "— (kosong: terapkan akan mengosongkan moda baris)"}</b></div>
           </div>
           {kosong > 0 && <div style={{ fontSize: 12, color: "#d29922", marginBottom: 8 }} data-testid="ph-kosong">⚠️ {kosong} baris belum punya harga (isi manual di kolom Biaya Pengiriman). Baris itu tidak ikut ke penawaran.</div>}
           <div style={{ maxHeight: 420, overflow: "auto", border: "1px solid #1c2433", borderRadius: 8 }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, color: "#e6edf3", background: "#0f1520" }}>
               <thead><tr style={{ position: "sticky", top: 0, background: "#161b22", color: "#8b98ad", textAlign: "left" }}>
-                {["No", "Tipe Kendaraan", "Pengambilan", "Pengiriman", "HPP", "Biaya Pengiriman"].map((h) => <th key={h} style={{ padding: "7px 8px", fontSize: 11, textTransform: "uppercase", whiteSpace: "nowrap" }}>{h}</th>)}
+                <th style={{ padding: "7px 8px" }}><input type="checkbox" aria-label="Centang semua" checked={semuaCentang} onChange={(e) => setCentang(e.target.checked ? Object.fromEntries(rows.map((_, i) => [i, true])) : {})} data-testid="ph-centang-semua" /></th>
+                {["No", "Tipe Kendaraan", "Pengambilan", "Pengiriman", "Moda", "HPP", "Biaya Pengiriman"].map((h) => <th key={h} style={{ padding: "7px 8px", fontSize: 11, textTransform: "uppercase", whiteSpace: "nowrap" }}>{h}</th>)}
               </tr></thead>
               <tbody>
                 {rows.map((r, i) => {
                   const b = badge(r);
                   return (
                     <tr key={i} data-testid="ph-row" style={{ borderTop: "1px solid #1c2433", color: "#e6edf3" }}>
+                      <td style={{ padding: "6px 8px" }}><input type="checkbox" aria-label={`Centang baris ${i + 1}`} checked={!!centang[i]} onChange={(e) => setCentang((c) => { const n = { ...c }; if (e.target.checked) n[i] = true; else delete n[i]; return n; })} data-testid="ph-centang" /></td>
                       <td style={{ padding: "6px 8px", color: "#8b98ad" }}>{r.no || i + 1}</td>
                       <td style={{ padding: "6px 8px" }}>{r.tipe}</td>
                       <td style={{ padding: "6px 8px" }}>{r.asal}</td>
                       <td style={{ padding: "6px 8px" }}>{r.tujuan}</td>
+                      <td style={{ padding: "6px 8px", fontSize: 11.5, color: modaBaris[i] ? "#EF9F27" : "#8b98ad" }} data-testid="ph-moda-baris">{modaBaris[i] || "—"}</td>
                       <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>
                         <div>{rp(r.hpp)}</div>
                         <div style={{ fontSize: 10.5, color: b.c }} title={r.n > 1 ? `Median dari ${r.n} harga (terendah ${rp(r.min)}, tertinggi ${rp(r.max)})` : ""}>{b.t}</div>
