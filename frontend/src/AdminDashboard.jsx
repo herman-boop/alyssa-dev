@@ -29,6 +29,7 @@ import { htmlKePng, bagikanPng, printPenawaran, simpanPenawaranGambar } from "./
 import SuratPermohonanModal, { cetakUlangSurat } from "./SuratPermohonan";
 import DaftarHargaGrid from "./DaftarHargaGrid";
 import PermintaanHarga from "./PermintaanHarga";
+import SimpanKeKalkulator from "./SimpanKeKalkulator";
 import { daftarDriverRows, daftarDriverCsv } from "./daftarDriver";
 import { namaUntukLink, pesanLinkTugas } from "./pesanLinkTugas";
 import { htmlDaftarDriver, kirimGambarDaftarDriver } from "./daftarDriverDoc";
@@ -5740,7 +5741,8 @@ function HistoriDokumen({ headers }) {
   const [fQ, setFQ] = useState("");                  // no dokumen / customer / PO
   const [fCust, setFCust] = useState("");            // kunci nama pelanggan (alfanumerik saja)
   const [page, setPage] = useState(1);
-  const [fakturWaBusy, setFakturWaBusy] = useState("");   // id faktur yang sedang dibuat gambarnya untuk WhatsApp
+  const [fakturWaBusy, setFakturWaBusy] = useState("");
+  const [simpanKalk, setSimpanKalk] = useState(null);   // penawaran yang sedang diberi nama + disimpan ke Kalkulator HPP   // id faktur yang sedang dibuat gambarnya untuk WhatsApp
   const [payRec, setPayRec] = useState(null);        // faktur yang lagi dibuka modal pembayarannya
   const [editRec, setEditRec] = useState(null);      // faktur yang lagi dibuka modal Edit / Tambah Unit
   const [stempelRec, setStempelRec] = useState(null); // faktur yang lagi dibuka modal TTD / Stempel / Materai
@@ -5968,6 +5970,7 @@ function HistoriDokumen({ headers }) {
 
   return (
     <div className="adm-dochist" data-testid="adm-dochist">
+      {simpanKalk && <SimpanKeKalkulator rec={simpanKalk} headers={headers} onClose={() => setSimpanKalk(null)} onDone={() => load()} />}
       <div className="adm-dochist-filters">
         {DOC_HIST_FILTERS.map((f) => (
           <button key={f.key || "all"}
@@ -6103,6 +6106,9 @@ function HistoriDokumen({ headers }) {
                   )}
                   {rec.jenis === "invoice" && (
                     <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={() => reprint(rec, { polos: true })} title="Cetak polos tanpa TTD/stempel (untuk stempel basah)" data-testid="dochist-print-polos">📄 Polos</button>
+                  )}
+                  {rec.jenis === "penawaran" && (
+                    <button className="adm-btn adm-btn-ghost adm-dochist-btn" onClick={async () => { let r2 = rec; try { const x = await axios.get(`${API}/admin/doc-history/${rec.id}`, { headers }); if (x.data) r2 = x.data; } catch {} setSimpanKalk(r2); }} title="Beri nama pelanggan + moda, simpan rute dan harga ke Kalkulator HPP" data-testid="dochist-simpan-kalk">💾 Kalkulator HPP</button>
                   )}
                   {rec.jenis === "penawaran" && (
                     <button className="adm-btn adm-btn-ghost adm-dochist-btn" disabled={!!fakturWaBusy} onClick={() => kirimWaPenawaran(rec)} title="Kirim penawaran lewat WhatsApp (gambar tajam)" data-testid="dochist-wa-penawaran">{fakturWaBusy === rec.id + ":pnw" ? "Membuat…" : "📲 WhatsApp"}</button>
