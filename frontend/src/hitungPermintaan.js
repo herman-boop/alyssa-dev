@@ -28,16 +28,27 @@ export function isiDariHpp(rows, marginPct, manualSekarang) {
 }
 
 /* Entri untuk PenawaranCetakButton ({rute, moda, tipe_kendaraan, harga_deal, ...}). Baris tanpa harga dilewati. */
-export function entriPenawaran(rows, marginPct, manualMap, moda) {
+/* Gabung metode yang dicentang (urut sesuai daftar) + isian ketik manual -> "Kapal Laut + Car Carrier". */
+export function gabungModa(dicentang, urutan, manualText) {
+  const pilih = new Set(dicentang || []);
+  const hasil = (urutan || []).filter((m) => pilih.has(m));
+  const teks = String(manualText || "").trim();
+  if (teks) hasil.push(teks);
+  return hasil.join(" + ");
+}
+
+/* modaBaris: { indeksBaris: "Kapal Laut + Car Carrier" } (atau string tunggal untuk semua baris). */
+export function entriPenawaran(rows, marginPct, manualMap, modaBaris) {
   const seen = new Set(), out = [];
   (rows || []).forEach((r, i) => {
     const harga = hargaBaris(r, marginPct, (manualMap || {})[i]);
     if (harga <= 0) return;
     const rute = r.asal && r.tujuan ? `${r.asal} → ${r.tujuan}` : (r.tujuan || r.asal || "-");
-    const k = `${rute}|${r.tipe}|${harga}`;
+    const moda = typeof modaBaris === "string" ? modaBaris : ((modaBaris || {})[i] || "");
+    const k = `${rute}|${r.tipe}|${harga}|${moda}`;
     if (seen.has(k)) return;
     seen.add(k);
-    out.push({ rute, moda: String(moda || ""), tipe_kendaraan: r.tipe || "", harga_deal: harga, catatan: "", tanggal: "" });
+    out.push({ rute, moda: String(moda), tipe_kendaraan: r.tipe || "", harga_deal: harga, catatan: "", tanggal: "" });
   });
   return out;
 }
