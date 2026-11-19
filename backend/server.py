@@ -23,6 +23,7 @@ import aktivitas  # Riwayat Aktivitas akun
 import belum_tagih  # Excel unit PO belum ditagih
 import permintaan_harga  # upload permintaan harga pelanggan -> HPP + Excel hasil
 import konfirmasi_harga  # Excel konfirmasi harga: deal vs invoice per unit
+import penawaran_simpan  # penawaran arsip -> riwayat harga pelanggan di Kalkulator HPP
 import leg_supplier  # supplier per leg + pembayaran supplier
 import driver_incentive  # insentif per checkpoint driver borongan (antrean bayar)
 import driver_notif  # notif WhatsApp ke driver saat insentif dibayar
@@ -1481,6 +1482,50 @@ async def set_doc_history_nomor(doc_id: str, body: NomorBody):
         {"$set": {"no_dokumen": nomor, "meta.no_invoice": nomor, "no_dokumen_sebelumnya": d.get("no_dokumen") or ""}},
     )
     return {"ok": True, "no_dokumen": nomor, "berubah": True}
+
+
+class SimpanKalkBody(BaseModel):
+    nama_pt: str
+    moda: str = ""
+
+
+@api_router.post("/admin/doc-history/{doc_id}/simpan-ke-kalkulator", dependencies=[Depends(require_admin_pin)])
+async def simpan_penawaran_ke_kalkulator(doc_id: str, body: SimpanKalkBody):
+    """Beri nama pelanggan (dan moda) pada penawaran yang sudah dicetak, lalu simpan rutenya sebagai riwayat harga
+    pelanggan itu di Kalkulator HPP. Pelanggan baru dibuat bila belum ada (nama tidak peka huruf besar/kecil).
+    Rute tanpa harga atau kembar dengan riwayat yang sudah ada dilewati. Cetak ulang penawaran memakai nama baru."""
+    nama = " ".join((body.nama_pt or "").split())[:120]
+    if not nama:
+        raise HTTPException(400, "Nama pelanggan wajib diisi")
+    d = await db.doc_history.find_one({"id": doc_id}, {"_id": 0})
+    if not d:
+        raise HTTPException(404, "Dokumen tidak ditemukan")
+    if d.get("jenis") != "penawaran":
+        raise HTTPException(400, "Hanya untuk penawaran")
+    import re as _re
+    sudah_ada = bool(await db.pelanggan_profiles.find_one({"nama_pt": _re.compile(r"^\s*" + _re.escape(nama) + r"\s*$", _re.IGNORECASE)}, {"_id": 1}))
+    prof = await create_pelanggan(PelangganCreateBody(nama_pt=nama))      # buat baru, atau ambil yang sudah ada
+    nama_pt = prof.get("nama_pt") or nama
+    entri, dilewati = penawaran_simpan.bangun_entri(d.get("units") or [], body.moda, prof.get("harga_history") or [])
+    now = datetime.utcnow().isoformat()
+    docs = [{"id": _gen_pelanggan_id(), "rute": e["rute"], "hpp": 0, "harga_deal": e["harga_deal"], "margin_aktual": 0,
+             "tipe_kendaraan": e["tipe_kendaraan"], "catatan": e["catatan"], "asuransi": e["asuransi"], "moda": e["moda"], "tanggal": now}
+            for e in entri]
+    if docs:
+        await db.pelanggan_profiles.update_one({"id": prof["id"]}, {"$push": {"harga_history": {"$each": docs, "$slice": -penawaran_simpan.BATAS_RIWAYAT}}})
+    # arsip penawaran: nama pelanggan + moda terisi (untuk cetak ulang)
+    moda_baru = penawaran_simpan._moda_ada(body.moda)
+    units = []
+    for u in d.get("units") or []:
+        u = dict(u) if isinstance(u, dict) else u
+        if isinstance(u, dict) and moda_baru and not penawaran_simpan._moda_ada(u.get("moda")):
+            u["moda"] = moda_baru
+        units.append(u)
+    judul = d.get("judul") or ""
+    judul = nama_pt + (" · " + judul.split(" · ", 1)[1] if " · " in judul else "")
+    await db.doc_history.update_one({"id": doc_id}, {"$set": {"customer": nama_pt, "meta.nama_pt": nama_pt, "judul": judul[:200], "units": units}})
+    return {"ok": True, "pelanggan_id": prof["id"], "nama_pt": nama_pt, "baru": not sudah_ada,
+            "ditambah": len(docs), "dilewati": dilewati}
 
 
 @api_router.get("/admin/doc-history/{doc_id}", dependencies=[Depends(require_admin_pin)])
@@ -6515,7 +6560,7 @@ async def get_pelanggan(pelanggan_id: str):
     doc = await db.pelanggan_profiles.find_one({"id": pelanggan_id}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Pelanggan tidak ditemukan")
-    doc["harga_history"] = (doc.get("harga_history") or [])[-200:]
+    doc["harga_history"] = (doc.get("harga_history") or [])[-300:]
     return doc
 
 @api_router.patch("/admin/pelanggan/{pelanggan_id}", dependencies=[Depends(require_admin_pin)])
@@ -6554,10 +6599,10 @@ async def add_pelanggan_harga(pelanggan_id: str, body: PelangganHargaBody):
     }
     await db.pelanggan_profiles.update_one(
         {"id": pelanggan_id},
-        {"$push": {"harga_history": {"$each": [entry], "$slice": -100}}}
+        {"$push": {"harga_history": {"$each": [entry], "$slice": -300}}}
     )
     updated = await db.pelanggan_profiles.find_one({"id": pelanggan_id}, {"_id": 0})
-    updated["harga_history"] = (updated.get("harga_history") or [])[-200:]
+    updated["harga_history"] = (updated.get("harga_history") or [])[-300:]
     return updated
 
 
