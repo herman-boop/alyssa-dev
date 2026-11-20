@@ -22,7 +22,10 @@ export function ketBersih(ket) {
   }
   const unit = kept.join(" ");
   const rangka = String(m[3] || "").trim();
-  const nr = norm(rangka);
-  const pakaiRangka = rangka && !(nr.length >= 5 && norm(unit).includes(nr));
+  const nr = norm(rangka), nu = norm(unit);
+  // Rangka dianggap dobel bila utuh ada di teks unit, ATAU semua kata/nomornya sudah ada di teks unit
+  // (mis. kotak Rangka berisi "T58512-2611111 SDT 85 CU.M"). VIN asli tidak ada di teks unit, jadi tetap tampil.
+  const semuaAda = rangka.split(/\s+/).filter(Boolean).every((t) => { const n = norm(t); return !n || nu.includes(n); });
+  const pakaiRangka = rangka && !(nr.length >= 5 && (nu.includes(nr) || semuaAda));
   return `${unit}${unit ? " " : ""}${m[2]}${pakaiRangka ? `<br>No. Rangka: ${rangka}` : ""}`;
 }
