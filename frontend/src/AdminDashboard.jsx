@@ -293,6 +293,7 @@ function Dashboard({ pin, me, onLogout }) {
   }, [me?.role]); // eslint-disable-line
   const [createSheet, setCreateSheet] = useState(false);
   const [stats, setStats] = useState(null);
+  const { types: vehicleTypes } = useVehicleTypes();   // tipe bawaan + tipe custom (mis. ditambah lewat Kalkulator HPP)
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -858,6 +859,7 @@ function Dashboard({ pin, me, onLogout }) {
             forceExpand={!!custFilter}
             onConvert={() => setConvertModal(o)}
             onPatch={(body) => patchOrder(o.order_id, body)}
+            vehicleTypes={vehicleTypes}
             onOdoo={doOdoo}
             onDelete={() => deleteOrder(o.order_id)}
             onOpenLegs={() => setLegsModal({ tripId: o.trip_id, order: o })}
@@ -2615,7 +2617,7 @@ function DuplicateVendorModal({ order, headers, onClose }) {
   ), document.body);
 }
 
-function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLegs, onOpenBonus, headers, kordList = [], cartHas = () => false, onToggleCartUnit = () => {}, onCartSetOrderUnits = () => {}, forceExpand = false }) {
+function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLegs, onOpenBonus, headers, kordList = [], vehicleTypes = VEHICLE_TYPE_LIST, cartHas = () => false, onToggleCartUnit = () => {}, onCartSetOrderUnits = () => {}, forceExpand = false }) {
   const [uploadingStage, setUploadingStage] = useState(null); // stage key lagi upload
   const [expanded, setExpanded] = useState(forceExpand);
   // Auto-buka kartu saat filter pelanggan aktif (biar semua unit langsung kelihatan).
@@ -3198,7 +3200,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
                   data-testid={`adm-vehicle-type-${order.order_id}`}
                 >
                   <option value="">— Tipe —</option>
-                  {VEHICLE_TYPE_LIST.map((v) => <option key={v} value={v}>{v}</option>)}
+                  {Array.from(new Set([...vehicleTypes, vtDraft].filter(Boolean))).map((v) => <option key={v} value={v}>{v}</option>)}
                 </select>
                 <input
                   className="adm-input-inline adm-mono"
@@ -3275,7 +3277,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
                   <span className="adm-unit-no">{i + 1}</span>
                   <select className="adm-input-inline" value={editUnit.vt} onChange={(e) => setEditUnit((d) => ({ ...d, vt: e.target.value }))} data-testid={`adm-unit-edit-vt-${order.order_id}-${i}`}>
                     <option value="">— Tipe —</option>
-                    {Array.from(new Set([...VEHICLE_TYPE_LIST, editUnit.vt].filter(Boolean))).map((v) => <option key={v} value={v}>{v}</option>)}
+                    {Array.from(new Set([...vehicleTypes, editUnit.vt].filter(Boolean))).map((v) => <option key={v} value={v}>{v}</option>)}
                   </select>
                   <input className="adm-input-inline" style={{ flex: 1, minWidth: 140 }} value={editUnit.tm} onChange={(e) => setEditUnit((d) => ({ ...d, tm: e.target.value }))} onKeyDown={(e) => { if (e.key === "Enter") saveUnitTipe(); }} placeholder="Model, mis. FH16 + SDT 85" autoFocus data-testid={`adm-unit-edit-tm-${order.order_id}-${i}`} />
                   <button type="button" className="adm-btn adm-btn-gold adm-btn-xs" onClick={saveUnitTipe} data-testid={`adm-unit-edit-save-${order.order_id}-${i}`}>OK</button>
