@@ -5,6 +5,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { createPortal } from "react-dom";
 import axios from "axios";
 import { VEHICLE_TYPE_LIST, useVehicleTypes, hasVehicleSketch } from "@/VehicleSketches";
+import { ketBersih } from "./ketBersih";
 import CostCalculator from "@/CostCalculator";
 import DriverData from "@/DriverData";
 import SupplierPage, { printSupplierA4, imageSupplierA4 } from "@/SupplierPage";
@@ -3956,7 +3957,7 @@ function InvoiceModal({ order, headers, onClose, onPrint, onSave, onImage }) {
     }
     const veh = `${u.vehicle_type || ""}${u.tipe_model ? " " + u.tipe_model : ""}`.trim() || "Kendaraan";
     const rangka = u.no_rangka ? `<br>No. Rangka: ${u.no_rangka}` : "";
-    return `${veh}${u.nopol ? " " + u.nopol : ""} ${rute}${rangka}`;
+    return ketBersih(`${veh}${u.nopol ? " " + u.nopol : ""} ${rute}${rangka}`);
   };
 
   const subtotal = rows.reduce((s, r) => s + (r.checked ? hargaNum(r.harga) : 0), 0);
@@ -6270,7 +6271,7 @@ function InvoiceEditModal({ rec, headers, onClose, onSaved, onPrint }) {
       asal_kota: o.asal_kota || "", tujuan_kota: o.tujuan_kota || "", customer: o.customer_nama || "",
     }));
   };
-  const ketOf = (r) => `${r.vehicle_type}${r.nopol ? " " + r.nopol : ""} (${r.asal_kota || "—"}–${r.tujuan_kota || "—"})${r.no_rangka ? `<br>No. Rangka: ${r.no_rangka}` : ""}`;
+  const ketOf = (r) => ketBersih(`${r.vehicle_type}${r.nopol ? " " + r.nopol : ""} (${r.asal_kota || "—"}–${r.tujuan_kota || "—"})${r.no_rangka ? `<br>No. Rangka: ${r.no_rangka}` : ""}`);
   const plain = (h) => String(h || "").replace(/<br\s*\/?>/gi, " · ").replace(/<[^>]+>/g, "");
   // Keterangan baris = "Unit Nopol (Asal–Tujuan)<br>No. Rangka: X" → dipecah jadi 3 kolom yang bisa diedit.
   const parseKet = (ket) => {
@@ -6427,7 +6428,7 @@ function InvoiceEditModal({ rec, headers, onClose, onSaved, onPrint }) {
 // terakhir (mis. MMBENKL30PH080777 → H080777) supaya tiap unit 1 baris dan faktur muat 1 halaman.
 // Hanya tampilan cetak; data tersimpan tetap lengkap.
 function ketSatuBaris(ket) {
-  return String(ket == null ? "" : ket).replace(/<br\s*\/?>\s*No\.?\s*Rangka:\s*([^<]*)/gi, (_, r) => {
+  return ketBersih(ket).replace(/<br\s*\/?>\s*No\.?\s*Rangka:\s*([^<]*)/gi, (_, r) => {
     const v = String(r).trim();
     const t = v.length > 7 ? v.slice(-7) : v;
     return t ? ` · Rangka: ${t}` : "";
@@ -7468,7 +7469,7 @@ function InvoiceGabunganModal({ cart, headers, onClose, onDone }) {
     const veh = `${u.vehicle_type || ""}${u.tipe_model ? " " + u.tipe_model : ""}`.trim() || "Kendaraan";
     const rute = `(${r.asal_kota || "—"}–${r.tujuan_kota || "—"})`;
     const rangka = u.no_rangka ? `<br>No. Rangka: ${u.no_rangka}` : "";
-    return `${veh}${u.nopol ? " " + u.nopol : ""} ${rute}${rangka}`;
+    return ketBersih(`${veh}${u.nopol ? " " + u.nopol : ""} ${rute}${rangka}`);
   };
 
   const subtotal = rows.reduce((s, r) => s + hargaNum(r.harga), 0);
