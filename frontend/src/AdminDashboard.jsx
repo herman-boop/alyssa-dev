@@ -2929,6 +2929,15 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
     } finally { setKordSaving(false); }
   };
 
+  const [editUnit, setEditUnit] = useState(null);   // { id, vt, tm } — edit tipe satu unit di daftar unit PO
+  const saveUnitTipe = async () => {
+    if (!editUnit) return;
+    const asal = units.find((x) => x.unit_id === editUnit.id) || {};
+    const body = { unit_id: editUnit.id, unit_tipe_model: editUnit.tm.trim() };
+    if ((asal.vehicle_type || "") !== editUnit.vt) body.unit_vehicle_type = editUnit.vt;   // tipe dasar dikirim hanya bila diganti
+    await onPatch(body);
+    setEditUnit(null);
+  };
   const saveVehicle = async () => {
     await onPatch({ vehicle_type: vtDraft, nopol: nopolDraft.trim() });
     setEditVehicle(false);
@@ -3260,12 +3269,27 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
               </label>
             )}
             <div className="adm-unit-list">
-              {units.map((u, i) => (
+              {units.map((u, i) => (editUnit && editUnit.id === u.unit_id ? (
+                <div key={u.unit_id} className="adm-unit-item sel" style={{ flexWrap: "wrap", gap: 8 }} data-testid={`adm-unit-edit-${order.order_id}-${i}`}>
+                  <span className="adm-unit-no">{i + 1}</span>
+                  <select className="adm-input-inline" value={editUnit.vt} onChange={(e) => setEditUnit((d) => ({ ...d, vt: e.target.value }))} data-testid={`adm-unit-edit-vt-${order.order_id}-${i}`}>
+                    <option value="">— Tipe —</option>
+                    {Array.from(new Set([...VEHICLE_TYPE_LIST, editUnit.vt].filter(Boolean))).map((v) => <option key={v} value={v}>{v}</option>)}
+                  </select>
+                  <input className="adm-input-inline" style={{ flex: 1, minWidth: 140 }} value={editUnit.tm} onChange={(e) => setEditUnit((d) => ({ ...d, tm: e.target.value }))} onKeyDown={(e) => { if (e.key === "Enter") saveUnitTipe(); }} placeholder="Model, mis. FH16 + SDT 85" autoFocus data-testid={`adm-unit-edit-tm-${order.order_id}-${i}`} />
+                  <button type="button" className="adm-btn adm-btn-gold adm-btn-xs" onClick={saveUnitTipe} data-testid={`adm-unit-edit-save-${order.order_id}-${i}`}>OK</button>
+                  <button type="button" className="adm-btn adm-btn-ghost adm-btn-xs" onClick={() => setEditUnit(null)}><IcoX /></button>
+                </div>
+              ) : (
                 <label key={u.unit_id} className={`adm-unit-item${cartHas(u.unit_id) ? " sel" : ""}`} data-testid={`adm-unit-item-${order.order_id}-${i}`}>
                   <input type="checkbox" checked={cartHas(u.unit_id)} onChange={() => onToggleCartUnit(order, u)} />
                   <span className="adm-unit-no">{i + 1}</span>
                   <span className="adm-unit-main">
-                    <span className="adm-unit-veh">{u.vehicle_type || "—"}{u.tipe_model ? ` · ${u.tipe_model}` : ""}</span>
+                    <span className="adm-unit-veh">{u.vehicle_type || "—"}{u.tipe_model ? ` · ${u.tipe_model}` : ""}
+                      <button type="button" className="adm-link" style={{ marginLeft: 8 }} title="Ubah tipe unit" aria-label="Ubah tipe unit"
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditUnit({ id: u.unit_id, vt: u.vehicle_type || "", tm: u.tipe_model || "" }); }}
+                        data-testid={`adm-unit-edit-btn-${order.order_id}-${i}`}><IcoPencil /></button>
+                    </span>
                     <span className="adm-unit-sub">{u.nopol || "nopol —"}{u.no_rangka ? ` · ${u.no_rangka}` : ""}{u.warna || u.tahun ? ` · ${u.warna || "—"}/${u.tahun || "—"}` : ""}</span>
                   </span>
                   <span className="adm-unit-tags">
@@ -3273,7 +3297,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
                     <span className="adm-utag inv">{u.status_invoice || "Belum Ditagih"}</span>
                   </span>
                 </label>
-              ))}
+              )))}
             </div>
           </div>
         )}

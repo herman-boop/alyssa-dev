@@ -3962,6 +3962,9 @@ async def _driver_master_nama(driver_id: str) -> str:
 
 
 class OrderPatchBody(BaseModel):
+    unit_id: Optional[str] = None            # edit tipe SATU unit di PO (dengan unit_vehicle_type / unit_tipe_model)
+    unit_vehicle_type: Optional[str] = None
+    unit_tipe_model: Optional[str] = None
     status: Optional[str] = None
     driver_id: Optional[str] = None
     nama_driver: Optional[str] = None
@@ -4038,6 +4041,25 @@ async def admin_patch_order(order_id: str, payload: OrderPatchBody):
         if payload.entity_id.strip() and not ent:
             raise HTTPException(400, f"entity_id harus salah satu dari {list(DOC_ENTITIES_VALID)}")
         upd["entity_id"] = ent
+    if payload.unit_id is not None:
+        # Ubah tipe satu unit (mis. "SIDE DUMP" + "FH16 + SDT 85"). Unit lain & data keuangan tidak disentuh.
+        order = await _ensure_order_units(order)
+        units = order.get("units") or []
+        tgt = next((u for u in units if u.get("unit_id") == payload.unit_id), None)
+        if tgt is None:
+            raise HTTPException(404, "Unit tidak ditemukan di PO ini")
+        if payload.unit_vehicle_type is not None:
+            uvt = payload.unit_vehicle_type.strip()
+            if uvt and uvt not in await _all_valid_vehicle_types():
+                raise HTTPException(400, "vehicle_type tidak valid")
+            tgt["vehicle_type"] = uvt
+        if payload.unit_tipe_model is not None:
+            tgt["tipe_model"] = " ".join(payload.unit_tipe_model.split())[:120]
+        tgt["updated_at"] = upd["updated_at"]
+        upd["units"] = units
+        if len(units) == 1:   # PO 1 unit: field legacy (surat jalan, invoice, trip) ikut
+            upd["vehicle_type"] = tgt.get("vehicle_type") or ""
+            upd["tipe_model"] = tgt.get("tipe_model") or ""
     if len(upd) == 1:
         raise HTTPException(400, "No fields to update")
     # PO 1 unit: nopol/no. rangka yang diedit ikut ke units[0] supaya Invoice/Jadwal memakai nilai yang sama.
