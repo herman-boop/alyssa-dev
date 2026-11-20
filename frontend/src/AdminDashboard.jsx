@@ -6513,6 +6513,21 @@ async function buildInvoiceHtml(lines, withTax, extra, opt) {
     const col2 = withPOc === lines.length ? "No. PO" : withPOc === 0 ? "Nama Barang" : "Referensi";
     const cell2 = (l) => poOfL(l) || (l.nama || "Jasa Pengiriman");
     const thS = (w, c, t) => `<th class="${c}"${w ? ` style="width:${w}px"` : ""}>${t}</th>`;
+    const nL = lines.length, cmp = nL >= 4;
+    const lvl = nL >= 15 ? 3 : nL >= 9 ? 2 : nL >= 8 ? 1 : 0;   // 0 = paling lega; tiap tingkat diukur muat 1 halaman A4 (1-17 unit)
+    const tight = lvl >= 2, tiny = lvl >= 3;   // faktur banyak unit dipadatkan supaya tetap 1 halaman (tanda tangan tidak lompat ke halaman 2)
+    const tdPad = !cmp ? 12 : [8, 5, 3, 2][lvl], tdFs = !cmp ? 12.5 : [11.5, 11, 10, 9.5][lvl];
+    const payHtml = `<div class="cs-pay">
+      <div class="bank">${DOC_BRAND.bank.name}</div>
+      <div><div class="no">${DOC_BRAND.bank.norek}</div><div class="an">Cabang ${DOC_BRAND.bank.cabang} &middot; a.n. ${DOC_BRAND.bank.an}</div></div>
+    </div>`;
+    const signHtml = `<div class="cs-sign"><div class="cell">
+      <div class="lbl">Hormat Kami,</div>
+      <div class="stamp ${stempel ? "" : "empty"}">${stempel ? `<img src="${stempel}" alt="stempel">` : ""}</div>
+      <div class="pt">PT. Alyssa Auto Logistik</div>
+      ${ttdNama ? `<div class="nm">( ${ttdNama} )</div>` : ""}
+      ${ttdJabatan ? `<div class="jb">${ttdJabatan}</div>` : ""}
+    </div></div>`;
     const rowsHtml = lines.map((l, i) => `<tr>
       <td class="c">${i + 1}</td>
       <td class="b">${cell2(l)}</td>
@@ -6532,44 +6547,45 @@ async function buildInvoiceHtml(lines, withTax, extra, opt) {
     body { font-family:'Inter', Arial, 'Helvetica Neue', Helvetica, sans-serif; font-size:13px; color:#1B2433; background:#fff; }
     .doc-sheet { padding:0; max-width:186mm; margin:0 auto; }
     .doc-title, .doc-brand-name { color:#000 !important; }
-    .cs-meta { display:flex; justify-content:space-between; align-items:flex-start; gap:24px; margin:4px 0 22px; }
+    .cs-meta { display:flex; justify-content:space-between; align-items:flex-start; gap:24px; margin:4px 0 ${cmp ? 12 : 22}px; }
     .cs-bill .lbl { font-size:11px; font-weight:800; letter-spacing:.4px; text-transform:uppercase; color:#0F2A5C; margin-bottom:5px; }
     .cs-bill .val { font-size:18px; font-weight:800; color:#0F2A5C; }
     table.cs-mt { border-collapse:collapse; font-size:12.5px; }
     table.cs-mt td { padding:2.5px 0; }
     table.cs-mt td:first-child { color:#4A5568; padding-right:22px; white-space:nowrap; }
     table.cs-mt td:last-child { font-weight:700; text-align:right; }
-    table.cs-it { width:100%; border-collapse:separate; border-spacing:0; table-layout:fixed; border:1px solid #E3E7ED; border-radius:10px; overflow:hidden; margin-bottom:20px; }
+    table.cs-it { width:100%; border-collapse:separate; border-spacing:0; table-layout:fixed; border:1px solid #E3E7ED; border-radius:10px; overflow:hidden; margin-bottom:${cmp ? 12 : 20}px; }
     table.cs-it thead { display:table-header-group; }
     table.cs-it tr { break-inside:avoid; page-break-inside:avoid; }
-    table.cs-it th { background:#F3F5F8; color:#0F2A5C; font-weight:800; font-size:12.5px; text-align:left; padding:11px 8px; vertical-align:middle; }
-    table.cs-it td { padding:${lines.length >= 8 ? 7 : 12}px 8px; font-size:${lines.length >= 8 ? 11.5 : 12.5}px; border-top:1px solid #E3E7ED; vertical-align:top; overflow-wrap:anywhere; line-height:1.4; }
+    table.cs-it th { background:#F3F5F8; color:#0F2A5C; font-weight:800; font-size:${cmp ? 11.5 : 12.5}px; text-align:left; padding:${cmp ? 7 : 11}px 8px; vertical-align:middle; }
+    table.cs-it td { padding:${tdPad}px ${cmp ? 6 : 8}px; font-size:${tdFs}px; border-top:1px solid #E3E7ED; vertical-align:top; overflow-wrap:anywhere; line-height:${cmp ? 1.3 : 1.4}; }
     table.cs-it .c { text-align:center; padding-left:4px; padding-right:4px; } table.cs-it .r { text-align:right; } table.cs-it td.r { white-space:nowrap; overflow-wrap:normal; }
     table.cs-it .b { font-weight:700; }
     table.cs-it .sm { font-size:10.5px; font-style:italic; color:#4A5568; margin-top:2px; white-space:normal; font-weight:400; }
-    table.cs-it td .rk { white-space:nowrap; }
-    .cs-sum { display:flex; justify-content:space-between; gap:28px; margin-bottom:22px; break-inside:avoid; page-break-inside:avoid; }
-    .cs-note { flex:1; font-size:12.5px; line-height:1.7; }
+    table.cs-it td .rk { white-space:${cmp ? 'normal' : 'nowrap'}; }
+    .cs-sum { display:flex; justify-content:space-between; gap:28px; margin-bottom:${cmp ? 10 : 22}px; break-inside:avoid; page-break-inside:avoid; }
+    .cs-note { flex:1; font-size:${cmp ? 11.5 : 12.5}px; line-height:${cmp ? 1.5 : 1.7}; }
     .cs-note b { font-weight:800; } .cs-note i { font-style:italic; }
     .cs-tot { width:310px; flex-shrink:0; }
-    .cs-tot .row { display:flex; justify-content:space-between; gap:12px; padding:6px 0; font-size:13px; }
+    .cs-tot .row { display:flex; justify-content:space-between; gap:12px; padding:${cmp ? 3 : 6}px 0; font-size:${cmp ? 12 : 13}px; }
     .cs-tot .row span:last-child { font-weight:700; white-space:nowrap; }
-    .cs-tot .grand { border-top:1.5px solid #8A94A6; margin-top:6px; padding-top:12px; font-size:18px; font-weight:800; color:#0F2A5C; white-space:nowrap; }
+    .cs-tot .grand { border-top:1.5px solid #8A94A6; margin-top:6px; padding-top:${cmp ? 8 : 12}px; font-size:${cmp ? 16 : 18}px; font-weight:800; color:#0F2A5C; white-space:nowrap; }
     .cs-tot .grand span:last-child { font-weight:800; }
     .cs-tot .sisa { color:#0F2A5C; font-weight:800; border-top:1px solid #CBD2DC; margin-top:4px; padding-top:8px; font-size:15px; }
     .cs-paytitle { font-size:12px; font-weight:800; color:#0F2A5C; margin:0 0 6px; text-transform:uppercase; letter-spacing:.4px; }
-    .cs-pay { display:flex; align-items:center; gap:16px; padding:15px 18px; background:#F3F5F8; border-radius:10px; margin:6px 0 24px; break-inside:avoid; }
+    .cs-pay { display:flex; align-items:center; gap:16px; padding:${cmp ? 9 : 15}px 18px; background:#F3F5F8; border-radius:10px; margin:6px 0 ${cmp ? 10 : 24}px; break-inside:avoid; }
     .cs-pay .bank { font-weight:900; font-style:italic; font-size:28px; color:#1565C0; padding-right:16px; border-right:2px solid #C9973A; line-height:1.1; }
     .cs-pay .no { font-size:21px; font-weight:800; letter-spacing:.5px; color:#1B2433; }
     .cs-pay .an { font-size:13px; color:#1B2433; margin-top:2px; }
-    .cs-sign { display:flex; justify-content:flex-end; margin-top:12px; break-inside:avoid; page-break-inside:avoid; }
+    .cs-bot { display:flex; align-items:flex-end; gap:18px; break-inside:avoid; page-break-inside:avoid; } .cs-bot .cs-pay { flex:1; min-width:0; margin-bottom:10px; padding:10px 12px; gap:12px; } .cs-bot .cs-pay .bank { font-size:24px; padding-right:12px; } .cs-bot .cs-pay .no { font-size:16px; } .cs-bot .cs-pay .an { font-size:10.5px; } .cs-bot .cs-sign { flex:0 0 auto; margin-top:0; } .cs-bot .cs-sign .cell { width:230px; }
+    .cs-sign { display:flex; justify-content:flex-end; margin-top:${cmp ? 4 : 12}px; break-inside:avoid; page-break-inside:avoid; }
     .cs-sign .cell { width:270px; text-align:center; }
     .cs-sign .lbl { font-size:13.5px; margin-bottom:6px; }
-    .cs-sign .stamp { min-height:70px; display:flex; align-items:center; justify-content:center; margin-bottom:2px; }
-    .cs-sign .stamp img { max-height:110px; max-width:240px; object-fit:contain; }
-    .cs-sign .stamp.empty { height:60px; }
+    .cs-sign .stamp { min-height:${cmp ? 54 : 70}px; display:flex; align-items:center; justify-content:center; margin-bottom:2px; }
+    .cs-sign .stamp img { max-height:${cmp ? 82 : 110}px; max-width:240px; object-fit:contain; }
+    .cs-sign .stamp.empty { height:${cmp ? 44 : 60}px; }
     .cs-sign .pt { font-size:14px; font-weight:800; } .cs-sign .nm { font-size:14px; font-weight:700; margin-top:2px; } .cs-sign .jb { font-size:12.5px; color:#4A5568; margin-top:2px; }
-    .cs-foot { display:flex; justify-content:space-between; gap:8px; padding-top:10px; margin-top:26px; border-top:2px solid #C9973A; font-size:11.5px; color:#1B2433; }
+    .cs-foot { display:flex; justify-content:space-between; gap:8px; padding-top:8px; margin-top:${cmp ? 12 : 26}px; border-top:2px solid #C9973A; font-size:11.5px; color:#1B2433; }
     ${pvCss}
     ${opt.forImage ? ".doc-sheet { max-width:none; width:751px; padding:24px; }" : ""}
   </style></head><body>
@@ -6586,7 +6602,7 @@ async function buildInvoiceHtml(lines, withTax, extra, opt) {
       </table>
     </div>
     <table class="cs-it">
-      <thead><tr>${thS(30, "c", "No")}${thS(col2 === "Nama Barang" ? 108 : 96, "", col2)}${thS(0, "", "Keterangan")}${thS(40, "c", "Qty")}${thS(112, "r", "Harga Satuan (Rp)")}${perRowIns ? thS(128, "r", "Premi Asuransi (Rp)") : ""}${thS(112, "r", "Jumlah (Rp)")}</tr></thead>
+      <thead><tr>${thS(cmp ? 26 : 30, "c", "No")}${thS(cmp ? 80 : col2 === "Nama Barang" ? 108 : 96, "", col2)}${thS(0, "", "Keterangan")}${thS(cmp ? 30 : 40, "c", "Qty")}${thS(cmp ? 96 : 112, "r", "Harga Satuan (Rp)")}${perRowIns ? thS(cmp ? 112 : 128, "r", "Premi Asuransi (Rp)") : ""}${thS(cmp ? 96 : 112, "r", "Jumlah (Rp)")}</tr></thead>
       <tbody>${rowsHtml}</tbody>
     </table>
     <div class="cs-sum">
@@ -6612,17 +6628,7 @@ async function buildInvoiceHtml(lines, withTax, extra, opt) {
       <tbody>${pays.map((p, i) => `<tr><td class="c">${i + 1}</td><td>${fmtTgl(p.tanggal)}</td><td>${escH(p.metode) || "&nbsp;"}</td><td>${escH(p.catatan) || "&nbsp;"}</td><td class="r">${fRp(Number(p.amount) || 0)}</td></tr>`).join("")}
       <tr><td></td><td colspan="3" class="b">Total Diterima</td><td class="r b">${fRp(diterima)}</td></tr></tbody>
     </table>` : ""}
-    <div class="cs-pay">
-      <div class="bank">${DOC_BRAND.bank.name}</div>
-      <div><div class="no">${DOC_BRAND.bank.norek}</div><div class="an">Cabang ${DOC_BRAND.bank.cabang} &middot; a.n. ${DOC_BRAND.bank.an}</div></div>
-    </div>
-    <div class="cs-sign"><div class="cell">
-      <div class="lbl">Hormat Kami,</div>
-      <div class="stamp ${stempel ? "" : "empty"}">${stempel ? `<img src="${stempel}" alt="stempel">` : ""}</div>
-      <div class="pt">PT. Alyssa Auto Logistik</div>
-      ${ttdNama ? `<div class="nm">( ${ttdNama} )</div>` : ""}
-      ${ttdJabatan ? `<div class="jb">${ttdJabatan}</div>` : ""}
-    </div></div>
+    ${cmp ? `<div class="cs-bot">${payHtml}${signHtml}</div>` : payHtml + signHtml}
     <div class="cs-foot"><span>${noInvoice}</span><span>${DOC_BRAND.tagline}</span><span>PT Alyssa Auto Logistik</span></div>
   </div>
   ${opt.forImage || opt.preview ? "" : `<script>
