@@ -6513,8 +6513,10 @@ async function buildInvoiceHtml(lines, withTax, extra, opt) {
     const col2 = withPOc === lines.length ? "No. PO" : withPOc === 0 ? "Nama Barang" : "Referensi";
     const cell2 = (l) => poOfL(l) || (l.nama || "Jasa Pengiriman");
     const thS = (w, c, t) => `<th class="${c}"${w ? ` style="width:${w}px"` : ""}>${t}</th>`;
-    const nL = lines.length, cmp = nL >= 5, tight = nL >= 9, tiny = nL >= 13;   // faktur banyak unit dipadatkan supaya tetap 1 halaman (tanda tangan tidak lompat ke halaman 2)
-    const tdPad = tiny ? 2 : tight ? 3 : cmp ? 5 : 12, tdFs = tiny ? 9.5 : tight ? 10 : cmp ? 11 : 12.5;
+    const nL = lines.length, cmp = nL >= 4;
+    const lvl = nL >= 15 ? 3 : nL >= 9 ? 2 : nL >= 8 ? 1 : 0;   // 0 = paling lega; tiap tingkat diukur muat 1 halaman A4 (1-17 unit)
+    const tight = lvl >= 2, tiny = lvl >= 3;   // faktur banyak unit dipadatkan supaya tetap 1 halaman (tanda tangan tidak lompat ke halaman 2)
+    const tdPad = !cmp ? 12 : [8, 5, 3, 2][lvl], tdFs = !cmp ? 12.5 : [11.5, 11, 10, 9.5][lvl];
     const payHtml = `<div class="cs-pay">
       <div class="bank">${DOC_BRAND.bank.name}</div>
       <div><div class="no">${DOC_BRAND.bank.norek}</div><div class="an">Cabang ${DOC_BRAND.bank.cabang} &middot; a.n. ${DOC_BRAND.bank.an}</div></div>
