@@ -3285,13 +3285,12 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
                   <input type="checkbox" checked={cartHas(u.unit_id)} onChange={() => onToggleCartUnit(order, u)} />
                   <span className="adm-unit-no">{i + 1}</span>
                   <span className="adm-unit-main">
-                    <span className="adm-unit-veh">{u.vehicle_type || "—"}{u.tipe_model ? ` · ${u.tipe_model}` : ""}
-                      <button type="button" className="adm-link" style={{ marginLeft: 8 }} title="Ubah tipe unit" aria-label="Ubah tipe unit"
-                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditUnit({ id: u.unit_id, vt: u.vehicle_type || "", tm: u.tipe_model || "" }); }}
-                        data-testid={`adm-unit-edit-btn-${order.order_id}-${i}`}><IcoPencil /></button>
-                    </span>
+                    <span className="adm-unit-veh" title={`${u.vehicle_type || ""}${u.tipe_model ? " · " + u.tipe_model : ""}`}>{u.vehicle_type || "—"}{u.tipe_model ? ` · ${u.tipe_model}` : ""}</span>
                     <span className="adm-unit-sub">{u.nopol || "nopol —"}{u.no_rangka ? ` · ${u.no_rangka}` : ""}{u.warna || u.tahun ? ` · ${u.warna || "—"}/${u.tahun || "—"}` : ""}</span>
                   </span>
+                  <button type="button" className="adm-link" style={{ flexShrink: 0, padding: 6 }} title="Ubah tipe unit" aria-label="Ubah tipe unit"
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditUnit({ id: u.unit_id, vt: u.vehicle_type || "", tm: u.tipe_model || "" }); }}
+                    data-testid={`adm-unit-edit-btn-${order.order_id}-${i}`}><IcoPencil /></button>
                   <span className="adm-unit-tags">
                     <span className="adm-utag trip">{u.status_perjalanan || "Belum Dijadwalkan"}</span>
                     <span className="adm-utag inv">{u.status_invoice || "Belum Ditagih"}</span>
