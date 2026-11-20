@@ -347,6 +347,18 @@ function Dashboard({ pin, me, onLogout }) {
     } catch (e) { alert("Gagal membuat Excel konfirmasi harga. Coba lagi."); }
     setKonfBusy(false);
   };
+  const [dupModal, setDupModal] = useState(null);   // { nama, busy, err }
+  const jalankanDuplikat = async () => {
+    const nama = (dupModal?.nama || "").trim();
+    if (!nama) { setDupModal((m) => ({ ...m, err: "Isi nama pelanggan tujuan." })); return; }
+    setDupModal((m) => ({ ...m, busy: true, err: "" }));
+    try {
+      const items = jadwalCart.map((c) => ({ order_id: c.order_id, unit_id: c.unit?.unit_id || "" }));
+      const r = await axios.post(`${API}/admin/orders/duplikat`, { items, customer_nama: nama }, { headers });
+      setDupModal(null); clearCart(); flash(`✅ ${r.data.dibuat} PO duplikat untuk ${r.data.customer_nama} (${r.data.unit} unit)`);
+      loadAll();
+    } catch (e) { setDupModal((m) => ({ ...m, busy: false, err: e?.response?.data?.detail || "Gagal menduplikat PO. Coba lagi." })); }
+  };
   const kirimWaDaftarDriver = async () => {
     const rows = daftarDriverRows(jadwalCart, orders);
     if (!rows.length) return;
@@ -868,7 +880,34 @@ function Dashboard({ pin, me, onLogout }) {
             <button className="adm-btn adm-btn-sm" onClick={() => printDaftarDriver(daftarDriverRows(jadwalCart, orders))} data-testid="adm-cartbar-driver" title="Daftar driver per unit yang dicentang (cetak / simpan PDF)">🧑‍✈️ Daftar Driver</button>
             <button className="adm-btn adm-btn-sm" onClick={() => unduhDaftarDriver(daftarDriverRows(jadwalCart, orders))} data-testid="adm-cartbar-driver-csv" title="Unduh CSV (buka di Excel)">⬇ CSV</button>
             <button className="adm-btn adm-btn-sm" disabled={konfBusy} onClick={unduhKonfirmasiHarga} data-testid="adm-cartbar-konfharga" title="Excel: NO | NO POL | HARGA DEAL | HARGA INVOICE | SELISIH untuk unit yang dicentang">{konfBusy ? "Membuat…" : "🧾 Konfirmasi Harga"}</button>
+            <button className="adm-btn adm-btn-sm" onClick={() => setDupModal({ nama: "", busy: false, err: "" })} data-testid="adm-cartbar-duplikat" title="Salin PO unit yang dicentang ke pelanggan lain (tagihan terpisah)">📑 Duplikat PO</button>
             <button className="adm-btn adm-btn-sm" disabled={driverWaBusy} onClick={kirimWaDaftarDriver} data-testid="adm-cartbar-driver-wa" title="Kirim daftar driver lewat WhatsApp sebagai gambar tajam">{driverWaBusy ? "Membuat…" : "📲 WhatsApp"}</button>
+          </div>
+        </div>
+      )}
+      {dupModal && (
+        <div className="adm-vars">
+          <div className="adm-modal-bg" onClick={() => !dupModal.busy && setDupModal(null)} data-testid="adm-dup-modal">
+            <div className="adm-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 460 }}>
+              <div className="adm-modal-head">
+                <div>
+                  <div className="adm-modal-title">📑 Duplikat PO</div>
+                  <div className="adm-modal-sub">{jadwalCart.length} unit dicentang disalin jadi PO baru untuk pelanggan lain</div>
+                </div>
+                <button className="adm-modal-close" onClick={() => setDupModal(null)} aria-label="Tutup">✕</button>
+              </div>
+              <div className="adm-modal-body">
+                <label style={{ fontSize: 12, fontWeight: 700 }}>Nama pelanggan tujuan</label>
+                <input type="text" className="adm-input" list="dup-cust" autoFocus value={dupModal.nama} onChange={(e) => setDupModal((m) => ({ ...m, nama: e.target.value, err: "" }))} placeholder="contoh: PT VOLVO" data-testid="adm-dup-nama" />
+                <datalist id="dup-cust">{Array.from(new Set((orders || []).map((o) => o.customer_nama).filter(Boolean))).map((n) => <option key={n} value={n} />)}</datalist>
+                <div style={{ fontSize: 11.5, color: "var(--text-mute)", margin: "8px 0" }}>PO baru muncul di Admin PO tanpa trip/driver dan tanpa kirim WhatsApp. PO asal tidak berubah. Harga diisi saat membuat Invoice.</div>
+                {dupModal.err && <div style={{ color: "#f85149", fontSize: 12.5, marginBottom: 8 }} data-testid="adm-dup-err">❌ {dupModal.err}</div>}
+                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                  <button className="adm-btn adm-btn-sm" onClick={() => setDupModal(null)} disabled={dupModal.busy}>Batal</button>
+                  <button className="adm-btn adm-btn-sm adm-btn-gold" onClick={jalankanDuplikat} disabled={dupModal.busy} data-testid="adm-dup-ok">{dupModal.busy ? "Menyalin…" : "Buat Duplikat"}</button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}

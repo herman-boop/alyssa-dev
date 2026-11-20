@@ -22,6 +22,7 @@ import kpi  # KPI & poin Admin Operasional 2 (pekan Minggu 09:00 WIB)
 import aktivitas  # Riwayat Aktivitas akun
 import belum_tagih  # Excel unit PO belum ditagih
 import permintaan_harga  # upload permintaan harga pelanggan -> HPP + Excel hasil
+import po_duplikat  # duplikat PO ke pelanggan lain (penagihan terpisah)
 import konfirmasi_harga  # Excel konfirmasi harga: deal vs invoice per unit
 import penawaran_simpan  # penawaran arsip -> riwayat harga pelanggan di Kalkulator HPP
 import leg_supplier  # supplier per leg + pembayaran supplier
@@ -3735,6 +3736,46 @@ async def admin_deal_prices():
         units = o.get("units") or []
         out[oid] = {"price": price_by_order.get(oid, 0), "units": (len(units) if units else 1)}
     return {"prices": out}
+
+
+class DuplikatPoBody(BaseModel):
+    items: List[dict]
+    customer_nama: str
+
+
+@api_router.post("/admin/orders/duplikat", dependencies=[Depends(require_admin_pin)])
+async def duplikat_po(body: DuplikatPoBody):
+    """Salin PO (unit yang dicentang) ke pelanggan lain, mis. satu pengiriman ditagih ke dua PT dengan harga berbeda.
+    Salinan muncul di Admin PO sebagai PO baru (tanpa trip/driver, tanpa WhatsApp ke pelanggan, status unit direset).
+    PO asal tidak diubah dan tidak ada harga/keuangan yang disentuh: harga diisi saat membuat Invoice."""
+    nama = " ".join((body.customer_nama or "").split())[:120]
+    if not nama:
+        raise HTTPException(400, "Nama pelanggan tujuan wajib diisi")
+    grup = po_duplikat.kelompokkan(body.items)
+    if not grup:
+        raise HTTPException(400, "Tidak ada unit")
+    if sum(max(1, len(v)) for v in grup.values()) > 300:
+        raise HTTPException(400, "Maksimal 300 unit sekali duplikat")
+    try:
+        nama = customer_name.resolve(nama, await _master_customer_names())[:120] or nama
+    except Exception as e:
+        logger.warning(f"[customer_name] gagal merapikan duplikat '{nama}': {e}")
+    asal = {o["order_id"]: o async for o in db.orders.find({"order_id": {"$in": list(grup)}}, {"_id": 0})}
+    hilang = [oid for oid in grup if oid not in asal]
+    if hilang:
+        raise HTTPException(404, f"PO tidak ditemukan: {', '.join(hilang[:5])}")
+    now = datetime.now(timezone.utc).isoformat()
+    baru = []
+    for oid, uids in grup.items():
+        doc = po_duplikat.bangun_salinan(asal[oid], set(uids), nama, f"ORD-{uuid.uuid4().hex[:10].upper()}", _gen_unit_id, now,
+                                         UNIT_STATUS_PERJALANAN_DEFAULT, UNIT_STATUS_INVOICE_DEFAULT)
+        if doc:
+            baru.append(doc)
+    if not baru:
+        raise HTTPException(400, "Unit yang dipilih tidak ditemukan di PO")
+    for d in baru:
+        await db.orders.insert_one(dict(d))
+    return {"ok": True, "customer_nama": nama, "dibuat": len(baru), "unit": sum(len(d["units"]) for d in baru), "order_ids": [d["order_id"] for d in baru]}
 
 
 @api_router.post("/admin/konfirmasi-harga/xlsx", dependencies=[Depends(require_admin_pin)])
