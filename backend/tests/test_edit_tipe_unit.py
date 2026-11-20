@@ -45,3 +45,13 @@ def test_ganti_vehicle_type_validasi(env):
     assert c.patch("/api/admin/orders/O1", json={"unit_id": "U1", "unit_vehicle_type": "NGAWUR-XYZ"}).status_code == 400
     assert c.patch("/api/admin/orders/O1", json={"unit_id": "NOPE", "unit_tipe_model": "x"}).status_code == 404
     assert run(db.orders.find_one({"order_id": "O1"}))["units"][0]["vehicle_type"] == "SIDE DUMP"
+
+
+def test_tipe_di_kartu_po_satu_unit_ikut_ke_unit(env):
+    c, db, run = env
+    assert c.patch("/api/admin/orders/O1", json={"vehicle_type": "Sedan"}).status_code == 200
+    o = run(db.orders.find_one({"order_id": "O1"}))
+    assert o["vehicle_type"] == "Sedan" and o["units"][0]["vehicle_type"] == "Sedan"
+    # PO banyak unit: unit tidak disentuh
+    assert c.patch("/api/admin/orders/O2", json={"vehicle_type": "Sedan"}).status_code == 200
+    assert [u["vehicle_type"] for u in run(db.orders.find_one({"order_id": "O2"}))["units"]] == ["SIDE DUMP", "SIDE DUMP"]

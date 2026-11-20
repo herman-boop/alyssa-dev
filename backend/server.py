@@ -4069,6 +4069,8 @@ async def admin_patch_order(order_id: str, payload: OrderPatchBody):
             upd["units.0.nopol"] = upd["nopol"].upper()
         if "no_rangka" in upd and upd["no_rangka"]:
             upd["units.0.no_rangka"] = upd["no_rangka"].upper()
+        if upd.get("vehicle_type") and "units" not in upd:   # tipe di kartu PO ikut ke baris unit (tampil di daftar unit & faktur)
+            upd["units.0.vehicle_type"] = upd["vehicle_type"]
     await db.orders.update_one({"order_id": order_id}, {"$set": upd})
 
     # Mirror driver_id to linked trip
