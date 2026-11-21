@@ -728,3 +728,12 @@
 .fs-card-x:hover { background:#f1f5f9; }
 @media (min-width: 861px) { .fs-card { left:auto; right:12px; top:12px; bottom:auto; width:330px; } }
 @media (max-width: 860px) { .trk-map-area.has-ship, .trk-fleet .trk-map-area.has-ship { height:56vh; min-height:380px; max-height:520px; } }
+
+/* Marker kapal: tanpa kotak putih/bingkai bawaan L.divIcon; hijau berdenyut = Berlayar, oranye = Berlabuh */
+.leaflet-marker-icon.ship-divicon { background: transparent; border: none; }
+.ship-ic { overflow: visible; }
+.ship-pulse { position:absolute; left:50%; top:50%; width:26px; height:26px; margin:-13px 0 0 -13px; border-radius:50%;
+  opacity:.45; pointer-events:none; animation: ship-pulse 1.9s ease-out infinite; }
+@keyframes ship-pulse { 0% { transform:scale(.6); opacity:.5; } 80%,100% { transform:scale(2.1); opacity:0; } }
+@media (prefers-reduced-motion: reduce) { .ship-pulse { animation:none; opacity:.18; } }
+.fs-chip { display:inline-block; font-weight:800; font-size:11.5px; padding:1px 9px; border:1px solid; border-radius:999px; }
