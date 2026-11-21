@@ -6,7 +6,7 @@ import "leaflet/dist/leaflet.css";
 import "./Tracking.css";
 import VesselPositionView from "./VesselPositionView";
 import LiveTrackSummary from "./LiveTrackSummary";
-import { ShipMarker, ShipCard } from "./ShipMarkerCard";
+import { ShipMarker, ShipCard, statusKapal } from "./ShipMarkerCard";
 import { MapFitter, SHIP_ZOOM, REGIONAL_ZOOM } from "./MapAutoCenter";
 import { buildVesselView } from "./vesselPositionData";
 import { renderMapImage } from "./mapShare";
@@ -677,8 +677,6 @@ export default function CustomerTracking() {
   const legs       = data.legs || [];
   const progress   = data.progress || {};
   const daily      = data.daily_checkpoints || [];
-  const overallStatus = getOverallStatus(data);
-  const statusColor   = STATUS_COLOR[overallStatus] || "gray";
 
   /* GPS-enabled checkpoints */
   const gpsPoints = daily
@@ -715,6 +713,13 @@ export default function CustomerTracking() {
   // Catatan jadwal pembaruan posisi kapal (supaya pelanggan paham posisi bukan real-time)
   const shipSched = shipAis && shipAis.jadwal && Array.isArray(shipAis.jadwal.jam) && shipAis.jadwal.jam.length ? shipAis.jadwal : null;
   const shipInfo = shipAis && shipAis.ais ? shipAis.ais : null;
+  // Badge status mengikuti AIS kapal: Speed > 0.5 kn = "Berlayar" (hijau), <= 0.5 kn = "Berlabuh" (oranye).
+  // Hanya saat ada posisi kapal segar & perjalanan belum selesai; selain itu tetap status perjalanan biasa.
+  const statusAis = shipInfo ? statusKapal(shipInfo) : null;
+  const statusDasar = getOverallStatus(data);
+  const selesai = statusDasar === "Sudah Diterima" || statusDasar === "Tiba di Tujuan";
+  const overallStatus = statusAis && !selesai ? statusAis.label : statusDasar;
+  const statusColor   = statusAis && !selesai ? statusAis.tone : (STATUS_COLOR[statusDasar] || "gray");
   const shipPos = (shipInfo && shipInfo.latitude != null && shipInfo.longitude != null)
     ? [parseFloat(shipInfo.latitude), parseFloat(shipInfo.longitude)] : null;
   const fitPositions = shipPos ? [...positions, shipPos] : positions;
@@ -1042,7 +1047,7 @@ export default function CustomerTracking() {
                 ship={onShip ? { name: shipAis.ship_name || shipInfo?.ship_name || activeShipLeg.kapal || "Kapal", atPort: shipInfo && shipInfo.speed != null && Number(shipInfo.speed) < 1, onOpen: () => setVesselView(true) } : null}
                 nopol={data.nopol} driver={data.nama_driver} route={data.route} tipe={data.tipe_kendaraan}
                 status={overallStatus} tone={statusColor}
-                done={overallStatus === "Sudah Diterima" || overallStatus === "Tiba di Tujuan"}
+                done={selesai}
                 speed={shipInfo ? shipInfo.speed : null} heading={shipInfo ? (shipInfo.course ?? shipInfo.heading) : null}
                 lat={onShip ? shipPos[0] : (lastGps ? lastGps.lat : null)} lon={onShip ? shipPos[1] : (lastGps ? lastGps.lng : null)}
                 cp={cp}
