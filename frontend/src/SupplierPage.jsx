@@ -1187,8 +1187,13 @@ export default function SupplierPage() {
   };
   const deleteSupplier = async () => {
     setMenuOpen(false);
-    if (!window.confirm(`Hapus supplier "${selected.nama}" beserta semua unit & riwayat pembayaran? Tidak bisa dibatalkan.`)) return;
-    try { await axios.delete(`${API}/admin/suppliers/${selected.id}`, { headers }); setSelected(null); setQuery(""); setListRefreshTick((t) => t + 1); flash("Supplier dihapus"); }
+    if (!window.confirm(`Hapus supplier "${selected.nama}"?\n\nBila supplier ini punya riwayat pembayaran, datanya DIARSIPKAN (invoice, pembayaran, alokasi, dan audit tetap tersimpan) dan bisa dipulihkan. Supplier tanpa riwayat pembayaran dihapus permanen.`)) return;
+    const alasan = window.prompt("Alasan (opsional, tercatat di riwayat audit):", "") || "";
+    try {
+      const r = await axios.delete(`${API}/admin/suppliers/${selected.id}`, { headers, params: { alasan } });
+      setSelected(null); setQuery(""); setListRefreshTick((t) => t + 1);
+      flash(r.data && r.data.arsip ? "Supplier diarsipkan (invoice & pembayaran tetap tersimpan)" : "Supplier dihapus");
+    }
     catch { flash("Gagal hapus supplier"); }
   };
   const addProject = async () => {
@@ -1781,7 +1786,8 @@ export default function SupplierPage() {
                   <div style={{ fontSize: 13, fontWeight: 800, color: C.gold, marginBottom: 8 }}>🏦 Pembayaran dari Audit Rekon Bank</div>
                   {selected.rekon_payments.filter((p) => !hiddenSet.has(`rk:${p.id}`)).map((p) => {
                     const st = p.alloc_status;
-                    const badge = st === "allocated" ? { t: "Dialokasikan", c: C.green } : st === "partial" ? { t: `Sebagian · sisa ${fRp(p.unallocated)}`, c: C.gold } : { t: "Belum Dialokasikan", c: C.red };
+                    const badge = (p.alokasi_yatim || 0) > 0 ? { t: `Perlu Hubungkan Ulang · ${fRp(p.alokasi_yatim)} menunjuk unit yang sudah tidak ada`, c: C.red }
+                      : st === "allocated" ? { t: "Dialokasikan", c: C.green } : st === "partial" ? { t: `Sebagian · sisa ${fRp(p.unallocated)}`, c: C.gold } : { t: "Belum Dialokasikan", c: C.red };
                     return (
                       <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "9px 0", borderTop: `1px solid ${C.line}`, flexWrap: "wrap" }} data-testid={`sup-rekon-${p.id}`}>
                         <div style={{ minWidth: 0 }}>

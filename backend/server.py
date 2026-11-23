@@ -38,6 +38,8 @@ import supplier_finance as SF  # rekap per invoice, riwayat transfer, rekonsilia
 import task_rules as TR  # aturan tugas Driver Tujuan (1 jepret, 1 checkpoint/hari, batas hari)
 import ais  # modul AIS (posisi kapal) — provider-agnostic, aman tanpa key
 import rekon_sync  # integrasi pembayaran supplier dari Audit Rekon (isolated)
+import supplier_audit  # log audit append-only: arsip/hapus supplier, hapus unit/pembayaran, relink
+import rekon_orphans  # deteksi pembayaran yatim (Perlu Rekonsiliasi), baca-saja
 import supplier_faktur  # pisah unit ke faktur (projek) baru — logika murni
 import hashlib
 import riwayat_clear  # clear/arsip Riwayat Pembayaran Supplier — aditif, tanpa delete
@@ -338,6 +340,20 @@ async def _resolve_admin(request: Request, x_admin_pin: Optional[str], authoriza
         if expected:
             raise HTTPException(401, "Invalid or missing admin PIN")
     return {"kind": "open", "user": None}
+
+
+# Supplier diarsipkan (soft delete) tidak ikut daftar aktif / agregat / pencocokan duplikat; datanya tetap utuh.
+_SUP_AKTIF = {"status": {"$ne": "archived"}}
+
+
+async def _audit_actor(request: Request) -> str:
+    """Nama pelaku untuk log audit (akun > PIN > Admin). Tidak pernah melempar error."""
+    try:
+        who = await _resolve_admin(request, request.headers.get("X-Admin-Pin"), request.headers.get("Authorization"))
+    except HTTPException:
+        return "Admin"
+    u = who.get("user") or {}
+    return (u.get("nama") or u.get("email") or ("PIN admin" if who.get("kind") == "pin" else "Admin"))[:80]
 
 
 async def require_admin_pin(
@@ -5500,7 +5516,7 @@ async def _migrate_trip_vendor_costs(trip: dict):
 async def _trip_vendor_costs(trip_id: str) -> list:
     """Semua biaya vendor 1 trip = supplier job yang di-tag trip_id (D1)."""
     out = []
-    async for s in db.supplier_profiles.find({}, {"_id": 0}):
+    async for s in db.supplier_profiles.find(_SUP_AKTIF, {"_id": 0}):
         for j in (s.get("jobs") or []):
             if j.get("trip_id") != trip_id:
                 continue
@@ -5700,7 +5716,7 @@ def _rute_str(a: str, b: str) -> str:
 async def vendor_mobile_bootstrap():
     """Data awal buat form: kategori biaya, metode bayar, & daftar vendor."""
     vendors = []
-    async for s in db.supplier_profiles.find({}, {"_id": 0, "id": 1, "nama": 1}).sort("nama", 1):
+    async for s in db.supplier_profiles.find(_SUP_AKTIF, {"_id": 0, "id": 1, "nama": 1}).sort("nama", 1):
         if s.get("id"):
             vendors.append({"id": s["id"], "nama": s.get("nama") or "-"})
     return {"kategori": MOBILE_VENDOR_KATEGORI, "metode": MOBILE_VENDOR_METODE, "vendors": vendors}
@@ -5750,7 +5766,7 @@ async def vendor_mobile_trips(q: Optional[str] = None, limit: int = 25):
 async def vendor_mobile_unpaid(limit: int = 200):
     """Semua tagihan vendor yang masih ada sisa (belum lunas), lintas vendor."""
     out = []
-    async for s in db.supplier_profiles.find({}, {"_id": 0}):
+    async for s in db.supplier_profiles.find(_SUP_AKTIF, {"_id": 0}):
         for j in (s.get("jobs") or []):
             jt = _supplier_job_totals(j)
             if (jt.get("sisa") or 0) > 0:
@@ -5772,7 +5788,7 @@ async def vendor_mobile_history(q: Optional[str] = None, limit: int = 200):
     """Riwayat pembayaran vendor terbaru (semua vendor)."""
     ql = (q or "").strip().lower()
     out = []
-    async for s in db.supplier_profiles.find({}, {"_id": 0}):
+    async for s in db.supplier_profiles.find(_SUP_AKTIF, {"_id": 0}):
         for j in (s.get("jobs") or []):
             for p in (j.get("payments") or []):
                 row = {
@@ -5876,7 +5892,7 @@ async def vendor_mobile_vendors_unpaid(limit: int = 300):
     Tiap vendor: ringkasan total tagihan/terbayar/sisa + daftar PO/job-nya
     (yang punya nilai tagihan) lengkap status per PO (belum/sebagian/lunas)."""
     vendors = []
-    async for s in db.supplier_profiles.find({}, {"_id": 0}):
+    async for s in db.supplier_profiles.find(_SUP_AKTIF, {"_id": 0}):
         jobs_out = []
         tot = terb = 0
         alloc_by_job = _supplier_rekon_overview(s)["alloc_by_job"]   # pembayaran Rekon ikut dihitung
@@ -7084,23 +7100,34 @@ def _supplier_rekon_overview(sup: dict) -> dict:
       rekon_payments        : daftar pembayaran + status alokasi (buat Riwayat)
     """
     rps = [p for p in (sup.get("rekon_payments") or []) if p.get("status") != "reversed"]
+    # Alokasi ke unit yang SUDAH TIDAK ADA (mis. unit dihapus / invoice diimpor ulang) tidak boleh dianggap "teralokasi":
+    # uangnya tetap ada, jadi dilaporkan sebagai alokasi yatim dan masuk "Belum Dialokasikan" (bukan hilang dari tampilan).
+    ids_job = {j.get("id") for j in (sup.get("jobs") or [])}
+    yatim_total = 0
     alloc_by_job, total_rekon, total_alloc, out = {}, 0, 0, []
     by_entity = {}   # pembukuan DIPISAH per source_entity (PT vs CV) — wajib kontrak
     for p in rps:
         amt = p.get("amount") or 0
         total_rekon += amt
         a_sum = 0
+        y_sum = 0
         for a in (p.get("allocations") or []):
             jid = a.get("job_id"); av = a.get("amount") or 0
             if jid and av > 0:
+                if jid not in ids_job:
+                    y_sum += av      # alokasi yatim: tidak dihitung sebagai teralokasi
+                    continue
                 alloc_by_job[jid] = alloc_by_job.get(jid, 0) + av
                 a_sum += av
+        yatim_total += y_sum
         total_alloc += a_sum
         status = "allocated" if (amt > 0 and a_sum >= amt) else ("partial" if a_sum > 0 else "unallocated")
         pp = dict(p)
         pp["allocated"] = a_sum
         pp["unallocated"] = max(0, amt - a_sum)
         pp["alloc_status"] = status
+        pp["alokasi_yatim"] = y_sum
+        pp["link_status"] = "perlu_hubungkan_ulang" if y_sum > 0 else ("tertaut" if status == "allocated" else "belum_dialokasikan")
         out.append(pp)
         # Agregasi per entitas — JANGAN gabung PT & CV (kewajiban terpisah).
         ent = p.get("source_entity") or (p.get("rekon") or {}).get("source_entity") or "TANPA_ENTITAS"
@@ -7120,6 +7147,7 @@ def _supplier_rekon_overview(sup: dict) -> dict:
         "total_rekon": total_rekon,
         "total_rekon_allocated": total_alloc,
         "total_unallocated": max(0, total_rekon - total_alloc),
+        "total_alokasi_yatim": yatim_total,
         "by_entity": by_entity,
         "rekon_payments": out,
     }
@@ -7449,7 +7477,7 @@ async def _import_dupe_other_suppliers(rows, supplier_id):
     pats = ["".join(re.escape(ch) + r"\s*" for ch in i) for i in idents]
     rx = re.compile("^\\s*(" + "|".join(pats) + ")\\s*$", re.IGNORECASE)
     keys_by_sup = {}
-    async for sp in db.supplier_profiles.find({"id": {"$ne": supplier_id}, "$or": [{"jobs.nopol": rx}, {"jobs.no_rangka": rx}]},
+    async for sp in db.supplier_profiles.find({"id": {"$ne": supplier_id}, "status": {"$ne": "archived"}, "$or": [{"jobs.nopol": rx}, {"jobs.no_rangka": rx}]},
                                               {"_id": 0, "id": 1, "nama": 1, "jobs.nopol": 1, "jobs.no_rangka": 1, "jobs.asal_kota": 1, "jobs.tujuan_kota": 1, "jobs.tanggal": 1}).limit(100):
         keys_by_sup[sp.get("nama") or sp.get("id")] = SI.existing_keys(sp.get("jobs") or [])
     out = {}
@@ -7629,7 +7657,7 @@ async def create_supplier(body: SupplierCreateBody):
     if not nama:
         raise HTTPException(400, "nama tidak boleh kosong")
     existing = await db.supplier_profiles.find_one(
-        {"nama": _re.compile(r"^\s*" + _re.escape(nama) + r"\s*$", _re.IGNORECASE)},
+        {"nama": _re.compile(r"^\s*" + _re.escape(nama) + r"\s*$", _re.IGNORECASE), "status": {"$ne": "archived"}},
         {"_id": 0},
     )
     if existing:
@@ -7650,12 +7678,12 @@ async def create_supplier(body: SupplierCreateBody):
 
 
 @api_router.get("/admin/suppliers", dependencies=[Depends(require_admin_pin)])
-async def list_suppliers(q: Optional[str] = None):
+async def list_suppliers(q: Optional[str] = None, arsip: bool = False):
     """List semua supplier, urut nama, optional search by q. Ikutan hitung
     grand total (semua job) per supplier biar kelihatan di daftar tanpa
     perlu buka detail satu-satu."""
     import re as _re
-    filt = {}
+    filt = {"status": ({"$eq": "archived"} if arsip else {"$ne": "archived"})}   # arsip=true -> hanya yang diarsipkan
     if q:
         filt["nama"] = _re.compile(_re.escape(q.strip()), _re.IGNORECASE)
     items = []
@@ -7677,7 +7705,7 @@ async def supplier_pricelist(limit: int = 3000):
     """Daftar Harga: semua job supplier yang sudah LUNAS (sisa<=0 & ada harga)
     -> referensi harga aktual per rute (HPP). Dicari asal/tujuan di frontend."""
     out = []
-    async for s in db.supplier_profiles.find({}, {"_id": 0}):
+    async for s in db.supplier_profiles.find(_SUP_AKTIF, {"_id": 0}):
         snama = s.get("nama") or "-"
         for j in (s.get("jobs") or []):
             jt = _supplier_job_totals(j)
@@ -7788,7 +7816,7 @@ def _sup_view(doc: dict):
 
 async def _invoice_dipakai_supplier_lain(supplier_id: str) -> set:
     used = set()
-    async for o in db.supplier_profiles.find({"id": {"$ne": supplier_id}, "jobs.no_invoice_supplier": {"$exists": True}},
+    async for o in db.supplier_profiles.find({"id": {"$ne": supplier_id}, "status": {"$ne": "archived"}, "jobs.no_invoice_supplier": {"$exists": True}},
                                              {"_id": 0, "jobs.no_invoice_supplier": 1}):
         for j in (o.get("jobs") or []):
             k = SF.norm_inv(j.get("no_invoice_supplier"))
@@ -7813,7 +7841,7 @@ async def finance_audit(limit: int = 500):
     """READ-ONLY. Untuk SEMUA supplier: bandingkan laporan Finance baru dengan angka existing (get_supplier) dan periksa
     invarian (tidak ada pembayaran hilang/ganda, alokasi <= transfer, biaya admin terpisah). Kosong = semua cocok."""
     hasil, n, bad = [], 0, 0
-    async for doc in db.supplier_profiles.find({}, {"_id": 0}).limit(max(1, min(int(limit or 500), 2000))):
+    async for doc in db.supplier_profiles.find(_SUP_AKTIF, {"_id": 0}).limit(max(1, min(int(limit or 500), 2000))):
         n += 1
         try:
             ex = await get_supplier(doc["id"])
@@ -7982,10 +8010,48 @@ async def patch_supplier(supplier_id: str, body: SupplierPatchBody):
 
 
 @api_router.delete("/admin/suppliers/{supplier_id}", dependencies=[Depends(require_admin_pin)])
-async def delete_supplier(supplier_id: str):
+async def delete_supplier(supplier_id: str, request: Request, alasan: str = ""):
+    """Hapus supplier. Bila supplier punya RIWAYAT PEMBAYARAN (pembayaran rekon bank, pembayaran manual, atau baris impor bank),
+    TIDAK dihapus permanen: diarsipkan (soft delete) dengan seluruh invoice, pembayaran, alokasi, dan riwayat tetap utuh,
+    lalu disembunyikan dari daftar aktif. Hanya supplier tanpa riwayat pembayaran yang dihapus permanen (snapshot lengkap
+    disimpan di log audit). Keduanya tercatat di log audit."""
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    by = await _audit_actor(request)
+    alasan = (alasan or "").strip()[:300] or "Dihapus lewat aplikasi"
+    n_imp = await db[rekon_sync.IMPORTS_COLLECTION].count_documents({"supplier_id": supplier_id})
+    ringkas = {"nama": doc.get("nama"), "jumlah_unit": len(doc.get("jobs") or []),
+               "jumlah_rekon": len(doc.get("rekon_payments") or []), "jumlah_import_bank": n_imp}
+    now = datetime.now(timezone.utc).isoformat()
+    if supplier_audit.punya_riwayat_pembayaran(doc, n_imp):
+        await db.supplier_profiles.update_one({"id": supplier_id}, {"$set": {
+            "status": "archived", "archived_at": now, "archived_by": by, "archive_reason": alasan}})
+        await supplier_audit.write(db, "supplier.archive", by, supplier_id=supplier_id, reason=alasan,
+                                   before={"status": doc.get("status") or "aktif"}, after={"status": "archived"}, extra=ringkas)
+        return {"ok": True, "arsip": True, "pesan": "Supplier punya riwayat pembayaran, jadi DIARSIPKAN (tidak dihapus permanen). Semua invoice, pembayaran, alokasi, dan audit tetap tersimpan.", **ringkas}
+    await supplier_audit.write(db, "supplier.delete", by, supplier_id=supplier_id, reason=alasan, before=doc, extra=ringkas)
     result = await db.supplier_profiles.delete_one({"id": supplier_id})
     if result.deleted_count == 0:
         raise HTTPException(404, "Supplier tidak ditemukan")
+    return {"ok": True, "arsip": False, **ringkas}
+
+
+@api_router.post("/admin/suppliers/{supplier_id}/pulihkan", dependencies=[Depends(require_admin_pin)])
+async def restore_supplier(supplier_id: str, request: Request, body: Optional[Dict[str, Any]] = Body(None)):
+    """Pulihkan supplier yang diarsipkan (kembali ke daftar aktif). Data tidak berubah; tercatat di log audit."""
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0, "id": 1, "status": 1, "nama": 1})
+    if not doc:
+        raise HTTPException(404, "Supplier tidak ditemukan")
+    if doc.get("status") != "archived":
+        raise HTTPException(400, "Supplier ini tidak sedang diarsipkan")
+    by = await _audit_actor(request)
+    alasan = str((body or {}).get("alasan") or "").strip()[:300] or "Dipulihkan lewat aplikasi"
+    now = datetime.now(timezone.utc).isoformat()
+    await db.supplier_profiles.update_one({"id": supplier_id}, {"$unset": {"status": "", "archived_at": "", "archived_by": "", "archive_reason": ""},
+                                                                  "$set": {"restored_at": now, "restored_by": by}})
+    await supplier_audit.write(db, "supplier.restore", by, supplier_id=supplier_id, reason=alasan,
+                               before={"status": "archived"}, after={"status": "aktif"}, extra={"nama": doc.get("nama")})
     return {"ok": True}
 
 
@@ -8073,13 +8139,26 @@ async def set_supplier_job_entity(supplier_id: str, job_id: str, body: Dict[str,
 
 
 @api_router.delete("/admin/suppliers/{supplier_id}/jobs/{job_id}", dependencies=[Depends(require_admin_pin)])
-async def delete_supplier_job(supplier_id: str, job_id: str):
+async def delete_supplier_job(supplier_id: str, job_id: str, request: Request, alasan: str = ""):
+    """Hapus 1 unit/job. Snapshot lengkap unit (termasuk pembayaran manual di dalamnya) disimpan di log audit SEBELUM dihapus.
+    Alokasi pembayaran bank yang menunjuk unit ini TIDAK dihapus: tampil sebagai alokasi yatim ("Perlu Hubungkan Ulang")."""
+    doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0, "jobs": 1, "rekon_payments": 1})
+    job = next((j for j in ((doc or {}).get("jobs") or []) if j.get("id") == job_id), None)
+    if job is None:
+        raise HTTPException(404, "Unit/job tidak ditemukan")
+    by = await _audit_actor(request)
+    teralokasi = [{"payment_id": p.get("id"), "bank_transaction_id": p.get("bank_transaction_id"), "amount": a.get("amount")}
+                  for p in (doc.get("rekon_payments") or []) if p.get("status") != "reversed"
+                  for a in (p.get("allocations") or []) if a.get("job_id") == job_id]
+    await supplier_audit.write(db, "job.delete", by, supplier_id=supplier_id, job_id=job_id,
+                               reason=(alasan or "").strip()[:300] or "Dihapus lewat aplikasi", before=job,
+                               extra={"alokasi_rekon_tertinggal": teralokasi, "pembayaran_manual": len(job.get("payments") or [])})
     result = await db.supplier_profiles.update_one(
         {"id": supplier_id}, {"$pull": {"jobs": {"id": job_id}}, "$inc": {"jobs_ver": 1}}
     )
     if result.modified_count == 0:
         raise HTTPException(404, "Unit/job tidak ditemukan")
-    return {"ok": True}
+    return {"ok": True, "alokasi_rekon_tertinggal": teralokasi}
 
 
 @api_router.patch("/admin/suppliers/{supplier_id}/jobs/{job_id}/tag", dependencies=[Depends(require_admin_pin)])
@@ -8541,7 +8620,7 @@ async def add_supplier_payment(
 
 @api_router.delete("/admin/suppliers/{supplier_id}/jobs/{job_id}/payments/{payment_id}", dependencies=[Depends(require_admin_pin)])
 @_jobs_retry()
-async def delete_supplier_payment(supplier_id: str, job_id: str, payment_id: str):
+async def delete_supplier_payment(supplier_id: str, job_id: str, payment_id: str, request: Request, alasan: str = ""):
     doc = await db.supplier_profiles.find_one({"id": supplier_id}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Supplier tidak ditemukan")
@@ -8550,10 +8629,13 @@ async def delete_supplier_payment(supplier_id: str, job_id: str, payment_id: str
     if job_idx is None:
         raise HTTPException(404, "Unit/job tidak ditemukan")
     before = len(jobs[job_idx].get("payments") or [])
+    removed_rows = [{"job_id": job_id, **p} for p in (jobs[job_idx].get("payments") or []) if p.get("id") == payment_id]
     jobs[job_idx]["payments"] = [p for p in (jobs[job_idx].get("payments") or []) if p.get("id") != payment_id]
     if len(jobs[job_idx]["payments"]) == before:
         raise HTTPException(404, "Pembayaran tidak ditemukan")
     await _jobs_commit(supplier_id, doc.get("jobs_ver"), {"jobs": jobs})
+    await supplier_audit.write(db, "payment.delete", await _audit_actor(request), supplier_id=supplier_id, job_id=job_id, payment_id=payment_id,
+                               reason=(alasan or "").strip()[:300] or "Dihapus lewat aplikasi", before=removed_rows)
     return _supplier_job_totals(jobs[job_idx])
 
 
@@ -8593,7 +8675,7 @@ async def attach_supplier_payment_bukti(
 
 @api_router.delete("/admin/suppliers/{supplier_id}/payments/{txn_key}", dependencies=[Depends(require_admin_pin)])
 @_jobs_retry()
-async def delete_supplier_payment_txn(supplier_id: str, txn_key: str):
+async def delete_supplier_payment_txn(supplier_id: str, txn_key: str, request: Request, alasan: str = ""):
     """Hapus 1 TRANSAKSI pembayaran (1 transfer) dari riwayat — termasuk semua
     baris alokasinya ke beberapa unit. `txn_key` = batch_id (transfer ke banyak
     unit) atau id payment tunggal. Dipakai admin buat batalin pembayaran yang
@@ -8604,6 +8686,7 @@ async def delete_supplier_payment_txn(supplier_id: str, txn_key: str):
         raise HTTPException(404, "Supplier tidak ditemukan")
     jobs = doc.get("jobs") or []
     removed = 0
+    removed_rows = []
     for j in jobs:
         before = j.get("payments") or []
         if not before:
@@ -8611,10 +8694,15 @@ async def delete_supplier_payment_txn(supplier_id: str, txn_key: str):
         after = [p for p in before if not (p.get("batch_id") == txn_key or p.get("id") == txn_key)]
         if len(after) != len(before):
             removed += len(before) - len(after)
+            removed_rows += [{"job_id": j.get("id"), **p} for p in before if (p.get("batch_id") == txn_key or p.get("id") == txn_key)]
             j["payments"] = after
     if removed == 0:
         raise HTTPException(404, "Transaksi pembayaran tidak ditemukan")
     await _jobs_commit(supplier_id, doc.get("jobs_ver"), {"jobs": jobs})
+    # Riwayat pembayaran sah tidak boleh hilang tanpa jejak: snapshot pembayaran yang dihapus disimpan di log audit.
+    await supplier_audit.write(db, "payment.delete", await _audit_actor(request), supplier_id=supplier_id, payment_id=txn_key,
+                               reason=(alasan or "").strip()[:300] or "Dihapus lewat aplikasi", before=removed_rows,
+                               extra={"jumlah_baris": removed})
     return {"ok": True, "txn_key": txn_key, "removed": removed}
 
 
@@ -8769,6 +8857,40 @@ async def rekon_ingest(body: Any = Body(...)):
     for r in results:
         summary[r.get("status")] = summary.get(r.get("status"), 0) + 1
     return {"ok": True, "summary": summary, "results": results}
+
+
+@api_router.get("/admin/supplier-audit", dependencies=[Depends(require_admin_pin)])
+async def supplier_audit_list(supplier_id: str = "", action: str = "", bank_transaction_id: str = "", limit: int = 200):
+    """Riwayat audit supplier/pembayaran (append-only, baca-saja)."""
+    items = await supplier_audit.list_entries(db, supplier_id=supplier_id, action=action, btid=bank_transaction_id, limit=limit)
+    return {"items": items, "count": len(items)}
+
+
+@api_router.get("/admin/rekon/perlu-rekonsiliasi", dependencies=[Depends(require_admin_pin)])
+async def rekon_perlu_rekonsiliasi(supplier_id: str = "", nama: str = "", semua: bool = False, limit: int = 1000):
+    """BACA-SAJA. Pembayaran bank yang referensinya terputus: supplier dihapus/diarsipkan, pembayaran hilang dari profil,
+    atau alokasi menunjuk unit yang sudah tidak ada. Menampilkan ID transaksi, nominal, tanggal, supplier lama, dan referensi
+    dokumen sebelumnya. `semua=true` ikut menampilkan kelas info (belum dialokasikan, tersembunyi, supplier diarsipkan).
+    Tidak mengubah data apa pun."""
+    import re as _re
+    filt = {"status": "processed"}
+    if supplier_id:
+        filt["supplier_id"] = supplier_id.strip()
+    elif nama:
+        rx = _re.compile(_re.escape(nama.strip()), _re.IGNORECASE)
+        filt["$or"] = [{"supplier_name": rx}, {"beneficiary_name_raw": rx}]
+    imports = [d async for d in db[rekon_sync.IMPORTS_COLLECTION].find(filt, {"_id": 0}).limit(max(1, min(int(limit or 1000), 5000)))]
+    sids = {d.get("supplier_id") for d in imports if d.get("supplier_id")}
+    sups = {s["id"]: s async for s in db.supplier_profiles.find({"id": {"$in": list(sids)}}, {"_id": 0})} if sids else {}
+    # Referensi dokumen lama untuk unit yang sudah dihapus: snapshot dari log audit (job.delete).
+    audit_jobs = {}
+    async for a in db[supplier_audit.COLL].find({"action": "job.delete", "supplier_id": {"$in": list(sids)}}, {"_id": 0, "job_id": 1, "before": 1}):
+        if a.get("job_id") and isinstance(a.get("before"), dict):
+            audit_jobs[a["job_id"]] = a["before"]
+    rows = rekon_orphans.klasifikasi(imports, sups, audit_jobs)
+    if not semua:
+        rows = [r for r in rows if r["kelas"] in rekon_orphans.KELAS_PERLU]
+    return {"ringkasan": rekon_orphans.ringkas(rows), "items": rows}
 
 
 @api_router.get("/admin/rekon/imports", dependencies=[Depends(require_admin_pin)])
@@ -9282,7 +9404,7 @@ async def _laba_rugi(date_from=None, date_to=None, entity_id=None):
         bucket(e)["pendapatan"] += inv
 
     # HPP — supplier jobs (DPP), tanggal job + entitas job.
-    async for sup in db.supplier_profiles.find({}, {"_id": 0, "jobs": 1}):
+    async for sup in db.supplier_profiles.find(_SUP_AKTIF, {"_id": 0, "jobs": 1}):
         for j in (sup.get("jobs") or []):
             e = j.get("entity_id") or ""
             if not pnl.entity_match(e, want, valid):
