@@ -39,6 +39,7 @@ Field mengikuti KONTRAK FINAL Felis (3 Okt 2026).
 import uuid
 import re
 import logging
+import rekon_dup
 from datetime import datetime, timezone
 
 try:
@@ -402,6 +403,15 @@ async def ingest_transaction(db, payload):
     if not isinstance(alokasi_note, list):
         alokasi_note = [alokasi_note] if isinstance(alokasi_note, dict) else []
 
+    # Kemungkinan satu transfer fisik tercatat dua kali (mis. Mutasi vs e-statement)? Tanggal + nominal sama TIDAK cukup untuk
+    # menyimpulkan duplikat, jadi tidak ada yang dihapus/digabung: pembayaran ditahan sebagai "Perlu Verifikasi"
+    # (tidak dihitung di total, tidak di-auto-alokasi) sampai Super Admin / Finance Approver memutuskan.
+    tahan_kand = []
+    if payload.get("tanggal"):
+        cur = db[IMPORTS_COLLECTION].find({"tanggal": payload.get("tanggal"), "status": "processed",
+                                           "bank_transaction_id": {"$ne": btid}}, {"_id": 0, "raw_payload": 0})
+        tahan_kand = rekon_dup.kandidat(payload, [d async for d in cur])
+
     pid = _gen_id()
     rekon_payment = {
         "id": pid,
@@ -433,15 +443,26 @@ async def ingest_transaction(db, payload):
             "alokasi_note": alokasi_note,   # keterangan audit; tidak dihitung sbg total
         },
     }
+    imp_set = {"status": "processed", "supplier_id": sid, "source_entity": entity,
+               "rekon_payment_id": pid, "amount": amount, "allocated": 0,
+               "updated_at": _now_iso(), "processed_at": _now_iso()}
+    if tahan_kand:
+        rekon_payment["status"] = "perlu_verifikasi"
+        rekon_payment["dup_status"] = "perlu_verifikasi"
+        rekon_payment["dup_info"] = {"kandidat": tahan_kand, "ditandai_at": now_iso}
+        # Disimpan TERPISAH dari rekon_payments supaya tidak ikut total/alokasi mana pun sampai diputuskan.
+        await db.supplier_profiles.update_one({"id": sid}, {"$push": {"rekon_payments_tahan": rekon_payment}})
+        imp_set.update({"dup_status": "perlu_verifikasi", "dup_kandidat": [k["bank_transaction_id"] for k in tahan_kand],
+                        "dup_tingkat": tahan_kand[0]["tingkat"]})
+        await db[IMPORTS_COLLECTION].update_one({"bank_transaction_id": btid}, {"$set": imp_set})
+        return {"status": "created", "perlu_verifikasi": True, "kandidat": tahan_kand, "bank_transaction_id": btid,
+                "supplier_id": sid, "source_entity": entity, "supplier_nama": sup.get("nama"),
+                "rekon_payment_id": pid, "amount": amount, "allocated": 0, "unallocated": 0}
     rekon_payments = list(sup.get("rekon_payments") or [])
     rekon_payments.append(rekon_payment)
     await db.supplier_profiles.update_one({"id": sid}, {"$set": {"rekon_payments": rekon_payments}})
 
-    await db[IMPORTS_COLLECTION].update_one(
-        {"bank_transaction_id": btid},
-        {"$set": {"status": "processed", "supplier_id": sid, "source_entity": entity,
-                  "rekon_payment_id": pid, "amount": amount, "allocated": 0,
-                  "updated_at": _now_iso(), "processed_at": _now_iso()}})
+    await db[IMPORTS_COLLECTION].update_one({"bank_transaction_id": btid}, {"$set": imp_set})
     return {"status": "created", "bank_transaction_id": btid, "supplier_id": sid,
             "source_entity": entity, "supplier_nama": sup.get("nama"),
             "rekon_payment_id": pid, "amount": amount,
@@ -571,6 +592,17 @@ async def reverse_import(db, bank_transaction_id, reason=""):
                 p["reversal_reason"] = str(reason or "")[:300]
                 break
         await db.supplier_profiles.update_one({"id": sid}, {"$set": {"rekon_payments": rps}})
+        if snapshot is None:      # mungkin ditahan sebagai "Perlu Verifikasi" (rekon_payments_tahan)
+            tahan = list(sup.get("rekon_payments_tahan") or [])
+            for p in tahan:
+                if p.get("id") == pid:
+                    snapshot = dict(p)
+                    p["status"] = "reversed"
+                    p["reversed_at"] = _now_iso()
+                    p["reversal_reason"] = str(reason or "")[:300]
+                    break
+            if snapshot is not None:
+                await db.supplier_profiles.update_one({"id": sid}, {"$set": {"rekon_payments_tahan": tahan}})
 
     await db[IMPORTS_COLLECTION].update_one(
         {"bank_transaction_id": btid},

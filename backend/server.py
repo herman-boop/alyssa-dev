@@ -40,6 +40,7 @@ import ais  # modul AIS (posisi kapal) — provider-agnostic, aman tanpa key
 import rekon_sync  # integrasi pembayaran supplier dari Audit Rekon (isolated)
 import supplier_audit  # log audit append-only: arsip/hapus supplier, hapus unit/pembayaran, relink
 import rekon_orphans  # deteksi pembayaran yatim (Perlu Rekonsiliasi), baca-saja
+import rekon_dup  # sidik transaksi bank + deteksi kemungkinan ganda (Perlu Verifikasi), tanpa hapus/gabung otomatis
 import supplier_faktur  # pisah unit ke faktur (projek) baru — logika murni
 import hashlib
 import riwayat_clear  # clear/arsip Riwayat Pembayaran Supplier — aditif, tanpa delete
@@ -344,6 +345,34 @@ async def _resolve_admin(request: Request, x_admin_pin: Optional[str], authoriza
 
 # Supplier diarsipkan (soft delete) tidak ikut daftar aktif / agregat / pencocokan duplikat; datanya tetap utuh.
 _SUP_AKTIF = {"status": {"$ne": "archived"}}
+
+
+async def _require_approver(request: Request) -> dict:
+    """Persetujuan pembayaran: HANYA akun Super Admin (Pemilik) atau Finance Approver yang ditunjuk. Dicek di backend dari
+    token akun. PIN admin / mode terbuka TIDAK cukup (tidak ada identitas yang bisa diaudit)."""
+    auth = request.headers.get("Authorization") or ""
+    if not auth.lower().startswith("bearer "):
+        raise HTTPException(401, "Persetujuan wajib memakai akun Super Admin / Finance Approver (PIN admin tidak cukup).")
+    u = await app_users.verify_token(db, auth[7:].strip())
+    if not u:
+        raise HTTPException(401, "Sesi akun tidak valid atau sudah habis. Masuk ulang.")
+    if not app_users.is_finance_approver(u):
+        raise HTTPException(403, "Hanya Super Admin atau Finance Approver yang ditunjuk yang boleh menyetujui.")
+    return u
+
+
+async def _reauth_approver(u: dict, password: str) -> None:
+    """Autentikasi ulang (ketik password lagi) sebelum persetujuan. Salah = 401, terkunci = 423."""
+    try:
+        await app_users.reauth(db, u["user_id"], password)
+    except PermissionError as e:
+        raise HTTPException(423, str(e))
+    except ValueError as e:
+        raise HTTPException(401, str(e))
+
+
+def _approver_name(u: dict) -> str:
+    return (u.get("nama") or u.get("email") or "Approver")[:80]
 
 
 async def _audit_actor(request: Request) -> str:
@@ -7148,6 +7177,9 @@ def _supplier_rekon_overview(sup: dict) -> dict:
         "total_rekon_allocated": total_alloc,
         "total_unallocated": max(0, total_rekon - total_alloc),
         "total_alokasi_yatim": yatim_total,
+        "perlu_verifikasi": [p for p in (sup.get("rekon_payments_tahan") or []) if p.get("dup_status") == "perlu_verifikasi" and p.get("status") != "reversed"],
+        "total_perlu_verifikasi": sum((p.get("amount") or 0) for p in (sup.get("rekon_payments_tahan") or [])
+                                       if p.get("dup_status") == "perlu_verifikasi" and p.get("status") != "reversed"),
         "by_entity": by_entity,
         "rekon_payments": out,
     }
@@ -7802,6 +7834,8 @@ async def get_supplier(supplier_id: str):
     doc["total_transferred"] = manual_transfer + rk["total_rekon"]      # total uang benar2 ditransfer
     doc["total_allocated"] = manual_transfer + rk["total_rekon_allocated"]  # yang sudah nempel ke tagihan
     doc["total_unallocated"] = rk["total_unallocated"]                  # masih belum dialokasikan
+    doc["perlu_verifikasi"] = rk.get("perlu_verifikasi") or []          # ditahan: kemungkinan transaksi bank ganda (tidak dihitung)
+    doc["total_perlu_verifikasi"] = rk.get("total_perlu_verifikasi") or 0
     return doc
 
 
@@ -8893,6 +8927,117 @@ async def rekon_perlu_rekonsiliasi(supplier_id: str = "", nama: str = "", semua:
     return {"ringkasan": rekon_orphans.ringkas(rows), "items": rows}
 
 
+class FinanceApproverBody(BaseModel):
+    aktif: bool
+
+
+@api_router.patch("/admin/users/{user_id}/finance-approver")
+async def admin_users_set_finance_approver(user_id: str, body: FinanceApproverBody, request: Request):
+    """Pemilik menunjuk / mencabut Finance Approver (hanya pengguna berperan Keuangan). Hanya akun Pemilik (bukan PIN)."""
+    auth = request.headers.get("Authorization") or ""
+    owner = await app_users.verify_token(db, auth[7:].strip()) if auth.lower().startswith("bearer ") else None
+    if not owner or owner.get("role") != "pemilik":
+        raise HTTPException(403, "Hanya akun Pemilik (Super Admin) yang boleh menunjuk Finance Approver.")
+    try:
+        user = await app_users.set_finance_approver(db, user_id, body.aktif)
+    except (LookupError, ValueError) as e:
+        raise _uerr(e)
+    await supplier_audit.write(db, "approver.designate" if body.aktif else "approver.revoke", _approver_name(owner),
+                               reason=f"{user.get('email')}", after={"user_id": user_id, "finance_approver": body.aktif})
+    return {"user": user}
+
+
+@api_router.get("/admin/rekon/kemungkinan-duplikat", dependencies=[Depends(require_admin_pin)])
+async def rekon_kemungkinan_duplikat(supplier_id: str = "", nama: str = "", limit: int = 5000):
+    """BACA-SAJA. Pasangan transaksi bank yang kemungkinan satu transfer fisik tercatat dua kali, berdasar sidik: tanggal +
+    nominal + rekening sumber, diperkuat referensi bank / rekening tujuan / identitas bank. `kuat` = ada bukti identitas yang
+    cocok; `perlu_verifikasi` = inti sama tetapi identitas belum cukup. Tidak menghapus / menggabungkan apa pun."""
+    import re as _re
+    filt = {"status": "processed"}
+    if supplier_id:
+        filt["supplier_id"] = supplier_id.strip()
+    elif nama:
+        rx = _re.compile(_re.escape(nama.strip()), _re.IGNORECASE)
+        filt["$or"] = [{"supplier_name": rx}, {"beneficiary_name_raw": rx}]
+    imps = [d async for d in db[rekon_sync.IMPORTS_COLLECTION].find(filt, {"_id": 0, "raw_payload": 0}).limit(max(1, min(int(limit or 5000), 20000)))]
+    by = {d["bank_transaction_id"]: d for d in imps}
+    out = []
+    for pr in rekon_dup.cari_pasangan(imps):
+        side = lambda b: {k: by[b].get(k) for k in ("bank_transaction_id", "supplier_id", "supplier_name", "tanggal", "amount", "referensi_bank",
+                                                      "source_account_number", "rekon_payment_id", "dup_status")}
+        out.append({**pr, "sisi_a": side(pr["a"]), "sisi_b": side(pr["b"])})
+    return {"count": len(out), "pasangan": out}
+
+
+class DuplikatKeputusanBody(BaseModel):
+    keputusan: str                      # "bukan_duplikat" | "duplikat"
+    alasan: str
+    password: str                       # autentikasi ulang
+    duplikat_dari: Optional[str] = None  # wajib bila keputusan = duplikat: bank_transaction_id yang DIPERTAHANKAN
+
+
+@api_router.post("/admin/rekon/verifikasi/{bank_transaction_id}/putuskan", dependencies=[Depends(require_admin_pin)])
+async def rekon_putuskan_duplikat(bank_transaction_id: str, body: DuplikatKeputusanBody, request: Request):
+    """Keputusan atas transaksi yang kemungkinan ganda. HANYA Super Admin / Finance Approver (dicek di backend) + autentikasi ulang
+    + alasan wajib + audit log.
+      bukan_duplikat : pembayaran yang ditahan ("Perlu Verifikasi") masuk ke daftar pembayaran supplier (belum dialokasikan).
+      duplikat       : transaksi ini DIBATALKAN (status reversed, bank_transaction_id & idempotency_key tetap tersimpan) karena salinan
+                       dari `duplikat_dari` yang dipertahankan. Nominal asli tidak diubah; alokasi lama tersimpan di snapshot audit."""
+    u = await _require_approver(request)
+    keputusan = (body.keputusan or "").strip()
+    alasan = (body.alasan or "").strip()
+    if keputusan not in ("bukan_duplikat", "duplikat"):
+        raise HTTPException(400, "keputusan harus 'bukan_duplikat' atau 'duplikat'")
+    if len(alasan) < 5:
+        raise HTTPException(400, "Alasan wajib diisi (minimal 5 karakter)")
+    await _reauth_approver(u, body.password)
+    btid = bank_transaction_id.strip()
+    imp = await db[rekon_sync.IMPORTS_COLLECTION].find_one({"bank_transaction_id": btid}, {"_id": 0})
+    if not imp:
+        raise HTTPException(404, "Import rekon tidak ditemukan")
+    if imp.get("status") != "processed":
+        raise HTTPException(409, f"Transaksi berstatus '{imp.get('status')}', bukan processed")
+    by = _approver_name(u)
+    if keputusan == "bukan_duplikat":
+        if imp.get("dup_status") != "perlu_verifikasi":
+            raise HTTPException(409, "Transaksi ini tidak sedang ditahan sebagai Perlu Verifikasi")
+        sid, pid = imp.get("supplier_id"), imp.get("rekon_payment_id")
+        sup = await db.supplier_profiles.find_one({"id": sid}, {"_id": 0})
+        held = next((p for p in ((sup or {}).get("rekon_payments_tahan") or []) if p.get("id") == pid), None)
+        if not held:
+            raise HTTPException(409, "Pembayaran yang ditahan tidak ditemukan di profil supplier (perlu rekonsiliasi manual)")
+        now = datetime.now(timezone.utc).isoformat()
+        lolos = {**held, "status": "active", "dup_status": "terverifikasi_berbeda", "dup_verified_by": by, "dup_verified_at": now, "dup_verified_reason": alasan[:300]}
+        lolos.pop("dup_info", None)
+        lolos["dup_info_arsip"] = held.get("dup_info")
+        await db.supplier_profiles.update_one({"id": sid}, {"$pull": {"rekon_payments_tahan": {"id": pid}}, "$push": {"rekon_payments": lolos}})
+        await db[rekon_sync.IMPORTS_COLLECTION].update_one({"bank_transaction_id": btid}, {"$set": {"dup_status": "terverifikasi_berbeda", "updated_at": now}})
+        await supplier_audit.write(db, "dup.bukan_duplikat", by, supplier_id=sid, payment_id=pid, btid=btid, reason=alasan,
+                                   before={"dup_status": "perlu_verifikasi", "kandidat": imp.get("dup_kandidat")}, after={"dup_status": "terverifikasi_berbeda"},
+                                   extra={"nominal": held.get("amount"), "disetujui_oleh": u.get("email")})
+        return {"ok": True, "keputusan": keputusan, "bank_transaction_id": btid, "nominal": held.get("amount")}
+    # keputusan == duplikat
+    asli = (body.duplikat_dari or "").strip()
+    if not asli or asli == btid:
+        raise HTTPException(400, "duplikat_dari wajib diisi dengan bank_transaction_id transaksi yang DIPERTAHANKAN (bukan transaksi ini)")
+    imp_asli = await db[rekon_sync.IMPORTS_COLLECTION].find_one({"bank_transaction_id": asli}, {"_id": 0})
+    if not imp_asli or imp_asli.get("status") != "processed":
+        raise HTTPException(409, "Transaksi yang dipertahankan harus ada dan berstatus processed (tidak boleh saling membatalkan)")
+    if imp_asli.get("dup_status") == "perlu_verifikasi":
+        raise HTTPException(409, "Transaksi yang dipertahankan sendiri masih Perlu Verifikasi; putuskan salah satunya sebagai asli lebih dulu")
+    lvl = rekon_dup.tingkat(imp, imp_asli)
+    if not lvl:
+        raise HTTPException(409, "Kedua transaksi tidak memenuhi sidik duplikat (tanggal, nominal, rekening sumber sama dan identitas tidak bertentangan)")
+    res = await rekon_sync.reverse_import(db, btid, f"Duplikat dari {asli}: {alasan}"[:300])
+    if res.get("status") != "reversed":
+        raise HTTPException(409, f"Gagal membatalkan: {res.get('status')}")
+    await db[rekon_sync.IMPORTS_COLLECTION].update_one({"bank_transaction_id": btid}, {"$set": {"dup_status": "duplikat_dari", "duplikat_dari": asli}})
+    await supplier_audit.write(db, "dup.duplikat", by, supplier_id=imp.get("supplier_id"), payment_id=imp.get("rekon_payment_id"), btid=btid, reason=alasan,
+                               before={"status": "processed", "dup_status": imp.get("dup_status")}, after={"status": "reversed", "duplikat_dari": asli},
+                               extra={"dipertahankan": asli, "tingkat": lvl[0], "bukti": lvl[1], "nominal": imp.get("amount"), "disetujui_oleh": u.get("email")})
+    return {"ok": True, "keputusan": keputusan, "bank_transaction_id": btid, "dipertahankan": asli, "tingkat": lvl[0], "bukti": lvl[1], "reverse": res}
+
+
 @api_router.get("/admin/rekon/imports", dependencies=[Depends(require_admin_pin)])
 async def rekon_list_imports(status: Optional[str] = None, limit: int = 200,
                              exclude_status: Optional[str] = None, compact: bool = False):
@@ -9200,7 +9345,7 @@ async def rekon_pull_from_felis(entitas: Optional[str] = None, batas: Optional[i
         try:
             r = await rekon_sync.ingest_transaction(db, it)
             # Auto-alokasi ke tagihan supplier (hanya utk yang BARU dibuat).
-            if auto_allocate and r.get("status") == "created" and r.get("rekon_payment_id"):
+            if auto_allocate and r.get("status") == "created" and r.get("rekon_payment_id") and not r.get("perlu_verifikasi"):
                 try:
                     aa = await _auto_allocate_rekon(r.get("supplier_id"), r.get("rekon_payment_id"), r.get("amount"))
                     r["auto_alloc"] = aa

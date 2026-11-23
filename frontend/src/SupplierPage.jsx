@@ -1779,6 +1779,21 @@ export default function SupplierPage() {
                   </div>
                 );
               })()}
+              {(selected.perlu_verifikasi || []).length > 0 && (
+                <div style={{ background: "#1f1606", border: `1px solid ${C.gold}`, borderRadius: 12, padding: 12, marginBottom: 10 }} data-testid="sup-perlu-verifikasi">
+                  <div style={{ fontSize: 13, fontWeight: 800, color: C.gold, marginBottom: 4 }}>⚠️ Perlu Verifikasi · {fRp(selected.total_perlu_verifikasi)}</div>
+                  <div style={{ fontSize: 11.5, color: C.mute, marginBottom: 8 }}>
+                    Transaksi bank ini kemungkinan SALINAN dari transaksi lain (tanggal, nominal, rekening sumber sama). Ditahan: <b>tidak dihitung</b> di total dan tidak dialokasikan otomatis.
+                    Keputusan "duplikat / bukan duplikat" hanya oleh Super Admin atau Finance Approver (perlu login akun dan password ulang).
+                  </div>
+                  {selected.perlu_verifikasi.map((p) => (
+                    <div key={p.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "7px 0", borderTop: `1px solid ${C.line}`, flexWrap: "wrap", fontSize: 12.5 }}>
+                      <div><b>{fRp(p.amount)}</b> · {fDate(p.tanggal)}<div style={{ fontSize: 10.5, color: C.mute }}>ID bank: {p.bank_transaction_id}</div></div>
+                      <div style={{ fontSize: 10.5, color: C.mute, textAlign: "right" }}>kemungkinan salinan dari:{((p.dup_info && p.dup_info.kandidat) || []).map((k) => <div key={k.bank_transaction_id}>{k.bank_transaction_id} · {k.tingkat === "kuat" ? "bukti kuat" : "perlu dicek"}</div>)}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
               {(selected.rekon_payments || []).filter((p) => !hiddenSet.has(`rk:${p.id}`)).length > 0 && (() => {
                 const jobById = Object.fromEntries((selected.jobs || []).map((j) => [j.id, j]));
                 return (

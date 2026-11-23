@@ -92,6 +92,14 @@ def _tok_hash(t):
     return hashlib.sha256((t or "").encode("utf-8")).hexdigest()
 
 
+def is_finance_approver(u):
+    """Boleh MENYETUJUI penghubungan ulang / keputusan duplikat pembayaran: Pemilik (Super Admin), atau pengguna
+    berperan Keuangan yang ditunjuk Pemilik (`finance_approver: true`). Peran lain TIDAK pernah."""
+    if not u:
+        return False
+    return u.get("role") == "pemilik" or (u.get("role") == "keuangan" and u.get("finance_approver") is True)
+
+
 def public_user(d):
     if not d:
         return None
@@ -104,6 +112,7 @@ def public_user(d):
         "status": d.get("status"),
         "is_owner": d.get("role") == "pemilik",
         "has_password": bool(d.get("pw_hash")),
+        "finance_approver": is_finance_approver(d),
         "access_expires_at": d.get("access_expires_at"),
         "last_login": d.get("last_login"),
         "created_at": d.get("created_at"),
@@ -418,3 +427,37 @@ async def set_enforce(db, enabled):
     ENFORCE_CACHE["v"] = bool(enabled)
     ENFORCE_CACHE["t"] = time.monotonic()
     return bool(enabled)
+
+
+# ───────────── Finance Approver + autentikasi ulang (persetujuan pembayaran) ─────────────
+async def set_finance_approver(db, user_id, aktif):
+    u = await db[COLL].find_one({"user_id": user_id})
+    if not u:
+        raise LookupError("Pengguna tidak ditemukan")
+    if u.get("role") == "pemilik":
+        raise ValueError("Pemilik otomatis Super Admin; tidak perlu ditunjuk")
+    if u.get("role") != "keuangan":
+        raise ValueError("Hanya pengguna berperan Keuangan yang dapat ditunjuk sebagai Finance Approver")
+    await db[COLL].update_one({"user_id": user_id}, {"$set": {"finance_approver": bool(aktif)}})
+    u["finance_approver"] = bool(aktif)
+    return public_user(u)
+
+
+async def reauth(db, user_id, password):
+    """Autentikasi ULANG sebelum persetujuan: password akun harus diketik lagi. Memakai penghitung gagal/kunci yang sama
+    dengan login (5 salah = terkunci 15 menit). Return True bila benar; ValueError (salah) / PermissionError (terkunci)."""
+    u = await db[COLL].find_one({"user_id": user_id})
+    if not u or not u.get("pw_hash"):
+        raise ValueError("Autentikasi ulang gagal")
+    lock = _parse(u.get("locked_until"))
+    if lock and lock > _now():
+        raise PermissionError("Terlalu banyak percobaan. Coba lagi 15 menit lagi.")
+    if not password or not verify_pw(password, u["pw_hash"]):
+        n = int(u.get("fail_count") or 0) + 1
+        upd = {"fail_count": n}
+        if n >= MAX_FAIL:
+            upd = {"fail_count": 0, "locked_until": _iso(_now() + timedelta(minutes=LOCK_MINUTES))}
+        await db[COLL].update_one({"user_id": user_id}, {"$set": upd})
+        raise ValueError("Password salah")
+    await db[COLL].update_one({"user_id": user_id}, {"$set": {"fail_count": 0}})
+    return True

@@ -14,8 +14,9 @@ Kelas (kelas):
 Status tampilan (link_status): perlu_rekonsiliasi | perlu_hubungkan_ulang | info
 """
 
-KELAS_PERLU = ("supplier_hilang", "pembayaran_hilang", "alokasi_yatim")
+KELAS_PERLU = ("supplier_hilang", "pembayaran_hilang", "alokasi_yatim", "perlu_verifikasi")
 LABEL = {
+    "perlu_verifikasi": "Perlu Verifikasi",
     "supplier_hilang": "Perlu Rekonsiliasi",
     "pembayaran_hilang": "Perlu Rekonsiliasi",
     "alokasi_yatim": "Perlu Hubungkan Ulang",
@@ -75,6 +76,11 @@ def klasifikasi(imports, suppliers_by_id, audit_jobs=None):
         if sup.get("status") == "archived":
             rows.append({**base, "kelas": "supplier_diarsipkan", "label": LABEL["supplier_diarsipkan"], "link_status": "info",
                          "ref_dokumen_lama": [], "saran": "Pembayaran aman di profil arsip. Pulihkan profil atau hubungkan ke profil aktif bila perlu."})
+            continue
+        if imp.get("dup_status") == "perlu_verifikasi":
+            rows.append({**base, "kelas": "perlu_verifikasi", "label": LABEL["perlu_verifikasi"], "link_status": "perlu_verifikasi",
+                         "ref_dokumen_lama": [], "dup_kandidat": imp.get("dup_kandidat") or [], "dup_tingkat": imp.get("dup_tingkat") or "",
+                         "saran": "Kemungkinan satu transfer bank tercatat dua kali. Dicek lalu diputuskan Super Admin / Finance Approver."})
             continue
         pay = next((p for p in (sup.get("rekon_payments") or [])
                     if (imp.get("rekon_payment_id") and p.get("id") == imp.get("rekon_payment_id")) or p.get("bank_transaction_id") == btid), None)
