@@ -429,6 +429,7 @@ export const VEHICLE_TYPE_LIST = [
   "Toyota Vellfire",
   "Toyota Hilux",
   "Toyota Agya",
+  "Toyota Hiace Commuter",
   // ── Daihatsu ──
   "Daihatsu Xenia",
   "Daihatsu Terios",
@@ -590,6 +591,7 @@ const TYPE_TO_FILENAME = {
   "Toyota Vellfire":        "mpv-suv",
   "Toyota Hilux":           "pickup",
   "Toyota Agya":            "sedan",
+  "Toyota Hiace Commuter":  "hiace-commuter.png",   // sketsa referensi 4 tampak (depan, belakang, samping kiri/kanan)
   // Daihatsu
   "Daihatsu Xenia":         "mpv-suv",
   "Daihatsu Terios":        "mpv-suv",
@@ -716,6 +718,7 @@ const SKETCH_KEYWORDS = [
     "strada", "colorado", "bt-50", "bt50", "terra", "tunland", "double cab",
     "dcab", "d-cab", "kabin", "cabin", "pick up", "pickup", "pick-up"], "Pickup / Double Cabin"],
   [["motor", "beat", "vario", "nmax", "scoopy", "supra", "cbr", "vespa", "pcx", "aerox"], "Motor"],
+  [["hiace", "hi-ace", "commuter"], "Toyota Hiace Commuter"],     // semua tipe Hiace/Commuter (termasuk tipe custom) memakai sketsa van ini
   [["avanza", "xenia", "innova", "rush", "terios", "fortuner", "pajero", "xpander",
     "ertiga", "calya", "sigra", "mobilio", "br-v", "brv", "hr-v", "hrv", "cr-v", "crv",
     "x-trail", "xtrail", "livina", "veloz", "raize", "rocky", "confero", "mpv", "suv",
@@ -761,7 +764,7 @@ export function VehicleSketch({ type, className, style, color = "#D4A847", strok
   const [imgOk, setImgOk] = React.useState(true);
   const rtype = resolveSketchType(type);
   const filename = TYPE_TO_FILENAME[rtype];
-  const imgUrl = filename ? `/vehicles/${filename}.jpg` : null;
+  const imgUrl = filename ? `/vehicles/${filename}${/\.[a-z0-9]+$/i.test(filename) ? "" : ".jpg"}` : null;   // nama file boleh membawa ekstensi (mis. .png); selain itu .jpg
   const Comp = VEHICLE_SKETCH_MAP[rtype];
 
   if (imgUrl && imgOk) {
