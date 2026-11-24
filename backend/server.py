@@ -1265,7 +1265,7 @@ VALID_VEHICLE_TYPES = _TRUCK_KAROSERI_COMBOS | {
     "Toyota Avanza", "Toyota Veloz", "Toyota Rush", "Toyota Fortuner",
     "Toyota Kijang Innova", "Toyota Innova Zenix", "Toyota Raize",
     "Toyota Yaris Cross", "Toyota Alphard", "Toyota Vellfire", "Toyota Hilux",
-    "Toyota Agya",
+    "Toyota Agya", "Toyota Hiace Commuter",
     # Daihatsu
     "Daihatsu Xenia", "Daihatsu Terios", "Daihatsu Rocky", "Daihatsu Sigra",
     "Daihatsu Ayla", "Daihatsu Gran Max",

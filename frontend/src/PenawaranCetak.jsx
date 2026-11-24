@@ -40,22 +40,28 @@ function routeOptions(e) {
 }
 // Nilai FINAL 1 rute = harga opsi terpilih (kalau ada opsi) atau harga_deal (simple).
 // Tidak pernah menjumlahkan antar-opsi.
+// Pengecualian: opsi bertanda `tambahan` (mis. 1 unit Self Loader memindahkan 2 alat
+// beda rute & harga) BUKAN alternatif — harganya DIJUMLAHKAN ke harga rute.
+function routeAdds(e) { return routeOptions(e).filter((o) => o.tambahan); }
 function routeFinalOption(e) {
   const opts = routeOptions(e);
   if (!opts.length) return null;
   const idx = (typeof e.selected === "number" && e.selected >= 0 && e.selected < opts.length) ? e.selected : 0;
-  return opts[idx];
+  if (!opts[idx].tambahan) return opts[idx];
+  return opts.find((o) => !o.tambahan) || null;   // yang terpilih ternyata tambahan → pakai alternatif pertama
 }
 function routeFinalHarga(e) {
   const sel = routeFinalOption(e);
-  return sel ? (Number(sel.harga) || 0) : (e.harga_deal || 0);
+  const adds = routeAdds(e).reduce((s, o) => s + (Number(o.harga) || 0), 0);
+  return (sel ? (Number(sel.harga) || 0) : (adds > 0 ? 0 : (e.harga_deal || 0))) + adds;
 }
 // Jumlah unit per rute (default 1). Harga opsi = harga PER UNIT; jumlah = harga × unit.
 function routeQty(e) { const q = Math.floor(Number(e && e.qty)); return q >= 1 ? q : 1; }
 function routeFinalMetode(e) {
   const sel = routeFinalOption(e);
-  return sel ? (sel.metode || "-") : (e.moda || "-");
+  return sel ? (sel.metode || "-") : (routeAdds(e).length ? "-" : (e.moda || "-"));
 }
+export { routeFinalHarga, routeFinalMetode, routeAdds };
 
 // Membangun HTML penawaran. forImage=true → tanpa dialog cetak & lebar kontainer tetap (dirender jadi gambar).
 async function buildPenawaran(rows, meta, forImage) {
@@ -130,12 +136,12 @@ async function buildPenawaran(rows, meta, forImage) {
         <td><b>${esc(e.rute || "-")}</b>${routeQty(e) > 1 ? `<div class="ph-note">Jumlah ${routeQty(e)} unit (harga per unit)</div>` : ""}${catatanHtml}</td>
         <td>${opts.length > 1 ? "Opsi Pengiriman" : esc(opts[0].metode || "-")}</td>
         <td>${esc(e.tipe_kendaraan || "-")}</td>
-        <td class="r ph-opt-hint">pilih salah satu</td>
+        <td class="r ph-opt-hint">${opts.some((o) => o.tambahan) ? "○ pilih satu · ＋ ditambahkan" : "pilih salah satu"}</td>
         ${draftIns ? "<td></td><td></td>" : ""}
       </tr>`;
       const subs = opts.map((o) => `<tr class="ph-sub">
         <td></td>
-        <td colspan="3" class="ph-sub-k">○ ${esc(o.metode || "-")}${o.catatan ? ` <span class="ph-sub-note">(${esc(o.catatan)})</span>` : ""}</td>
+        <td colspan="3" class="ph-sub-k">${o.tambahan ? "＋" : "○"} ${esc(o.metode || "-")}${o.catatan ? ` <span class="ph-sub-note">(${esc(o.catatan)})</span>` : ""}</td>
         <td class="r ph-sub-v">${fRp(o.harga || 0)}</td>
         ${draftIns ? premiCellDraft(Number(o.ins) || 0, o.harga) : ""}
       </tr>`).join("");
@@ -143,19 +149,41 @@ async function buildPenawaran(rows, meta, forImage) {
     }
     // FINAL (atau simple / 1 opsi) → 1 baris: metode + harga terpilih.
     const harga = isDraft ? (e.harga_deal || 0) : routeFinalHarga(e);
-    const metode = isDraft ? (e.moda || "-") : routeFinalMetode(e);
+    const adds = isDraft ? [] : routeAdds(e);
+    const selO = isDraft ? null : routeFinalOption(e);
+    const q = routeQty(e);
+    // Harga baris utama = opsi pertama/terpilih (di atas). Opsi Tambahan = baris terpisah di bawahnya, lalu Total Rute.
+    const hargaUtama = (isDraft || !adds.length) ? harga : (selO ? (Number(selO.harga) || 0) : 0);
+    const metodeUtama = (isDraft || !adds.length) ? (isDraft ? (e.moda || "-") : routeFinalMetode(e)) : (selO ? (selO.metode || "-") : "-");
+    const noteUtama = (!isDraft && adds.length && selO && selO.catatan) ? `<div class="ph-note">${esc(selO.catatan)}</div>` : "";
     const main = `<tr class="ph-main-single">
       <td class="c">${i + 1}</td>
       <td><b>${esc(e.rute || "-")}</b>${catatanHtml}</td>
-      <td>${esc(metode)}</td>
+      <td>${esc(metodeUtama)}${noteUtama}</td>
       <td>${esc(e.tipe_kendaraan || "-")}</td>
-      ${showQty ? `<td class="c">${routeQty(e)}</td>` : ""}
-      <td class="r"><b>${fRp(harga)}</b></td>
+      ${showQty ? `<td class="c">${q}</td>` : ""}
+      <td class="r"><b>${fRp(hargaUtama)}</b></td>
       ${(isDraft && draftIns) ? premiCellDraft(rowNilai(e), harga) : ""}
-      ${perRow ? `<td class="r">${rowPremi(e) > 0 ? `${fRp(rowPremi(e))}<div class="ph-note">Nilai Pertanggungan ${fRp(rowNilai(e))}${routeQty(e) > 1 ? " / unit" : ""}</div>` : "-"}</td>` : ""}
-      ${showQty ? `<td class="r"><b>${fRp(harga * routeQty(e))}</b></td>` : ""}
+      ${perRow ? `<td class="r">${rowPremi(e) > 0 ? `${fRp(rowPremi(e))}<div class="ph-note">Nilai Pertanggungan ${fRp(rowNilai(e))}${q > 1 ? " / unit" : ""}</div>` : "-"}</td>` : ""}
+      ${showQty ? `<td class="r"><b>${fRp(hargaUtama * q)}</b></td>` : ""}
     </tr>`;
-    return `<tbody class="ph-route">${main}</tbody>`;
+    if (!adds.length) return `<tbody class="ph-route">${main}</tbody>`;
+    const rowTambah = (o) => `<tr class="ph-sub">
+      <td></td>
+      <td colspan="3" class="ph-sub-k">＋ ${esc(o.metode || "-")}${o.catatan ? ` <span class="ph-sub-note">(${esc(o.catatan)})</span>` : ""}</td>
+      ${showQty ? `<td class="c">${q}</td>` : ""}
+      <td class="r ph-sub-v">${fRp(Number(o.harga) || 0)}</td>
+      ${perRow ? "<td></td>" : ""}
+      ${showQty ? `<td class="r ph-sub-v">${fRp((Number(o.harga) || 0) * q)}</td>` : ""}
+    </tr>`;
+    const rowTotal = `<tr class="ph-sub ph-rt">
+      <td></td>
+      <td colspan="${showQty ? 4 : 3}" class="ph-sub-k" style="text-align:right;font-weight:700">Total Rute${q > 1 ? " (per unit)" : ""}</td>
+      <td class="r ph-sub-v">${fRp(harga)}</td>
+      ${perRow ? "<td></td>" : ""}
+      ${showQty ? `<td class="r ph-sub-v">${fRp(harga * q)}</td>` : ""}
+    </tr>`;
+    return `<tbody class="ph-route">${main}${adds.map(rowTambah).join("")}${rowTotal}</tbody>`;
   }).join("");
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${noDoc}</title>
@@ -202,6 +230,7 @@ async function buildPenawaran(rows, meta, forImage) {
     table.ph tr.ph-sub td { border-bottom:none; padding-top:2px; padding-bottom:2px; }
     table.ph .ph-sub-k { padding-left:16px !important; font-size:${fs}px; color:var(--ink); font-weight:500; }
     table.ph .ph-sub-note { font-style:italic; color:var(--mut); }
+    table.ph tr.ph-rt td { border-top:1px solid #999; }
     table.ph .ph-sub-v { font-size:${fs}px; font-weight:700; white-space:nowrap; }
     table.ph .ph-opt-hint { font-size:12px; font-style:italic; color:var(--mut); font-weight:500; }
     .ph-draft-note { font-size:13px; color:var(--ink); line-height:1.6; background:var(--lb); border-left:4px solid var(--gold); border-radius:8px; padding:12px 14px; margin:12px 0 2px; }
@@ -488,7 +517,12 @@ export function PenawaranCetakButton({ rows, namaPt, style, adminPin }) {
   // Harga FINAL 1 rute (mode final) = opsi terpilih atau harga_deal. TIDAK menjumlah opsi.
   const qtyOf = (i, e) => { const q = Math.floor(Number(onlyDigits0(qtyMap[i]))); return q >= 1 ? q : (Math.floor(Number(e && e.qty)) >= 1 ? Math.floor(Number(e.qty)) : 1); };
   const onlyDigits0 = (v) => String(v == null ? "" : v).replace(/[^0-9]/g, "");
-  const routeFinal = (i, e) => { const o = optOf(i); if (!o.length) return e.harga_deal || 0; return pNum(o[selOf(i)].harga); };
+  const routeFinal = (i, e) => {
+    const o = optOf(i); if (!o.length) return e.harga_deal || 0;
+    const adds = o.filter((k) => k.tambahan).reduce((s, k) => s + pNum(k.harga), 0);
+    const si = selOf(i); const base = !o[si].tambahan ? o[si] : o.find((k) => !k.tambahan);
+    return (base ? pNum(base.harga) : 0) + adds;
+  };
   const addOpt = (i, seed) => setOptMap((m) => ({ ...m, [i]: [...(m[i] || []), seed || { metode: "Self Drive", harga: "", catatan: "" }] }));
   const setOpt = (i, ki, patch) => setOptMap((m) => ({ ...m, [i]: (m[i] || []).map((x, idx) => (idx === ki ? { ...x, ...patch } : x)) }));
   const delOpt = (i, ki) => setOptMap((m) => ({ ...m, [i]: (m[i] || []).filter((_, idx) => idx !== ki) }));
@@ -624,14 +658,14 @@ export function PenawaranCetakButton({ rows, namaPt, style, adminPin }) {
                     )}
                     {isOpen && (
                       <div style={{ padding: "4px 10px 10px 36px", background: "#fafbfc" }}>
-                        <div style={{ fontSize: 10, fontWeight: 800, color: gray, textTransform: "uppercase", letterSpacing: ".3px", marginBottom: 6 }}>Opsi Harga / Metode <span style={{ textTransform: "none", fontWeight: 400 }}>(alternatif — customer pilih 1, tidak dijumlah)</span></div>
+                        <div style={{ fontSize: 10, fontWeight: 800, color: gray, textTransform: "uppercase", letterSpacing: ".3px", marginBottom: 6 }}>Opsi Harga / Metode <span style={{ textTransform: "none", fontWeight: 400 }}>(alternatif — customer pilih 1; centang ＋Tambahan kalau harus dijumlahkan)</span></div>
                         {opts.length === 0 && <div style={{ fontSize: 11, color: gray, marginBottom: 6 }}>Belum ada opsi — pakai harga satuan {fRp(e.harga_deal)}. Tambah opsi kalau mau kasih beberapa pilihan metode.</div>}
                         {opts.map((k, ki) => {
-                          const picked = mode === "final" && selOf(i) === ki;
+                          const picked = mode === "final" && !k.tambahan && (opts[selOf(i)]?.tambahan ? opts.findIndex((x) => !x.tambahan) : selOf(i)) === ki;
                           return (
                           <div key={ki} style={{ marginBottom: 8, padding: mode === "final" ? "6px 6px 6px 4px" : 0, border: mode === "final" ? `1px solid ${picked ? "#16a34a" : border}` : "none", borderRadius: 8, background: picked ? "#f0fdf4" : "transparent" }}>
                             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                              {mode === "final" && (
+                              {mode === "final" && !k.tambahan && (
                                 <input type="radio" name={`pnw-sel-${i}`} checked={picked} onChange={() => setSelMap((m) => ({ ...m, [i]: ki }))} title="Pilih metode ini" data-testid={`pnw-opt-pick-${i}-${ki}`} style={{ width: 15, height: 15, flexShrink: 0 }} />
                               )}
                               {/* Metode: input bebas + saran (datalist) — bisa pilih preset ATAU ketik manual (mis. Car Carrier / kombinasi) */}
@@ -643,7 +677,11 @@ export function PenawaranCetakButton({ rows, namaPt, style, adminPin }) {
                               <button onClick={() => delOpt(i, ki)} title="Hapus opsi"
                                 style={{ flexShrink: 0, color: "#991b1b", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6, padding: "5px 8px", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>✕</button>
                             </div>
-                            <input value={k.catatan || ""} onChange={(ev) => setOpt(i, ki, { catatan: ev.target.value })} placeholder="Catatan (opsional)"
+                            <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, fontSize: 11, fontWeight: 700, color: k.tambahan ? "#166534" : gray, cursor: "pointer" }}>
+                              <input type="checkbox" checked={!!k.tambahan} onChange={(ev) => setOpt(i, ki, { tambahan: ev.target.checked })} data-testid={`pnw-opt-tambahan-${i}-${ki}`} />
+                              ＋ Tambahan (harga DIJUMLAHKAN ke total rute, bukan alternatif)
+                            </label>
+                            <input value={k.catatan || ""} onChange={(ev) => setOpt(i, ki, { catatan: ev.target.value })} placeholder="Catatan (opsional, mis. Dari Km 5 ke Km 9)"
                               style={{ width: "100%", boxSizing: "border-box", marginTop: 4, padding: "5px 8px", borderRadius: 7, border: `1px solid ${border}`, fontSize: 11 }} />
                             {mode === "draft" && (
                               <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
@@ -668,7 +706,7 @@ export function PenawaranCetakButton({ rows, namaPt, style, adminPin }) {
                         </div>
                         {opts.length > 0 && mode === "final" && (
                           <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, paddingTop: 6, borderTop: `1px dashed ${border}`, fontSize: 12, fontWeight: 800, color: navy }}>
-                            <span>Harga Terpilih ({opts[selOf(i)]?.metode || "-"})</span><span>{fRp(routeFinal(i, e))}</span>
+                            <span>{opts.some((k) => k.tambahan) ? "Total Rute (terpilih + tambahan)" : `Harga Terpilih (${opts[selOf(i)]?.metode || "-"})`}</span><span>{fRp(routeFinal(i, e))}</span>
                           </div>
                         )}
                       </div>
@@ -781,7 +819,7 @@ export function PenawaranCetakButton({ rows, namaPt, style, adminPin }) {
               <button disabled={gambarBusy} onClick={async () => {
                 const sel = list.map((e, i) => ({ e, i })).filter(({ i }) => selIdx.has(i)).map(({ e, i }) => {
                   const options = optOf(i)
-                    .map((k) => ({ metode: (k.metode || "Lainnya"), harga: pNum(k.harga), catatan: (k.catatan || "").trim(), ins: Number(onlyDigits(k.ins)) || 0 }))
+                    .map((k) => ({ metode: (k.metode || "Lainnya"), harga: pNum(k.harga), catatan: (k.catatan || "").trim(), ins: Number(onlyDigits(k.ins)) || 0, ...(k.tambahan ? { tambahan: true } : {}) }))
                     .filter((k) => k.harga > 0 || k.metode);
                   return { ...e, options, selected: options.length ? selOf(i) : -1, insNilai: rowIns(i), qty: qtyOf(i, e) };
                 });
@@ -799,7 +837,7 @@ export function PenawaranCetakButton({ rows, namaPt, style, adminPin }) {
               <button onClick={() => {
                 const sel = list.map((e, i) => ({ e, i })).filter(({ i }) => selIdx.has(i)).map(({ e, i }) => {
                   const options = optOf(i)
-                    .map((k) => ({ metode: (k.metode || "Lainnya"), harga: pNum(k.harga), catatan: (k.catatan || "").trim(), ins: Number(onlyDigits(k.ins)) || 0 }))
+                    .map((k) => ({ metode: (k.metode || "Lainnya"), harga: pNum(k.harga), catatan: (k.catatan || "").trim(), ins: Number(onlyDigits(k.ins)) || 0, ...(k.tambahan ? { tambahan: true } : {}) }))
                     .filter((k) => k.harga > 0 || k.metode);
                   return { ...e, options, selected: options.length ? selOf(i) : -1, insNilai: rowIns(i), qty: qtyOf(i, e) };
                 });
@@ -811,7 +849,7 @@ export function PenawaranCetakButton({ rows, namaPt, style, adminPin }) {
               <button onClick={() => {
                 const sel = list.map((e, i) => ({ e, i })).filter(({ i }) => selIdx.has(i)).map(({ e, i }) => {
                   const options = optOf(i)
-                    .map((k) => ({ metode: (k.metode || "Lainnya"), harga: pNum(k.harga), catatan: (k.catatan || "").trim(), ins: Number(onlyDigits(k.ins)) || 0 }))
+                    .map((k) => ({ metode: (k.metode || "Lainnya"), harga: pNum(k.harga), catatan: (k.catatan || "").trim(), ins: Number(onlyDigits(k.ins)) || 0, ...(k.tambahan ? { tambahan: true } : {}) }))
                     .filter((k) => k.harga > 0 || k.metode);
                   // options = ALTERNATIF (tidak dijumlah). `selected` = index opsi terpilih (mode final).
                   return { ...e, options, selected: options.length ? selOf(i) : -1, insNilai: rowIns(i), qty: qtyOf(i, e) };
