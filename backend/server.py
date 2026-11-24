@@ -9268,6 +9268,128 @@ async def rekon_relink_apply(body: RelinkApplyBody, request: Request):
             "sisa_belum_dialokasikan": pv["sisa_belum_dialokasikan"], "sesudah": pv["sesudah"]}
 
 
+# ── Selesaikan transaksi READY yang "menempel" (supplier_id lama sudah dihapus) ─────────────────────────────────
+# Transaksi di Felis berstatus READY selama belum di-ACK. Bila supplier_id-nya sudah tidak ada di master, Tarik Rekon
+# menolaknya (supplier_not_found, tidak di-ACK) sehingga ia muncul terus di READY (terlihat juga oleh Claude Alyssa/Felis).
+# Alur aman: pilih profil supplier yang benar -> preview baca-saja -> persetujuan Super Admin/Finance Approver (+ password,
+# alasan) -> simpan sebagai pembayaran "Belum Dialokasikan" di profil itu -> ACK HANYA bila sudah tersimpan permanen.
+_STUCK_FINAL = ("processed", "reversed", "posted_expense")
+
+
+async def _stuck_ambil_item(btid: str):
+    if not rekon_felis_client.is_configured():
+        raise HTTPException(503, "Koneksi Felis belum diset (FELIS_BASE_URL + FELIS_TOKEN).")
+    try:
+        ready = await rekon_felis_client.fetch_ready(batas=500)
+    except rekon_felis_client.FelisError as e:
+        raise HTTPException(502, f"Felis: {e}")
+    for it in ready.get("data") or []:
+        k = str((it or {}).get("bank_transaction_id") or (it or {}).get("idempotency_key") or "").strip()
+        if k == btid:
+            return dict(it), ready.get("batch")
+    raise HTTPException(404, "Transaksi ini sudah tidak READY di Felis (tidak ada yang menempel).")
+
+
+async def _stuck_preview(btid: str, target_id: str) -> dict:
+    btid = (btid or "").strip()
+    item, batch = await _stuck_ambil_item(btid)
+    tgt = await db.supplier_profiles.find_one({"id": target_id}, {"_id": 0})
+    if not tgt:
+        raise HTTPException(404, "Supplier tujuan tidak ditemukan")
+    if tgt.get("status") == "archived":
+        raise HTTPException(409, "Supplier tujuan berstatus arsip; pulihkan dulu atau pilih profil lain")
+    sid_lama = str(item.get("supplier_id") or "").strip()
+    ada_lama = await db.supplier_profiles.find_one({"id": sid_lama}, {"_id": 0, "id": 1, "nama": 1, "status": 1}) if sid_lama else None
+    if ada_lama and ada_lama.get("status") != "archived":
+        raise HTTPException(409, f"Supplier lama masih ada ({ada_lama.get('nama')}); pakai Tarik Rekon biasa, tidak perlu dialihkan")
+    rec = await db[rekon_sync.IMPORTS_COLLECTION].find_one({"bank_transaction_id": btid}, {"_id": 0, "status": 1, "supplier_id": 1})
+    if (rec or {}).get("status") in _STUCK_FINAL:
+        raise HTTPException(409, f"Transaksi sudah berstatus {rec.get('status')} di alyssa-dev; pakai Hubungkan Ulang, bukan alihkan READY")
+    nama_bank = item.get("supplier_name") or item.get("bank_account_name") or item.get("beneficiary_name_raw") or ""
+    identitas = rekon_relink.identitas_supplier(nama_bank, tgt.get("nama"), tgt.get("aliases") or [])
+    cand = []
+    if item.get("tanggal"):
+        cur = db[rekon_sync.IMPORTS_COLLECTION].find({"tanggal": item.get("tanggal"), "status": "processed", "bank_transaction_id": {"$ne": btid}}, {"_id": 0, "raw_payload": 0})
+        cand = rekon_dup.kandidat(item, [d async for d in cur])
+    stabil = {"btid": btid, "target": tgt.get("id"), "nominal": rekon_sync._to_int(item.get("nominal")), "tanggal": item.get("tanggal"), "sid_lama": sid_lama}
+    return {
+        "bank_transaction_id": btid, "batch": batch,
+        "transaksi": {"nominal": rekon_sync._to_int(item.get("nominal")), "tanggal": item.get("tanggal"), "entitas": item.get("source_entity"),
+                      "nama_bank": nama_bank, "deskripsi": item.get("deskripsi_bank"), "referensi": item.get("referensi_bank")},
+        "supplier_lama": {"supplier_id": sid_lama, "ada": bool(ada_lama), "status": (ada_lama or {}).get("status") or "tidak_ada"},
+        "supplier_tujuan": {"supplier_id": tgt.get("id"), "nama": tgt.get("nama"), "no_hp": tgt.get("no_hp") or "", "aliases": tgt.get("aliases") or []},
+        "identitas_supplier": identitas,
+        "kemungkinan_duplikat": cand,
+        "hasil_bila_diterapkan": ("ditahan_perlu_verifikasi" if cand else "disimpan_belum_dialokasikan"),
+        "catatan": "Nominal bank tidak berubah. Pembayaran masuk Belum Dialokasikan; alokasi ke unit dilakukan terpisah. ACK ke Felis hanya setelah tersimpan permanen.",
+        "token": rekon_relink.token(stabil),
+        "_item": item,
+    }
+
+
+class StuckPreviewBody(BaseModel):
+    bank_transaction_id: str
+    target_supplier_id: str
+
+
+@api_router.post("/admin/rekon/menempel/preview", dependencies=[Depends(require_admin_pin)])
+async def rekon_menempel_preview(body: StuckPreviewBody):
+    """BACA-SAJA. Pratinjau pengalihan 1 transaksi READY yang supplier lamanya sudah tidak ada. Tidak menyimpan, tidak ACK."""
+    pv = await _stuck_preview(body.bank_transaction_id, body.target_supplier_id)
+    return {k: v for k, v in pv.items() if k != "_item"}
+
+
+class StuckApplyBody(BaseModel):
+    bank_transaction_id: str
+    target_supplier_id: str
+    preview_token: str
+    alasan: str
+    password: str
+    identitas_diverifikasi: bool = False
+
+
+@api_router.post("/admin/rekon/menempel/terapkan", dependencies=[Depends(require_admin_pin)])
+async def rekon_menempel_terapkan(body: StuckApplyBody, request: Request):
+    """Terapkan. HANYA Super Admin / Finance Approver (cek backend) + password + alasan + token preview yang masih sama +
+    identitas supplier diverifikasi. Idempoten per token. ACK ke Felis hanya bila pembayaran sudah tersimpan permanen."""
+    u = await _require_approver(request)
+    alasan = (body.alasan or "").strip()
+    if len(alasan) < 5:
+        raise HTTPException(400, "Alasan wajib diisi (minimal 5 karakter)")
+    if not body.identitas_diverifikasi:
+        raise HTTPException(400, "Identitas supplier wajib diverifikasi admin (identitas_diverifikasi=true)")
+    await _reauth_approver(u, body.password)
+    sudah = await db[supplier_audit.COLL].find_one({"action": "rekon.menempel_selesai", "extra.token": body.preview_token}, {"_id": 0, "id": 1, "at": 1})
+    if sudah:
+        return {"ok": True, "sudah_diterapkan": True, "audit_id": sudah.get("id"), "at": sudah.get("at")}
+    pv = await _stuck_preview(body.bank_transaction_id, body.target_supplier_id)
+    if pv["token"] != body.preview_token:
+        raise HTTPException(409, "Data berubah sejak preview. Buat preview ulang lalu setujui lagi; tidak ada yang tertulis.")
+    item, batch, btid = pv["_item"], pv["batch"], pv["bank_transaction_id"]
+    payload = dict(item)
+    payload["supplier_id"] = body.target_supplier_id
+    payload["supplier_id_asli"] = pv["supplier_lama"]["supplier_id"]
+    r = await rekon_sync.ingest_transaction(db, payload)
+    if r.get("status") not in rekon_sync.ACK_OK_STATUSES:
+        raise HTTPException(422, {"pesan": "Gagal menyimpan; tidak di-ACK, tidak ada yang berubah di Felis", "hasil": {k: r.get(k) for k in ("status", "reason", "error")}})
+    by, now = _approver_name(u), datetime.now(timezone.utc).isoformat()
+    await db[rekon_sync.IMPORTS_COLLECTION].update_one({"bank_transaction_id": btid}, {"$set": {
+        "supplier_id_lama": pv["supplier_lama"]["supplier_id"], "relinked_at": now, "relink_alasan": alasan[:300], "updated_at": now}})
+    ack_hasil, peringatan = None, None
+    ids = rekon_sync.pick_ack_ids([payload], [r])
+    if batch and ids:
+        try:
+            ack_hasil = await rekon_felis_client.ack(batch, ids)
+        except rekon_felis_client.FelisError as e:
+            peringatan = f"Tersimpan, tapi ACK gagal: {e}. Jalankan Tarik Rekon lagi untuk ACK ulang."
+    await supplier_audit.write(db, "rekon.menempel_selesai", by, supplier_id=body.target_supplier_id, btid=btid, reason=alasan,
+                               before={"supplier_lama": pv["supplier_lama"], "status_felis": "READY"},
+                               after={"supplier": pv["supplier_tujuan"], "hasil": r.get("status"), "acked": bool(ack_hasil)},
+                               extra={"token": body.preview_token, "nominal": pv["transaksi"]["nominal"], "identitas_supplier": pv["identitas_supplier"],
+                                      "kemungkinan_duplikat": pv["kemungkinan_duplikat"], "disetujui_oleh": u.get("email")})
+    return {"ok": True, "status": r.get("status"), "perlu_verifikasi": bool(r.get("perlu_verifikasi")), "acked": bool(ack_hasil),
+            "peringatan": peringatan, "bank_transaction_id": btid, "nominal": pv["transaksi"]["nominal"]}
+
 @api_router.get("/admin/rekon/rekonsiliasi-supplier", dependencies=[Depends(require_admin_pin)])
 async def rekon_rekonsiliasi_supplier(nama: str = "", supplier_ids: str = "", limit: int = 5000):
     """BACA-SAJA. Laporan rekonsiliasi bank <-> tagihan untuk satu supplier/orang (semua profil kembar, termasuk arsip). Menampilkan
