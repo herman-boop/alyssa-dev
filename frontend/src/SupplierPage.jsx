@@ -4,6 +4,7 @@ import { DOC_BRAND, DOC_BASE_CSS, docHeader, docFooter, DOC_ENTITIES } from "./d
 import { isBankFee } from "./rekonReportData";
 import { htmlKePng, bagikanPng } from "./PenawaranCetak";
 import SupplierFinance from "./SupplierFinance";
+import RekonLaporan from "./RekonLaporan";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "";
 const API = `${BACKEND_URL}/api`;
@@ -535,6 +536,7 @@ export default function SupplierPage() {
   const [tab, setTab] = useState("pembayaran"); // default: Pembayaran (dipakai tiap hari)
   const [filter, setFilter] = useState("semua");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [showRekonLap, setShowRekonLap] = useState(false);   // laporan rekonsiliasi bank (baca-saja)
   const [financeOpen, setFinanceOpen] = useState(false);   // Rekap Keuangan (Enterprise Finance) — tampilan baru, tidak menggantikan yang lama
   const [idCopied, setIdCopied] = useState(false);
   // Rekap supplier: No. Dokumen (auto/manual) + cetak / simpan ke Histori Dokumen
@@ -1455,15 +1457,17 @@ export default function SupplierPage() {
                       { t: "📊 Rekap Keuangan (baru)", on: () => { setMenuOpen(false); setFinanceOpen(true); }, },
                       { t: "🧾 Rekap A4 (No. + Simpan)", on: openRekap, },
                       { t: "📁 Projek Baru", on: addProject },
+                      { t: "🏦 Rekonsiliasi Bank", on: () => { setMenuOpen(false); setShowRekonLap(true); } },
                       { t: "✏️ Edit Supplier", on: openEdit },
                       { t: "🗑️ Hapus Supplier", on: deleteSupplier, danger: true },
                     ].map((m, i) => (
-                      <button key={i} onClick={m.on} style={{ display: "block", width: "100%", textAlign: "left", padding: "11px 14px", background: "none", border: "none", borderBottom: i < 4 ? `1px solid ${C.line}` : "none", color: m.danger ? C.red : C.ink, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{m.t}</button>
+                      <button key={i} onClick={m.on} style={{ display: "block", width: "100%", textAlign: "left", padding: "11px 14px", background: "none", border: "none", borderBottom: i < 5 ? `1px solid ${C.line}` : "none", color: m.danger ? C.red : C.ink, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{m.t}</button>
                     ))}
                   </div>
                 )}
               </div>
             </div>
+            {showRekonLap && <RekonLaporan nama={selected.nama} supplierId={selected.id} headers={headers} onClose={() => setShowRekonLap(false)} />}
             {/* Summary pajak-aware: Invoice · PPh23 · Net Transfer · Sudah Transfer · Sisa Transfer.
                 PPh23 BUKAN diskon; Sisa Transfer = yang masih harus ditransfer tunai ke supplier. */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 14 }}>

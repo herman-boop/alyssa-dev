@@ -41,6 +41,7 @@ import rekon_sync  # integrasi pembayaran supplier dari Audit Rekon (isolated)
 import supplier_audit  # log audit append-only: arsip/hapus supplier, hapus unit/pembayaran, relink
 import rekon_orphans  # deteksi pembayaran yatim (Perlu Rekonsiliasi), baca-saja
 import rekon_relink  # hubungkan ulang pembayaran: identitas bisnis, usulan, validasi (murni)
+import rekon_laporan  # laporan rekonsiliasi bank <-> tagihan per supplier (baca-saja)
 import rekon_dup  # sidik transaksi bank + deteksi kemungkinan ganda (Perlu Verifikasi), tanpa hapus/gabung otomatis
 import supplier_faktur  # pisah unit ke faktur (projek) baru — logika murni
 import hashlib
@@ -9388,6 +9389,25 @@ async def rekon_menempel_terapkan(body: StuckApplyBody, request: Request):
                                       "kemungkinan_duplikat": pv["kemungkinan_duplikat"], "disetujui_oleh": u.get("email")})
     return {"ok": True, "status": r.get("status"), "perlu_verifikasi": bool(r.get("perlu_verifikasi")), "acked": bool(ack_hasil),
             "peringatan": peringatan, "bank_transaction_id": btid, "nominal": pv["transaksi"]["nominal"]}
+
+@api_router.get("/admin/rekon/rekonsiliasi-supplier", dependencies=[Depends(require_admin_pin)])
+async def rekon_rekonsiliasi_supplier(nama: str = "", supplier_ids: str = "", limit: int = 5000):
+    """BACA-SAJA. Laporan rekonsiliasi bank <-> tagihan untuk satu supplier/orang (semua profil kembar, termasuk arsip). Menampilkan
+    tiap transaksi bank (status import, profil tempatnya, alokasi sah vs yatim, tersembunyi/ditahan, kelas), pasangan kemungkinan
+    salinan (sisi mana yang tersembunyi), ringkasan total bank vs tagihan aktif, dan catatan. Tidak mengasumsikan semua transaksi
+    teralokasi atau semuanya milik tagihan yang tampil. Tidak mengubah data apa pun."""
+    import re as _re
+    ids = [x.strip() for x in (supplier_ids or "").split(",") if x.strip()]
+    nm = (nama or "").strip()
+    if not nm and not ids:
+        raise HTTPException(400, "Isi nama supplier atau supplier_ids")
+    rx = _re.compile(_re.escape(nm), _re.IGNORECASE) if nm else None
+    pf = {"$or": ([{"nama": rx}] if rx else []) + ([{"id": {"$in": ids}}] if ids else [])}
+    profiles = [s_ async for s_ in db.supplier_profiles.find(pf, {"_id": 0})]
+    all_ids = sorted({p_["id"] for p_ in profiles} | set(ids))
+    imf = {"$or": ([{"supplier_id": {"$in": all_ids}}] if all_ids else []) + ([{"supplier_name": rx}, {"beneficiary_name_raw": rx}] if rx else [])}
+    imports = [d async for d in db[rekon_sync.IMPORTS_COLLECTION].find(imf, {"_id": 0, "raw_payload": 0}).limit(max(1, min(int(limit or 5000), 20000)))]
+    return rekon_laporan.susun(profiles, imports, _sup_view)
 
 
 @api_router.get("/admin/rekon/imports", dependencies=[Depends(require_admin_pin)])
