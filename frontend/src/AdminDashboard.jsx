@@ -1,6 +1,6 @@
 /* eslint-disable */
 import LegSupplierModal from "./LegSupplierModal";
-import { scanDokumen } from "./docScan";
+import DokumenScanModal from "./DokumenScanModal";
 import LegSupplierFields from "./LegSupplierFields";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -2652,8 +2652,13 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
     if (ok) { setCopiedPo(true); setTimeout(() => setCopiedPo(false), 1800); }
   };
 
+  const [scanQ, setScanQ] = useState(null);   // dokumen yang sedang ditinjau di jendela scan
   const uploadFotoAlbum = async (stage, files) => {
     if (!order.trip_id || !files?.length) return;
+    if (stage === "dokumen") { setScanQ({ stage, files: Array.from(files) }); return; }   // dokumen: scan + pratinjau dulu
+    return kirimFotoAlbum(stage, files);
+  };
+  const kirimFotoAlbum = async (stage, files) => {
     const catatan = window.prompt(
       `Catatan buat foto ${ALBUM_STAGES.find(s => s.key === stage)?.label || stage} ini (opsional, misal nama kapal):`,
       ""
@@ -2661,8 +2666,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
     if (catatan === null) return; // batal
     setUploadingStage(stage);
     try {
-      for (const f0 of Array.from(files)) {
-        const file = stage === "dokumen" ? await scanDokumen(f0) : f0;   // dokumen: potong otomatis, lurus A4, tajam (PDF/gagal = file asli)
+      for (const file of Array.from(files)) {
         const fd = new FormData();
         fd.append("foto", file);
         fd.append("stage", stage);
@@ -3570,15 +3574,16 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
               accept={key === "dokumen" ? "image/*,application/pdf" : "image/*"}
               multiple
               style={{ display: "none" }}
-              onChange={(e) => uploadFotoAlbum(key, e.target.files)}
+              onChange={(e) => { const fl = Array.from(e.target.files || []); e.target.value = ""; uploadFotoAlbum(key, fl); }}
             />
             <button className="adm-btn adm-btn-sm" onClick={() => albumFileRefs.current[key]?.click()} disabled={uploadingStage === key}
               style={{ background: "#E0F2FE", border: "1px solid #38BDF8", color: "#0369A1" }}
               title={`Upload foto ke album ${label} (kalau driver belum sempat)`}>
-              {uploadingStage === key ? (key === "dokumen" ? "Memindai & upload..." : "Uploading...") : `${icon} ${label}`}
+              {uploadingStage === key ? "Uploading..." : `${icon} ${label}`}
             </button>
           </span>
         ))}
+        {scanQ && <DokumenScanModal files={scanQ.files} onClose={() => setScanQ(null)} onSave={(fs) => { const st = scanQ.stage; setScanQ(null); kirimFotoAlbum(st, fs); }} />}
         <button className="adm-btn adm-btn-sm" onClick={(e) => { e.stopPropagation(); setShowSJ(true); }}
           style={{ background: "#DCFCE7", border: "1px solid #4ADE80", color: "#166534" }}>
           📄 Surat Jalan
@@ -8373,13 +8378,17 @@ function Trip360Modal({ order, headers, onClose, onEditLegs, onPrintSuratJalan, 
     { key: "tracking", label: "Tracking", icon: "tracking", count: checkpoints.length || undefined },
   ];
 
+  const [scanQ, setScanQ] = useState(null);   // dokumen: scan + pratinjau dulu
   const runUpload = async (stage, files, label) => {
     const list = files ? Array.from(files) : [];
     if (!list.length || !order.trip_id) return;
+    if (stage === "dokumen") { setScanQ({ stage, label, files: list }); return; }
+    return kirimUpload(stage, list, label);
+  };
+  const kirimUpload = async (stage, list, label) => {
     setBusy(true);
     try {
-      for (const f0 of list) {
-        const file = stage === "dokumen" ? await scanDokumen(f0) : f0;   // dokumen: potong otomatis, lurus A4, tajam
+      for (const file of list) {
         const fd = new FormData();
         fd.append("foto", file);
         fd.append("stage", stage);
@@ -8458,7 +8467,8 @@ function Trip360Modal({ order, headers, onClose, onEditLegs, onPrintSuratJalan, 
               <button className="t360-qabtn" onClick={() => setCpManual(true)} data-testid="t360-qa-cp-manual" title="Unggah foto checkpoint harian yang dikirim driver">📍 Checkpoint Manual</button>
             ) : null}
             <input ref={cpInputRef} type="file" accept="image/*" multiple hidden onChange={(e) => { runUpload(t360StageForLeg(activeLeg), e.target.files, "checkpoint"); e.target.value = ""; }} />
-            <input ref={docInputRef} type="file" accept="image/*" multiple hidden onChange={(e) => { runUpload("dokumen", e.target.files, "dokumen"); e.target.value = ""; }} />
+            <input ref={docInputRef} type="file" accept="image/*" multiple hidden onChange={(e) => { const fl = Array.from(e.target.files || []); e.target.value = ""; runUpload("dokumen", fl, "dokumen"); }} />
+            {scanQ && <DokumenScanModal files={scanQ.files} onClose={() => setScanQ(null)} onSave={(fs) => { const q = scanQ; setScanQ(null); kirimUpload(q.stage, fs, q.label); }} />}
           </div>
 
           <div className="t360-prog-thin">

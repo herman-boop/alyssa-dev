@@ -81,7 +81,34 @@ function close(mask, w, h, r) {
 }
 
 /* gray: Uint8Array w*h  ->  { quad:[[x,y]*4 pecahan 0..1 urut KA,KN,KB,KiB], luas:pecahan } | null */
-export function cariKertas(gray, w, h) {
+/* Blur kotak terpisah (radius r) pada gambar skala abu-abu: meleburkan bintik kecil (pola kain/meja) tapi tidak tepi kertas. */
+export function haluskan(gray, w, h, r) {
+  const tmp = new Float32Array(w * h), out = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    let acc = 0, n = 0;
+    for (let x = -r; x <= r; x++) if (x >= 0 && x < w) { acc += gray[y * w + x]; n++; }
+    for (let x = 0; x < w; x++) {
+      tmp[y * w + x] = acc / n;
+      const a = x - r, b = x + r + 1;
+      if (a >= 0) { acc -= gray[y * w + a]; n--; }
+      if (b < w) { acc += gray[y * w + b]; n++; }
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let acc = 0, n = 0;
+    for (let y = -r; y <= r; y++) if (y >= 0 && y < h) { acc += tmp[y * w + x]; n++; }
+    for (let y = 0; y < h; y++) {
+      out[y * w + x] = acc / n;
+      const a = y - r, b = y + r + 1;
+      if (a >= 0) { acc -= tmp[a * w + x]; n--; }
+      if (b < h) { acc += tmp[b * w + x]; n++; }
+    }
+  }
+  return out;
+}
+
+export function cariKertas(gray0, w, h, rgba) {
+  const gray = haluskan(gray0, w, h, 3);
   const med = (arr) => { const a = Array.from(arr).sort((x, y) => x - y); return a.length ? a[a.length >> 1] : 128; };
   // pembanding: cincin tepi foto (latar atau pinggir kertas) vs pusat foto (hampir pasti kertas)
   const rt = Math.max(2, Math.round(Math.min(w, h) * 0.03));
@@ -98,23 +125,87 @@ export function cariKertas(gray, w, h) {
   const terang = mc >= mr;                                   // kertas biasanya lebih terang dari meja, tapi dukung sebaliknya
   let mask = new Uint8Array(w * h);
   for (let i = 0; i < mask.length; i++) mask[i] = (terang ? gray[i] > th : gray[i] <= th) ? 1 : 0;
+  // Syarat warna: kertas punya warna (kromatisitas) seperti kertas di tengah foto; kain/meja terang tapi beda warna (mis. denim biru) dibuang.
+  if (rgba && terang) {
+    const cr = [], cb = [];
+    for (let y = Math.floor(h * 0.3); y < h * 0.7; y += 2) for (let x = Math.floor(w * 0.3); x < w * 0.7; x += 2) {
+      const i = (y * w + x) * 4, t = rgba[i] + rgba[i + 1] + rgba[i + 2] || 1;
+      if (gray[y * w + x] > th) { cr.push(rgba[i] / t); cb.push(rgba[i + 2] / t); }
+    }
+    if (cr.length > 20) {
+      const r0 = med(cr), b0 = med(cb);
+      for (let i = 0; i < mask.length; i++) {
+        if (!mask[i] || gray[i] > 235) continue;                       // sangat terang (sorot/kertas putih over-expose) tetap kertas
+        const t = rgba[i * 4] + rgba[i * 4 + 1] + rgba[i * 4 + 2] || 1;
+        if (Math.hypot(rgba[i * 4] / t - r0, rgba[i * 4 + 2] / t - b0) > 0.07) mask[i] = 0;
+      }
+    }
+  }
   mask = close(mask, w, h, Math.max(2, Math.round(Math.min(w, h) / 60)));
+  { const inv = new Uint8Array(w * h); for (let i = 0; i < inv.length; i++) inv[i] = mask[i] ? 0 : 1;      // buka: buang tonjolan tipis (selip kertas kecil, bayangan)
+    const c2 = close(inv, w, h, Math.max(2, Math.round(Math.min(w, h) / 80))); for (let i = 0; i < mask.length; i++) mask[i] = c2[i] ? 0 : 1; }
   const comp = terbesar(mask, w, h);
   if (!comp) return null;
   const luas = comp.area / (w * h);
   if (luas < 0.15) return null;
-  // 4 sudut = titik ekstrem pada diagonal (x+y, x-y)
-  let tl = Infinity, br = -Infinity, tr = -Infinity, bl = Infinity;
-  let pTL = null, pBR = null, pTR = null, pBL = null;
-  for (const p of comp.pts) {
-    const x = p % w, y = (p / w) | 0, s = x + y, d = x - y;
-    if (s < tl) { tl = s; pTL = [x, y]; }
-    if (s > br) { br = s; pBR = [x, y]; }
-    if (d > tr) { tr = d; pTR = [x, y]; }
-    if (d < bl) { bl = d; pBL = [x, y]; }
+  // Tepi kertas: titik batas komponen -> cangkang cembung -> sederhanakan jadi 4 sudut yang MEMBUNGKUS kertas
+  // (sisi-sisinya mengikuti tepi kertas asli, tahan terhadap lipatan/tepi melengkung/kertas miring).
+  const inC = new Uint8Array(w * h); for (const q of comp.pts) inC[q] = 1;
+  const batas = [];
+  for (const q of comp.pts) {
+    const x = q % w, y = (q / w) | 0;
+    if (x === 0 || y === 0 || x === w - 1 || y === h - 1 || !inC[q - 1] || !inC[q + 1] || !inC[q - w] || !inC[q + w]) batas.push([x, y]);
   }
-  const quad = [pTL, pTR, pBR, pBL].map(([x, y]) => [x / (w - 1), y / (h - 1)]);
-  return { quad, luas };
+  const quad4 = quadDariCangkang(cangkang(batas));
+  if (!quad4) return null;
+  const quad = quad4.map(([x, y]) => [Math.min(1, Math.max(0, x / (w - 1))), Math.min(1, Math.max(0, y / (h - 1)))]);
+  return { quad, luas, mask: inC, w, h };
+}
+
+/* Cangkang cembung (Andrew monotone chain), urutan searah jarum jam di koordinat layar (y ke bawah). */
+export function cangkang(pts) {
+  const p = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (p.length < 3) return p;
+  const cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo = []; for (const q of p) { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+  const up = []; for (let i = p.length - 1; i >= 0; i--) { const q = p[i]; while (up.length >= 2 && cr(up[up.length - 2], up[up.length - 1], q) <= 0) up.pop(); up.push(q); }
+  lo.pop(); up.pop();
+  return lo.concat(up);
+}
+
+/* Cangkang -> 4 sudut: berulang buang sisi yang penambahan luasnya paling kecil (perpanjang dua sisi tetangganya sampai bertemu). */
+export function quadDariCangkang(hull) {
+  let P = hull.map((q) => [q[0], q[1]]);
+  if (P.length < 4) return null;
+  const inter = (a, b, c, d) => {
+    const x1 = a[0], y1 = a[1], x2 = b[0], y2 = b[1], x3 = c[0], y3 = c[1], x4 = d[0], y4 = d[1];
+    const den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+    if (Math.abs(den) < 1e-9) return null;
+    const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / den;
+    return [x1 + t * (x2 - x1), y1 + t * (y2 - y1)];
+  };
+  const tri = (a, b, c) => Math.abs((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])) / 2;
+  while (P.length > 4) {
+    const n = P.length; let best = null;
+    for (let i = 0; i < n; i++) {
+      const a = P[(i - 1 + n) % n], b = P[i], c = P[(i + 1) % n], d = P[(i + 2) % n];
+      const x = inter(a, b, c, d);
+      if (!x) continue;
+      // titik potong harus di "luar" sisi b-c (arah menjauhi pusat), kalau tidak sisi ini tak bisa dibuang
+      const ab = [b[0] - a[0], b[1] - a[1]], dc = [c[0] - d[0], c[1] - d[1]];
+      if ((x[0] - b[0]) * ab[0] + (x[1] - b[1]) * ab[1] < 0 || (x[0] - c[0]) * dc[0] + (x[1] - c[1]) * dc[1] < 0) continue;
+      const add = tri(b, x, c);
+      if (!best || add < best.add) best = { i, x, add };
+    }
+    if (!best) return null;
+    const i = best.i, j = (i + 1) % n;
+    const Q = [];
+    for (let k = 0; k < n; k++) { if (k === j) continue; Q.push(k === i ? best.x : P[k]); }
+    P = Q;
+  }
+  // urut: mulai dari sudut kiri-atas (x+y terkecil), searah jarum jam -> KiAt, KaAt, KaBw, KiBw
+  let s0 = 0; for (let k = 1; k < 4; k++) if (P[k][0] + P[k][1] < P[s0][0] + P[s0][1]) s0 = k;
+  return [P[s0], P[(s0 + 1) % 4], P[(s0 + 2) % 4], P[(s0 + 3) % 4]];
 }
 
 function luasQuad(q) { let a = 0; for (let i = 0; i < 4; i++) { const [x1, y1] = q[i], [x2, y2] = q[(i + 1) % 4]; a += x1 * y2 - x2 * y1; } return Math.abs(a) / 2; }
@@ -199,7 +290,7 @@ export function bersihkan(img) {
 const toBlob = (canvas, q) => new Promise((res) => canvas.toBlob((b) => res(b), "image/jpeg", q));
 
 /* Foto dokumen (File) -> File JPEG A4 tegak & tajam. Gagal -> kembalikan file asli. */
-export async function scanDokumen(file, { lebar = 1654 } = {}) {      // 1654 x 2339 px = A4 @ 200 dpi
+export async function scanDokumen(file, { lebar = 1654, debug = null } = {}) {      // 1654 x 2339 px = A4 @ 200 dpi
   try {
     if (!file || !/^image\//.test(file.type || "") || /heic|heif/i.test(file.type || "")) return file;
     const bmp = await loadBitmap(file);
@@ -216,11 +307,14 @@ export async function scanDokumen(file, { lebar = 1654 } = {}) {      // 1654 x 
     const md = mctx.getImageData(0, 0, sw, sh).data;
     const gray = new Uint8Array(sw * sh);
     for (let i = 0; i < gray.length; i++) gray[i] = 0.299 * md[i * 4] + 0.587 * md[i * 4 + 1] + 0.114 * md[i * 4 + 2];
-    const hit = cariKertas(gray, sw, sh);
+    const hit = cariKertas(gray, sw, sh, md);
     let quad = hit && masukAkal(hit.quad, hit.luas) ? hit.quad : [[0, 0], [1, 0], [1, 1], [0, 1]];   // tak ketemu -> pakai seluruh foto
-    const pts = quad.map(([x, y]) => [x * (W - 1), y * (H - 1)]);
+    const cx = quad.reduce((t, q) => t + q[0], 0) / 4, cy = quad.reduce((t, q) => t + q[1], 0) / 4;
+    const kk = hit && !hit.penuh ? 0.988 : 1;                                   // masuk sedikit dari tepi kertas: buang sisa latar gelap/bayangan di pinggir
+    const pts = quad.map(([x, y]) => [(cx + (x - cx) * kk) * (W - 1), (cy + (y - cy) * kk) * (H - 1)]);
     const d = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
     const wd = (d(pts[0], pts[1]) + d(pts[3], pts[2])) / 2, ht = (d(pts[0], pts[3]) + d(pts[1], pts[2])) / 2;
+    if (debug) { debug.hit = hit ? { quad: hit.quad, luas: hit.luas, penuh: !!hit.penuh } : null; debug.pakai = quad; debug.pts = pts; debug.W = W; debug.H = H; debug.sw = sw; debug.sh = sh; debug.small = sm; debug.mask = hit && hit.mask; }
     const portrait = ht >= wd;
     const r = Math.max(wd, ht) / Math.max(1, Math.min(wd, ht));
     const rasio = r > 1.49 ? RASIO_F4 : RASIO_A4;                        // kertas F4/folio (330 mm) vs A4 (297 mm), pilih yang paling dekat
