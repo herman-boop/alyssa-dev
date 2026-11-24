@@ -40,6 +40,7 @@ import ais  # modul AIS (posisi kapal) — provider-agnostic, aman tanpa key
 import rekon_sync  # integrasi pembayaran supplier dari Audit Rekon (isolated)
 import supplier_audit  # log audit append-only: arsip/hapus supplier, hapus unit/pembayaran, relink
 import rekon_orphans  # deteksi pembayaran yatim (Perlu Rekonsiliasi), baca-saja
+import rekon_relink  # hubungkan ulang pembayaran: identitas bisnis, usulan, validasi (murni)
 import rekon_dup  # sidik transaksi bank + deteksi kemungkinan ganda (Perlu Verifikasi), tanpa hapus/gabung otomatis
 import supplier_faktur  # pisah unit ke faktur (projek) baru — logika murni
 import hashlib
@@ -1265,7 +1266,7 @@ VALID_VEHICLE_TYPES = _TRUCK_KAROSERI_COMBOS | {
     "Toyota Avanza", "Toyota Veloz", "Toyota Rush", "Toyota Fortuner",
     "Toyota Kijang Innova", "Toyota Innova Zenix", "Toyota Raize",
     "Toyota Yaris Cross", "Toyota Alphard", "Toyota Vellfire", "Toyota Hilux",
-    "Toyota Agya", "Toyota Hiace Commuter",
+    "Toyota Agya",
     # Daihatsu
     "Daihatsu Xenia", "Daihatsu Terios", "Daihatsu Rocky", "Daihatsu Sigra",
     "Daihatsu Ayla", "Daihatsu Gran Max",
@@ -9036,6 +9037,234 @@ async def rekon_putuskan_duplikat(bank_transaction_id: str, body: DuplikatKeputu
                                before={"status": "processed", "dup_status": imp.get("dup_status")}, after={"status": "reversed", "duplikat_dari": asli},
                                extra={"dipertahankan": asli, "tingkat": lvl[0], "bukti": lvl[1], "nominal": imp.get("amount"), "disetujui_oleh": u.get("email")})
     return {"ok": True, "keputusan": keputusan, "bank_transaction_id": btid, "dipertahankan": asli, "tingkat": lvl[0], "bukti": lvl[1], "reverse": res}
+
+
+# ── HUBUNGKAN ULANG PEMBAYARAN (relink) ───────────────────────────────────────────────────────────────
+# Preview (baca-saja) -> persetujuan Super Admin / Finance Approver + autentikasi ulang -> terapkan (idempoten, teraudit).
+# Nominal bank tidak pernah berubah; total alokasi <= nominal; alokasi lama tersimpan (relink_history + log audit).
+async def _relink_job_refs_lama(pay_view: dict, sup_asal: Optional[dict]) -> list:
+    """Referensi dokumen LAMA dari alokasi pembayaran: snapshot `ref` di alokasi > unit di supplier asal > snapshot log audit."""
+    refs, jobs_asal = [], {j.get("id"): j for j in ((sup_asal or {}).get("jobs") or [])}
+    ids = [a.get("job_id") for a in (pay_view.get("allocations") or []) if a.get("job_id")]
+    audit = {}
+    if ids:
+        async for a in db[supplier_audit.COLL].find({"action": "job.delete", "job_id": {"$in": ids}}, {"_id": 0, "job_id": 1, "before": 1}):
+            if isinstance(a.get("before"), dict):
+                audit[a["job_id"]] = a["before"]
+    for a in (pay_view.get("allocations") or []):
+        jid = a.get("job_id")
+        ref = a.get("ref") or (rekon_relink.ref_dari_job(jobs_asal[jid]) if jid in jobs_asal else None) \
+            or (rekon_relink.ref_dari_job(audit[jid]) if jid in audit else None) or {"job_id": jid, "no_invoice": "", "unit": "", "rute": "", "total": 0}
+        refs.append({**ref, "job_id": jid, "alokasi_lama": a.get("amount")})
+    return refs
+
+
+async def _relink_preview(btid: str, target_sid: str, raw_proposals) -> dict:
+    """BACA-SAJA. Hitung kondisi sebelum/sesudah, validasi, usulan, dan token. Tidak menulis apa pun."""
+    btid = (btid or "").strip()
+    imp = await db[rekon_sync.IMPORTS_COLLECTION].find_one({"bank_transaction_id": btid}, {"_id": 0})
+    if not imp:
+        raise HTTPException(404, "Import rekon tidak ditemukan")
+    if imp.get("status") != "processed":
+        raise HTTPException(409, f"Transaksi berstatus '{imp.get('status')}', hanya yang processed yang bisa dihubungkan")
+    if imp.get("dup_status") == "perlu_verifikasi":
+        raise HTTPException(409, "Transaksi ini masih Perlu Verifikasi (kemungkinan duplikat). Putuskan dulu sebelum dihubungkan.")
+    tgt = await db.supplier_profiles.find_one({"id": (target_sid or "").strip()}, {"_id": 0})
+    if not tgt:
+        raise HTTPException(404, "Supplier tujuan tidak ditemukan")
+    if tgt.get("status") in ("archived", "merged"):
+        raise HTTPException(409, "Supplier tujuan diarsipkan/digabung. Pilih profil aktif (atau pulihkan arsip dulu).")
+    sup_asal = await db.supplier_profiles.find_one({"rekon_payments.bank_transaction_id": btid}, {"_id": 0})
+    pay = next((p for p in ((sup_asal or {}).get("rekon_payments") or []) if p.get("bank_transaction_id") == btid), None)
+    if pay is None:
+        sup_asal = await db.supplier_profiles.find_one({"id": imp.get("supplier_id")}, {"_id": 0}) if imp.get("supplier_id") else None
+        if sup_asal and any(p.get("bank_transaction_id") == btid for p in (sup_asal.get("rekon_payments_tahan") or [])):
+            raise HTTPException(409, "Pembayaran ini ditahan sebagai Perlu Verifikasi. Putuskan dulu.")
+        if not (imp.get("raw_payload") or imp.get("amount")):
+            raise HTTPException(409, "Pembayaran tidak ditemukan dan import tidak menyimpan data untuk memulihkannya")
+        mode = "pulih_dari_import"
+        pay_view = rekon_relink.bangun_pembayaran_dari_import(imp, "", "", "")
+    else:
+        if pay.get("status") == "reversed":
+            raise HTTPException(409, "Pembayaran sudah dibatalkan (reversed)")
+        pay_view = copy.deepcopy(pay)
+        mode = "alokasi_ulang" if sup_asal.get("id") == tgt.get("id") else "pindah_supplier"
+    nominal = int(pay_view.get("amount") or 0)
+    if nominal <= 0:
+        raise HTTPException(409, "Nominal pembayaran tidak valid")
+    if mode != "alokasi_ulang" and any(p.get("bank_transaction_id") == btid for p in (tgt.get("rekon_payments") or [])):
+        raise HTTPException(409, "Pembayaran ini sudah aktif di supplier tujuan")
+
+    jobs_t = tgt.get("jobs") or []
+    jobs_by = {j.get("id"): j for j in jobs_t}
+    ov_before = _supplier_rekon_overview(tgt)
+    tot_before = {j["id"]: _supplier_job_totals(j, extra_paid=ov_before["alloc_by_job"].get(j["id"], 0)) for j in jobs_t}
+    own = {a.get("job_id"): int(a.get("amount") or 0) for a in (pay_view.get("allocations") or [])} if mode == "alokasi_ulang" else {}
+    sisa_tanpa_sendiri = {jid: (t.get("sisa") or 0) + own.get(jid, 0) for jid, t in tot_before.items()}
+    proposals, errs = rekon_relink.normalisasi_proposals(raw_proposals)
+    errs += rekon_relink.validasi(nominal, proposals, sisa_tanpa_sendiri, set(jobs_by))
+
+    new_allocs = [{"job_id": p["job_id"], "amount": p["amount"], "ref": rekon_relink.ref_dari_job(jobs_by[p["job_id"]])} for p in proposals if p["job_id"] in jobs_by]
+    tgt_after = copy.deepcopy(tgt)
+    pay_after = {**pay_view, "allocations": new_allocs, "status": "active"}
+    rps_after = [p for p in (tgt_after.get("rekon_payments") or []) if p.get("id") != pay_view.get("id")] if mode == "alokasi_ulang" else list(tgt_after.get("rekon_payments") or [])
+    tgt_after["rekon_payments"] = rps_after + [pay_after]
+    ov_after = _supplier_rekon_overview(tgt_after)
+    tot_after = {j["id"]: _supplier_job_totals(j, extra_paid=ov_after["alloc_by_job"].get(j["id"], 0)) for j in (tgt_after.get("jobs") or [])}
+    sentuh = sorted({p["job_id"] for p in proposals} | {jid for jid in own})
+    unit_rows = [{"job_id": jid, "no_invoice": (jobs_by.get(jid) or {}).get("no_invoice_supplier") or "", "unit": (jobs_by.get(jid) or {}).get("nopol") or (jobs_by.get(jid) or {}).get("no_rangka") or "",
+                  "sisa_sebelum": (tot_before.get(jid) or {}).get("sisa"), "sisa_sesudah": (tot_after.get(jid) or {}).get("sisa"),
+                  "alokasi_lama": own.get(jid, 0), "alokasi_baru": next((p["amount"] for p in proposals if p["job_id"] == jid), 0)} for jid in sentuh if jid in jobs_by]
+
+    src_before = src_after = None
+    if mode == "pindah_supplier":
+        ovs = _supplier_rekon_overview(sup_asal)
+        sa = copy.deepcopy(sup_asal); sa["rekon_payments"] = [p for p in (sa.get("rekon_payments") or []) if p.get("bank_transaction_id") != btid]
+        ova = _supplier_rekon_overview(sa)
+        src_before = {"supplier_id": sup_asal.get("id"), "nama": sup_asal.get("nama"), "total_rekon": ovs["total_rekon"], "total_unallocated": ovs["total_unallocated"]}
+        src_after = {"supplier_id": sup_asal.get("id"), "nama": sup_asal.get("nama"), "total_rekon": ova["total_rekon"], "total_unallocated": ova["total_unallocated"]}
+
+    refs_lama = await _relink_job_refs_lama(pay_view, sup_asal)
+    ganda = rekon_relink.identitas_ganda(jobs_t)
+    nama_asal = (sup_asal or {}).get("nama") or imp.get("supplier_name") or (imp.get("raw_payload") or {}).get("supplier_name") or ""
+    kec_supplier = "sama" if mode == "alokasi_ulang" else rekon_relink.identitas_supplier(nama_asal, tgt.get("nama"), tgt.get("aliases") or [])
+    konfirmasi = []     # kecocokan lemah/ambigu -> wajib konfirmasi eksplisit (terpisah dari verifikasi identitas supplier)
+    cocok_per_proposal = []
+    for p in proposals:
+        j = jobs_by.get(p["job_id"])
+        if not j:
+            continue
+        terbaik = None
+        for r in refs_lama:
+            sk = rekon_relink.skor(r, j)
+            if sk == "kuat" or (sk == "lemah" and terbaik != "kuat"):
+                terbaik = sk
+        cocok_per_proposal.append({"job_id": p["job_id"], "kecocokan_dengan_referensi_lama": terbaik or ("tidak_ada_referensi_lama" if not refs_lama else "tidak_cocok")})
+        if refs_lama and terbaik != "kuat":
+            punya_identitas = any(r.get("no_invoice") or r.get("unit") or r.get("rute") or r.get("total") for r in refs_lama)
+            konfirmasi.append(f"Kecocokan {terbaik or 'tidak cocok'} dengan referensi lama untuk unit {p['job_id']}" if punya_identitas else
+                              f"Referensi lama tidak punya identitas (nomor invoice/unit) untuk dicocokkan; pilihan unit {p['job_id']} perlu dikonfirmasi admin")
+        if p["job_id"] in ganda:
+            konfirmasi.append(f"Unit {p['job_id']} punya kembaran dengan identitas sama di supplier tujuan (ambigu)")
+    stabil = {"btid": btid, "target": tgt.get("id"), "mode": mode, "nominal": nominal, "proposals": proposals,
+              "pay": {k: pay_view.get(k) for k in ("id", "amount", "tanggal", "status", "allocations")},
+              "sisa": sisa_tanpa_sendiri, "alloc_target": ov_before["alloc_by_job"], "jobs_ver": tgt.get("jobs_ver")}
+    return {
+        "bank_transaction_id": btid, "mode": mode, "errors": errs, "boleh_diterapkan": not errs and bool(proposals),
+        "pembayaran": {"id": pay_view.get("id"), "nominal": nominal, "tanggal": pay_view.get("tanggal"), "status": pay_view.get("status"),
+                       "alokasi_lama": [{"job_id": a.get("job_id"), "amount": a.get("amount")} for a in (pay_view.get("allocations") or [])]},
+        "supplier_asal": {"supplier_id": (sup_asal or {}).get("id") or imp.get("supplier_id"), "nama": nama_asal, "ada": bool(sup_asal), "status": (sup_asal or {}).get("status") or ("aktif" if sup_asal else "tidak_ada")},
+        "supplier_tujuan": {"supplier_id": tgt.get("id"), "nama": tgt.get("nama"), "no_hp": tgt.get("no_hp") or "", "aliases": tgt.get("aliases") or []},
+        "identitas_supplier": kec_supplier,
+        "perlu_verifikasi_identitas": mode != "alokasi_ulang",     # pindah supplier / pulih: admin wajib memverifikasi identitas supplier
+        "referensi_dokumen_lama": refs_lama,
+        "usulan": rekon_relink.saran(refs_lama, jobs_t),
+        "proposals": proposals, "kecocokan": cocok_per_proposal,
+        "sebelum": {"supplier_tujuan": {"total_rekon": ov_before["total_rekon"], "teralokasi": ov_before["total_rekon_allocated"], "belum_dialokasikan": ov_before["total_unallocated"]}, "supplier_asal": src_before},
+        "sesudah": {"supplier_tujuan": {"total_rekon": ov_after["total_rekon"], "teralokasi": ov_after["total_rekon_allocated"], "belum_dialokasikan": ov_after["total_unallocated"]}, "supplier_asal": src_after},
+        "unit": unit_rows, "total_alokasi": sum(p["amount"] for p in proposals), "sisa_belum_dialokasikan": nominal - sum(p["amount"] for p in proposals),
+        "perlu_konfirmasi": konfirmasi, "token": rekon_relink.token(stabil),
+        "_ctx": {"imp": imp, "sup_asal": sup_asal, "tgt": tgt, "pay_view": pay_view, "new_allocs": new_allocs},
+    }
+
+
+def _relink_publik(pv: dict) -> dict:
+    return {k: v for k, v in pv.items() if k != "_ctx"}
+
+
+class RelinkPreviewBody(BaseModel):
+    bank_transaction_id: str
+    target_supplier_id: str
+    proposals: List[Dict[str, Any]] = []
+
+
+@api_router.get("/admin/rekon/relink/saran", dependencies=[Depends(require_admin_pin)])
+async def rekon_relink_saran(bank_transaction_id: str, target_supplier_id: str):
+    """BACA-SAJA. Usulan penautan berdasarkan identitas bisnis (nomor invoice, unit, rute, total). Hanya usulan, tidak ada yang ditulis."""
+    pv = await _relink_preview(bank_transaction_id, target_supplier_id, [])
+    return {"mode": pv["mode"], "referensi_dokumen_lama": pv["referensi_dokumen_lama"], "usulan": pv["usulan"],
+            "pembayaran": pv["pembayaran"], "supplier_asal": pv["supplier_asal"], "supplier_tujuan": pv["supplier_tujuan"], "identitas_supplier": pv["identitas_supplier"]}
+
+
+@api_router.post("/admin/rekon/relink/preview", dependencies=[Depends(require_admin_pin)])
+async def rekon_relink_preview(body: RelinkPreviewBody):
+    """BACA-SAJA. Preview sebelum/sesudah, validasi nominal, kecocokan identitas, dan `token` untuk persetujuan."""
+    return _relink_publik(await _relink_preview(body.bank_transaction_id, body.target_supplier_id, body.proposals))
+
+
+class RelinkApplyBody(BaseModel):
+    bank_transaction_id: str
+    target_supplier_id: str
+    proposals: List[Dict[str, Any]]
+    preview_token: str
+    alasan: str
+    password: str                         # autentikasi ulang
+    identitas_diverifikasi: bool = False  # wajib true untuk pindah supplier / pulih dari import
+    konfirmasi_ambigu: bool = False       # wajib true bila preview mencantumkan perlu_konfirmasi
+
+
+@api_router.post("/admin/rekon/relink/apply", dependencies=[Depends(require_admin_pin)])
+async def rekon_relink_apply(body: RelinkApplyBody, request: Request):
+    """Terapkan hubungkan ulang. HANYA Super Admin / Finance Approver (dicek di backend) + autentikasi ulang + alasan + token preview
+    yang masih berlaku. Idempoten: token yang sama tidak diterapkan dua kali. Tidak mengubah nominal bank; alokasi lama disimpan
+    di `relink_history` pada pembayaran dan di log audit."""
+    u = await _require_approver(request)
+    alasan = (body.alasan or "").strip()
+    if len(alasan) < 5:
+        raise HTTPException(400, "Alasan wajib diisi (minimal 5 karakter)")
+    await _reauth_approver(u, body.password)
+    sudah = await db[supplier_audit.COLL].find_one({"action": "payment.relink", "extra.token": body.preview_token}, {"_id": 0, "id": 1, "at": 1})
+    if sudah:
+        return {"ok": True, "sudah_diterapkan": True, "audit_id": sudah.get("id"), "at": sudah.get("at")}
+    pv = await _relink_preview(body.bank_transaction_id, body.target_supplier_id, body.proposals)
+    if pv["errors"]:
+        raise HTTPException(422, {"pesan": "Validasi gagal", "errors": pv["errors"]})
+    if not pv["proposals"]:
+        raise HTTPException(400, "Usulan alokasi kosong")
+    if pv["token"] != body.preview_token:
+        raise HTTPException(409, "Data berubah sejak preview. Buat preview ulang lalu setujui lagi; tidak ada yang tertulis.")
+    if pv["mode"] != "alokasi_ulang" and not body.identitas_diverifikasi:
+        raise HTTPException(400, "Identitas supplier wajib diverifikasi admin (identitas_diverifikasi=true) untuk memindahkan pembayaran antar profil")
+    if pv["perlu_konfirmasi"] and not body.konfirmasi_ambigu:
+        raise HTTPException(400, {"pesan": "Ada kecocokan yang lemah/ambigu; wajib konfirmasi eksplisit (konfirmasi_ambigu=true)", "perlu_konfirmasi": pv["perlu_konfirmasi"]})
+
+    ctx = pv["_ctx"]
+    imp, sup_asal, tgt, pay_view, new_allocs = ctx["imp"], ctx["sup_asal"], ctx["tgt"], ctx["pay_view"], ctx["new_allocs"]
+    btid, mode = pv["bank_transaction_id"], pv["mode"]
+    by, now = _approver_name(u), datetime.now(timezone.utc).isoformat()
+    if sum(a["amount"] for a in new_allocs) > int(pay_view.get("amount") or 0):
+        raise HTTPException(422, "Total alokasi melebihi nominal pembayaran")        # pagar terakhir
+    riwayat = {"at": now, "by": by, "alasan": alasan[:300], "token": body.preview_token, "mode": mode,
+               "dari": [{"job_id": a.get("job_id"), "amount": a.get("amount"), "ref": a.get("ref")} for a in (pay_view.get("allocations") or [])],
+               "ke": [{"job_id": a["job_id"], "amount": a["amount"]} for a in new_allocs],
+               "dari_supplier": (sup_asal or {}).get("id") or imp.get("supplier_id"), "ke_supplier": tgt.get("id")}
+    if mode == "alokasi_ulang":
+        rps = list(tgt.get("rekon_payments") or [])
+        for p in rps:
+            if p.get("id") == pay_view.get("id"):
+                p["allocations"] = new_allocs
+                p.setdefault("relink_history", []).append(riwayat)
+        await db.supplier_profiles.update_one({"id": tgt["id"]}, {"$set": {"rekon_payments": rps}})
+    else:
+        pindah = {**pay_view, "allocations": new_allocs, "status": "active", "relink_history": list(pay_view.get("relink_history") or []) + [riwayat]}
+        if mode == "pulih_dari_import":
+            pindah = {**rekon_relink.bangun_pembayaran_dari_import(imp, now, by, alasan), "allocations": new_allocs, "relink_history": [riwayat]}
+        else:
+            pindah["dipindah_dari"] = {"supplier_id": sup_asal.get("id"), "nama": sup_asal.get("nama"), "at": now, "by": by, "alasan": alasan[:300]}
+            await db.supplier_profiles.update_one({"id": sup_asal["id"]}, {
+                "$pull": {"rekon_payments": {"bank_transaction_id": btid}},
+                "$push": {"rekon_payments_dipindah": {"payment": pay_view, "ke_supplier": tgt.get("id"), "at": now, "by": by, "alasan": alasan[:300], "token": body.preview_token}}})
+        await db.supplier_profiles.update_one({"id": tgt["id"]}, {"$push": {"rekon_payments": pindah}})
+        await db[rekon_sync.IMPORTS_COLLECTION].update_one({"bank_transaction_id": btid}, {"$set": {
+            "supplier_id": tgt["id"], "supplier_id_lama": imp.get("supplier_id"), "relinked_at": now, "updated_at": now}})
+    await supplier_audit.write(db, "payment.relink", by, supplier_id=tgt["id"], payment_id=pay_view.get("id"), btid=btid, reason=alasan,
+                               before={"mode": mode, "supplier": pv["supplier_asal"], "alokasi_lama": riwayat["dari"], "sebelum": pv["sebelum"]},
+                               after={"supplier": pv["supplier_tujuan"], "alokasi_baru": riwayat["ke"], "sesudah": pv["sesudah"]},
+                               extra={"token": body.preview_token, "nominal": pay_view.get("amount"), "identitas_supplier": pv["identitas_supplier"],
+                                      "identitas_diverifikasi": body.identitas_diverifikasi, "konfirmasi_ambigu": body.konfirmasi_ambigu,
+                                      "perlu_konfirmasi": pv["perlu_konfirmasi"], "disetujui_oleh": u.get("email")})
+    return {"ok": True, "mode": mode, "bank_transaction_id": btid, "nominal": pay_view.get("amount"), "total_alokasi": pv["total_alokasi"],
+            "sisa_belum_dialokasikan": pv["sisa_belum_dialokasikan"], "sesudah": pv["sesudah"]}
 
 
 @api_router.get("/admin/rekon/imports", dependencies=[Depends(require_admin_pin)])

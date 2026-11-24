@@ -40,6 +40,7 @@ import uuid
 import re
 import logging
 import rekon_dup
+import rekon_relink
 from datetime import datetime, timezone
 
 try:
@@ -545,7 +546,8 @@ async def allocate_payment(db, supplier_id, rekon_payment_id, allocations):
     if rps[idx].get("status") == "reversed":
         return {"error": "Pembayaran sudah dibatalkan (reversed)"}
     amount = rps[idx].get("amount") or 0
-    valid_job_ids = {j.get("id") for j in (sup.get("jobs") or [])}
+    jobs_by_id = {j.get("id"): j for j in (sup.get("jobs") or [])}
+    valid_job_ids = set(jobs_by_id)
     cleaned, total = [], 0
     for a in (allocations or []):
         jid = str((a or {}).get("job_id") or "").strip()
@@ -555,7 +557,9 @@ async def allocate_payment(db, supplier_id, rekon_payment_id, allocations):
         if amt <= 0:
             return {"error": "amount alokasi harus > 0"}
         total += amt
-        cleaned.append({"job_id": jid, "amount": amt})
+        # `ref` = identitas bisnis unit/invoice saat dialokasikan, supaya alokasi tetap terbaca (dan bisa dihubungkan ulang)
+        # walau unit/supplier kemudian dihapus atau invoice diimpor ulang.
+        cleaned.append({"job_id": jid, "amount": amt, "ref": rekon_relink.ref_dari_job(jobs_by_id[jid])})
     if total > amount:
         return {"error": f"Total alokasi ({total}) melebihi nominal pembayaran ({amount})"}
     rps[idx]["allocations"] = cleaned
