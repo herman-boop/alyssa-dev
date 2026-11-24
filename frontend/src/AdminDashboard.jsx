@@ -1,5 +1,6 @@
 /* eslint-disable */
 import LegSupplierModal from "./LegSupplierModal";
+import { scanDokumen } from "./docScan";
 import LegSupplierFields from "./LegSupplierFields";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -2660,7 +2661,8 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
     if (catatan === null) return; // batal
     setUploadingStage(stage);
     try {
-      for (const file of Array.from(files)) {
+      for (const f0 of Array.from(files)) {
+        const file = stage === "dokumen" ? await scanDokumen(f0) : f0;   // dokumen: potong otomatis, lurus A4, tajam (PDF/gagal = file asli)
         const fd = new FormData();
         fd.append("foto", file);
         fd.append("stage", stage);
@@ -3573,7 +3575,7 @@ function OrderCard({ order, idx, onConvert, onPatch, onOdoo, onDelete, onOpenLeg
             <button className="adm-btn adm-btn-sm" onClick={() => albumFileRefs.current[key]?.click()} disabled={uploadingStage === key}
               style={{ background: "#E0F2FE", border: "1px solid #38BDF8", color: "#0369A1" }}
               title={`Upload foto ke album ${label} (kalau driver belum sempat)`}>
-              {uploadingStage === key ? "Uploading..." : `${icon} ${label}`}
+              {uploadingStage === key ? (key === "dokumen" ? "Memindai & upload..." : "Uploading...") : `${icon} ${label}`}
             </button>
           </span>
         ))}
@@ -8376,7 +8378,8 @@ function Trip360Modal({ order, headers, onClose, onEditLegs, onPrintSuratJalan, 
     if (!list.length || !order.trip_id) return;
     setBusy(true);
     try {
-      for (const file of list) {
+      for (const f0 of list) {
+        const file = stage === "dokumen" ? await scanDokumen(f0) : f0;   // dokumen: potong otomatis, lurus A4, tajam
         const fd = new FormData();
         fd.append("foto", file);
         fd.append("stage", stage);
