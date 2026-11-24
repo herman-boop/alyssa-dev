@@ -1,6 +1,7 @@
 /* eslint-disable */
 import LegSupplierModal from "./LegSupplierModal";
 import { scanDokumen } from "./docScan";
+import RekonMenempel from "./RekonMenempel";
 import LegSupplierFields from "./LegSupplierFields";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -1957,6 +1958,7 @@ function PengaturanPage({ dark, onToggleTheme, onLogout, fixHeicPhotos, fixingHe
   const _rp = (n) => "Rp " + new Intl.NumberFormat("id-ID").format(Number(n || 0));
   const _wColor = (w) => w === "would_create" ? "#3fb950" : (w === "supplier_not_found" || w === "error") ? "#f85149" : "#f0a742";
   // Tarik (PROSES): panggil /admin/rekon/pull (READY→simpan→ACK). Ada konfirmasi.
+  const [menempel, setMenempel] = useState(null);   // item READY yang supplier lamanya hilang -> modal "Selesaikan"
   const [pullRes, setPullRes] = useState(null);
   const [pullBusy, setPullBusy] = useState(false);
   const runRekonPull = async () => {
@@ -2227,12 +2229,19 @@ function PengaturanPage({ dark, onToggleTheme, onLogout, fixHeicPhotos, fixingHe
                     <div style={{ color: "#8b949e" }}>deskripsi: {p.deskripsi_bank || "-"}</div>
                     <div style={{ color: "#8b949e" }}>alokasi: {Array.isArray(p.alokasi) ? p.alokasi.length : 0} catatan</div>
                     <div style={{ fontSize: 11, color: "#6b7688", marginTop: 4 }}>id: {p.bank_transaction_id}</div>
+                    {p.would_status === "supplier_not_found" && (
+                      <button onClick={() => setMenempel(p)} data-testid={`rekon-menempel-buka-${p.bank_transaction_id}`}
+                        style={{ marginTop: 8, padding: "7px 12px", borderRadius: 8, border: "1px solid #1f6feb", background: "#0b1d3a", color: "#58a6ff", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                        🔗 Selesaikan: alihkan ke supplier yang benar
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
             )}
           </div>
         )}
+        {menempel && <RekonMenempel api={API} headers={headers} item={menempel} onClose={() => setMenempel(null)} onDone={runRekonPreview} />}
         {/* ── Tarik (PROSES) — simpan pembayaran + ACK ke Felis ── */}
         <div style={{ marginTop: 12, borderTop: "1px solid #1a2130", paddingTop: 12 }}>
           <button onClick={runRekonPull} disabled={pullBusy} style={{ padding: "9px 16px", borderRadius: 9, border: "1px solid #2ea043", background: "#0d2a17", color: "#3fb950", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }} data-testid="rekon-pull-run">
