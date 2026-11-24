@@ -151,23 +151,39 @@ async function buildPenawaran(rows, meta, forImage) {
     const harga = isDraft ? (e.harga_deal || 0) : routeFinalHarga(e);
     const adds = isDraft ? [] : routeAdds(e);
     const selO = isDraft ? null : routeFinalOption(e);
-    const line = (o) => `${esc(o.metode || "-")}${o.catatan ? ` <span class="ph-note">(${esc(o.catatan)})</span>` : ""}`;
-    const metode = (isDraft || !adds.length) ? esc(isDraft ? (e.moda || "-") : routeFinalMetode(e))
-      : [selO ? `<div>${line(selO)}</div>` : "", ...adds.map((o) => `<div>＋ ${line(o)}</div>`)].join("");
-    const hargaCell = (isDraft || !adds.length) ? `<b>${fRp(harga)}</b>`
-      : [selO ? `<div>${fRp(Number(selO.harga) || 0)}</div>` : "", ...adds.map((o) => `<div>＋ ${fRp(Number(o.harga) || 0)}</div>`), `<div style="border-top:1px solid #999;margin-top:2px;padding-top:2px"><b>${fRp(harga)}</b></div>`].join("");
+    const q = routeQty(e);
+    // Harga baris utama = opsi pertama/terpilih (di atas). Opsi Tambahan = baris terpisah di bawahnya, lalu Total Rute.
+    const hargaUtama = (isDraft || !adds.length) ? harga : (selO ? (Number(selO.harga) || 0) : 0);
+    const metodeUtama = (isDraft || !adds.length) ? (isDraft ? (e.moda || "-") : routeFinalMetode(e)) : (selO ? (selO.metode || "-") : "-");
+    const noteUtama = (!isDraft && adds.length && selO && selO.catatan) ? `<div class="ph-note">${esc(selO.catatan)}</div>` : "";
     const main = `<tr class="ph-main-single">
       <td class="c">${i + 1}</td>
       <td><b>${esc(e.rute || "-")}</b>${catatanHtml}</td>
-      <td>${metode}</td>
+      <td>${esc(metodeUtama)}${noteUtama}</td>
       <td>${esc(e.tipe_kendaraan || "-")}</td>
-      ${showQty ? `<td class="c">${routeQty(e)}</td>` : ""}
-      <td class="r">${hargaCell}</td>
+      ${showQty ? `<td class="c">${q}</td>` : ""}
+      <td class="r"><b>${fRp(hargaUtama)}</b></td>
       ${(isDraft && draftIns) ? premiCellDraft(rowNilai(e), harga) : ""}
-      ${perRow ? `<td class="r">${rowPremi(e) > 0 ? `${fRp(rowPremi(e))}<div class="ph-note">Nilai Pertanggungan ${fRp(rowNilai(e))}${routeQty(e) > 1 ? " / unit" : ""}</div>` : "-"}</td>` : ""}
-      ${showQty ? `<td class="r"><b>${fRp(harga * routeQty(e))}</b></td>` : ""}
+      ${perRow ? `<td class="r">${rowPremi(e) > 0 ? `${fRp(rowPremi(e))}<div class="ph-note">Nilai Pertanggungan ${fRp(rowNilai(e))}${q > 1 ? " / unit" : ""}</div>` : "-"}</td>` : ""}
+      ${showQty ? `<td class="r"><b>${fRp(hargaUtama * q)}</b></td>` : ""}
     </tr>`;
-    return `<tbody class="ph-route">${main}</tbody>`;
+    if (!adds.length) return `<tbody class="ph-route">${main}</tbody>`;
+    const rowTambah = (o) => `<tr class="ph-sub">
+      <td></td>
+      <td colspan="3" class="ph-sub-k">＋ ${esc(o.metode || "-")}${o.catatan ? ` <span class="ph-sub-note">(${esc(o.catatan)})</span>` : ""}</td>
+      ${showQty ? `<td class="c">${q}</td>` : ""}
+      <td class="r ph-sub-v">${fRp(Number(o.harga) || 0)}</td>
+      ${perRow ? "<td></td>" : ""}
+      ${showQty ? `<td class="r ph-sub-v">${fRp((Number(o.harga) || 0) * q)}</td>` : ""}
+    </tr>`;
+    const rowTotal = `<tr class="ph-sub ph-rt">
+      <td></td>
+      <td colspan="${showQty ? 4 : 3}" class="ph-sub-k" style="text-align:right;font-weight:700">Total Rute${q > 1 ? " (per unit)" : ""}</td>
+      <td class="r ph-sub-v">${fRp(harga)}</td>
+      ${perRow ? "<td></td>" : ""}
+      ${showQty ? `<td class="r ph-sub-v">${fRp(harga * q)}</td>` : ""}
+    </tr>`;
+    return `<tbody class="ph-route">${main}${adds.map(rowTambah).join("")}${rowTotal}</tbody>`;
   }).join("");
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${noDoc}</title>
@@ -214,6 +230,7 @@ async function buildPenawaran(rows, meta, forImage) {
     table.ph tr.ph-sub td { border-bottom:none; padding-top:2px; padding-bottom:2px; }
     table.ph .ph-sub-k { padding-left:16px !important; font-size:${fs}px; color:var(--ink); font-weight:500; }
     table.ph .ph-sub-note { font-style:italic; color:var(--mut); }
+    table.ph tr.ph-rt td { border-top:1px solid #999; }
     table.ph .ph-sub-v { font-size:${fs}px; font-weight:700; white-space:nowrap; }
     table.ph .ph-opt-hint { font-size:12px; font-style:italic; color:var(--mut); font-weight:500; }
     .ph-draft-note { font-size:13px; color:var(--ink); line-height:1.6; background:var(--lb); border-left:4px solid var(--gold); border-radius:8px; padding:12px 14px; margin:12px 0 2px; }
