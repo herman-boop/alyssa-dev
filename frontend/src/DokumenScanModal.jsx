@@ -5,9 +5,12 @@
    Admin lihat hasilnya, boleh pakai foto asli, lalu Simpan. */
 import { useEffect, useRef, useState } from "react";
 import { scanDokumen } from "./docScan";
+import { buatPdfA4, namaPdf } from "./docPdf";
 
 const LS_MODE = "alyssa_scan_dokumen_mode";
 const LS_ON = "alyssa_scan_dokumen_otomatis";
+const LS_FMT = "alyssa_scan_dokumen_format";
+const bacaFmt = () => { try { return localStorage.getItem(LS_FMT) === "jpg" ? "jpg" : "pdf"; } catch (e) { return "pdf"; } };
 const bacaMode = () => { try { return localStorage.getItem(LS_MODE) === "warna" ? "warna" : "bw"; } catch (e) { return "bw"; } };
 const bacaOn = () => { try { return localStorage.getItem(LS_ON) !== "0"; } catch (e) { return true; } };
 const simpanLS = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* abaikan */ } };
@@ -17,6 +20,10 @@ const kb = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1,
 export default function DokumenScanModal({ files, onSave, onClose }) {
   const [mode, setMode] = useState(bacaMode);
   const [auto, setAuto] = useState(bacaOn);
+  const [fmt, setFmt] = useState(bacaFmt);          // "pdf" (A4) | "jpg"
+  const [gabung, setGabung] = useState(false);     // gabung semua halaman scan jadi 1 PDF
+  const [bikin, setBikin] = useState(false);
+  const [errPdf, setErrPdf] = useState("");
   // cache hasil per file per mode: { bw: {file,url}, warna: {file,url} | {gagal:true} }
   const [item, setItem] = useState(() => files.map((f) => ({ asli: f, foto: adalahFoto(f), urlAsli: adalahFoto(f) ? URL.createObjectURL(f) : "", cache: {}, proses: false, pakai: bacaOn() ? "scan" : "asli" })));
   const batal = useRef(false);
@@ -48,7 +55,41 @@ export default function DokumenScanModal({ files, onSave, onClose }) {
   const hasilDari = (x) => (x.cache[mode] && x.cache[mode].file) || null;
   const efektif = (x) => (x.pakai === "scan" && hasilDari(x) ? "scan" : "asli");
   const sibuk = item.some((x) => x.foto && !x.cache[mode]);
-  const simpan = () => onSave(item.map((x) => (efektif(x) === "scan" ? hasilDari(x) : x.asli)));
+  const ubahFmt = (v) => { setFmt(v); simpanLS(LS_FMT, v); };
+  const jumlahScan = item.filter((x) => efektif(x) === "scan").length;
+  // Susun file keluaran: hasil scan -> PDF A4 (satu per dokumen, atau digabung 1 file); lainnya (foto asli/PDF) apa adanya.
+  const susun = async () => {
+    const dasar = item.map((x) => (efektif(x) === "scan" ? hasilDari(x) : x.asli));
+    if (fmt !== "pdf") return dasar;
+    const idx = item.map((x, i) => (efektif(x) === "scan" ? i : -1)).filter((i) => i >= 0);
+    if (!idx.length) return dasar;
+    if (gabung && idx.length > 1) {
+      const blob = await buatPdfA4(idx.map((i) => dasar[i]));
+      const nm = namaPdf(item[idx[0]].asli.name).replace(/-scan\.pdf$/, "") + `-${idx.length}hal-scan.pdf`;
+      const out = []; let sudah = false;
+      dasar.forEach((f, i) => { if (idx.includes(i)) { if (!sudah) { out.push(new File([blob], nm, { type: "application/pdf" })); sudah = true; } } else out.push(f); });
+      return out;
+    }
+    const out = [...dasar];
+    for (const i of idx) out[i] = new File([await buatPdfA4([dasar[i]])], namaPdf(item[i].asli.name), { type: "application/pdf" });
+    return out;
+  };
+  const simpan = async () => {
+    setBikin(true); setErrPdf("");
+    try { onSave(await susun()); } catch (e) { setErrPdf("Gagal membuat PDF: " + (e && e.message ? e.message : "coba format Gambar (JPG)")); }
+    setBikin(false);
+  };
+  const unduh = async () => {   // unduh PDF A4 (semua halaman scan digabung) ke perangkat, mis. untuk dilampirkan ke invoice/email
+    setBikin(true); setErrPdf("");
+    try {
+      const jpgs = item.filter((x) => efektif(x) === "scan").map((x) => hasilDari(x));
+      const blob = await buatPdfA4(jpgs);
+      const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+      a.download = jpgs.length > 1 ? `dokumen-${jpgs.length}hal-scan.pdf` : namaPdf(item.find((x) => efektif(x) === "scan").asli.name);
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    } catch (e) { setErrPdf("Gagal membuat PDF: " + (e && e.message ? e.message : "")); }
+    setBikin(false);
+  };
 
   const btn = (aktif) => ({ padding: "6px 10px", borderRadius: 8, border: `1px solid ${aktif ? "#1f6feb" : "#2a3344"}`, background: aktif ? "#0b1d3a" : "#0d1117", color: aktif ? "#58a6ff" : "#8b949e", fontWeight: 700, fontSize: 12, cursor: "pointer" });
 
@@ -67,6 +108,16 @@ export default function DokumenScanModal({ files, onSave, onClose }) {
           <span style={{ fontSize: 11.5, color: "#8b949e", fontWeight: 700 }}>Mode:</span>
           <button onClick={() => ubahMode("bw")} style={btn(mode === "bw")} data-testid="scan-mode-bw" title="Teks hitam pekat di kertas putih — paling tajam, cocok untuk lampiran invoice/arsip">⚫⚪ Hitam-putih (tajam)</button>
           <button onClick={() => ubahMode("warna")} style={btn(mode === "warna")} data-testid="scan-mode-warna" title="Kertas putih bersih, warna asli (logo, stempel) dipertahankan">🎨 Warna</button>
+        </div>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }} data-testid="scan-format">
+          <span style={{ fontSize: 11.5, color: "#8b949e", fontWeight: 700 }}>Simpan sebagai:</span>
+          <button onClick={() => ubahFmt("pdf")} style={btn(fmt === "pdf")} data-testid="scan-fmt-pdf" title="PDF ukuran A4, siap dilampirkan">📕 PDF A4</button>
+          <button onClick={() => ubahFmt("jpg")} style={btn(fmt === "jpg")} data-testid="scan-fmt-jpg">🖼️ Gambar (JPG)</button>
+          {fmt === "pdf" && jumlahScan > 1 && (
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginLeft: 6 }}>
+              <input type="checkbox" checked={gabung} onChange={(e) => setGabung(e.target.checked)} data-testid="scan-gabung" /> Gabung {jumlahScan} halaman jadi 1 PDF
+            </label>
+          )}
         </div>
         {sibuk && auto && <div style={{ fontSize: 12, color: "#8b949e", marginBottom: 8 }} data-testid="scan-proses">⏳ Memindai…</div>}
 
@@ -96,11 +147,13 @@ export default function DokumenScanModal({ files, onSave, onClose }) {
           })}
         </div>
 
+        {errPdf && <div style={{ marginTop: 10, fontSize: 12.5, color: "#f85149" }} data-testid="scan-err">{errPdf}</div>}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>
           <button onClick={onClose} style={btn(false)}>Batal</button>
-          <button onClick={simpan} disabled={sibuk && auto} data-testid="scan-simpan"
-            style={{ padding: "8px 16px", borderRadius: 9, border: "1px solid #2ea043", background: sibuk && auto ? "#11161f" : "#0d2a17", color: sibuk && auto ? "#4b5563" : "#3fb950", fontWeight: 800, fontSize: 12.5, cursor: sibuk && auto ? "default" : "pointer" }}>
-            ✅ Simpan {item.length} dokumen
+          {jumlahScan > 0 && <button onClick={unduh} disabled={bikin || (sibuk && auto)} data-testid="scan-unduh" style={btn(false)} title="Unduh PDF A4 ke HP/laptop (tidak mengunggah)">📥 Unduh PDF</button>}
+          <button onClick={simpan} disabled={bikin || (sibuk && auto)} data-testid="scan-simpan"
+            style={{ padding: "8px 16px", borderRadius: 9, border: "1px solid #2ea043", background: bikin || (sibuk && auto) ? "#11161f" : "#0d2a17", color: bikin || (sibuk && auto) ? "#4b5563" : "#3fb950", fontWeight: 800, fontSize: 12.5, cursor: bikin || (sibuk && auto) ? "default" : "pointer" }}>
+            {bikin ? "⏳ Menyiapkan…" : `✅ Simpan ${gabung && fmt === "pdf" && jumlahScan > 1 ? item.length - jumlahScan + 1 : item.length} dokumen`}
           </button>
         </div>
       </div>
