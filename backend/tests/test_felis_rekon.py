@@ -872,10 +872,10 @@ async def test_vendor_pin_embedded():
 
 
 async def test_auto_refresh_cycle():
-    """Cek otomatis berkala: kapal 'Berlangsung' tanpa posisi segar dicek SEKALI per
-    kapal unik, jeda makin lama kalau kosong, kapal segar dilewati, data basi bukan sukses."""
+    """Pemantauan otomatis 24 jam: kapal 'Berlangsung' (pembawa kendaraan) didahulukan, kapal 'Menunggu' ikut dipantau
+    lebih jarang, kapal baru dicoba langsung, kapal segar/selesai dilewati, interval dihormati (disimpan di DB)."""
     print("test_auto_refresh_cycle")
-    ok([AIS._auto_backoff_seconds(n) for n in (1, 2, 3, 4, 9)] == [3600, 7200, 14400, 21600, 21600], "jeda: 1j → 2j → 4j → 6j (maks)")
+    ok([AIS._auto_backoff_seconds(n) for n in (1, 2, 3, 4, 9)] == [1800, 3600, 7200, 14400, 14400], "backoff gagal: 30m → 1j → 2j → 4j (maks)")
 
     from datetime import datetime, timezone, timedelta
     class _R:
@@ -885,7 +885,7 @@ async def test_auto_refresh_cycle():
     mode = {"v": "404"}
     def fake_get(path, params, timeout=15):
         calls.append((path, dict(params)))
-        if path.endswith("/eta"):
+        if path.endswith("/eta") or (path.count("/") == 2 and not path.endswith("/position")):
             return _R(404)
         if mode["v"] == "404":
             return _R(404)
@@ -893,13 +893,12 @@ async def test_auto_refresh_cycle():
         return _R(200, {"vesselPosition": {"mmsi": "525200343", "latitude": 1.2, "longitude": 127.4, "timestamp": ts, "sog": 0.3}})
 
     db = FakeDB()
-    # Mutiara: 3 trip 'Berlangsung' (kapal sama). KAPAL B: Berlangsung, hanya IMO. Menunggu: diabaikan.
-    for tid in ("T1", "T2", "T3"):
+    for tid in ("T1", "T2", "T3"):       # Mutiara: 3 trip 'Berlangsung' (kapal sama) -> 1 target
         await db.trips.insert_one({"trip_id": tid, "legs": [{"route_leg_id": "l" + tid, "tipe": "Kapal RoRo", "kapal": "MUTIARA", "mmsi": "525200343", "imo": "9425021", "status": "Berlangsung"}]})
     await db.trips.insert_one({"trip_id": "T4", "legs": [{"route_leg_id": "l4", "tipe": "Kapal RoRo", "kapal": "B", "imo": "1234567", "status": "Berlangsung"}]})
-    await db.trips.insert_one({"trip_id": "T5", "legs": [{"route_leg_id": "l5", "tipe": "Kapal RoRo", "kapal": "C", "mmsi": "525000009", "status": "Menunggu"}]})
-    # Kapal D: Berlangsung tapi posisinya SUDAH segar → dilewati
+    await db.trips.insert_one({"trip_id": "T5", "legs": [{"route_leg_id": "l5", "tipe": "Kapal RoRo", "kapal": "C", "mmsi": "525000009", "status": "Menunggu"}]})   # upcoming: ikut dipantau
     await db.trips.insert_one({"trip_id": "T6", "legs": [{"route_leg_id": "l6", "tipe": "Kapal RoRo", "kapal": "D", "mmsi": "525000007", "status": "Berlangsung"}]})
+    await db.trips.insert_one({"trip_id": "T7", "legs": [{"route_leg_id": "l7", "tipe": "Kapal RoRo", "kapal": "E", "mmsi": "525000011", "status": "Selesai"}]})        # selesai: diabaikan
     await db.ais_positions.insert_one({"mmsi": "525000007", "latitude": 1.0, "longitude": 118.0, "position_timestamp": datetime.now(timezone.utc).isoformat()})
 
     saved = (AIS.vesselapi_enabled, AIS._vesselapi_use_sat, AIS._vesselapi_get, AIS.vesselfinder_enabled)
@@ -908,41 +907,44 @@ async def test_auto_refresh_cycle():
     AIS.vesselfinder_enabled = lambda: False
     AIS._vesselapi_get = fake_get
     state = {}
+    T0 = datetime.now(timezone.utc)
     try:
-        AIS._last_pos_fetch.clear(); AIS._last_eta_fetch.clear()
-        r1 = await AIS.auto_refresh_cycle(db, state, 1000.0)
-        ok(r1["candidates"] == 3, "kandidat = 3 kapal unik 'Berlangsung' (Menunggu diabaikan)")
-        ok(r1["attempted"] == 2 and r1["skipped_fresh"] == 1, "2 dicek, 1 dilewati karena posisinya sudah segar")
-        ok(r1["fail"] == 2 and r1["ok"] == 0, "provider kosong → 2 gagal")
+        AIS._last_pos_fetch.clear(); AIS._last_eta_fetch.clear(); AIS._last_exist_check.clear()
+        r1 = await AIS.auto_refresh_cycle(db, state, 1000.0, now_utc=T0)
+        ok(r1["candidates"] == 4, "target = 4 kapal unik (3 Berlangsung + 1 Menunggu; Selesai diabaikan)")
+        ok(r1["attempted"] == 3 and r1["skipped_fresh"] == 1, "3 dicek (termasuk kapal Menunggu yang belum pernah dicek), 1 dilewati karena posisinya segar")
+        ok(r1["fail"] == 3 and r1["ok"] == 0, "provider kosong -> 3 gagal")
         pos = [x for x in calls if x[0].endswith("/position")]
-        ok(len(pos) == 2, "Mutiara dites SEKALI walau 3 trip (+ 1 kapal IMO-saja) = 2 call posisi")
-        ok(state["525200343"]["fails"] == 1 and state["525200343"]["next"] == 1000.0 + 3600, "gagal pertama → cek ulang 1 jam lagi")
+        ok(len(pos) == 3, "Mutiara dites SEKALI walau 3 trip")
+        ok(state["525200343"]["fails"] == 1 and state["525200343"]["next"] == 1000.0 + 1800, "gagal pertama -> backoff 30 menit")
+        st = await AIS.ais_audit.get_status(db, "525000009")
+        ok(st and st["state"] in ("no_position", "not_found", "no_signal"), "status penyebab tersimpan walau kapal belum punya posisi")
 
         calls.clear(); AIS._last_pos_fetch.clear()
-        r2 = await AIS.auto_refresh_cycle(db, state, 1000.0 + 600)
-        ok(r2["attempted"] == 0 and r2["skipped_backoff"] == 2 and not calls, "10 menit kemudian: masih masa jeda → tidak ada call")
+        r2 = await AIS.auto_refresh_cycle(db, state, 1000.0 + 600, now_utc=T0 + timedelta(minutes=10))
+        ok(r2["attempted"] == 0 and not calls, "10 menit kemudian: masih dalam interval -> tidak ada call")
 
-        r3 = await AIS.auto_refresh_cycle(db, state, 1000.0 + 3601)
-        ok(r3["attempted"] == 2 and state["525200343"]["fails"] == 2 and state["525200343"]["next"] == 1000.0 + 3601 + 7200, "lewat 1 jam: dicek lagi, gagal kedua → jeda 2 jam")
+        # lewat interval pembawa kendaraan (120 mnt) & backoff: kapal 'Berlangsung' dicek lagi, kapal 'Menunggu' (480 mnt) belum
+        r3 = await AIS.auto_refresh_cycle(db, state, 1000.0 + 8000, now_utc=T0 + timedelta(minutes=130))
+        ok(r3["attempted"] == 2, "130 menit: 2 kapal pembawa kendaraan dicek lagi, kapal 'Menunggu' belum waktunya")
+        r3b = await AIS.auto_refresh_cycle(db, state, 1000.0 + 40000, now_utc=T0 + timedelta(minutes=500))
+        ok(r3b["attempted"] >= 3, "500 menit: kapal 'Menunggu' juga dipantau lagi (24 jam, termasuk malam)")
 
-        # Provider balas posisi BASI (12 jam) → bukan sukses, tetap backoff
         mode["v"] = "stale"; AIS._last_pos_fetch.clear()
-        r4 = await AIS.auto_refresh_cycle(db, state, 1000.0 + 3601 + 7300)
-        ok(r4["ok"] == 0 and r4["fail"] == 2 and state["525200343"]["fails"] == 3, "posisi basi 12 jam ≠ sukses → jeda makin lama (3 jam…)")
+        r4 = await AIS.auto_refresh_cycle(db, state, 1000.0 + 90000, now_utc=T0 + timedelta(minutes=900))
+        ok(r4["ok"] == 0 and r4["fail"] >= 1, "posisi basi 12 jam bukan sukses")
 
-        # Provider akhirnya balas posisi SEGAR → sukses, state dibersihkan, masuk cache
         mode["v"] = "fresh"; AIS._last_pos_fetch.clear()
-        r5 = await AIS.auto_refresh_cycle(db, state, 1000.0 + 3601 + 7300 + 15000)
-        ok(r5["ok"] >= 1 and "525200343" not in state, "posisi segar → sukses, state bersih")
+        r5 = await AIS.auto_refresh_cycle(db, state, 1000.0 + 200000, now_utc=T0 + timedelta(minutes=1500))
+        ok(r5["ok"] >= 1 and "525200343" not in state, "posisi segar -> sukses, state bersih")
         cached = await db.ais_positions.find_one({"mmsi": "525200343"})
-        ok(cached is not None and cached.get("latitude") == 1.2, "posisi masuk cache (semua unit Mutiara ikut dapat)")
+        ok(cached is not None and cached.get("latitude") == 1.2, "posisi masuk cache")
 
-        # Batas per putaran
         state2 = {}
         for i in range(15):
             await db.trips.insert_one({"trip_id": f"X{i}", "legs": [{"route_leg_id": f"x{i}", "tipe": "Kapal RoRo", "kapal": f"K{i}", "imo": f"90000{i:02d}", "status": "Berlangsung"}]})
         mode["v"] = "404"; calls.clear(); AIS._last_pos_fetch.clear()
-        r6 = await AIS.auto_refresh_cycle(db, state2, 5.0, max_ships=4)
+        r6 = await AIS.auto_refresh_cycle(db, state2, 5.0, max_ships=4, now_utc=T0 + timedelta(minutes=3000))
         ok(r6["attempted"] == 4, "dibatasi max_ships per putaran")
     finally:
         AIS.vesselapi_enabled, AIS._vesselapi_use_sat, AIS._vesselapi_get, AIS.vesselfinder_enabled = saved
@@ -950,24 +952,33 @@ async def test_auto_refresh_cycle():
 
 
 async def test_ais_jadwal_hemat_kuota():
-    """Cek otomatis cuma di jam jadwal (default 5x sehari, jam kerja), tiap kapal sekali per slot;
+    """Pemantauan 24 jam (default), pembatasan jam opsional, anggaran kuota melebarkan interval,
     pelanggan tidak memicu panggilan berbayar; simpan leg tidak memanggil lagi kalau posisi masih ada."""
     from datetime import datetime, timezone, timedelta
     old = {k: os.environ.get(k) for k in ("AIS_REFRESH_HOURS", "AIS_CUSTOMER_REFRESH")}
     os.environ.pop("AIS_REFRESH_HOURS", None); os.environ.pop("AIS_CUSTOMER_REFRESH", None)
     U = lambda *a: datetime(*a, tzinfo=timezone.utc)
     try:
-        ok(AIS.refresh_hours() == {8, 10, 12, 14, 16}, "default jadwal: 08, 10, 12, 14, 16 (5x sehari, jam kerja)")
-        ok(AIS.current_slot(U(2026, 10, 14, 1, 5)) == "2026-10-14@08", "01.05 UTC = 08.05 WIB -> slot 08")
-        ok(AIS.current_slot(U(2026, 10, 14, 2, 0)) is None, "09.00 WIB (jam lompat) -> di luar jadwal")
-        ok(AIS.current_slot(U(2026, 10, 14, 11, 0)) is None and AIS.current_slot(U(2026, 10, 14, 15, 0)) is None, "18.00 dan 22.00 WIB (di luar jam kerja) -> tidak ada")
-        ok(AIS.current_slot(U(2026, 10, 14, 9, 30)) == "2026-10-14@16", "16.30 WIB -> slot 16")
-        os.environ["AIS_REFRESH_HOURS"] = "always"
-        ok(AIS.refresh_hours() is None and AIS.current_slot(U(2026, 10, 14, 15, 0)) == "always", "'always' = tanpa jadwal (perilaku lama)")
+        ok(AIS.refresh_hours() is None, "default: 24 jam (tanpa jendela jam)")
+        ok(AIS.current_slot(U(2026, 10, 14, 17, 0)) == "always", "malam hari (00.00 WIB) tetap boleh dipantau")
+        os.environ["AIS_REFRESH_HOURS"] = "8,10,12,14,16"
+        ok(AIS.refresh_hours() == {8, 10, 12, 14, 16}, "jam bisa dibatasi lewat env")
+        ok(AIS.current_slot(U(2026, 10, 14, 1, 5)) == "2026-10-14@08" and AIS.current_slot(U(2026, 10, 14, 11, 0)) is None, "jadwal terbatas: 08 ya, 18 tidak")
         os.environ["AIS_REFRESH_HOURS"] = "7, 13,xx,30"
         ok(AIS.refresh_hours() == {7, 13}, "jam ngawur diabaikan")
         os.environ.pop("AIS_REFRESH_HOURS", None)
-        ok(AIS.jadwal_info() == {"jam": [8, 10, 12, 14, 16], "zona": "WIB"}, "info jadwal buat halaman pelanggan")
+        ok(AIS.jadwal_info() is None, "tanpa jam terbatas: tidak ada catatan '5x sehari'")
+
+        # anggaran kuota
+        ic, iu = AIS.plan_intervals(2, 3, budget=0)
+        ok((ic, iu) == (120, 480), "tanpa anggaran: interval dasar 2 jam / 8 jam")
+        ic, iu = AIS.plan_intervals(2, 3, budget=100000, now=U(2026, 10, 14))
+        ok((ic, iu) == (120, 480), "anggaran besar: interval dasar tetap")
+        ic, iu = AIS.plan_intervals(20, 30, budget=3000, now=U(2026, 10, 14))
+        ok(ic > 120 and (iu is None or iu >= 480), "anggaran kecil: interval melebar, kapal pembawa kendaraan didahulukan")
+        ic2, iu2 = AIS.plan_intervals(5, 0, budget=3000, now=U(2026, 10, 14))
+        calls_per_day = 5 * 1.3 * 1440 / ic2
+        ok(calls_per_day <= 3000 * 0.9 / 31 + 1, f"pemakaian harian proyeksi <= jatah anggaran (dapat {calls_per_day:.1f})")
 
         class _R:
             def __init__(self, st, body=None): self.status_code = st; self._b = body or {}; self.headers = {}; self.text = ""
@@ -982,24 +993,12 @@ async def test_ais_jadwal_hemat_kuota():
         state = {}
         try:
             AIS._last_pos_fetch.clear(); AIS._last_eta_fetch.clear()
-            r = await AIS.auto_refresh_cycle(db, state, 1000.0, now_utc=U(2026, 10, 14, 2, 0))
-            ok(r["outside_schedule"] and r["attempted"] == 0 and not calls, "09.00 WIB: tidak ada panggilan sama sekali")
-            r = await AIS.auto_refresh_cycle(db, state, 1000.0, now_utc=U(2026, 10, 14, 3, 0))
-            ok(r["attempted"] == 1 and len([c for c in calls if c.endswith("/position")]) == 1, "10.00 WIB (slot jadwal): kapal dicek sekali")
-            calls.clear(); AIS._last_pos_fetch.clear()
-            r = await AIS.auto_refresh_cycle(db, state, 1000.0 + 600, now_utc=U(2026, 10, 14, 3, 10))
-            ok(r["attempted"] == 0 and not calls, "10.10 WIB (slot sama): tidak dicek lagi")
-            state[("slot", "525200343")] = "2026-10-14@10"; state.pop("525200343", None)
-            r = await AIS.auto_refresh_cycle(db, state, 1000.0 + 8000, now_utc=U(2026, 10, 14, 5, 0))
-            ok(r["attempted"] == 1, "12.00 WIB: slot berikutnya, dicek lagi")
-            # 5 slot sehari = paling banyak 5 percobaan per kapal per hari
-            state.clear(); calls.clear(); n = 0
-            for h in range(0, 24):
-                AIS._last_pos_fetch.clear(); state.pop("525200343", None)
-                for minute in (0, 10, 20, 30, 40, 50):
-                    rr = await AIS.auto_refresh_cycle(db, state, 10000.0 + h * 3600 + minute * 60, now_utc=U(2026, 10, 14, 0, 0) + timedelta(hours=h, minutes=minute))
-                    n += rr["attempted"]
-            ok(n == 5, f"sehari penuh (tiap 10 menit): tepat 5 percobaan per kapal (dapat {n})")
+            r = await AIS.auto_refresh_cycle(db, state, 1000.0, now_utc=U(2026, 10, 14, 17, 0))
+            ok(r["attempted"] == 1, "00.00 WIB: dicek (24 jam)")
+            os.environ["AIS_REFRESH_HOURS"] = "10"
+            r = await AIS.auto_refresh_cycle(db, {}, 1000.0, now_utc=U(2026, 10, 14, 17, 0))
+            ok(r["outside_schedule"] and r["attempted"] == 0, "jika dibatasi jam 10 saja: 00.00 WIB tidak dicek")
+            os.environ.pop("AIS_REFRESH_HOURS", None)
         finally:
             AIS.vesselapi_enabled, AIS._vesselapi_use_sat, AIS._vesselapi_get, AIS.vesselfinder_enabled = saved
             AIS._last_pos_fetch.clear(); AIS._last_eta_fetch.clear()
@@ -1011,18 +1010,17 @@ async def test_ais_jadwal_hemat_kuota():
         try:
             out = await AIS.position_for_legs(db, [{"route_leg_id": "l1", "tipe": "Kapal RoRo", "kapal": "MUTIARA", "mmsi": "525200343", "status": "Berlangsung"}])
             ok(not calls, "halaman tracking pelanggan dibuka: 0 panggilan ke VesselAPI")
-            ok(out["jadwal"] == {"jam": [8, 10, 12, 14, 16], "zona": "WIB"}, "halaman tracking membawa info jadwal buat catatan")
+            ok(out["status"]["state"] in ("pending", "no_position", "not_found", "no_signal") and out["status"]["message"], "tanpa posisi: halaman membawa PENYEBAB, bukan sekadar kosong")
             os.environ["AIS_CUSTOMER_REFRESH"] = "on"; AIS._last_pos_fetch.clear()
             await AIS.position_for_legs(db, [{"route_leg_id": "l1", "tipe": "Kapal RoRo", "kapal": "MUTIARA", "mmsi": "525200343", "status": "Berlangsung"}])
             ok(len(calls) >= 1, "AIS_CUSTOMER_REFRESH=on mengembalikan perilaku lama (opsional)")
             os.environ.pop("AIS_CUSTOMER_REFRESH", None)
-            # simpan leg: kapal dengan posisi segar di cache tidak dipanggil lagi
             calls.clear(); AIS._last_pos_fetch.clear()
             await db.ais_positions.insert_one({"mmsi": "525200343", "latitude": 1.0, "longitude": 118.0, "position_timestamp": datetime.now(timezone.utc).isoformat()})
             await AIS.warm_ships(db, [{"mmsi": "525200343"}])
             ok(not calls, "simpan leg: posisi masih ada di cache -> tidak ada panggilan")
             await AIS.warm_ships(db, [{"mmsi": "525999999"}])
-            ok(len(calls) >= 1, "simpan leg: kapal baru tanpa posisi -> tetap diambil sekali")
+            ok(len(calls) >= 1, "simpan leg: kapal baru tanpa posisi -> langsung diambil")
         finally:
             AIS.vesselapi_enabled, AIS._vesselapi_use_sat, AIS._vesselapi_get, AIS.vesselfinder_enabled = saved
             AIS._last_pos_fetch.clear(); AIS._last_eta_fetch.clear()

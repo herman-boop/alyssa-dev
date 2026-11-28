@@ -73,7 +73,7 @@ def test_refresh_aktif_sekarang():
 
     db = types.SimpleNamespace(trips=_Trips())
     from datetime import datetime, timezone
-    async def fake(db_, mmsi, imo, timeout=15):
+    async def fake(db_, mmsi, imo, timeout=15, manual=False):
         return {"latitude": -5.7, "longitude": 107.2, "position_timestamp": datetime.now(timezone.utc).isoformat()}
     orig, orig_en = ais._vesselapi_refresh, ais.vesselapi_enabled
     ais._vesselapi_refresh, ais.vesselapi_enabled = fake, (lambda: True)

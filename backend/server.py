@@ -2405,6 +2405,9 @@ async def public_trip_ais_refresh(trip_id: str):
     doc = await db.trips.find_one({"trip_id": trip_id})
     if not doc:
         raise HTTPException(404, "Trip not found")
+    if ais.trip_selesai(doc):      # pengiriman selesai: tombol tidak memakai kuota provider
+        return {"status": "selesai", "retry_after": 0,
+                "message": "Pengiriman ini sudah selesai; posisi kapal tidak diperbarui lagi. Posisi terakhir tetap tersimpan."}
     return await ais.manual_refresh(db, doc.get("legs") or [])
 
 
@@ -2421,6 +2424,19 @@ async def admin_trip_ais_refresh(trip_id: str):
 async def admin_ais_armada():
     """Audit semua kapal aktif: identitas MMSI/IMO, umur posisi, percobaan refresh terakhir."""
     return await ais.armada(db)
+
+
+@api_router.get("/admin/ais/kuota", dependencies=[Depends(require_admin_pin)])
+async def admin_ais_kuota():
+    """Monitoring pemakaian API provider: total/berhasil/gagal per kelas (bulan & hari ini), sisa kuota bila tersedia."""
+    return await ais.kuota(db)
+
+
+@api_router.post("/admin/ais/uji-kapal", dependencies=[Depends(require_admin_pin)])
+async def admin_ais_uji_kapal(payload: dict):
+    """Uji 1 kapal berdasarkan nama (mis. FAJAR BAHARI II) atau IMO/MMSI. live=true menembak provider sekarang (memakai kuota)."""
+    return await ais.uji_kapal(db, nama=payload.get("nama") or "", mmsi=payload.get("mmsi") or "",
+                               imo=payload.get("imo") or "", live=bool(payload.get("live")))
 
 
 @api_router.get("/admin/ship-master", dependencies=[Depends(require_admin_pin)])
