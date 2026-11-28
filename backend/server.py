@@ -2398,6 +2398,31 @@ async def public_trip(trip_id: str):
     return view
 
 
+@api_router.post("/public/trips/{trip_id}/ais/refresh")
+async def public_trip_ais_refresh(trip_id: str):
+    """Tombol "Perbarui posisi" di peta: meminta data baru ke provider AIS (dengan cooldown & jeda kuota),
+    bukan sekadar memuat ulang cache. Scoped ke kapal pada trip ini."""
+    doc = await db.trips.find_one({"trip_id": trip_id})
+    if not doc:
+        raise HTTPException(404, "Trip not found")
+    return await ais.manual_refresh(db, doc.get("legs") or [])
+
+
+@api_router.post("/admin/trips/{trip_id}/ais/refresh", dependencies=[Depends(require_admin_pin)])
+async def admin_trip_ais_refresh(trip_id: str):
+    doc = await db.trips.find_one({"trip_id": trip_id})
+    if not doc:
+        raise HTTPException(404, "Trip not found")
+    ais.kuota_reset()
+    return await ais.manual_refresh(db, doc.get("legs") or [], admin=True)
+
+
+@api_router.get("/admin/ais/armada", dependencies=[Depends(require_admin_pin)])
+async def admin_ais_armada():
+    """Audit semua kapal aktif: identitas MMSI/IMO, umur posisi, percobaan refresh terakhir."""
+    return await ais.armada(db)
+
+
 @api_router.get("/admin/ship-master", dependencies=[Depends(require_admin_pin)])
 async def admin_ship_master_list():
     """Daftar master kapal (panjang/lebar/tipe)."""
