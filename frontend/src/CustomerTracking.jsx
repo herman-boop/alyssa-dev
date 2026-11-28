@@ -6,7 +6,7 @@ import "leaflet/dist/leaflet.css";
 import "./Tracking.css";
 import VesselPositionView from "./VesselPositionView";
 import LiveTrackSummary from "./LiveTrackSummary";
-import { ShipMarker, ShipCard, statusKapal } from "./ShipMarkerCard";
+import { ShipMarker, ShipCard, statusKapal, fmtWaktuWib } from "./ShipMarkerCard";
 import { MapFitter, SHIP_ZOOM, REGIONAL_ZOOM } from "./MapAutoCenter";
 import { buildVesselView } from "./vesselPositionData";
 import { renderMapImage } from "./mapShare";
@@ -469,7 +469,7 @@ function getOverallStatus(data) {
   const lastLeg = legs[legs.length - 1];
   if (progress.handover_complete) return "Sudah Diterima";
   if (lastLeg?.status === "Delivered") return "Tiba di Tujuan";
-  if (legs.some((l) => /jalan|kapal|berangkat|laut|feri/i.test(l.status || ""))) return "Sedang Dikirim";
+  if (legs.some((l) => /jalan|kapal|berangkat|berlangsung|laut|feri|transit/i.test(l.status || ""))) return "Sedang Dikirim";
   if (progress.initial_complete) return "Siap Berangkat";
   return "Persiapan";
 }
@@ -504,8 +504,8 @@ function createCpIcon(num, isLatest, dark) {
 /* Badge & label kesegaran AIS. Tidak pernah menyebut LIVE kalau bukan fresh. */
 function aisBadge(freshness) {
   if (freshness === "fresh") return { label: "🟢 Fresh", color: "#16a34a", bg: "#e7f6ee", bd: "#b6e2ca" };
-  if (freshness === "recent") return { label: "🟡 Posisi Terakhir", color: "#b45309", bg: "#fdf3e3", bd: "#f0d59b" };
-  if (freshness === "stale") return { label: "🔴 Stale", color: "#dc2626", bg: "#fdecec", bd: "#f5c2c2" };
+  if (freshness === "recent") return { label: "🟡 Posisi Terakhir Terdeteksi", color: "#b45309", bg: "#fdf3e3", bd: "#f0d59b" };
+  if (freshness === "stale") return { label: "🔴 Posisi Terakhir Terdeteksi", color: "#dc2626", bg: "#fdecec", bd: "#f5c2c2" };
   return { label: "Belum ada data AIS", color: "#6e7681", bg: "#161b22", bd: "#30363d" };
 }
 
@@ -568,6 +568,8 @@ export default function CustomerTracking() {
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [shipRefreshing, setShipRefreshing] = useState(false);
+  const [shipRefreshMsg, setShipRefreshMsg] = useState("");
   const [selectedCp, setSelectedCp] = useState(null);
   const [docPreview, setDocPreview] = useState(null);
   const [shipDetail, setShipDetail] = useState(false);   // toggle "Detail kapal"
@@ -617,6 +619,23 @@ export default function CustomerTracking() {
       setRefreshing(false);
     }
   }, [tripId]);
+
+  /* Minta posisi BARU ke provider AIS lewat backend (ada cooldown & jeda kuota), lalu muat ulang data.
+     Pesan hasil jujur: diperbarui / belum ada yang lebih baru / cooldown / kuota. */
+  const refreshShip = useCallback(async () => {
+    if (!tripId || shipRefreshing) return;
+    setShipRefreshing(true);
+    setShipRefreshMsg("");
+    try {
+      const r = await axios.post(`${API}/public/trips/${tripId}/ais/refresh`);
+      setShipRefreshMsg((r.data && r.data.message) || "");
+    } catch {
+      setShipRefreshMsg("Gagal menghubungi server. Coba lagi sebentar.");
+    } finally {
+      setShipRefreshing(false);
+      fetchData();
+    }
+  }, [tripId, shipRefreshing, fetchData]);
 
   useEffect(() => {
     fetchData();
@@ -997,6 +1016,9 @@ export default function CustomerTracking() {
               unit={[data.no_rangka, data.tipe_kendaraan ? (data.no_rangka ? `(${data.tipe_kendaraan})` : data.tipe_kendaraan) : ""].filter(Boolean).join(" ") || data.nopol || ""}
               umurText={aisAgeText(shipInfo.age_seconds)}
               badge={aisBadge(shipInfo.freshness)}
+              onRefresh={refreshShip}
+              refreshing={shipRefreshing}
+              refreshMsg={shipRefreshMsg}
               onClose={() => setShipCardOpen(false)}
             />
           )}
@@ -1048,6 +1070,8 @@ export default function CustomerTracking() {
                 nopol={data.nopol} driver={data.nama_driver} route={data.route} tipe={data.tipe_kendaraan}
                 status={overallStatus} tone={statusColor}
                 done={selesai}
+                lastSeen={!!(onShip && shipInfo && shipInfo.freshness !== "fresh")}
+                lastSeenText={shipInfo ? [fmtWaktuWib(shipInfo.position_timestamp), aisAgeText(shipInfo.age_seconds)].filter((x) => x && x !== "—").join(" · ") : ""}
                 speed={shipInfo ? shipInfo.speed : null} heading={shipInfo ? (shipInfo.course ?? shipInfo.heading) : null}
                 lat={onShip ? shipPos[0] : (lastGps ? lastGps.lat : null)} lon={onShip ? shipPos[1] : (lastGps ? lastGps.lng : null)}
                 cp={cp}
