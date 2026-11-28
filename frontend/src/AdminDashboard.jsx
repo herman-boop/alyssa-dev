@@ -2372,6 +2372,8 @@ function ComingSoon({ icon, title, note }) {
 /* ════════════════════════════════════════
    ORDER CARD
 ════════════════════════════════════════ */
+// Dokumen di album bisa berupa PDF (hasil scan A4): tampilkan sebagai kotak yang membuka PDF, bukan <img> rusak.
+const isPdfUrl = (u) => /\.pdf(\?|#|$)/i.test(u || "");
 const ALBUM_STAGES = [
   { key: "asal", label: "Asal", icon: "📍" },
   { key: "kapal", label: "Di Kapal", icon: "⚓" },
@@ -9146,7 +9148,9 @@ function Trip360Dokumen({ order, detail, bastk, resi, album, albumCount, docRead
                   {photos.map((p, j) => (
                     <div key={j} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
                       <div style={{ position: "relative" }}>
-                        <img src={resolveTripUrl(p.url)} alt="" className="t360-photo" onClick={() => onView(resolveTripUrl(p.url))} />
+                        {isPdfUrl(p.url)
+                          ? <a href={resolveTripUrl(p.url)} target="_blank" rel="noreferrer" className="t360-photo" title="Buka PDF" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, textDecoration: "none", color: "var(--text-1)", fontSize: 11, fontWeight: 700 }}><span style={{ fontSize: 26 }}>📕</span>PDF</a>
+                          : <img src={resolveTripUrl(p.url)} alt="" className="t360-photo" onClick={() => onView(resolveTripUrl(p.url))} />}
                         {onDeleteFoto && <button onClick={(e) => { e.stopPropagation(); onDeleteFoto(stage, p.id); }} title="Hapus foto" style={{ position: "absolute", top: 4, right: 4, width: 24, height: 24, borderRadius: 6, border: "none", background: "rgba(180,30,30,.92)", color: "#fff", fontSize: 12, cursor: "pointer", lineHeight: 1 }}>🗑</button>}
                       </div>
                       {p.catatan && <div style={{ fontSize: 10, color: "var(--text-2)", lineHeight: 1.3, wordBreak: "break-word" }} title={p.catatan}>📝 {p.catatan}</div>}
@@ -10141,7 +10145,9 @@ function RuteLegTab({ legs, setLeg, addLeg, nextLeg, delLeg, moveLeg, order, tri
                   ) : (
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                       {albumPhotos.slice(0, 4).map((p, pi) => (
-                        <img key={pi} src={resolveTripUrl(p.url)} alt="" style={{ width: 56, height: 56, borderRadius: 7, objectFit: "cover", border: "1px solid #21262d" }} />
+                        isPdfUrl(p.url)
+                          ? <a key={pi} href={resolveTripUrl(p.url)} target="_blank" rel="noreferrer" title="Buka PDF" style={{ width: 56, height: 56, borderRadius: 7, border: "1px solid #21262d", background: "#0d1117", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, textDecoration: "none" }}>📕</a>
+                          : <img key={pi} src={resolveTripUrl(p.url)} alt="" style={{ width: 56, height: 56, borderRadius: 7, objectFit: "cover", border: "1px solid #21262d" }} />
                       ))}
                       {albumPhotos.length > 4 && (
                         <div style={{ width: 56, height: 56, borderRadius: 7, background: "#0d1117", border: "1px solid #21262d", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "#8b949e", fontWeight: 700 }}>
@@ -10328,7 +10334,9 @@ function FotoTab({ detail, loading, onView, onDelete }) {
               <div className="keep-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))", gap: 8 }}>
                 {photos.map((p, i) => (
                   <div key={i} style={{ position: "relative" }}>
-                    <img src={resolveTripUrl(p.url)} alt="" onClick={() => onView(resolveTripUrl(p.url))} style={{ width: "100%", aspectRatio: "1", borderRadius: 8, objectFit: "cover", border: "1px solid #21262d", cursor: "pointer" }} />
+                    {isPdfUrl(p.url)
+                      ? <a href={resolveTripUrl(p.url)} target="_blank" rel="noreferrer" title="Buka PDF" style={{ width: "100%", aspectRatio: "1", borderRadius: 8, border: "1px solid #21262d", background: "#0d1117", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, textDecoration: "none" }}>📕</a>
+                      : <img src={resolveTripUrl(p.url)} alt="" onClick={() => onView(resolveTripUrl(p.url))} style={{ width: "100%", aspectRatio: "1", borderRadius: 8, objectFit: "cover", border: "1px solid #21262d", cursor: "pointer" }} />}
                     {onDelete && <button onClick={(e) => { e.stopPropagation(); onDelete(stage.key, p.id); }} title="Hapus foto" style={{ position: "absolute", top: 4, right: 4, width: 24, height: 24, borderRadius: 6, border: "none", background: "rgba(180,30,30,.92)", color: "#fff", fontSize: 12, cursor: "pointer", lineHeight: 1 }}>🗑</button>}
                     {p.catatan && <div style={{ fontSize: 9.5, color: "#c9d1d9", marginTop: 3, lineHeight: 1.3, wordBreak: "break-word" }} title={p.catatan}>📝 {p.catatan}</div>}
                   </div>
