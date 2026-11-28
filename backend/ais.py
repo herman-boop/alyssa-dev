@@ -1489,7 +1489,7 @@ def trip_selesai(t):
     if (t.get("progress") or {}).get("handover_complete") or _TRIP_DONE_RE.search(str(t.get("status") or "")):
         return True
     legs = t.get("legs") or []
-    return bool(legs) and _leg_status_kind(legs[-1]) == "done"
+    return bool(legs) and _leg_status_kind(legs[-1]) == "done" and not any(_leg_status_kind(l) == "active" for l in legs)
 
 
 async def ship_targets(db):
