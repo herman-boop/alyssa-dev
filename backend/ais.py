@@ -788,6 +788,9 @@ async def manual_refresh(db, legs, admin=False):
         return {"status": "no_ship", "message": "Trip ini belum punya kapal ber-MMSI/IMO.", "retry_after": 0}
     mmsi, imo = _leg_ship_id(lg)
     ident = mmsi or imo
+    if not admin and _leg_status_kind(lg) == "done":
+        return {"status": "selesai", "retry_after": 0,
+                "message": "Pengiriman laut kapal ini sudah selesai; posisi tidak diperbarui lagi. Posisi terakhir tetap tersimpan."}
     if not (vesselapi_enabled() or vesselfinder_enabled()):
         return {"status": "no_provider", "message": "Provider AIS belum aktif.", "retry_after": 0}
     left = await ais_audit.cooldown_left_seconds(db, ident, minutes=(_MIN_FETCH_INTERVAL // 60) if admin else None)
@@ -1012,6 +1015,8 @@ async def warm_ships(db, legs):
         return
     seen = set()
     for lg in (legs or []):
+        if _leg_status_kind(lg or {}) == "done":      # pengiriman laut selesai: tidak menarik posisi lagi (hemat kuota)
+            continue
         mmsi, imo = _leg_ship_id(lg or {})
         key = mmsi or imo
         if not key or key in seen:
@@ -1478,12 +1483,21 @@ def plan_intervals(n_carry, n_up, budget=None, now=None):
     return int(ic), int(iu)
 
 
+def trip_selesai(t):
+    """Pengiriman sudah selesai (serah terima selesai / status trip selesai / leg terakhir selesai): kapalnya tak perlu dipantau lagi."""
+    t = t or {}
+    if (t.get("progress") or {}).get("handover_complete") or _TRIP_DONE_RE.search(str(t.get("status") or "")):
+        return True
+    legs = t.get("legs") or []
+    return bool(legs) and _leg_status_kind(legs[-1]) == "done"
+
+
 async def ship_targets(db):
     """Semua kapal yang perlu dipantau: {ident: {mmsi, imo, name, prio, trips}} — prio 'carrying' mengalahkan 'upcoming'."""
     out = {}
     try:
         async for t in db.trips.find({"legs": {"$exists": True}}, {"_id": 0, "trip_id": 1, "legs": 1, "progress": 1, "status": 1}):
-            if (t.get("progress") or {}).get("handover_complete") or _TRIP_DONE_RE.search(str(t.get("status") or "")):
+            if trip_selesai(t):
                 continue
             for lg in (t.get("legs") or []):
                 if not _leg_is_ship(lg):
@@ -1505,6 +1519,14 @@ async def ship_targets(db):
                 e["trips"].append(t.get("trip_id"))
     except Exception as e:
         logger.warning("[ais] ship_targets gagal: %s", e)
+    # Satu kapal = satu target (satu request per siklus) walau ada leg yang hanya mengisi IMO dan leg lain MMSI+IMO.
+    by_imo = {e["imo"]: k for k, e in out.items() if e["mmsi"] and e["imo"]}
+    for k in [k for k, e in out.items() if not e["mmsi"] and e["imo"] in by_imo]:
+        e = out.pop(k)
+        tgt = out[by_imo[e["imo"]]]
+        tgt["trips"] += e["trips"]
+        if e["prio"] == "carrying":
+            tgt["prio"] = "carrying"
     return out
 
 

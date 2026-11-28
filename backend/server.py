@@ -2405,6 +2405,9 @@ async def public_trip_ais_refresh(trip_id: str):
     doc = await db.trips.find_one({"trip_id": trip_id})
     if not doc:
         raise HTTPException(404, "Trip not found")
+    if ais.trip_selesai(doc):      # pengiriman selesai: tombol tidak memakai kuota provider
+        return {"status": "selesai", "retry_after": 0,
+                "message": "Pengiriman ini sudah selesai; posisi kapal tidak diperbarui lagi. Posisi terakhir tetap tersimpan."}
     return await ais.manual_refresh(db, doc.get("legs") or [])
 
 

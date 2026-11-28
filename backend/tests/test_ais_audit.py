@@ -238,3 +238,67 @@ def test_kapal_baru_disimpan_langsung_dicoba_dan_uji_kapal():
         asyncio.run(go())
     finally:
         _restore(saved)
+
+
+def test_kapal_selesai_keluar_armada_dan_data_tetap():
+    """Pengiriman laut selesai -> keluar dari target/armada, tidak ada request; riwayat trip, cache posisi & master kapal utuh."""
+    fake, calls = _fake_factory(404)
+
+    async def go():
+        db = FakeDB()
+        await db.trips.insert_one({"trip_id": "A", "legs": [{"tipe": "Kapal", "kapal": "FAJAR BAHARI II", "mmsi": "525701831", "imo": "9074729", "status": "Selesai"}]})
+        await db.trips.insert_one({"trip_id": "B", "legs": [{"tipe": "Kapal", "kapal": "ARMADA B", "mmsi": "525000001", "status": "Menunggu"}, {"tipe": "Self Drive", "status": "Delivered"}]})
+        await db.ais_positions.insert_one({"mmsi": "525701831", "latitude": 1.0, "longitude": 2.0, "position_timestamp": "2026-11-01T00:00:00+00:00"})
+        await db.kapal_master.insert_one({"nama": "FAJAR BAHARI II", "imo": "9074729"})
+        assert await AIS.ship_targets(db) == {}                       # A selesai, B (leg terakhir selesai) selesai
+        a = await AIS.armada(db)
+        assert a["kapal"] == []
+        r = await AIS.auto_refresh_cycle(db, {}, 1.0, now_utc=datetime.now(timezone.utc))
+        assert r["attempted"] == 0 and not calls                      # nol request ke provider
+        await AIS.warm_ships(db, [{"mmsi": "525701831", "status": "Selesai"}])
+        assert not calls                                              # simpan leg trip selesai tidak menarik posisi
+        m = await AIS.manual_refresh(db, [{"tipe": "Kapal", "mmsi": "525701831", "status": "Selesai"}])
+        assert m["status"] == "selesai" and not calls                 # tombol pelanggan tidak memakai kuota
+        # riwayat & master tidak dihapus
+        assert await db.trips.find_one({"trip_id": "A"}) and await db.ais_positions.find_one({"mmsi": "525701831"})
+        assert await db.kapal_master.find_one({"nama": "FAJAR BAHARI II"})
+
+    saved = _patch(fake)
+    try:
+        asyncio.run(go())
+    finally:
+        _restore(saved)
+
+
+def test_kapal_aktif_tetap_dipantau_dan_satu_request_per_siklus():
+    now = datetime.now(timezone.utc).isoformat()
+
+    def fake_get(path, params, timeout=15):
+        calls.append(path)
+        if path.endswith("/position"):
+            return _R(200, {"vesselPosition": {"mmsi": "525200343", "latitude": 1.0, "longitude": 2.0, "timestamp": now}})
+        return _R(404)
+    calls = []
+
+    async def go():
+        db = FakeDB()
+        # satu kapal, 6 trip/kendaraan; sebagian leg hanya IMO, sebagian MMSI+IMO
+        for i in range(4):
+            await db.trips.insert_one({"trip_id": f"T{i}", "legs": [{"tipe": "Kapal", "kapal": "SHILOH SEJATI", "mmsi": "525200343", "imo": "9074729", "status": "Berlangsung"}]})
+        for i in range(2):
+            await db.trips.insert_one({"trip_id": f"I{i}", "legs": [{"tipe": "Kapal", "kapal": "SHILOH SEJATI", "imo": "9074729", "status": "Berlangsung"}]})
+        tg = await AIS.ship_targets(db)
+        assert len(tg) == 1 and tg["525200343"]["prio"] == "carrying" and len(tg["525200343"]["trips"]) == 6
+        r = await AIS.auto_refresh_cycle(db, {}, 1.0, now_utc=datetime.now(timezone.utc))
+        assert r["candidates"] == 1 and r["attempted"] == 1
+        assert [c for c in calls if c.endswith("/position")] == ["/vessel/525200343/position"]   # 1 request posisi untuk 6 kendaraan
+        # siklus berikutnya (belum waktunya / posisi segar): tidak ada request tambahan
+        n = len(calls)
+        await AIS.auto_refresh_cycle(db, {}, 2.0, now_utc=datetime.now(timezone.utc))
+        assert len(calls) == n
+
+    saved = _patch(fake_get)
+    try:
+        asyncio.run(go())
+    finally:
+        _restore(saved)
