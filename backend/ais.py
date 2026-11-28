@@ -53,9 +53,10 @@ AIS_TZ_OFFSET_MIN = int(os.environ.get("AIS_TZ_OFFSET_MIN") or "420")   # WIB = 
 
 
 def refresh_hours():
-    """Set jam jadwal cek otomatis, atau None kalau tanpa jadwal (selalu)."""
+    """Set jam jadwal cek otomatis, atau None = 24 JAM (tanpa jendela jam; interval diatur per prioritas & anggaran kuota).
+    Env AIS_REFRESH_HOURS="8,10,12" masih bisa dipakai untuk membatasi ke jam tertentu."""
     raw = os.environ.get("AIS_REFRESH_HOURS")
-    raw = "8,10,12,14,16" if raw is None else raw.strip().lower()
+    raw = "" if raw is None else raw.strip().lower()
     if raw in ("", "always", "semua"):
         return None
     hrs = set()
@@ -412,6 +413,35 @@ async def _apply_berth_state(db, doc):
     return doc
 
 
+_last_exist_check = {}      # ident -> monotonic; cek "kapal dikenal?" paling sering sekali per 6 jam (hemat kuota)
+_EXIST_INTERVAL = 6 * 3600
+
+
+async def _bedakan_404(db, ident, idtype, timeout=15):
+    """Posisi 404: bedakan KAPAL TIDAK DITEMUKAN (IMO/MMSI salah) vs SINYAL AIS TIDAK ADA (kapal dikenal, tapi tak ada posisi).
+    Satu panggilan detail kapal (/vessel/{id}); hasil tak meyakinkan -> 'no_position' (jujur: tidak diklaim salah satunya)."""
+    import time as _t
+    now_m = _t.monotonic()
+    last = _last_exist_check.get(ident)
+    prev = await ais_audit.get_status(db, ident)
+    if last is not None and now_m - last < _EXIST_INTERVAL and prev and prev.get("state") in ("not_found", "no_signal"):
+        return prev["state"]
+    _last_exist_check[ident] = now_m
+    try:
+        r = await asyncio.to_thread(_vesselapi_get, f"/vessel/{ident}", {"filter.idType": idtype}, timeout)
+    except Exception as e:
+        await ais_audit.log_call(db, ident, "/vessel", ais_audit.classify_http(exc=e))
+        return "no_position"
+    if isinstance(r, _KuotaHabis):
+        return "no_position"
+    await ais_audit.log_call(db, ident, "/vessel", ais_audit.classify_http(r.status_code), r.status_code, getattr(r, "headers", None))
+    if r.status_code == 200:
+        return "no_signal"
+    if r.status_code == 404:
+        return "not_found"
+    return "no_position"
+
+
 async def _vesselapi_refresh(db, mmsi, imo, timeout=15, manual=False):
     """Ambil posisi (+ETA) 1 kapal dari VesselAPI dan simpan ke cache.
     On-demand + throttle supaya kuota hemat. Return dokumen cache terbaru / None.
@@ -454,24 +484,30 @@ async def _vesselapi_refresh(db, mmsi, imo, timeout=15, manual=False):
     pos = None
     why = "no_position"          # alasan terakhir kalau tak ada posisi (untuk log audit)
     http = None
+    saw_404 = False
     for label, params in attempts:
         try:
             r = await asyncio.to_thread(_vesselapi_get, f"/vessel/{ident}/position", params, timeout)
         except Exception as e:
             logger.warning("[ais] VesselAPI position (%s) gagal utk %s: %s", label, ident, e)
-            why = "timeout" if "timed out" in str(e).lower() or "timeout" in type(e).__name__.lower() else "http_error"
+            why = ais_audit.classify_http(exc=e)
+            await ais_audit.log_call(db, ident, "/position", why)
             continue
         http = getattr(r, "status_code", None)
-        if isinstance(r, _KuotaHabis):
+        cls = ais_audit.classify_http(http)
+        if not isinstance(r, _KuotaHabis):          # panggilan yang ditahan aplikasi TIDAK memakai kuota provider
+            await ais_audit.log_call(db, ident, "/position", cls, http, getattr(r, "headers", None))
+        if isinstance(r, _KuotaHabis) or http == 429:
             why = "quota"
             continue
-        if r.status_code == 404:
+        if http == 404:
             logger.info("[ais] VesselAPI (%s): belum ada posisi untuk %s (404).", label, ident)
             why = "no_position"
+            saw_404 = True
             continue
-        if r.status_code != 200:
-            logger.warning("[ais] VesselAPI position (%s) HTTP %s utk %s.", label, r.status_code, ident)
-            why = "quota" if r.status_code == 429 else "http_error"
+        if http != 200:
+            logger.warning("[ais] VesselAPI position (%s) HTTP %s utk %s.", label, http, ident)
+            why = cls            # auth | api_error
             continue
         try:
             cand = _pluck(r.json(), "latitude")
@@ -480,8 +516,13 @@ async def _vesselapi_refresh(db, mmsi, imo, timeout=15, manual=False):
         if cand and cand.get("latitude") is not None and cand.get("longitude") is not None:
             pos = cand
             break   # dapet posisi (dari satelit ATAU terestrial) — pakai ini
+        why = "no_position"
     if not pos or pos.get("latitude") is None or pos.get("longitude") is None:
+        state = why
+        if why == "no_position" and saw_404:
+            state = await _bedakan_404(db, ident, idtype, timeout)     # not_found | no_signal | no_position
         await ais_audit.log_attempt(db, ident, why, http=http, provider="vesselapi", manual=manual)
+        await ais_audit.set_status(db, ident, state, http=http)
         return None
 
     now = datetime.now(timezone.utc).isoformat()
@@ -520,6 +561,7 @@ async def _vesselapi_refresh(db, mmsi, imo, timeout=15, manual=False):
         try:
             await db.ais_positions.update_one({"mmsi": key_mmsi}, {"$set": upd}, upsert=True)
             await ais_audit.log_attempt(db, ident, "no_timestamp", http=http, provider="vesselapi", manual=manual, source=src)
+            await ais_audit.set_status(db, ident, "ok", http=http)
             return await db.ais_positions.find_one({"mmsi": key_mmsi}, {"_id": 0})
         except Exception as e:
             logger.warning("[ais] VesselAPI upsert gagal: %s", e)
@@ -538,6 +580,7 @@ async def _vesselapi_refresh(db, mmsi, imo, timeout=15, manual=False):
             pass
         await ais_audit.log_attempt(db, ident, outcome, http=http, provider="vesselapi", manual=manual,
                                     provider_ts=str(prov_ts), cache_ts=str(cur.get("position_timestamp")) if cur else None)
+        await ais_audit.set_status(db, ident, "ok", http=http)
         return cur
     upd["position_timestamp"] = str(prov_ts)
     upd["ts_unverified"] = False
@@ -549,6 +592,8 @@ async def _vesselapi_refresh(db, mmsi, imo, timeout=15, manual=False):
         _last_eta_fetch[ident] = now_m
         try:
             re = await asyncio.to_thread(_vesselapi_get, f"/vessel/{ident}/eta", {"filter.idType": idtype}, timeout)
+            if not isinstance(re, _KuotaHabis):
+                await ais_audit.log_call(db, ident, "/eta", ais_audit.classify_http(re.status_code), re.status_code, getattr(re, "headers", None))
             if re.status_code == 200:
                 eta = _pluck(re.json(), "destination") or _pluck(re.json(), "eta") or {}
                 if isinstance(eta, dict):
@@ -568,6 +613,7 @@ async def _vesselapi_refresh(db, mmsi, imo, timeout=15, manual=False):
         await db.ais_positions.update_one({"mmsi": key_mmsi}, {"$set": upd}, upsert=True)
         await ais_audit.log_attempt(db, ident, "updated", http=http, provider="vesselapi", manual=manual,
                                     provider_ts=str(prov_ts), source=src)
+        await ais_audit.set_status(db, ident, "ok", http=http)
         return await db.ais_positions.find_one({"mmsi": key_mmsi}, {"_id": 0})
     except Exception as e:
         logger.warning("[ais] VesselAPI upsert gagal: %s", e)
@@ -781,41 +827,111 @@ async def manual_refresh(db, legs, admin=False):
     return out
 
 
+def konfigurasi():
+    """Konfigurasi AIS efektif (tanpa nilai rahasia) — buat audit Railway env vars."""
+    return {
+        "vesselapi_key_terisi": vesselapi_enabled(),
+        "vesselapi_satelit": _vesselapi_use_sat(),
+        "vesselapi_sat_lookback_menit": VESSELAPI_SAT_LOOKBACK,
+        "vesselfinder_key_terisi": vesselfinder_enabled(),
+        "aisstream_key_terisi": provider_enabled(),
+        "auto_refresh_berjalan": auto_refresh_running(),
+        "auto_refresh_aktif": _auto_refresh_enabled(),
+        "jam_terbatas": sorted(refresh_hours()) if refresh_hours() else None,
+        "interval_pembawa_kendaraan_menit": INTERVAL_CARRYING_MIN,
+        "interval_kapal_berikutnya_menit": INTERVAL_UPCOMING_MIN,
+        "anggaran_panggilan_bulan": budget_month() or None,
+        "pelanggan_memicu_panggilan": customer_refresh_enabled(),
+        "cooldown_tombol_menit": ais_audit.MANUAL_COOLDOWN_MIN,
+        "kuota_ditahan_menit": kuota_sisa_menit(),
+    }
+
+
+async def kuota(db):
+    """Monitoring pemakaian API: bulan/hari ini, berhasil vs gagal per kelas, sisa kuota (bila provider mengirim header)."""
+    u = await ais_audit.usage(db)
+    bm = budget_month()
+    u["anggaran_bulan"] = bm or None
+    u["sisa_anggaran"] = max(0, bm - u["bulan"]["total"]) if bm else None
+    u["kuota_ditahan_menit"] = kuota_sisa_menit()
+    return u
+
+
 async def armada(db):
-    """Admin: ringkasan semua kapal pada leg aktif — identitas valid?, umur posisi, percobaan refresh terakhir."""
-    ships = {}
-    try:
-        async for t in db.trips.find({"legs": {"$exists": True}}, {"_id": 0, "trip_id": 1, "legs": 1}):
-            for lg in (t.get("legs") or []):
-                if not _leg_is_ship(lg) or _leg_status_kind(lg) != "active":
-                    continue
-                mmsi, imo = _leg_ship_id(lg)
-                ident = mmsi or imo
-                if not ident:
-                    continue
-                e = ships.setdefault(ident, {"ident": ident, "kapal": str(lg.get("kapal") or "").strip(),
-                                             "mmsi": mmsi, "imo": imo, "trips": []})
-                e["trips"].append(t.get("trip_id"))
-    except Exception as e:
-        return {"error": str(e), "kapal": []}
+    """Admin: semua kapal yang dipantau — prioritas, identitas valid?, posisi/umur, status penyebab, percobaan terakhir; plus konfigurasi & kuota."""
+    tg = await ship_targets(db)
     rows = []
-    for ident, e in ships.items():
+    for ident, e in tg.items():
         doc = None
         try:
             doc = await db.ais_positions.find_one({"mmsi": e["mmsi"]} if e["mmsi"] else {"imo": e["imo"]}, {"_id": 0})
+            if not doc and e["mmsi"] and e["imo"]:
+                doc = await db.ais_positions.find_one({"imo": e["imo"]}, {"_id": 0})
         except Exception:
             pass
         pub = public_ais(doc)
-        rows.append({**e, "jumlah_trip": len(e["trips"]), "trips": e["trips"][:5],
+        stt = await ais_audit.get_status(db, ident)
+        rows.append({**e, "jumlah_trip": len(e["trips"]), "kapal": e["name"], "trips": e["trips"][:5],
                      "masalah_identitas": ais_audit.identity_issues(e["mmsi"], e["imo"]),
                      "nama_di_ais": (pub or {}).get("ship_name") or "",
                      "freshness": (pub or {}).get("freshness") or "none",
                      "age_seconds": (pub or {}).get("age_seconds"),
                      "position_timestamp": (pub or {}).get("position_timestamp"),
+                     "status": (stt or {}).get("state") or "pending",
+                     "status_pesan": ais_audit.PESAN.get((stt or {}).get("state") or "pending", ""),
+                     "terakhir_diperiksa": (stt or {}).get("last_checked_at") or "",
                      "percobaan_terakhir": await ais_audit.last_attempts(db, ident, 3)})
-    rows.sort(key=lambda r: -(r["age_seconds"] if r["age_seconds"] is not None else 10**9))
-    return {"kapal": rows, "kuota_habis_menit": kuota_sisa_menit(),
-            "jadwal": jadwal_info(), "cooldown_manual_menit": ais_audit.MANUAL_COOLDOWN_MIN}
+    rows.sort(key=lambda r: (0 if r["prio"] == "carrying" else 1, -(r["age_seconds"] if r["age_seconds"] is not None else 10**9)))
+    return {"kapal": rows, "kuota_habis_menit": kuota_sisa_menit(), "jadwal": jadwal_info(),
+            "cooldown_manual_menit": ais_audit.MANUAL_COOLDOWN_MIN,
+            "konfigurasi": konfigurasi(), "kuota": await kuota(db)}
+
+
+async def uji_kapal(db, nama="", mmsi="", imo="", live=False):
+    """Uji satu kapal (mis. FAJAR BAHARI II): identitas tersimpan di leg, validitas, cache, status & percobaan terakhir.
+    live=True: ikut menembak provider SEKARANG (memakai kuota) lewat refresh manual dan mengembalikan hasil klasifikasinya."""
+    out = {"nama": nama, "ditemukan_di_leg": []}
+    nm = str(nama or "").strip().lower()
+    if nm and not (mmsi or imo):
+        try:
+            async for t in db.trips.find({"legs": {"$exists": True}}, {"_id": 0, "trip_id": 1, "legs": 1}):
+                for lg in (t.get("legs") or []):
+                    if nm in str((lg or {}).get("kapal") or "").lower() and _leg_is_ship(lg):
+                        m, i = _leg_ship_id(lg)
+                        out["ditemukan_di_leg"].append({"trip_id": t.get("trip_id"), "kapal": lg.get("kapal"), "mmsi": m, "imo": i,
+                                                        "status_leg": lg.get("status"), "prioritas": "carrying" if _leg_status_kind(lg) == "active" else ("done" if _leg_status_kind(lg) == "done" else "upcoming")})
+        except Exception as e:
+            out["error"] = str(e)
+        uniq = {(x["mmsi"], x["imo"]) for x in out["ditemukan_di_leg"]}
+        if len(uniq) == 1:
+            mmsi, imo = next(iter(uniq))
+        elif not uniq:
+            out["kesimpulan"] = "Tidak ada leg kapal dengan nama itu di Route Leg."
+            return out
+        else:
+            out["kesimpulan"] = "Nama kapal itu dipakai dengan beberapa pasang IMO/MMSI berbeda — samakan datanya."
+            return out
+    mmsi, imo = str(mmsi or "").strip(), str(imo or "").strip()
+    ident = mmsi or imo
+    out.update({"mmsi": mmsi, "imo": imo, "masalah_identitas": ais_audit.identity_issues(mmsi, imo),
+                "konfigurasi": konfigurasi()})
+    try:
+        doc = await db.ais_positions.find_one({"mmsi": mmsi} if mmsi else {"imo": imo}, {"_id": 0})
+        if not doc and mmsi and imo:
+            doc = await db.ais_positions.find_one({"imo": imo}, {"_id": 0})
+    except Exception:
+        doc = None
+    out["cache"] = public_ais(doc)
+    out["status"] = await ais_audit.get_status(db, ident)
+    out["percobaan_terakhir"] = await ais_audit.last_attempts(db, ident, 8)
+    if live:
+        legs = [{"tipe": "Kapal", "kapal": nama, "mmsi": mmsi, "imo": imo, "status": "Berlangsung"}]
+        kuota_reset()
+        out["refresh_live"] = await manual_refresh(db, legs, admin=True)
+        out["status_setelah"] = await ais_audit.get_status(db, ident)
+    st = (out.get("status_setelah") or out.get("status") or {}).get("state")
+    out["kesimpulan"] = ais_audit.PESAN.get(st or "pending", "") or ("Posisi valid tersedia." if out["cache"] else "Belum pernah dicek.")
+    return out
 
 
 def jadwal_info():
@@ -873,12 +989,15 @@ async def position_for_legs(db, legs):
     # Deteksi sandar otomatis (nav_status) sebelum dikirim ke publik.
     doc = await _apply_berth_state(db, doc)
 
+    stt = await ais_audit.get_status(db, chosen["mmsi"] or chosen["imo"])
     return {
         "ship_name": chosen["ship_name"],
         "mmsi": chosen["mmsi"],
         "imo": chosen["imo"],
         "provider_enabled": any_provider_enabled(),
         "ais": public_ais(doc),
+        "status": ais_audit.status_publik(stt, any_provider_enabled()),   # sebab "belum ada data": api gagal / kuota / tidak ditemukan / tanpa sinyal
+        "pemantauan": {"mode": "24 jam", "interval_menit": plan_intervals(1, 0)[0]},
         "jadwal": jadwal_info(),      # mis. {"jam": [8,10,12,14,16], "zona": "WIB"} -> catatan "diperbarui 5x sehari" di halaman tracking
     }
 
@@ -907,6 +1026,11 @@ async def warm_ships(db, legs):
             age = _doc_age_seconds(doc) if (doc and doc.get("latitude") is not None) else None
             if age is not None and age <= WARM_MAX_AGE_MIN * 60:
                 continue
+        except Exception:
+            pass
+        try:
+            if not await ais_audit.get_status(db, key):
+                await ais_audit.set_status(db, key, "pending")
         except Exception:
             pass
         try:
@@ -1306,31 +1430,95 @@ async def trace(db, probe_missing=True, max_probe=8):
 # makin lama kalau terus kosong (hemat kuota call): 1 jam → 2 → 4 → maks 6 jam.
 # Mati total kalau tidak ada provider berbayar, atau env AIS_AUTO_REFRESH=off.
 AUTO_REFRESH_TICK = int(os.environ.get("AIS_AUTO_REFRESH_TICK") or "600")   # detik antar putaran
-_AUTO_BACKOFF = (3600, 7200, 14400, 21600)
+_AUTO_BACKOFF = (1800, 3600, 7200, 14400)   # backoff kegagalan beruntun: 30 mnt → 1 → 2 → maks 4 jam (kapal pembawa kendaraan tetap dipantau malam hari)
 _auto_task = None
 
 
-async def refresh_aktif_sekarang(db, max_ships=10):
-    """Admin: ambil posisi SEKARANG untuk kapal pada leg 'Berlangsung' (tanpa menunggu jadwal jam).
-    Membuka tahanan kuota dan jeda per-kapal lebih dulu. Kalau panggilan pertama masih ditolak karena kuota
-    habis, sisanya ditahan lagi (tidak memboroskan). Return daftar hasil per kapal."""
-    kuota_reset()
-    ships, names = {}, {}
+# ── Target pemantauan & anggaran kuota ───────────────────────────────────────
+# Prioritas: "carrying" = leg kapal BERLANGSUNG (kapal sedang membawa kendaraan pelanggan),
+#            "upcoming" = leg kapal belum selesai (Menunggu) pada trip yang masih jalan -> posisi sudah siap
+#            saat kendaraan naik kapal, dan data kapal baru/IMO salah ketahuan lebih awal.
+INTERVAL_CARRYING_MIN = int(os.environ.get("AIS_INTERVAL_CARRYING_MIN") or "120")
+INTERVAL_UPCOMING_MIN = int(os.environ.get("AIS_INTERVAL_UPCOMING_MIN") or "480")
+_CALLS_PER_CHECK = 1.3          # posisi (1) + sebagian eta/fallback; dipakai utk menghitung anggaran
+_TRIP_DONE_RE = re.compile(r"selesai|delivered|completed|dibatalkan|batal|cancel", re.I)
+
+
+def budget_month():
+    """Kuota panggilan per bulan dari paket (env AIS_BUDGET_MONTH). 0/kosong = tidak dibatasi (pakai interval dasar)."""
     try:
-        async for t in db.trips.find({"legs": {"$exists": True}}, {"_id": 0, "legs": 1}):
+        return max(0, int(float(os.environ.get("AIS_BUDGET_MONTH") or "0")))
+    except Exception:
+        return 0
+
+
+def plan_intervals(n_carry, n_up, budget=None, now=None):
+    """(menit_carrying, menit_upcoming|None). Tanpa anggaran: interval dasar. Dengan anggaran: kapal yang membawa
+    kendaraan dapat sampai 75% dari jatah harian (aman 90% kuota), sisanya kapal berikutnya; kalau jatah habis,
+    kapal 'upcoming' dijeda (None) tapi kapal pembawa kendaraan tetap dipantau."""
+    import calendar
+    b = budget_month() if budget is None else budget
+    ic, iu = float(INTERVAL_CARRYING_MIN), float(INTERVAL_UPCOMING_MIN)
+    if not b or (n_carry + n_up) == 0:
+        return int(ic), int(iu)
+    now = now or datetime.now(timezone.utc)
+    days = calendar.monthrange(now.year, now.month)[1]
+    daily = b * 0.9 / days
+    carry_need = n_carry * _CALLS_PER_CHECK * 1440 / ic
+    cap_c = daily * (0.75 if n_up else 1.0)
+    if n_carry and carry_need > cap_c:
+        ic = n_carry * _CALLS_PER_CHECK * 1440 / cap_c
+        carry_need = cap_c
+    ic = max(float(_MIN_FETCH_INTERVAL // 60), ic)
+    up_daily = daily - (n_carry * _CALLS_PER_CHECK * 1440 / ic if n_carry else 0)
+    if n_up:
+        if up_daily <= 0:
+            return int(ic), None
+        iu = max(iu, n_up * _CALLS_PER_CHECK * 1440 / up_daily)
+    return int(ic), int(iu)
+
+
+async def ship_targets(db):
+    """Semua kapal yang perlu dipantau: {ident: {mmsi, imo, name, prio, trips}} — prio 'carrying' mengalahkan 'upcoming'."""
+    out = {}
+    try:
+        async for t in db.trips.find({"legs": {"$exists": True}}, {"_id": 0, "trip_id": 1, "legs": 1, "progress": 1, "status": 1}):
+            if (t.get("progress") or {}).get("handover_complete") or _TRIP_DONE_RE.search(str(t.get("status") or "")):
+                continue
             for lg in (t.get("legs") or []):
-                if not _leg_is_ship(lg) or _leg_status_kind(lg) != "active":
+                if not _leg_is_ship(lg):
+                    continue
+                kind = _leg_status_kind(lg)
+                if kind == "done":
                     continue
                 mmsi, imo = _leg_ship_id(lg)
                 ident = mmsi or imo
-                if ident and ident not in ships:
-                    ships[ident] = (mmsi, imo)
-                    names[ident] = str(lg.get("kapal") or "").strip()
+                if not ident:
+                    continue
+                prio = "carrying" if kind == "active" else "upcoming"
+                e = out.get(ident)
+                if e is None:
+                    e = out[ident] = {"ident": ident, "mmsi": mmsi, "imo": imo, "name": str(lg.get("kapal") or "").strip(),
+                                      "prio": prio, "trips": []}
+                elif prio == "carrying":
+                    e["prio"] = "carrying"
+                e["trips"].append(t.get("trip_id"))
     except Exception as e:
-        return {"error": f"gagal membaca leg: {e}", "hasil": []}
+        logger.warning("[ais] ship_targets gagal: %s", e)
+    return out
+
+
+async def refresh_aktif_sekarang(db, max_ships=10):
+    """Admin: ambil posisi SEKARANG untuk kapal yang dipantau (pembawa kendaraan lebih dulu), tanpa menunggu jadwal.
+    Membuka tahanan kuota dan jeda per-kapal lebih dulu. Kalau panggilan pertama masih ditolak karena kuota
+    habis, sisanya ditahan lagi (tidak memboroskan). Return daftar hasil per kapal."""
+    kuota_reset()
+    tg = await ship_targets(db)
+    order = sorted(tg.values(), key=lambda e: 0 if e["prio"] == "carrying" else 1)
     hasil = []
-    for ident, (mmsi, imo) in list(ships.items())[:max_ships]:
-        row = {"ident": ident, "kapal": names.get(ident, ""), "ok": False, "freshness": None, "age_seconds": None, "catatan": ""}
+    for e in order[:max_ships]:
+        ident, mmsi, imo = e["ident"], e["mmsi"], e["imo"]
+        row = {"ident": ident, "kapal": e["name"], "prioritas": e["prio"], "ok": False, "freshness": None, "age_seconds": None, "catatan": ""}
         if kuota_sisa_menit() > 0:
             row["catatan"] = "ditahan (kuota VesselAPI habis)"
             hasil.append(row)
@@ -1339,20 +1527,21 @@ async def refresh_aktif_sekarang(db, max_ships=10):
         fresh = None
         try:
             if vesselapi_enabled():
-                fresh = await _vesselapi_refresh(db, mmsi, imo, timeout=(5, 30))
+                fresh = await _vesselapi_refresh(db, mmsi, imo, timeout=(5, 30), manual=True)
             if not fresh and vesselfinder_enabled():
                 fresh = await _vesselfinder_refresh(db, mmsi, imo)
-        except Exception as e:
-            row["catatan"] = f"error: {e}"
+        except Exception as ex:
+            row["catatan"] = f"error: {ex}"
         if fresh and fresh.get("latitude") is not None:
-            st = staleness(fresh.get("position_timestamp") or fresh.get("updated_at"))
+            st = staleness(fresh.get("position_timestamp") or (None if fresh.get("ts_unverified") else fresh.get("updated_at")))
             row.update({"ok": st["freshness"] != "stale", "freshness": st["freshness"], "age_seconds": st["age_seconds"]})
             if not row["ok"]:
                 row["catatan"] = "posisi dari provider masih lama"
         elif not row["catatan"]:
-            row["catatan"] = "provider belum punya posisi kapal ini" if kuota_sisa_menit() == 0 else "ditolak (kuota VesselAPI habis)"
+            stt = await ais_audit.get_status(db, ident)
+            row["catatan"] = ais_audit.PESAN.get((stt or {}).get("state") or "", "") or "provider belum punya posisi kapal ini"
         hasil.append(row)
-    return {"hasil": hasil, "kapal_aktif": len(ships), "kuota_habis_menit": kuota_sisa_menit()}
+    return {"hasil": hasil, "kapal_aktif": len(tg), "kuota_habis_menit": kuota_sisa_menit()}
 
 
 def _auto_backoff_seconds(fails):
@@ -1371,37 +1560,47 @@ def auto_refresh_running():
 
 
 async def auto_refresh_cycle(db, state, now_m, max_ships=10, now_utc=None):
-    """Satu putaran cek otomatis. `state` = {ident: {"fails", "next"}} (in-memory),
-    `now_m` = time.monotonic(). Return ringkasan putaran (buat log & tes).
-    `now_utc` (opsional): kalau diisi, putaran hanya jalan di jam jadwal (AIS_REFRESH_HOURS) dan
-    tiap kapal dicek MAKSIMAL SEKALI per slot jam -> default 5x sehari di jam kerja."""
+    """Satu putaran pemantauan otomatis (24 jam). `state` = {ident: {"fails","next"}} (in-memory, hanya backoff gagal),
+    `now_m` = time.monotonic(). Waktu pengecekan terakhir tersimpan di DB (ais_ship_status), jadi deploy/restart
+    tidak memicu panggilan beruntun.
+    - kapal yang belum pernah dicek -> langsung dicoba (tidak menunggu jadwal);
+    - kapal pembawa kendaraan ("carrying") dicek tiap ~AIS_INTERVAL_CARRYING_MIN, kapal berikutnya ("upcoming") lebih jarang;
+    - anggaran kuota (AIS_BUDGET_MONTH) melebarkan interval otomatis; kapal pembawa kendaraan selalu didahulukan;
+    - AIS_REFRESH_HOURS (opsional) membatasi ke jam tertentu, tiap kapal sekali per slot."""
     res = {"candidates": 0, "attempted": 0, "ok": 0, "fail": 0, "skipped_fresh": 0, "skipped_backoff": 0,
-           "skipped_slot": 0, "outside_schedule": False}
+           "skipped_slot": 0, "skipped_interval": 0, "paused_budget": False, "outside_schedule": False}
+    now_u = now_utc or datetime.now(timezone.utc)
     slot = None
-    if now_utc is not None:
-        slot = current_slot(now_utc)
-        if slot is None:                 # di luar jam jadwal: tidak ada panggilan, tidak ada scan DB
+    if refresh_hours() is not None:
+        slot = current_slot(now_u)
+        if slot is None:                 # di luar jam jadwal (hanya bila AIS_REFRESH_HOURS diisi)
             res["outside_schedule"] = True
             return res
-    ships = {}
-    try:
-        cur = db.trips.find({"legs": {"$exists": True}}, {"_id": 0, "legs": 1})
-        async for t in cur:
-            for lg in (t.get("legs") or []):
-                if not _leg_is_ship(lg) or _leg_status_kind(lg) != "active":
-                    continue
-                mmsi, imo = _leg_ship_id(lg)
-                ident = mmsi or imo
-                if ident and ident not in ships:
-                    ships[ident] = (mmsi, imo)
-    except Exception as e:
-        logger.warning("[ais] auto-refresh scan gagal: %s", e)
+    tg = await ship_targets(db)
+    res["candidates"] = len(tg)
+    if not tg:
         return res
-    res["candidates"] = len(ships)
+    n_c = sum(1 for e in tg.values() if e["prio"] == "carrying")
+    iv_c, iv_u = plan_intervals(n_c, len(tg) - n_c, now=now_u)
+    res["interval_carrying_min"], res["interval_upcoming_min"] = iv_c, iv_u
+    bm = budget_month()
+    if bm:
+        try:
+            u = await ais_audit.usage(db, now_u)
+            if u["bulan"]["total"] >= bm * 0.98:
+                res["paused_budget"] = True
+                return res
+        except Exception:
+            pass
     max_age = VESSELAPI_MAX_AGE_MIN * 60
-    for ident, (mmsi, imo) in ships.items():
+    order = sorted(tg.values(), key=lambda e: 0 if e["prio"] == "carrying" else 1)
+    for e in order:
         if res["attempted"] >= max_ships:
             break
+        ident, mmsi, imo, prio = e["ident"], e["mmsi"], e["imo"], e["prio"]
+        if prio == "upcoming" and iv_u is None:
+            res["skipped_interval"] += 1
+            continue
         doc = None
         try:
             if mmsi:
@@ -1418,6 +1617,15 @@ async def auto_refresh_cycle(db, state, now_m, max_ships=10, now_utc=None):
         if slot is not None and state.get(("slot", ident)) == slot:
             res["skipped_slot"] += 1     # sudah dicek di slot jam ini
             continue
+        stt = await ais_audit.get_status(db, ident)
+        if stt and stt.get("last_checked_at"):             # pernah dicek -> hormati interval prioritas
+            try:
+                lc = datetime.fromisoformat(str(stt["last_checked_at"]).replace("Z", "+00:00"))
+                if (now_u - lc).total_seconds() < (iv_c if prio == "carrying" else iv_u) * 60:
+                    res["skipped_interval"] += 1
+                    continue
+            except Exception:
+                pass
         st = state.get(ident)
         if st and now_m < st["next"]:
             res["skipped_backoff"] += 1
@@ -1431,14 +1639,16 @@ async def auto_refresh_cycle(db, state, now_m, max_ships=10, now_utc=None):
                 fresh = await _vesselapi_refresh(db, mmsi, imo)
             if not fresh and vesselfinder_enabled():
                 fresh = await _vesselfinder_refresh(db, mmsi, imo)
-        except Exception as e:
-            logger.warning("[ais] auto-refresh %s gagal: %s", ident, e)
+        except Exception as ex:
+            logger.warning("[ais] auto-refresh %s gagal: %s", ident, ex)
             fresh = None
+        if not vesselapi_enabled():                    # jalur VesselFinder saja: catat waktu cek supaya interval berlaku
+            await ais_audit.set_status(db, ident, "ok" if fresh else "no_position")
         fage = _doc_age_seconds(fresh) if (fresh and fresh.get("latitude") is not None) else None
         if fage is not None and fage <= max_age:      # dapat posisi yang benar-benar segar
             state.pop(ident, None)
             res["ok"] += 1
-        else:                                          # kosong / masih basi → jeda makin lama
+        else:                                          # kosong / masih basi -> backoff kegagalan
             fails = (st["fails"] if st else 0) + 1
             state[ident] = {"fails": fails, "next": now_m + _auto_backoff_seconds(fails)}
             res["fail"] += 1

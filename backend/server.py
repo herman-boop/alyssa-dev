@@ -2423,6 +2423,19 @@ async def admin_ais_armada():
     return await ais.armada(db)
 
 
+@api_router.get("/admin/ais/kuota", dependencies=[Depends(require_admin_pin)])
+async def admin_ais_kuota():
+    """Monitoring pemakaian API provider: total/berhasil/gagal per kelas (bulan & hari ini), sisa kuota bila tersedia."""
+    return await ais.kuota(db)
+
+
+@api_router.post("/admin/ais/uji-kapal", dependencies=[Depends(require_admin_pin)])
+async def admin_ais_uji_kapal(payload: dict):
+    """Uji 1 kapal berdasarkan nama (mis. FAJAR BAHARI II) atau IMO/MMSI. live=true menembak provider sekarang (memakai kuota)."""
+    return await ais.uji_kapal(db, nama=payload.get("nama") or "", mmsi=payload.get("mmsi") or "",
+                               imo=payload.get("imo") or "", live=bool(payload.get("live")))
+
+
 @api_router.get("/admin/ship-master", dependencies=[Depends(require_admin_pin)])
 async def admin_ship_master_list():
     """Daftar master kapal (panjang/lebar/tipe)."""

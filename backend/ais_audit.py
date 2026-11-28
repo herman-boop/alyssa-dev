@@ -94,3 +94,116 @@ async def cooldown_left_seconds(db, ident, minutes=None):
         return 0
     left = (t + timedelta(minutes=mins) - datetime.now(timezone.utc)).total_seconds()
     return max(0, int(left))
+
+
+# ── Monitoring pemakaian API & status per kapal ─────────────────────────────
+CALLS = "ais_api_calls"      # 1 dokumen per panggilan ke provider
+STATUS = "ais_ship_status"   # status terakhir per kapal (ident = mmsi atau imo)
+
+# Penyebab "tidak ada data" yang DIBEDAKAN (bukan satu pesan umum):
+#   ok | pending | not_found | no_signal | quota | auth | api_error | timeout | disabled
+PESAN = {
+    "ok": "",
+    "pending": "Posisi sedang diminta dari provider AIS.",
+    "not_found": "Kapal tidak ditemukan di provider AIS — periksa kembali nomor IMO/MMSI.",
+    "no_position": "Provider AIS belum punya posisi untuk kapal ini (nomor IMO/MMSI belum cocok, atau belum ada sinyal AIS).",
+    "no_signal": "Kapal dikenali provider, tetapi belum ada sinyal AIS (di luar jangkauan penerima atau transponder mati).",
+    "quota": "Kuota API provider AIS sedang habis. Posisi terakhir yang valid tetap ditampilkan bila ada.",
+    "auth": "API key atau paket provider AIS ditolak (HTTP 401/403) — perlu dicek admin.",
+    "api_error": "Layanan provider AIS sedang gagal merespons; sistem mencoba lagi otomatis.",
+    "timeout": "Provider AIS tidak merespons tepat waktu; sistem mencoba lagi otomatis.",
+    "disabled": "Integrasi AIS belum diaktifkan di server (API key belum diisi).",
+}
+
+
+def classify_http(status=None, exc=None):
+    """Kelas hasil 1 panggilan HTTP: ok | quota | auth | not_found | timeout | api_error."""
+    if exc is not None:
+        t = (str(exc) + type(exc).__name__).lower()
+        return "timeout" if ("timed out" in t or "timeout" in t) else "api_error"
+    if status == 200:
+        return "ok"
+    if status == 429:
+        return "quota"
+    if status in (401, 403):
+        return "auth"
+    if status == 404:
+        return "not_found"
+    return "api_error"
+
+
+def _hdr_int(headers, name):
+    try:
+        v = (headers or {}).get(name)
+        return int(float(v)) if v not in (None, "") else None
+    except Exception:
+        return None
+
+
+async def log_call(db, ident, path, cls, status=None, headers=None):
+    """Catat 1 panggilan ke provider (untuk monitoring kuota). Tidak boleh menggagalkan refresh."""
+    try:
+        await db[CALLS].insert_one({
+            "at": datetime.now(timezone.utc).isoformat(), "ident": str(ident), "path": str(path)[:60],
+            "cls": cls, "http": status,
+            "remaining": _hdr_int(headers, "X-RateLimit-Remaining"), "limit": _hdr_int(headers, "X-RateLimit-Limit")})
+    except Exception as e:
+        logger.info("[ais] log_call gagal: %s", e)
+
+
+async def set_status(db, ident, state, **extra):
+    """Simpan status terakhir kapal (dipakai halaman tracking utk menjelaskan 'belum ada data')."""
+    try:
+        d = {"ident": str(ident), "state": state, "last_checked_at": datetime.now(timezone.utc).isoformat()}
+        d.update({k: v for k, v in extra.items() if v is not None})
+        await db[STATUS].update_one({"ident": str(ident)}, {"$set": d}, upsert=True)
+    except Exception as e:
+        logger.info("[ais] set_status gagal: %s", e)
+
+
+async def get_status(db, ident):
+    try:
+        return await db[STATUS].find_one({"ident": str(ident)}, {"_id": 0})
+    except Exception:
+        return None
+
+
+def status_publik(st, provider_enabled=True):
+    """Status ramah-pelanggan: {state, message, last_checked_at}. Tanpa detail teknis."""
+    if not provider_enabled:
+        return {"state": "disabled", "message": PESAN["disabled"], "last_checked_at": ""}
+    if not st:
+        return {"state": "pending", "message": PESAN["pending"], "last_checked_at": ""}
+    s = st.get("state") or "pending"
+    return {"state": s, "message": PESAN.get(s, ""), "last_checked_at": st.get("last_checked_at") or ""}
+
+
+async def usage(db, now=None):
+    """Ringkasan pemakaian API bulan ini & hari ini: total, berhasil, gagal per kelas, sisa kuota (bila provider mengirim header)."""
+    now = now or datetime.now(timezone.utc)
+    month0 = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+    day0 = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    out = {"bulan": {"total": 0}, "hari": {"total": 0}, "sisa_kuota": None, "batas_kuota": None, "terakhir": None}
+    last_hdr = None
+    try:
+        cur = db[CALLS].find({"at": {"$gte": month0}}, {"_id": 0})
+        rows = [d async for d in cur]
+    except Exception:
+        rows = []
+    for d in rows:
+        at = str(d.get("at") or "")
+        if at < month0:
+            continue
+        for key, ok_ in (("bulan", True), ("hari", at >= day0)):
+            if not ok_:
+                continue
+            b = out[key]
+            b["total"] += 1
+            b[d.get("cls") or "api_error"] = b.get(d.get("cls") or "api_error", 0) + 1
+        if d.get("remaining") is not None and (last_hdr is None or at > last_hdr[0]):
+            last_hdr = (at, d.get("remaining"), d.get("limit"))
+        if out["terakhir"] is None or at > out["terakhir"]:
+            out["terakhir"] = at
+    if last_hdr:
+        out["sisa_kuota"], out["batas_kuota"] = last_hdr[1], last_hdr[2]
+    return out

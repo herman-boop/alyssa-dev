@@ -135,7 +135,7 @@ function Cell({ k, children, span }) {
   return <div style={{ gridColumn: span ? "1 / -1" : undefined, minWidth: 0 }}><div style={K}>{k}</div><div style={V}>{children}</div></div>;
 }
 
-export function ShipCard({ info, shipName, origin, destination, unit, umurText, badge, onClose, onRefresh, refreshing, refreshMsg }) {
+export function ShipCard({ info, shipName, origin, destination, unit, umurText, badge, onClose, onRefresh, refreshing, refreshMsg, imo, mmsi, eta, lastChecked }) {
   const sp = num(info.speed);
   const cg = num(info.course);
   const speedCourse = [
@@ -161,6 +161,8 @@ export function ShipCard({ info, shipName, origin, destination, unit, umurText, 
         {st ? <Cell k="Status"><span className="fs-chip" style={{ color: st.color, background: st.soft, borderColor: st.border }} data-testid="ship-status-chip">{st.label}</span>{info.nav_status_text ? <span style={{ fontWeight: 500, color: "#64748b" }}> · {info.nav_status_text}</span> : null}</Cell>
           : (info.nav_status_text ? <Cell k={live ? "Status" : "Status terakhir"}>{info.nav_status_text}</Cell> : null)}
         {(origin || destination) ? <Cell k="Origin / Destination">{origin || "—"} → {destination || "—"}</Cell> : null}
+        {(imo || mmsi) ? <Cell k="IMO / MMSI"><span style={{ fontVariantNumeric: "tabular-nums" }}>{imo || "—"} / {mmsi || "—"}</span></Cell> : null}
+        {eta ? <Cell k="ETA">{eta}</Cell> : null}
         {unit ? <Cell k="Unit" span>{unit}</Cell> : null}
       </div>
       {onRefresh && (
@@ -173,8 +175,9 @@ export function ShipCard({ info, shipName, origin, destination, unit, umurText, 
       )}
       <div className="fs-card-foot">
         <span style={{ color: badge && badge.color, fontWeight: 700 }}>{badge ? badge.label : ""}</span>
-        {waktu ? <> · Pembaruan: <b>{waktu}</b></> : null}
+        {waktu ? <> · Data AIS diterima: <b>{waktu}</b></> : null}
         {umurText ? <> ({umurText})</> : null}
+        {lastChecked ? <div data-testid="ship-lastchecked">API terakhir diperiksa: <b>{lastChecked}</b></div> : null}
       </div>
     </section>
   );

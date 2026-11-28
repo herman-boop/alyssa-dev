@@ -1016,6 +1016,9 @@ export default function CustomerTracking() {
               unit={[data.no_rangka, data.tipe_kendaraan ? (data.no_rangka ? `(${data.tipe_kendaraan})` : data.tipe_kendaraan) : ""].filter(Boolean).join(" ") || data.nopol || ""}
               umurText={aisAgeText(shipInfo.age_seconds)}
               badge={aisBadge(shipInfo.freshness)}
+              imo={shipAis.imo || shipInfo.imo} mmsi={shipAis.mmsi || shipInfo.mmsi}
+              eta={aisEtaFuture(shipInfo.eta) ? fmtAisEta(shipInfo.eta) : ""}
+              lastChecked={fmtWaktuWib(shipInfo.last_checked_at || (shipAis.status && shipAis.status.last_checked_at))}
               onRefresh={refreshShip}
               refreshing={shipRefreshing}
               refreshMsg={shipRefreshMsg}
@@ -1221,7 +1224,11 @@ export default function CustomerTracking() {
                         <div style={{ marginTop: 8, fontSize: 12, color: "#8b949e", lineHeight: 1.5 }}>
                           {shipInfo
                             ? <>📍 Posisi terakhir AIS: <b style={{ color: frC }}>{aisAgeText(shipInfo.age_seconds)}</b>{shipInfo.freshness !== "fresh" ? " — bukan real-time (sinyal laut terbatas)" : ""}.</>
-                            : <>📡 Posisi kapal lagi belum ketangkep AIS. Perjalanan laut dipantau lewat <b style={{ color: "#c9d1d9" }}>checkpoint petugas kapal</b> & update di bawah.</>}
+                            : <>📡 <b style={{ color: "#e8c99d" }} data-testid="trk-ais-status-msg">{(shipAis.status && shipAis.status.message) || "Posisi kapal belum tersedia."}</b> Perjalanan laut tetap dipantau lewat <b style={{ color: "#c9d1d9" }}>checkpoint petugas kapal</b> & update di bawah.</>}
+                        </div>
+                        <div style={{ marginTop: 6, fontSize: 11.5, color: "#8b949e", lineHeight: 1.5 }} data-testid="trk-ais-pantau">
+                          🕒 Dipantau otomatis 24 jam{shipAis.pemantauan && shipAis.pemantauan.interval_menit ? <> (tiap ± {shipAis.pemantauan.interval_menit >= 60 ? `${Math.round(shipAis.pemantauan.interval_menit / 60 * 10) / 10} jam` : `${shipAis.pemantauan.interval_menit} menit`}, menyesuaikan kuota)</> : null}.
+                          {shipAis.status && shipAis.status.last_checked_at ? <> API terakhir diperiksa: <b style={{ color: "#c9d1d9" }}>{fmtWaktuWib(shipAis.status.last_checked_at)}</b>.</> : null}
                         </div>
                         {shipSched ? (
                           <div style={{ marginTop: 6, fontSize: 11.5, color: "#8b949e", lineHeight: 1.5 }} data-testid="trk-ais-jadwal">
@@ -1236,7 +1243,13 @@ export default function CustomerTracking() {
                   {shipInfo ? (
                     <>
                       <div style={{ marginTop: 10 }}>
-                        <div style={rowS}><span style={kS}>Update terakhir</span><b style={{ color: "#e6edf3" }}>{aisAgeText(shipInfo.age_seconds)}</b></div>
+                        <div style={rowS}><span style={kS}>{shipInfo.is_live ? "Update terakhir" : "Posisi Terakhir Terdeteksi"}</span><b style={{ color: "#e6edf3" }}>{aisAgeText(shipInfo.age_seconds)}</b></div>
+                        <div style={rowS} data-testid="trk-ais-ids"><span style={kS}>IMO / MMSI</span><span>{shipAis.imo || shipInfo.imo || "—"} / {shipAis.mmsi || shipInfo.mmsi || "—"}</span></div>
+                        <div style={rowS}><span style={kS}>Koordinat</span><span style={{ fontVariantNumeric: "tabular-nums" }}>{shipInfo.latitude != null ? `${Number(shipInfo.latitude).toFixed(4)}, ${Number(shipInfo.longitude).toFixed(4)}` : "—"}</span></div>
+                        <div style={rowS}><span style={kS}>Arah</span><span>{shipInfo.course != null && Number(shipInfo.course) < 360 ? `${Math.round(shipInfo.course)}°` : (shipInfo.heading != null ? `${Math.round(shipInfo.heading)}°` : "—")}</span></div>
+                        <div style={rowS}><span style={kS}>Data AIS diterima</span><span>{fmtWaktuWib(shipInfo.position_timestamp) || "—"}</span></div>
+                        <div style={rowS}><span style={kS}>API terakhir diperiksa</span><span>{fmtWaktuWib(shipInfo.last_checked_at || (shipAis.status && shipAis.status.last_checked_at)) || "—"}</span></div>
+                        {shipInfo.freshness !== "fresh" ? <div style={rowS} data-testid="trk-ais-delay"><span style={kS}>Status data</span><b style={{ color: "#f0a742" }}>Terlambat {aisAgeText(shipInfo.age_seconds).replace(" lalu", "")} — bukan posisi live</b></div> : null}
                         <div style={rowS}><span style={kS}>Kecepatan</span><span>{shipInfo.speed != null ? `${shipInfo.speed} knot` : "—"}</span></div>
                         {shipInfo.nav_status_text ? <div style={rowS}><span style={kS}>Status</span><span>{shipInfo.nav_status_text}</span></div> : null}
                         <div style={rowS}><span style={kS}>Tujuan</span><span>{shipInfo.destination || "—"}</span></div>
@@ -1258,9 +1271,13 @@ export default function CustomerTracking() {
                     </>
                   ) : (
                     <div style={{ marginTop: 10 }}>
-                      <div style={{ fontSize: 12.5, color: "#8b949e" }}>Posisi live kapal lagi belum terpantau di jaringan AIS kami saat ini. Lihat posisi terkini kapal di peta pelacakan publik:</div>
+                      <div style={{ fontSize: 12.5, color: "#c9d1d9" }} data-testid="trk-ais-nodata">{(shipAis.status && shipAis.status.message) || "Posisi kapal belum tersedia."}</div>
+                      <button type="button" onClick={refreshShip} disabled={shipRefreshing} style={{ width: "100%", marginTop: 10, padding: "10px 12px", borderRadius: 8, border: "1px solid #1f6feb", background: "#0d2340", color: "#58a6ff", fontWeight: 700, fontSize: 13, cursor: "pointer", opacity: shipRefreshing ? .6 : 1 }} data-testid="trk-ais-refresh">
+                        {shipRefreshing ? "Meminta posisi…" : "🔄 Perbarui posisi kapal"}
+                      </button>
+                      {shipRefreshMsg ? <div style={{ marginTop: 6, fontSize: 11.5, color: "#8b949e" }}>{shipRefreshMsg}</div> : null}
                       {extUrl && (
-                        <a href={extUrl} target="_blank" rel="noreferrer" style={{ display: "block", textAlign: "center", marginTop: 10, padding: "10px 12px", borderRadius: 8, border: "1px solid #1f6feb", background: "#0d2340", color: "#58a6ff", fontWeight: 700, fontSize: 13, textDecoration: "none" }} data-testid="trk-ais-public">📍 Lihat posisi kapal live (peta publik)</a>
+                        <a href={extUrl} target="_blank" rel="noreferrer" style={{ display: "block", marginTop: 8, fontSize: 11, color: "#6e7681", textDecoration: "underline" }} data-testid="trk-ais-public">Cadangan: lihat di peta publik (VesselFinder)</a>
                       )}
                     </div>
                   )}
