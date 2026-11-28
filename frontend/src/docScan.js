@@ -377,10 +377,131 @@ function luminansi(rgba, w, h) {
   return L;
 }
 
+/* ── Perataan teks otomatis (dewarp ringan) ────────────────────────────────────────────────────────────────
+   Halaman yang difoto sering miring dan sedikit melengkung/bergelombang (lipatan, kertas melengkung). Kemiringan baris teks
+   diukur per sel (kisi 6x10) lewat profil proyeksi pada banyak sudut; sudut median = kemiringan seluruh halaman (diputar balik),
+   selisih per sel = lengkungan (diintegrasikan ke arah horizontal jadi pergeseran vertikal per piksel). Satu kali resampling. */
+const KISI_X = 6, KISI_Y = 10, SUDUT_MAKS = 4, LANGKAH = 0.25;
+
+function inkKecil(img, target = 700) {
+  const { width: w, height: h, data } = img;
+  const f = Math.max(1, Math.floor(w / target)), dw = Math.floor(w / f), dh = Math.floor(h / f);
+  const g = new Float32Array(dw * dh);
+  for (let y = 0; y < dh; y++) for (let x = 0; x < dw; x++) {
+    let t = 0;
+    for (let yy = 0; yy < f; yy++) for (let xx = 0; xx < f; xx++) { const i = ((y * f + yy) * w + (x * f + xx)) * 4; t += 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]; }
+    g[y * dw + x] = t / (f * f);
+  }
+  const m = blurKotak(g, dw, dh, Math.max(6, Math.round(dw / 60)));
+  const ink = new Uint8Array(dw * dh);
+  for (let i = 0; i < ink.length; i++) ink[i] = m[i] > 60 && g[i] < 0.78 * m[i] ? 1 : 0;
+  return { ink, dw, dh };
+}
+
+/* Sudut (derajat) baris teks pada satu sel, atau null bila tidak cukup tinta / tidak ada puncak yang jelas. */
+function sudutSel(ink, dw, x0, x1, y0, y1) {
+  const xs = [], ys = [];
+  for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) if (ink[y * dw + x]) { xs.push(x); ys.push(y - y0); }
+  if (xs.length < 150) return null;
+  const cx = (x0 + x1) / 2, H = y1 - y0, off = H, hist = new Float32Array(H * 3);
+  let best = -1, bestA = 0, sum = 0, n = 0;
+  for (let a = -SUDUT_MAKS; a <= SUDUT_MAKS + 1e-6; a += LANGKAH) {
+    const t = Math.tan((a * Math.PI) / 180); hist.fill(0);
+    for (let k = 0; k < xs.length; k++) { const yy = Math.round(ys[k] - t * (xs[k] - cx)) + off; if (yy >= 0 && yy < hist.length) hist[yy]++; }
+    let sc = 0; for (let k = 0; k < hist.length; k++) sc += hist[k] * hist[k];
+    sum += sc; n++;
+    if (sc > best) { best = sc; bestA = a; }
+  }
+  if (best / (sum / n) < 1.12) return null;            // puncak tidak jelas -> bukan baris teks
+  if (Math.abs(bestA) >= SUDUT_MAKS - 1e-6) return null;  // di tepi rentang -> tak bisa dipercaya
+  return bestA;
+}
+
+export function ukurKemiringan(img) {
+  const { ink, dw, dh } = inkKecil(img);
+  const cw = dw / KISI_X, ch = dh / KISI_Y, sel = new Array(KISI_X * KISI_Y).fill(null);
+  for (let j = 0; j < KISI_Y; j++) for (let i = 0; i < KISI_X; i++) sel[j * KISI_X + i] = sudutSel(ink, dw, Math.round(i * cw), Math.round((i + 1) * cw), Math.round(j * ch), Math.round((j + 1) * ch));
+  const valid = sel.filter((v) => v !== null);
+  if (valid.length < 8) return null;
+  const sorted = valid.slice().sort((a, b) => a - b), med = sorted[sorted.length >> 1];
+  // sebaran kemiringan sel jauh dari median -> bukan dokumen teks rata; jangan dipaksa
+  const sisa = sel.map((v) => (v === null ? null : v - med));
+  const field = sisa.map((v) => (v === null ? 0 : v)); const isi = sisa.map((v) => v !== null);
+  for (let it = 0; it < 30; it++) {                    // isi sel kosong dari tetangga (difusi)
+    let berubah = false;
+    for (let j = 0; j < KISI_Y; j++) for (let i = 0; i < KISI_X; i++) {
+      const k = j * KISI_X + i; if (isi[k]) continue;
+      let t = 0, c = 0;
+      for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const ii = i + di, jj = j + dj; if (ii < 0 || jj < 0 || ii >= KISI_X || jj >= KISI_Y) continue; const kk = jj * KISI_X + ii; if (isi[kk]) { t += field[kk]; c++; } }
+      if (c) { field[k] = t / c; isi[k] = true; berubah = true; }
+    }
+    if (!berubah) break;
+  }
+  const hal = field.slice();                           // haluskan 1x (rata-rata 3x3)
+  for (let j = 0; j < KISI_Y; j++) for (let i = 0; i < KISI_X; i++) {
+    let t = 0, c = 0; for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) { const ii = i + di, jj = j + dj; if (ii < 0 || jj < 0 || ii >= KISI_X || jj >= KISI_Y) continue; t += field[jj * KISI_X + ii]; c++; }
+    hal[j * KISI_X + i] = t / c;
+  }
+  return { theta: med, field: hal, valid: valid.length };
+}
+
+/* Terapkan koreksi: putar -theta lalu geser vertikal per piksel agar baris teks lurus. Mengembalikan ImageData baru (atau yang sama bila tak perlu). */
+export function luruskanTeks(img, { klem = false } = {}) {      // klem: isi area kosong di tepi dengan piksel terdekat (bukan putih) supaya pembersih tepi tetap bekerja pada foto di atas latar lain
+  const ukur = ukurKemiringan(img);
+  if (!ukur) return img;
+  const { theta, field } = ukur, { width: w, height: h, data } = img;
+  const rad = (theta * Math.PI) / 180, cos = Math.cos(rad), sin = Math.sin(rad), cx = (w - 1) / 2, cy = (h - 1) / 2;
+  const maxF = Math.max(...field.map(Math.abs));
+  if (Math.abs(theta) < 0.15 && maxF < 0.2) return img;                  // sudah cukup lurus
+  // medan kemiringan halus pada kisi 48x64, diintegrasikan ke arah x dari kolom tengah -> tabel pergeseran dy (piksel)
+  const NX = 48, NY = 64, dyT = new Float32Array(NX * NY);
+  const slopeAt = (fx, fy) => {                                              // bilinear pada kisi kasar (koordinat 0..1)
+    const gx = Math.min(KISI_X - 1, Math.max(0, fx * KISI_X - 0.5)), gy = Math.min(KISI_Y - 1, Math.max(0, fy * KISI_Y - 0.5));
+    const x0 = Math.floor(gx), y0 = Math.floor(gy), x1 = Math.min(KISI_X - 1, x0 + 1), y1 = Math.min(KISI_Y - 1, y0 + 1), ax = gx - x0, ay = gy - y0;
+    const F = (i, j) => field[j * KISI_X + i];
+    const deg = F(x0, y0) * (1 - ax) * (1 - ay) + F(x1, y0) * ax * (1 - ay) + F(x0, y1) * (1 - ax) * ay + F(x1, y1) * ax * ay;
+    return Math.tan((deg * Math.PI) / 180);
+  };
+  const mid = (NX - 1) / 2, dxPx = w / (NX - 1);
+  for (let j = 0; j < NY; j++) {
+    const fy = j / (NY - 1);
+    let acc = 0; dyT[j * NX + Math.round(mid)] = 0;
+    for (let i = Math.round(mid) + 1; i < NX; i++) { acc += slopeAt((i - 0.5) / (NX - 1), fy) * dxPx; dyT[j * NX + i] = acc; }
+    acc = 0;
+    for (let i = Math.round(mid) - 1; i >= 0; i--) { acc -= slopeAt((i + 0.5) / (NX - 1), fy) * dxPx; dyT[j * NX + i] = acc; }
+  }
+  const dyAt = (X, Y) => {
+    const gx = (X / (w - 1)) * (NX - 1), gy = (Y / (h - 1)) * (NY - 1);
+    const x0 = Math.min(NX - 2, Math.floor(gx)), y0 = Math.min(NY - 2, Math.floor(gy)), ax = gx - x0, ay = gy - y0;
+    const D = (i, j) => dyT[j * NX + i];
+    return D(x0, y0) * (1 - ax) * (1 - ay) + D(x0 + 1, y0) * ax * (1 - ay) + D(x0, y0 + 1) * (1 - ax) * ay + D(x0 + 1, y0 + 1) * ax * ay;
+  };
+  // warna kertas di pinggir (median per kanal) untuk mengisi area kosong hasil putaran: bukan putih murni, supaya normalisasi tidak menganggap bayangan di tepi sebagai tinta
+  const papan = [255, 255, 255];
+  { const band = Math.max(3, Math.round(Math.min(w, h) * 0.004)), vals = [[], [], []];
+    for (let y = 0; y < h; y += 3) for (let x = 0; x < w; x += 3) { if (x < band || y < band || x >= w - band || y >= h - band) for (let c = 0; c < 3; c++) vals[c].push(data[(y * w + x) * 4 + c]); }
+    for (let c = 0; c < 3; c++) { vals[c].sort((a, b) => a - b); papan[c] = vals[c].length ? vals[c][vals[c].length >> 1] : 255; } }
+  const out = new Uint8ClampedArray(data.length);
+  for (let Y = 0; Y < h; Y++) for (let X = 0; X < w; X++) {
+    const xr = X - cx, yr = Y - cy;
+    let xs = cx + cos * xr - sin * yr, ys = cy + sin * xr + cos * yr + dyAt(X, Y);
+    const o = (Y * w + X) * 4;
+    if (xs < 0 || ys < 0 || xs > w - 1 || ys > h - 1) {
+      if (!klem) { out[o] = papan[0]; out[o + 1] = papan[1]; out[o + 2] = papan[2]; out[o + 3] = 255; continue; }
+      xs = Math.min(w - 1, Math.max(0, xs)); ys = Math.min(h - 1, Math.max(0, ys));
+    }
+    const x0 = Math.floor(xs), y0 = Math.floor(ys), x1 = Math.min(w - 1, x0 + 1), y1 = Math.min(h - 1, y0 + 1), fx = xs - x0, fy = ys - y0;
+    const i00 = (y0 * w + x0) * 4, i10 = (y0 * w + x1) * 4, i01 = (y1 * w + x0) * 4, i11 = (y1 * w + x1) * 4;
+    for (let c = 0; c < 3; c++) out[o + c] = data[i00 + c] * (1 - fx) * (1 - fy) + data[i10 + c] * fx * (1 - fy) + data[i01 + c] * (1 - fx) * fy + data[i11 + c] * fx * fy;
+    out[o + 3] = 255;
+  }
+  return new ImageData(out, w, h);
+}
+
 const toBlob = (canvas, q) => new Promise((res) => canvas.toBlob((b) => res(b), "image/jpeg", q));
 
 /* Foto dokumen (File) -> File JPEG A4 tegak & tajam. Gagal -> kembalikan file asli. */
-export async function scanDokumen(file, { lebar = 0, mode = "bw", debug = null } = {}) {      // lebar 0 = otomatis (1240..2000 px sesuai resolusi foto); mode: "bw" hitam-putih tajam | "warna"
+export async function scanDokumen(file, { lebar = 0, mode = "bw", luruskan = true, debug = null } = {}) {      // lebar 0 = otomatis (1240..2000 px sesuai resolusi foto); mode: "bw" hitam-putih tajam | "warna"
   try {
     if (!file || !/^image\//.test(file.type || "") || /heic|heif/i.test(file.type || "")) return file;
     const bmp = await loadBitmap(file);
@@ -410,8 +531,9 @@ export async function scanDokumen(file, { lebar = 0, mode = "bw", debug = null }
     const rasio = r > 1.49 ? RASIO_F4 : RASIO_A4;                        // kertas F4/folio (330 mm) vs A4 (297 mm), pilih yang paling dekat
     const dasar = lebar || Math.min(2000, Math.max(1240, Math.round(Math.min(wd, ht) / k0)));   // jangan membesar jauh melebihi detail asli foto
     const outW = portrait ? dasar : Math.round(dasar * rasio), outH = portrait ? Math.round(dasar * rasio) : dasar;
-    const warped = warp(sd, W, H, pts, outW, outH);
+    const warped0 = warp(sd, W, H, pts, outW, outH);
     const tepi = !!(hit && !hit.penuh);            // bersihkan sisa latar di pinggir hanya bila kertas terdeteksi di atas latar lain; kalau kertas memenuhi bingkai, tepi dibiarkan (isi bisa menempel ke tepi)
+    const warped = luruskan ? luruskanTeks(warped0, { klem: tepi }) : warped0;       // ratakan baris teks yang miring/melengkung
     const hasil = mode === "warna" ? bersihkan(warped, { tepi }) : hitamPutih(warped, { tepi });
     const out = document.createElement("canvas"); out.width = outW; out.height = outH;
     out.getContext("2d").putImageData(hasil, 0, 0);
