@@ -241,10 +241,31 @@ function warp(srcData, W, H, pts, outW, outH) {
   return new ImageData(o, outW, outH);
 }
 
-/* Hapus bayangan/warna kertas (bagi dengan latar yang diperkirakan), naikkan kontras, lalu pertajam (unsharp 3x3). */
-export function bersihkan(img) {
+/* Blur kotak (radius r, tepi direplikasi) pada kanal Float32 w*h. O(n) lewat jumlah berjalan. */
+export function blurKotak(src, w, h, r) {
+  const tmp = new Float32Array(w * h), out = new Float32Array(w * h), n = 2 * r + 1;
+  for (let y = 0; y < h; y++) {
+    const o = y * w; let acc = 0;
+    for (let k = -r; k <= r; k++) acc += src[o + Math.min(w - 1, Math.max(0, k))];
+    for (let x = 0; x < w; x++) {
+      tmp[o + x] = acc / n;
+      acc += src[o + Math.min(w - 1, x + r + 1)] - src[o + Math.max(0, x - r)];
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let acc = 0;
+    for (let k = -r; k <= r; k++) acc += tmp[Math.min(h - 1, Math.max(0, k)) * w + x];
+    for (let y = 0; y < h; y++) {
+      out[y * w + x] = acc / n;
+      acc += tmp[Math.min(h - 1, y + r + 1) * w + x] - tmp[Math.max(0, y - r) * w + x];
+    }
+  }
+  return out;
+}
+
+/* Putihkan kertas & buang bayangan/warna latar (bagi dengan warna kertas per blok), tinta digelapkan. -> RGBA Uint8ClampedArray */
+function putihkan(img) {
   const { width: w, height: h, data } = img;
-  // luminansi latar: kecilkan ke blok ~ w/32 lalu ambil blok terang (persentil) -> bilinear
   const bs = Math.max(8, Math.round(Math.max(w, h) / 40));
   const gw = Math.ceil(w / bs), gh = Math.ceil(h / bs);
   const bg = new Float32Array(gw * gh * 3);          // warna kertas per kanal R,G,B per blok -> buang bayangan DAN stik warna (kebiruan/kekuningan)
@@ -264,33 +285,102 @@ export function bersihkan(img) {
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     const i = (y * w + x) * 4;
     for (let c = 0; c < 3; c++) {
-      let v = data[i + c] * (250 / Math.max(60, bgAt(x, y, c)));                                             // putihkan kertas
-      v = 255 * Math.pow(Math.min(1, Math.max(0, v / 255)), 1.35);         // gelapkan tinta, kertas tetap putih
+      let v = data[i + c] * (252 / Math.max(60, bgAt(x, y, c)));
+      v = 255 * Math.pow(Math.min(1, Math.max(0, v / 255)), 1.5);          // kertas tetap putih, tinta/abu-abu lebih gelap
       out[i + c] = v;
     }
     out[i + 3] = 255;
   }
-  // unsharp: out + 0.9*(out - blur3x3)
-  const res = new Uint8ClampedArray(out.length);
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    const i = (y * w + x) * 4;
-    for (let c = 0; c < 3; c++) {
-      let s = 0, n = 0;
-      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-        const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
-        s += out[(yy * w + xx) * 4 + c]; n++;
-      }
-      res[i + c] = out[i + c] + 0.9 * (out[i + c] - s / n);
-    }
-    res[i + 3] = 255;
+  return out;
+}
+
+/* Pertajam (unsharp mask) tiap kanal; radius kotak ~1-2 px. */
+function pertajam(rgba, w, h, amount, r) {
+  const res = new Uint8ClampedArray(rgba.length);
+  const ch = new Float32Array(w * h);
+  for (let c = 0; c < 3; c++) {
+    for (let i = 0; i < w * h; i++) ch[i] = rgba[i * 4 + c];
+    const b = blurKotak(blurKotak(ch, w, h, r), w, h, r);
+    for (let i = 0; i < w * h; i++) res[i * 4 + c] = ch[i] + amount * (ch[i] - b[i]);
   }
-  return new ImageData(res, w, h);
+  for (let i = 0; i < w * h; i++) res[i * 4 + 3] = 255;
+  return res;
+}
+
+/* Mode WARNA: kertas putih bersih + teks/gambar tajam. */
+export function bersihkan(img, { tepi = true } = {}) {
+  const { width: w, height: h } = img;
+  const dasar = putihkan(img);
+  const L0 = luminansi(dasar, w, h);
+  const hasil = pertajam(dasar, w, h, 1.5, 1);
+  if (tepi) bersihkanTepi(hasil, L0, w, h);
+  return new ImageData(hasil, w, h);
+}
+
+/* Mode HITAM-PUTIH (seperti mesin scan kantor): teks hitam pekat di atas kertas putih, tepi halus tanpa bergerigi.
+   Ambang adaptif terhadap rata-rata lokal, jadi bayangan/noda tidak ikut jadi hitam. */
+export function hitamPutih(img, { tepi = true } = {}) {
+  const { width: w, height: h } = img;
+  const rgba = putihkan(img);
+  const L = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) L[i] = 0.299 * rgba[i * 4] + 0.587 * rgba[i * 4 + 1] + 0.114 * rgba[i * 4 + 2];
+  const lembut = blurKotak(blurKotak(L, w, h, 1), w, h, 1);
+  const Ls = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) Ls[i] = L[i] + 1.1 * (L[i] - lembut[i]);                 // pertajam tepi huruf dulu
+  const R = Math.max(14, Math.round(w / 30));
+  const M = blurKotak(blurKotak(Ls, w, h, R), w, h, Math.max(4, R >> 1));                  // rata-rata lokal (latar)
+  const out = new Uint8ClampedArray(w * h * 4);
+  for (let i = 0; i < w * h; i++) {
+    const rasio = Ls[i] / Math.max(40, M[i]);
+    let t = (rasio - 0.70) / (0.90 - 0.70); t = t < 0 ? 0 : t > 1 ? 1 : t;
+    t = t * t * (3 - 2 * t);                                                                 // smoothstep: tepi halus
+    const v = t * 255;
+    out[i * 4] = out[i * 4 + 1] = out[i * 4 + 2] = v; out[i * 4 + 3] = 255;
+  }
+  if (tepi) bersihkanTepi(out, L, w, h);
+  return new ImageData(out, w, h);
+}
+
+/* Buang sisa latar (kain/meja) di pinggir hasil scan. Per baris/kolom, dari tepi ke dalam: selama jendela 10 px belum "putih kertas"
+   (rata-rata kecerahan < 215 setelah dinormalkan), itu masih latar dan diputihkan. Berhenti di margin kertas putih pertama, jadi isi
+   dokumen yang dekat tepi tidak ikut terhapus. Maksimal 8% dari lebar/tinggi; kedalaman diratakan antar baris tetangga. */
+export function bersihkanTepi(rgba, L, w, h) {
+  const WIN = 10, BATAS_X = Math.floor(w * 0.08), BATAS_Y = Math.floor(h * 0.08), PUTIH = 215 * WIN;
+  const kedalaman = (batas, at) => {                           // at(d) = kecerahan piksel ke-d dari tepi
+    let acc = 0; for (let k = 0; k < WIN; k++) acc += at(k);
+    for (let d = 0; d < batas; d++) {
+      if (acc >= PUTIH) return d ? Math.min(batas, d + 1) : 0;
+      acc += at(d + WIN) - at(d);
+    }
+    return batas;
+  };
+  const ratakan = (arr, r) => { const o = new Int32Array(arr.length); for (let i = 0; i < arr.length; i++) { let m = 0; for (let k = Math.max(0, i - r); k <= Math.min(arr.length - 1, i + r); k++) if (arr[k] > m) m = arr[k]; o[i] = m; } return o; };
+  const rY = Math.max(20, Math.round(h * 0.012)), rX = Math.max(20, Math.round(w * 0.012));
+  const kiri = new Int32Array(h), kanan = new Int32Array(h), atas = new Int32Array(w), bawah = new Int32Array(w);
+  for (let y = 0; y < h; y++) {
+    kiri[y] = kedalaman(BATAS_X, (d) => (d < w ? L[y * w + d] : 255));
+    kanan[y] = kedalaman(BATAS_X, (d) => (d < w ? L[y * w + w - 1 - d] : 255));
+  }
+  for (let x = 0; x < w; x++) {
+    atas[x] = kedalaman(BATAS_Y, (d) => (d < h ? L[d * w + x] : 255));
+    bawah[x] = kedalaman(BATAS_Y, (d) => (d < h ? L[(h - 1 - d) * w + x] : 255));
+  }
+  const kiriR = ratakan(kiri, rY), kananR = ratakan(kanan, rY), atasR = ratakan(atas, rX), bawahR = ratakan(bawah, rX);
+  const putih = (x, y) => { const i = (y * w + x) * 4; rgba[i] = rgba[i + 1] = rgba[i + 2] = 255; };
+  for (let y = 0; y < h; y++) { for (let x = 0; x < kiriR[y]; x++) putih(x, y); for (let x = 0; x < kananR[y]; x++) putih(w - 1 - x, y); }
+  for (let x = 0; x < w; x++) { for (let y = 0; y < atasR[x]; y++) putih(x, y); for (let y = 0; y < bawahR[x]; y++) putih(x, h - 1 - y); }
+}
+
+function luminansi(rgba, w, h) {
+  const L = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) L[i] = 0.299 * rgba[i * 4] + 0.587 * rgba[i * 4 + 1] + 0.114 * rgba[i * 4 + 2];
+  return L;
 }
 
 const toBlob = (canvas, q) => new Promise((res) => canvas.toBlob((b) => res(b), "image/jpeg", q));
 
 /* Foto dokumen (File) -> File JPEG A4 tegak & tajam. Gagal -> kembalikan file asli. */
-export async function scanDokumen(file, { lebar = 1654, debug = null } = {}) {      // 1654 x 2339 px = A4 @ 200 dpi
+export async function scanDokumen(file, { lebar = 0, mode = "bw", debug = null } = {}) {      // lebar 0 = otomatis (1240..2000 px sesuai resolusi foto); mode: "bw" hitam-putih tajam | "warna"
   try {
     if (!file || !/^image\//.test(file.type || "") || /heic|heif/i.test(file.type || "")) return file;
     const bmp = await loadBitmap(file);
@@ -318,11 +408,14 @@ export async function scanDokumen(file, { lebar = 1654, debug = null } = {}) {  
     const portrait = ht >= wd;
     const r = Math.max(wd, ht) / Math.max(1, Math.min(wd, ht));
     const rasio = r > 1.49 ? RASIO_F4 : RASIO_A4;                        // kertas F4/folio (330 mm) vs A4 (297 mm), pilih yang paling dekat
-    const outW = portrait ? lebar : Math.round(lebar * rasio), outH = portrait ? Math.round(lebar * rasio) : lebar;
-    const hasil = bersihkan(warp(sd, W, H, pts, outW, outH));
+    const dasar = lebar || Math.min(2000, Math.max(1240, Math.round(Math.min(wd, ht) / k0)));   // jangan membesar jauh melebihi detail asli foto
+    const outW = portrait ? dasar : Math.round(dasar * rasio), outH = portrait ? Math.round(dasar * rasio) : dasar;
+    const warped = warp(sd, W, H, pts, outW, outH);
+    const tepi = !!(hit && !hit.penuh);            // bersihkan sisa latar di pinggir hanya bila kertas terdeteksi di atas latar lain; kalau kertas memenuhi bingkai, tepi dibiarkan (isi bisa menempel ke tepi)
+    const hasil = mode === "warna" ? bersihkan(warped, { tepi }) : hitamPutih(warped, { tepi });
     const out = document.createElement("canvas"); out.width = outW; out.height = outH;
     out.getContext("2d").putImageData(hasil, 0, 0);
-    const blob = await toBlob(out, 0.9);
+    const blob = await toBlob(out, 0.92);
     if (!blob) return file;
     const nama = String(file.name || "dokumen").replace(/\.[^.]+$/, "") + "-scan.jpg";
     return new File([blob], nama, { type: "image/jpeg" });
