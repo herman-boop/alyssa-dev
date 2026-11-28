@@ -6,6 +6,7 @@ import LegSupplierFields from "./LegSupplierFields";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import axios from "axios";
+import AisArmadaPanel from "./AisArmadaPanel";
 import { VEHICLE_TYPE_LIST, useVehicleTypes, hasVehicleSketch } from "@/VehicleSketches";
 import { ketBersih } from "./ketBersih";
 import CostCalculator from "@/CostCalculator";
@@ -2183,6 +2184,7 @@ function PengaturanPage({ dark, onToggleTheme, onLogout, fixHeicPhotos, fixingHe
             </div>
           ))}
         </div>
+        <AisArmadaPanel apiBase={API} headers={headers} />
       </div>
 
       {/* Preview Rekon — READ-ONLY (uji baca 1 transaksi READY dari Felis) */}

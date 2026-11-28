@@ -21,7 +21,7 @@ function Item({ k, v, mono }) {
 
 export default function LiveTrackSummary({
   nopol, driver, route, tipe, status, tone = "gray", done = false,
-  speed, heading, lat, lon, cp, onOpenPhoto, onSelectCp, ship,
+  speed, heading, lat, lon, cp, onOpenPhoto, onSelectCp, ship, lastSeen = false, lastSeenText = "",
 }) {
   const coord = lat != null && lon != null
     ? `${Number(lat).toFixed(4)}, ${Number(lon).toFixed(4)}` : "";
@@ -48,7 +48,7 @@ export default function LiveTrackSummary({
         <button type="button" className="lts-ship" onClick={ship.onOpen} data-testid="lts-ship">
           <span className="lts-ship-ic" aria-hidden="true">🚢</span>
           <span className="lts-ship-t">
-            <small>{ship.atPort ? "Kapal masih di pelabuhan" : "Unit sedang di atas kapal"}</small>
+            <small>{ship.atPort ? "Kapal masih di pelabuhan" : "Unit sedang di atas kapal"}{lastSeen ? " · posisi terakhir terdeteksi" : ""}</small>
             <b>{ship.name}</b>
           </span>
           <span className="lts-ship-go">Lihat Posisi ›</span>
@@ -61,9 +61,10 @@ export default function LiveTrackSummary({
           <h4>Kendaraan &amp; Rute</h4>
           <Item k="Rute" v={route} />
           <Item k="Tipe" v={tipe} />
-          <Item k="Speed" v={spd} />
-          <Item k="Heading" v={hdg} />
-          <Item k="Koordinat" v={coord} mono />
+          <Item k={lastSeen ? "Speed terakhir" : "Speed"} v={spd} />
+          <Item k={lastSeen ? "Heading terakhir" : "Heading"} v={hdg} />
+          <Item k={lastSeen ? "Posisi Terakhir Terdeteksi" : "Koordinat"} v={coord} mono />
+          {lastSeen && lastSeenText ? <Item k="Terdeteksi" v={lastSeenText} /> : null}
         </div>
 
         {/* Kanan: checkpoint driver terakhir */}
